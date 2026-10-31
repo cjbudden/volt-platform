@@ -268,11 +268,16 @@ export async function prepareFileFrames(assetId: string, opts: { force?: boolean
   const a = await one<any>(`SELECT v.id, v.source_kind, v.source_key, v.duration_ms, v.sprite, v.poster_candidates, v.account_id FROM vod_assets v WHERE v.id = $1`, [assetId]);
   if (!a || !['upload', 'watchfolder'].includes(a.source_kind) || !a.account_id || !a.source_key) return false;
   if (!opts.force && a.sprite && Array.isArray(a.poster_candidates) && a.poster_candidates.length) return false;
-  const { existsSync } = await import('node:fs');
-  if (!existsSync(a.source_key)) return false;
-  const dur = a.duration_ms ? Number(a.duration_ms) : null;
-  if (opts.force || !(Array.isArray(a.poster_candidates) && a.poster_candidates.length)) await extractFrames(a.id, a.account_id, a.source_key, dur);
-  if (opts.force || !a.sprite) await (await import('../thumbnails/fileSprites')).buildFileSprites(a.id, a.account_id, a.source_key, dur);
+  // The original may be in the bucket (build queue 2.1a-2b): a scratch copy while the
+  // frames and sprites are built, removed afterwards.
+  const { fetchVodSource } = await import('./vodSource');
+  const src = await fetchVodSource(a.source_key);
+  if (!src) return false;
+  try {
+    const dur = a.duration_ms ? Number(a.duration_ms) : null;
+    if (opts.force || !(Array.isArray(a.poster_candidates) && a.poster_candidates.length)) await extractFrames(a.id, a.account_id, src.path, dur);
+    if (opts.force || !a.sprite) await (await import('../thumbnails/fileSprites')).buildFileSprites(a.id, a.account_id, src.path, dur);
+  } finally { await src.release(); }
   return true;
 }
 

@@ -289,7 +289,28 @@ data "aws_iam_policy_document" "origin_bucket" {
   }
 }
 
+# ... except what viewers must never fetch: customers' original files (vod-src/,
+# build queue 2.1a-2b) and upload parts in flight (upload-staging/, 2.1a-2). The
+# distribution's default behaviour forwards any path to the bucket, and an
+# ingest rule can give an original a readable, guessable name.
+data "aws_iam_policy_document" "origin_bucket_private" {
+  source_policy_documents = [data.aws_iam_policy_document.origin_bucket.json]
+  statement {
+    sid     = "DenyCloudFrontPrivatePrefixes"
+    effect  = "Deny"
+    actions = ["s3:GetObject"]
+    resources = [
+      "${aws_s3_bucket.origin.arn}/vod-src/*",
+      "${aws_s3_bucket.origin.arn}/upload-staging/*",
+    ]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_s3_bucket_policy" "origin" {
   bucket = aws_s3_bucket.origin.id
-  policy = data.aws_iam_policy_document.origin_bucket.json
+  policy = data.aws_iam_policy_document.origin_bucket_private.json
 }

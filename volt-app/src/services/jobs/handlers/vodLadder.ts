@@ -76,8 +76,17 @@ export async function handleVodLadder(ctx: JobContext): Promise<Record<string, u
 async function run(ctx: JobContext, p: VodLadderPayload, log: JobLog): Promise<Record<string, unknown>> {
   const asset = await one<any>(`SELECT id, title, source_key, ingest, encode_result, top_height FROM vod_assets WHERE id = $1 AND account_id = $2`, [p.vodAssetId, p.accountId]);
   if (!asset) throw new PermanentError('the asset is gone', 'asset_missing');
-  const src = p.sourcePath || asset.source_key;
-  if (!src || !existsSync(src)) throw new PermanentError(`the source file is not on this server: ${src ?? '(none)'}`, 'source_missing');
+  // On AWS the original is in the bucket (build queue 2.1a-2b): a private scratch
+  // copy for the length of the job, removed afterwards. A local path as it is.
+  const given = p.sourcePath || asset.source_key;
+  const { fetchVodSource } = await import('../../media/vodSource');
+  const fetched = given ? await fetchVodSource(given) : null;
+  if (!fetched) throw new PermanentError(`the source file is not on this server: ${given ?? '(none)'}`, 'source_missing');
+  try { return await runFrom(ctx, p, log, asset, fetched.path); }
+  finally { await fetched.release(); }
+}
+
+async function runFrom(ctx: JobContext, p: VodLadderPayload, log: JobLog, asset: any, src: string): Promise<Record<string, unknown>> {
   await setRow(p, { state: 'encoding', error: null, job_id: ctx.job.id });
 
   let ladder;

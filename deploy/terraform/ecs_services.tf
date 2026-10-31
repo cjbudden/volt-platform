@@ -354,6 +354,10 @@ locals {
     # the bucket under upload-staging/, because the load balancer sends one
     # upload's requests to any task (build queue 2.1a-2).
     { name = "UPLOAD_STAGING_DRIVER", value = "s3" },
+    # Originals of uploads and watch folder drops (services/media/vodSource.ts):
+    # in the bucket under vod-src/, because the task that finishes an upload is
+    # rarely the one whose worker encodes it (build queue 2.1a-2b).
+    { name = "VOD_SOURCE_DRIVER", value = "s3" },
     { name = "PUBLIC_BASE_URL", value = local.public_base_url },
     { name = "ECS_SPOT_PROVIDER", value = aws_ecs_capacity_provider.spot.name },
     { name = "ECS_ONDEMAND_PROVIDER", value = aws_ecs_capacity_provider.ondemand.name },

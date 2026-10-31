@@ -26,7 +26,7 @@ const ROOT = join(__dirname, '../..');
 const REQUIRED = [
   ['ORCH_LAUNCHER', 'ecs'], ['MEDIA_STORE_DRIVER', 's3'], ['INGEST_DESTINATION', 's3'],
   ['IMAGE_STORE_DRIVER', 's3'], ['FAST_OUTPUT', 's3'], ['VOD_STORE', 's3'], ['FILLER_STORE_DRIVER', 's3'],
-  ['UPLOAD_STAGING_DRIVER', 's3'],
+  ['UPLOAD_STAGING_DRIVER', 's3'], ['VOD_SOURCE_DRIVER', 's3'],
 ];
 
 /** A throwaway tree: one source file and a minimal control-plane task definition. */
@@ -96,7 +96,15 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   // 2.1a-2: upload chunks wait in the bucket, so an upload spread over tasks assembles.
   ok(real.wired.has('UPLOAD_STAGING_DRIVER') && cov.settings.UPLOAD_STAGING_DIR?.class === 'default', 'upload chunks wait in the bucket on AWS, UPLOAD_STAGING_DIR only scratch (2.1a-2)');
   ok(/resource "aws_s3_bucket_lifecycle_configuration" "origin"[\s\S]*?prefix = "upload-staging\/"/.test(readFileSync(join(ROOT, 'deploy/terraform/s3_cloudfront.tf'), 'utf8')), 'the origin bucket expires forgotten upload parts (2.1a-2)');
-  for (const [n, item] of [['CLIPS_DIR', '2.1a-2b'], ['VOLT_TRASH_DIR', '2.1a-2c'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
+  // 2.1a-2b: an asset's original is in the bucket, so an upload finished on one task
+  // encodes on another; the CDN may not serve originals or upload parts.
+  ok(real.wired.has('VOD_SOURCE_DRIVER') && cov.settings.VOD_SOURCE_CACHE_DIR?.class === 'default', 'originals are in the bucket on AWS, VOD_SOURCE_CACHE_DIR only scratch (2.1a-2b)');
+  {
+    const cdn = readFileSync(join(ROOT, 'deploy/terraform/s3_cloudfront.tf'), 'utf8');
+    const deny = /sid\s*=\s*"DenyCloudFrontPrivatePrefixes"[\s\S]*?effect\s*=\s*"Deny"[\s\S]*?resources\s*=\s*\[([^\]]*)\]/.exec(cdn);
+    ok(!!deny && /\/vod-src\/\*/.test(deny[1]) && /\/upload-staging\/\*/.test(deny[1]), 'the CDN cannot read originals or upload parts from the origin bucket (2.1a-2b)');
+  }
+  for (const [n, item] of [['CLIPS_DIR', '2.1a-2b-2'], ['VOLT_TRASH_DIR', '2.1a-2c'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
   // 2.1b wired radio, captions and the GPU pool; only the Icecast relay waits (2.1c).
   for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
   ok(cov.settings.ICECAST_HOST?.class === 'not-on-aws-yet' && cov.settings.ICECAST_HOST?.item === '2.1c', 'the Icecast relay is named as not on AWS yet (2.1c)');

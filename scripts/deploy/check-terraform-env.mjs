@@ -38,6 +38,7 @@ export const REQUIRED_ON_AWS = {
   VOD_STORE: { value: 's3', why: 'packaged library media must be readable by any task' },
   FILLER_STORE_DRIVER: { value: 's3', why: 'slates and loops on a Fargate disk are lost with the task and missing on the others' },
   UPLOAD_STAGING_DRIVER: { value: 's3', why: 'the load balancer spreads one upload\'s chunks over several tasks, so they must wait where every task reaches them' },
+  VOD_SOURCE_DRIVER: { value: 's3', why: 'the task that finishes an upload is rarely the one that encodes it, so the original must be where every task reaches it' },
 };
 
 // ---------------------------------------------------------------- the code

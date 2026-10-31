@@ -105,8 +105,8 @@
     },
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
-      "why": "Clip, VOD encode and ad conditioning work is done here and downloads are served from here; the bucket copy exists for clips, but the local copy is still what is served.",
-      "item": "2.1a-2b"
+      "why": "Clip, VOD encode and ad conditioning work is done here and downloads and encode outputs are served from here; the bucket copy exists for clips, but the local copy is still what is served. Originals of uploads and watch folder drops already live in the bucket (VOD_SOURCE_DRIVER=s3, 2.1a-2b).",
+      "item": "2.1a-2b-2"
     },
     "CLIPS_S3_UPLOAD": {
       "class": "default",
@@ -807,6 +807,18 @@
     "VIEWER_REFRESH_TTL": {
       "class": "default",
       "why": "Session and link lifetimes; the built-in values are the product defaults on every deployment."
+    },
+    "VOD_SOURCE_CACHE_DIR": {
+      "class": "default",
+      "why": "Scratch copies of an original that an encode, a ladder or a frame grab opens with ffmpeg, one per job and removed when it ends; the task's temp folder is right (build queue 2.1a-2b)."
+    },
+    "VOD_SOURCE_S3_BUCKET": {
+      "class": "default",
+      "why": "Originals live in the origin bucket (S3_BUCKET) under vod-src/, which the CDN is denied; set only to keep them in another bucket."
+    },
+    "VOD_SOURCE_S3_PREFIX": {
+      "class": "default",
+      "why": "vod-src, the prefix the origin bucket policy keeps away from the CDN."
     },
     "VOLT_TRASH_DAYS": {
       "class": "default",

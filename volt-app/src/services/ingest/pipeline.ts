@@ -274,11 +274,13 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
      JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store }),
      JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, finalPath, missing.length ? missing : null]);
 
+  let sidecarPath: string | null = null;
   if (status !== 'rejected' && duplicate.outcome !== 'skip' && s.sidecar !== 'none') {
     const text = s.sidecar === 'xml' ? toXml(payload) : JSON.stringify(payload, null, 2);
     try {
       const sc = join(dirname(finalPath), sidecarKey(finalPath.split('/').pop()!, s.sidecar));
       writeFileSync(sc, text);
+      sidecarPath = sc;
       if (dest && objectUri) await dest.putText(`${f.accountId}/${sidecarKey(naming.key, s.sidecar)}`, text, s.sidecar === 'xml' ? 'application/xml' : 'application/json');
     } catch (e) { console.warn('[ingest] sidecar not written', e); }
   }
@@ -291,6 +293,24 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     if (usedTitle) fnProvenance.title = { source: 'filename', file: f.originalName, at: new Date().toISOString() };
     try { await afterIngest(f.accountId, f.assetId, fnMode === 'off' ? null : reading, fnProvenance, typeChosenBy); }
     catch (e) { console.warn('[ingest] file-name follow-up failed', e); }
+  }
+
+  // THE ORIGINAL LEAVES THIS TASK'S DISK (build queue 2.1a-2b). On AWS
+  // (VOD_SOURCE_DRIVER=s3) the named original and its sidecar go to the bucket
+  // and the asset's source_key becomes the s3:// address, so whichever task
+  // takes the encode, a re-encode or a held duplicate later can read it. A
+  // rejected file is quarantined where it is. Locally this changes nothing.
+  // If the bucket refuses, the file stays on this disk and the encode still
+  // works when this task takes it; the warning says why another task cannot.
+  if (status !== 'rejected') {
+    try {
+      const { landVodSource, vodSourceDriver } = await import('../media/vodSource');
+      if (vodSourceDriver() === 's3') {
+        const uri = await landVodSource(finalPath, sidecarPath);
+        await query(`UPDATE vod_assets SET source_key = $2, updated_at = now() WHERE id = $1`, [f.assetId, uri]);
+        finalPath = uri;
+      }
+    } catch (e) { console.warn('[ingest] the original could not be landed in the bucket; it stays on this task', e); }
   }
 
   return { resolved, naming, duplicate, extracted, metadata: merged.metadata, missing, path: finalPath, payload, status };
@@ -387,7 +407,12 @@ export async function resolveDuplicate(accountId: string, assetId: string, actio
   if (!a) throw Object.assign(new Error('asset not found'), { status: 404 });
   if (a.ingest?.status !== 'duplicate') throw Object.assign(new Error('this asset is not a held duplicate'), { status: 409 });
   if (action === 'skip') {
-    try { if (a.source_key && !String(a.source_key).startsWith('s3://')) require('node:fs').rmSync(a.source_key, { force: true }); } catch { /* */ }
+    // A bucket original (build queue 2.1a-2b) is removed from the bucket; a local one as before.
+    try {
+      const { deleteVodSource, isBucketSource } = await import('../media/vodSource');
+      if (isBucketSource(a.source_key)) await deleteVodSource(a.source_key);
+      else if (a.source_key && !String(a.source_key).startsWith('s3://')) require('node:fs').rmSync(a.source_key, { force: true });
+    } catch { /* */ }
     await query(`DELETE FROM vod_assets WHERE id = $1`, [assetId]);
     return { status: 'skipped' };
   }

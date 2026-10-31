@@ -125,14 +125,26 @@ export async function handleVodEncode(ctx: JobContext): Promise<Record<string, u
 }
 
 async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unknown>> {
-  const p = ctx.job.payload as VodEncodePayload;
-  if (!p?.vodAssetId || !p?.sourcePath || !p?.accountId) {
+  const given = ctx.job.payload as VodEncodePayload;
+  if (!given?.vodAssetId || !given?.sourcePath || !given?.accountId) {
     throw new PermanentError('vod.encode payload needs vodAssetId, accountId and sourcePath', 'bad_payload');
   }
-  if (!existsSync(p.sourcePath)) {
+  // THE ORIGINAL MAY BE IN THE BUCKET (build queue 2.1a-2b): on AWS the task that
+  // finished the upload is rarely the one running this job, so an s3:// source is
+  // fetched into this task's scratch space for the length of the encode and
+  // removed afterwards. A local path is used as it is.
+  const { fetchVodSource } = await import('../../media/vodSource');
+  const src = await fetchVodSource(given.sourcePath);
+  if (!src) {
     // A retry cannot make a missing file appear.
-    throw new PermanentError(`the source file is not there: ${p.sourcePath}`, 'source_missing');
+    throw new PermanentError(`the source file is not there: ${given.sourcePath}`, 'source_missing');
   }
+  if (src.fetched) log.step(`fetched ${given.sourcePath} to this task's scratch space`);
+  try { return await encodeFrom(ctx, log, { ...given, sourcePath: src.path }); }
+  finally { await src.release(); }
+}
+
+async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Promise<Record<string, unknown>> {
 
   let srcBytes: number | null = null;
   try { srcBytes = (await stat(p.sourcePath)).size; } catch { /* reported below */ }

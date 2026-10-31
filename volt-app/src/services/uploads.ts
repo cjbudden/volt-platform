@@ -480,9 +480,10 @@ export async function completeLanded(session: UploadSession, dest: string, writt
       const placeholder = session.vod_asset_id!;
       await query(`UPDATE upload_sessions SET vod_asset_id = $2 WHERE id = $1`, [session.id, old.id]);
       await query(`DELETE FROM vod_assets WHERE id = $1 AND source_kind = 'upload' AND master_key IS NULL`, [placeholder]);
-      if (old.source_key && old.source_key !== dest && !/^[a-z0-9]+:\/\//i.test(old.source_key)
-          && old.source_key.startsWith(join(config.clips.dir, 'vod-src'))) {
-        try { rmSync(old.source_key, { force: true }); } catch { /* */ }
+      // The failed record's old original goes, on this disk or in the bucket (2.1a-2b).
+      if (old.source_key && old.source_key !== dest) {
+        const { deleteVodSource } = await import('./media/vodSource');
+        await deleteVodSource(old.source_key);
       }
       await query(`UPDATE vod_assets SET encode_job_id = NULL, thumb_status = 'processing', updated_at = now() WHERE id = $1`, [old.id]);
       session = { ...session, vod_asset_id: old.id };
@@ -526,6 +527,14 @@ export async function completeLanded(session: UploadSession, dest: string, writt
       // the bytes over. The asset keeps its original name and encodes as before.
       await query(`UPDATE upload_sessions SET error = $2 WHERE id = $1`,
         [session.id, `ingest rules could not run: ${String(e?.message ?? e)}`.slice(0, 500)]);
+      // Still landed in the bucket on AWS (2.1a-2b), so another task can encode it.
+      try {
+        const { landVodSource, vodSourceDriver } = await import('./media/vodSource');
+        if (vodSourceDriver() === 's3' && statSync(dest, { throwIfNoEntry: false })?.isFile()) {
+          encodeSource = await landVodSource(dest);
+          await query(`UPDATE vod_assets SET source_key = $2, updated_at = now() WHERE id = $1`, [session.vod_asset_id, encodeSource]);
+        }
+      } catch (le: any) { console.warn('[uploads] the original stays on this task:', le?.message ?? le); }
     }
   }
   // A METADATA GATE HOLDS THE INGEST, NOT THE MEDIA (27 Oct 2026). An upload

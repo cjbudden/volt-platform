@@ -23,12 +23,12 @@
 //  older upload on a replaced task) the asset is reported, not guessed at.
 //  Runs on activation and on demand (POST /api/fast/channels/:id/prepare).
 // ============================================================================
-import { existsSync } from 'node:fs';
 import { query } from '../../db';
 import type { Slot } from './lineup';
 import { episodesOf, type AssetInfo } from './lineup';
 import { assetFromRow } from './store';
 import { channelLadder, variantsOf, needFor, sameNeed, mainMatches, recordMain, recordQueued, variantRel, fitToTop, sourceQuality, isStale, type ChannelLadder, type Role } from './ladder';
+import { vodSourceAvailable } from '../media/vodSource';
 
 /** ident / loop: the channel's brand (store.ts ChannelBrand). An ident is prepared like a house spot; the brand loop like the slate (it stretches to fill a gap), with normalised loudness. */
 export type { Role };
@@ -113,7 +113,8 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
     const role = use.get(id)!;
     const title = String(r.metadata?.title || r.title || 'Untitled');
     const base = { assetId: id, title, role, packaging: null as Readiness['packaging'], progress: null as number | null, note: null as string | null };
-    const hasSource = !!r.source_key && existsSync(r.source_key);
+    // A bucket original (build queue 2.1a-2b) counts: the ladder job fetches it.
+    const hasSource = vodSourceAvailable(r.source_key);
     if (ladder) {
       const need = needFor(role, ladder);
       const fit = fitToTop(sourceQuality(r), top);
