@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.24.0 (2026-10-31)
+
+### Product (in customer release notes)
+
+- security · Uploads: On a cloud deployment, original upload files and upload parts in progress can no longer be fetched through the content delivery network.
+- improved · Uploads: On a cloud deployment with several servers, an uploaded or watch folder video is encoded by whichever server takes the work, and replacing a server no longer loses the original files it received.
+
+### Internal
+
+- added · Deployment: Originals of uploads and watch folder drops live in the origin bucket on AWS (VOD_SOURCE_DRIVER=s3); encodes, ladders and frame grabs take a scratch copy per job; the origin bucket policy denies the CDN vod-src/ and upload-staging/; new vod-source-store check suite.
+
 ## 0.23.0 (2026-10-30)
 
 ### Product (in customer release notes)
