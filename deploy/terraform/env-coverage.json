@@ -105,8 +105,8 @@
     },
     "CLIPS_DIR": {
       "class": "not-on-aws-yet",
-      "why": "Clip, VOD encode and ad conditioning work is done here and downloads and encode outputs are served from here; the bucket copy exists for clips, but the local copy is still what is served. Originals of uploads and watch folder drops already live in the bucket (VOD_SOURCE_DRIVER=s3, 2.1a-2b).",
-      "item": "2.1a-2b-2"
+      "why": "Clip, VOD encode and ad conditioning work is done here. Clip and encode files and downloads are served from any task: a file this task does not hold is read from the bucket copy the job made (2.1a-2b-2). Still on the task's disk: ad conditioning work, the FAST render of a slate or loop, and caption track files served beside an asset's playlists (2.1a-2b-3). Originals of uploads and watch folder drops already live in the bucket (VOD_SOURCE_DRIVER=s3, 2.1a-2b).",
+      "item": "2.1a-2b-3"
     },
     "CLIPS_S3_UPLOAD": {
       "class": "default",

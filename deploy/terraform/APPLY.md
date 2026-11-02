@@ -198,7 +198,7 @@ has.
 These are queued, not forgotten (`BUILD_QUEUE.md`, and class
 `not-on-aws-yet` in `env-coverage.json`):
 
-- **2.1a-2b-2, 2.1a-2c, 2.1a-3, 2.1a-4.** Uploaded slates and loops now live
+- **2.1a-2b-3, 2.1a-2c, 2.1a-3, 2.1a-4.** Uploaded slates and loops now live
   in the origin bucket under `filler/` (2.1a, `FILLER_STORE_DRIVER=s3`), so
   every control-plane task serves them and none is lost with its task. A
   resumable upload's chunks and tus parts wait in the bucket under
@@ -208,9 +208,11 @@ These are queued, not forgotten (`BUILD_QUEUE.md`, and class
   original of an upload or watch folder drop lands in the bucket under
   `vod-src/` once the ingest rules have named it (2.1a-2b,
   `VOD_SOURCE_DRIVER=s3`), so whichever task takes its encode fetches it; the
-  bucket policy keeps `vod-src/` and `upload-staging/` away from the CDN. Still
-  on a task's own disk: clip and VOD encode outputs, ad conditioning and
-  downloads (2.1a-2b-2), the trash
+  bucket policy keeps `vod-src/` and `upload-staging/` away from the CDN. Clip
+  and VOD encode files and downloads are served by any task: a file the task
+  does not hold is read from the copy the job made under `clips/` or `vod/`
+  (2.1a-2b-2). Still on a task's own disk: ad conditioning work, the FAST
+  render of a slate or loop and caption track files (2.1a-2b-3), the trash
   (2.1a-2c), and the prebuilt loop segments (2.1a-3). The control-plane image has no
   ffmpeg, packager or Python for the jobs that run in it (clip extract, VOD
   encode, loop preparation, intro detection, the FAST render of a slate or

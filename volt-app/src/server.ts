@@ -5,6 +5,7 @@ import { accountSettingsRouter } from './modules/accountSettings';
 import { sourcePreviewRouter } from './modules/sourcePreview';
 import express from 'express';
 import { serveFiller } from './services/media/fillerStore';
+import { isPrivateClipsPath, readThroughKey, readObjectText, openObject } from './services/media/clipsStore';
 import cors from 'cors';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -147,6 +148,16 @@ export function createServer() {
   // already loaded the asset once. Segments keep the long cache below.
   //
   // FAILS OPEN: anything unexpected falls through to the plain file.
+  // WORKING SPACE UNDER CLIPS_DIR IS NEVER SERVED: the originals of uploads and
+  // watch folder drops (vod-src/, which 2.1a-2b also keeps from the CDN) and
+  // the encoder's probe scratch. express.static below served them to anyone
+  // who knew an asset id and the file's extension.
+  app.use('/clips', (req, res, next) => {
+    let rel = req.path;
+    try { rel = decodeURIComponent(req.path); } catch { /* the raw path is checked */ }
+    if (isPrivateClipsPath(rel)) { res.status(404).end(); return; }
+    next();
+  });
   // Caption tracks of an asset (services/companions/serve.ts, COMPANION_FILES.md):
   // subs/<id>.m3u8 | .vtt | .dash.vtt beside its playlists. Before the route below.
   app.get(/^\/clips\/.+\/subs\/[0-9a-f-]{36}(\.dash)?\.(m3u8|vtt)$/i, (req, res, next) => {
@@ -160,7 +171,14 @@ export function createServer() {
       if (!file.startsWith(config.clips.dir) || rel.includes('..')) return next();
       const id = assetIdFromClipsPath(rel);
       const { readFile } = await import('node:fs/promises');
-      const text = await readFile(file, 'utf8');
+      // Not on this task's disk: on AWS the clip or encode was made by another
+      // task, and its copy in the bucket is the one to serve (2.1a-2b-2).
+      let text: string | null = await readFile(file, 'utf8').catch(() => null);
+      if (text == null) {
+        const key = await readThroughKey(rel);
+        text = key ? await readObjectText(key) : null;
+      }
+      if (text == null) return next();
       const ctx = id ? await playlistContext(id) : null;
       const isMpd = req.path.endsWith('.mpd');
       const out = !ctx || !ctx.markers.length ? text
@@ -177,6 +195,32 @@ export function createServer() {
   app.use('/clips', express.static(config.clips.dir, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'),
   }));
+  // ...and, when this task does not hold the file, from the bucket the job
+  // copied it to (services/media/clipsStore.ts): on AWS the task that cut the
+  // clip or ran the encode is rarely the one a viewer reaches, and a replaced
+  // task takes its disk with it. Byte ranges pass through, so seeking in an
+  // MP4 works. The Mac copies nothing to a bucket and never gets here.
+  app.get(/^\/clips\/.+/, async (req, res, next) => {
+    try {
+      let rel = req.path.slice('/clips'.length);
+      try { rel = decodeURIComponent(rel); } catch { return next(); }
+      const key = await readThroughKey(rel);
+      if (!key) return next();
+      const range = typeof req.headers.range === 'string' ? req.headers.range : undefined;
+      const o = await openObject(key, range);
+      if (!o) return next();
+      res.status(o.range ? 206 : 200);
+      res.setHeader('Content-Type', o.type || 'application/octet-stream');
+      if (o.length != null) res.setHeader('Content-Length', String(o.length));
+      if (o.range) res.setHeader('Content-Range', o.range);
+      if (o.etag) res.setHeader('ETag', o.etag);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      o.body.on('error', () => res.destroy());
+      o.body.pipe(res);
+    } catch { next(); }
+  });
   // /console WAS a 205-line single-file test console in public/, built before
   // volt-web existed. It is retired to volt-app/dev/console.html: it is not the
   // product's console, it looked like one, and somebody finding it reasonably

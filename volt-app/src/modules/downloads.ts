@@ -26,6 +26,7 @@ import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound } from '../util/http';
 import { writeAudit, actor } from '../services/audit';
+import { isEncodeBucketKey, readThroughKey, openObject, objectSize } from '../services/media/clipsStore';
 
 const AUD = 'volt-download';
 const TTL_SEC = 300;
@@ -55,22 +56,45 @@ export function downloadName(title: string | null | undefined, ext: string): str
   return `${base}.${ext}`;
 }
 
-/** Where a stored key's bytes are: a local clips file, an absolute URL, or nowhere. */
-export function locate(key: string | null | undefined): { file?: string; url?: string } | null {
+/**
+ * Where a stored key's bytes are: a local clips file (with its path under
+ * /clips, for the bucket copy), an encode's bucket key, an absolute URL, or
+ * nowhere. On an S3 deployment an encode's MP4 is stored as its bucket key
+ * (vod/<id>/<file>, services/jobs/handlers/vodEncode.ts), which this did not
+ * know, so every encode download on AWS answered "no longer here".
+ */
+export function locate(key: string | null | undefined): { file?: string; rel?: string; bucketKey?: string; url?: string } | null {
   if (!key) return null;
   if (/^https?:\/\//i.test(key)) return { url: key };
+  if (isEncodeBucketKey(key)) return { bucketKey: key };
   const m = /^\/?clips\/(.+)$/.exec(key);
   if (!m) return null;
   const root = normalize(config.clips.dir);
   const file = normalize(join(root, m[1]));
   if (!file.startsWith(root)) return null;          // never climb out of the clips dir
-  return { file };
+  return { file, rel: '/' + m[1] };
 }
 
-function sizeOf(key: string | null | undefined): number | null {
+/**
+ * Where to read the bytes from on THIS task: its own disk when the file is
+ * there, otherwise the bucket copy the job made (services/media/clipsStore.ts),
+ * so a clip cut or an encode run on another task downloads from any task.
+ */
+export async function resolveBytes(key: string | null | undefined): Promise<{ file?: string; bucketKey?: string; url?: string } | null> {
   const l = locate(key);
-  if (!l?.file) return null;
-  try { return statSync(l.file).size; } catch { return null; }
+  if (!l) return null;
+  if (l.url) return { url: l.url };
+  if (l.bucketKey) return { bucketKey: l.bucketKey };
+  if (l.file && existsSync(l.file)) return { file: l.file };
+  const k = l.rel ? await readThroughKey(l.rel) : null;
+  return k ? { bucketKey: k } : null;
+}
+
+async function sizeOf(key: string | null | undefined): Promise<number | null> {
+  const w = await resolveBytes(key).catch(() => null);
+  if (w?.file) { try { return statSync(w.file).size; } catch { return null; } }
+  if (w?.bucketKey) return objectSize(w.bucketKey).catch(() => null);
+  return null;
 }
 
 // ---- the file itself: no session, the token is the access -----------------
@@ -82,11 +106,23 @@ downloadFileRouter.get('/file', asyncHandler(async (req: Request, res: Response)
   const a = await ownedAsset(String(claims.a), String(claims.acct));
   const spec = FILES.find((f) => f.format === claims.f);
   if (!a || !spec) throw notFound('That file is no longer here');
-  const where = locate(a[spec.col]);
+  const where = await resolveBytes(a[spec.col]);
   const name = downloadName(a.title, spec.ext);
   res.setHeader('Cache-Control', 'private, no-store');
   if (where?.url) { res.redirect(302, where.url); return; }
-  if (!where?.file || !existsSync(where.file)) throw notFound('That file is no longer here');
+  if (where?.bucketKey) {
+    // Streamed through the task rather than redirected to the CDN: the CDN
+    // cannot name the file, and a download is rare next to playback.
+    const o = await openObject(where.bucketKey);
+    if (!o) throw notFound('That file is no longer here');
+    res.attachment(name);
+    res.setHeader('Content-Type', spec.mime);
+    if (o.length != null) res.setHeader('Content-Length', String(o.length));
+    o.body.on('error', () => res.destroy());
+    o.body.pipe(res);
+    return;
+  }
+  if (!where?.file) throw notFound('That file is no longer here');
   res.download(where.file, name, { headers: { 'Content-Type': spec.mime } });
 }));
 
@@ -98,9 +134,9 @@ downloadsRouter.get('/vod/:id', asyncHandler(async (req, res) => {
   const a = await ownedAsset(String(req.params.id), accountId(req));
   if (!a) throw notFound('VOD asset not found');
   res.json({
-    files: FILES.filter((f) => a[f.col]).map((f) => ({
-      format: f.format, label: f.label, filename: downloadName(a.title, f.ext), bytes: sizeOf(a[f.col]),
-    })),
+    files: await Promise.all(FILES.filter((f) => a[f.col]).map(async (f) => ({
+      format: f.format, label: f.label, filename: downloadName(a.title, f.ext), bytes: await sizeOf(a[f.col]),
+    }))),
   });
 }));
 
