@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.26.0 (2026-11-02)
+
+### Product (in customer release notes)
+
+- fixed · FAST: On a cloud deployment, a new ad creative and a slate or loop used on a FAST channel are prepared by whichever server picks up the work, so they no longer fail when that is not the server that downloaded or rendered them.
+- fixed · VOD: On a cloud deployment, caption tracks of a clip or encode stay in time with the picture when the server answering does not hold the video files.
+
+### Internal
+
+- added: clips-off-disk check suite: ad creatives and FAST renders of slates and loops land in the bucket on S3, caption clocks read through the bucket, the Mac unchanged.
+
 ## 0.25.0 (2026-11-02)
 
 ### Product (in customer release notes)
