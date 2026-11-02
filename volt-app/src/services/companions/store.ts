@@ -34,6 +34,11 @@ export function decodeText(buf: Buffer): { text: string; encoding: string } {
 
 const safeName = (n: string) => (n.split(/[\\/]/).pop() ?? 'file').replace(/[^\w.\- ()[\]]+/g, '_').slice(0, 160) || 'file';
 const invalidate = async (assetId: string) => { try { (await import('../../scale/cache')).invalidateTag(`asset:${assetId}`); } catch { /* no cache */ } };
+// On S3 an encode plays from the CDN, so its caption tracks are written into the
+// bucket's playlists at each change (bucketTracks.ts; a no-op anywhere else).
+const syncTracks = async (assetId: string, removed?: string[]) => {
+  try { await (await import('./bucketTracks')).syncBucketTracks(assetId, { removed }); } catch { /* fails open */ }
+};
 
 export interface AddInput {
   name: string; buf: Buffer; contentType?: string | null; kind?: CompanionKind | null; language?: string | null; label?: string | null;
@@ -90,6 +95,7 @@ export async function addFile(assetId: string, acct: string, inp: AddInput): Pro
     [id, a.id, acct, kind, format, name, storeKey, vttKey, inp.contentType ?? null, inp.buf.length, sha256, encoding,
      language, label, !!isDefault, forced, sdh, kind === 'captions' ? !!report?.ok : true, inp.offsetMs ?? 0, report ? JSON.stringify(report) : null, inp.source ?? 'upload', inp.by]);
   await invalidate(a.id);
+  if (kind === 'captions') await syncTracks(a.id);
   return { file: view(row), duplicate: false };
 }
 
@@ -150,6 +156,7 @@ export async function updateFile(assetId: string, acct: string, fileId: string, 
     [r.id, r.asset_id, p.language !== undefined, p.language ?? null, p.label?.trim() || null, p.isDefault ?? null, p.forced ?? null, p.sdh ?? null,
      p.enabled ?? null, p.offsetMs ?? null, vttKey, report ? JSON.stringify(report) : null]);
   await invalidate(r.asset_id);
+  if (r.kind === 'captions' || row?.kind === 'captions') await syncTracks(r.asset_id);
   return view(row);
 }
 
@@ -158,6 +165,7 @@ export async function deleteFile(assetId: string, acct: string, fileId: string) 
   await query(`DELETE FROM vod_asset_files WHERE id = $1`, [r.id]);
   for (const k of [r.store_key, r.vtt_key]) if (k) await imageStore().delete(k).catch(() => {});
   await invalidate(r.asset_id);
+  if (r.kind === 'captions') await syncTracks(r.asset_id, [r.id]);
   return { deleted: true, name: r.name };
 }
 

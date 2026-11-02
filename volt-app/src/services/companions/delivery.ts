@@ -46,6 +46,18 @@ export function withHlsSubtitles(master: string, tracks: Track[]): string {
   return out.join('\n');
 }
 
+/**
+ * The master with Volt's subtitle tracks taken out (the last track disabled or
+ * removed). Only what withHlsSubtitles wrote: other SUBTITLES groups stay.
+ */
+export function withoutHlsSubtitles(master: string): string {
+  if (!master.includes(`"${SUBS_GROUP}"`)) return master;
+  return master.split('\n')
+    .filter((l) => !(l.startsWith('#EXT-X-MEDIA:') && l.includes(`GROUP-ID="${SUBS_GROUP}"`)))
+    .map((l) => (l.startsWith('#EXT-X-STREAM-INF:') ? l.replace(`,SUBTITLES="${SUBS_GROUP}"`, '') : l))
+    .join('\n');
+}
+
 /** One subtitle track as an HLS media playlist: the whole WebVTT as one segment. */
 export function subtitlePlaylist(id: string, durationMs: number): string {
   const secs = Math.max(1, durationMs / 1000);

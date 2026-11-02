@@ -14,22 +14,29 @@ import { join, posix, resolve, sep } from 'node:path';
 import { one, query } from '../../db';
 import { config } from '../../config';
 import { imageStore } from '../imageStore';
-import { withHlsSubtitles, withDashSubtitles, subtitlePlaylist, timestampMap, readTfdt, readTimescale, type Track } from './delivery';
+import { withHlsSubtitles, withoutHlsSubtitles, withDashSubtitles, subtitlePlaylist, timestampMap, readTfdt, readTimescale, type Track } from './delivery';
 import { languageName } from './formats';
+
+/** The asset's caption files that play as tracks, in manifest order. Uncached. */
+export async function activeTracks(assetId: string): Promise<Track[]> {
+  return (await query<any>(`SELECT id, language, label, is_default, forced, sdh FROM vod_asset_files
+                             WHERE asset_id = $1 AND kind = 'captions' AND enabled AND vtt_key IS NOT NULL
+                             ORDER BY is_default DESC, forced, language NULLS LAST, created_at`, [assetId]))
+    .map((r) => ({ id: r.id, language: r.language, label: r.label || languageName(r.language), isDefault: !!r.is_default, forced: !!r.forced, sdh: !!r.sdh }));
+}
 
 async function tracksFor(assetId: string): Promise<Track[]> {
   const { cached } = await import('../../scale/cache');
-  return cached(`vodsubs:${assetId}`, { ttlSec: 300, tags: [`asset:${assetId}`] }, async () =>
-    (await query<any>(`SELECT id, language, label, is_default, forced, sdh FROM vod_asset_files
-                        WHERE asset_id = $1 AND kind = 'captions' AND enabled AND vtt_key IS NOT NULL
-                        ORDER BY is_default DESC, forced, language NULLS LAST, created_at`, [assetId]))
-      .map((r) => ({ id: r.id, language: r.language, label: r.label || languageName(r.language), isDefault: !!r.is_default, forced: !!r.forced, sdh: !!r.sdh })));
+  return cached(`vodsubs:${assetId}`, { ttlSec: 300, tags: [`asset:${assetId}`] }, () => activeTracks(assetId));
 }
 
 export async function withTracks(text: string, assetId: string, isMpd: boolean): Promise<string> {
   try {
     const tracks = await tracksFor(assetId);
-    if (!tracks.length) return text;
+    // No tracks: still strip any the stored file carries. On S3 the bucket's
+    // master and MPD hold the tracks written there (bucketTracks.ts), and a
+    // failed write after the last one was disabled must not keep it listed.
+    if (!tracks.length) return isMpd ? withDashSubtitles(text, [], '') : withoutHlsSubtitles(text);
     return isMpd ? withDashSubtitles(text, tracks, '') : withHlsSubtitles(text, tracks);
   } catch (e) { console.warn(`[subs] ${assetId}: tracks not added`, e); return text; }
 }

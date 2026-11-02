@@ -390,6 +390,17 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   // made from the previous encode or source. Forgotten, so each channel's prepare
   // packages it again (its own encode plays meanwhile).
   await query(`DELETE FROM vod_asset_ladders WHERE vod_asset_id = $1`, [p.vodAssetId]).catch(() => null);
+  // The master and MPD just uploaded carry no caption tracks; on S3 players get
+  // them from the CDN, so the asset's tracks are written back in (fails open).
+  if (vodStore() === 's3') {
+    const { syncBucketTracks } = await import('../../companions/bucketTracks');
+    const st = await syncBucketTracks(p.vodAssetId);
+    if (st.error) log.warn(`caption tracks not written into the bucket's playlists: ${st.error}`);
+    else {
+      const n = st.written.filter((k) => k.includes('/subs/') && k.endsWith('.m3u8')).length;
+      if (n) log.step(`caption tracks written into the bucket's playlists (${n})`);
+    }
+  }
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
   // While the source is on disk: candidate stills to pick the asset's image
   // from (services/media/assetImage.ts) and the sprite sheets for hover

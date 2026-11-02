@@ -84,9 +84,20 @@ the first variant, at the timescale in its init segment. An encoded file starts 
 recording starts wherever the live timeline was, and without the map its captions would be minutes or hours out.
 Verified end to end with a segment at 1000 s. DASH WebVTT is served without the map.
 
-**Limits.** Tracks are added to playlists served by the control plane (`/clips/...`, local and single-server
-deployments). Playlists the CDN serves straight from S3 need the same edge treatment as skip markers before captions
-show there. A clip whose `master_key` is a single media playlist (no master) cannot carry a subtitle track.
+**Encodes the CDN serves (S3 deployments, build queue 2.1a-2b-4).** There an encode's `master_key` is the bucket
+key `vod/<id>/master.m3u8` and players get it from the CDN, so the control plane is never asked. Instead the tracks
+are written into the bucket copy (`services/companions/bucketTracks.ts`): after every add, change or delete of a
+caption file, and after an encode lands in the bucket (its new master has no tracks), the master and MPD are
+rewritten with the tracks and `subs/<id>.m3u8`, `.vtt` (with the map) and `.dash.vtt` are put beside them; a
+disabled or deleted track's copies are removed. Chosen over answering masters through the API because tracks change
+rarely while masters are asked for on every play: every request stays on the CDN, with no control-plane load or
+latency per viewer. The cost is up to a minute's delay (the playlists' `max-age=60`) before a change shows. The API's
+`/clips` route still adds tracks as it answers (idempotent over a bucket master that already has them) and strips a
+stale listing when no track is left.
+
+**Limits.** A clip whose `master_key` is a single media playlist (no master) cannot carry a subtitle track. Clips
+cut from recordings play through `/clips` on every deployment, so they are covered by the route above. Skip markers
+on CDN-served encodes are not yet written into the bucket copy.
 
 ## 5. API
 
@@ -107,4 +118,4 @@ Feature `vod`: reading needs view, changes need manage. Every change is in the a
 * Pairing at ingest: a watchfolder or upload batch that holds `episode.mp4` with `episode.en.srt` and
   `episode.nfo` attaches them automatically (the ingest rule decides whether sidecar values apply on arrival).
 * Burned-in or embedded caption extraction (CEA-608/708 in the source) into the same tracks.
-* The CDN edge for S3-served playlists (section 4).
+* Skip markers in the bucket copy of CDN-served encodes, the way caption tracks are written (section 4).
