@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.25.0 (2026-11-02)
+
+### Product (in customer release notes)
+
+- fixed · VOD: On a cloud deployment, clips and encoded files play and download from every server, and downloading an encoded MP4 no longer says the file is gone.
+- security · VOD: The original file of an upload or watch folder drop can no longer be fetched through the media address by someone who knows the item's id.
+
+### Internal
+
+- added: clips-store check suite: clip and encode files and downloads served from another task through the bucket.
+
 ## 0.24.0 (2026-10-31)
 
 ### Product (in customer release notes)
