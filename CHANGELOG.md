@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.26.1 (2026-11-02)
+
+### Product (in customer release notes)
+
+- fixed · VOD: On cloud deployments, caption files added to an encoded asset now show as subtitle tracks in the player (HLS and DASH), and switching a track off or deleting it takes it out within a minute.
+
+### Internal
+
+- added · Tests: bucket-tracks check suite: caption tracks written into the bucket copy of CDN-played encodes.
+
 ## 0.26.0 (2026-11-02)
 
 ### Product (in customer release notes)
