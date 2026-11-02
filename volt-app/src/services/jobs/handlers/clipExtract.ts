@@ -269,6 +269,8 @@ async function buildClip(ctx: JobContext): Promise<Record<string, unknown>> {
 
   // Skip markers: the intro and credits, against the other episodes of its series.
   await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId, { channelId: asset.channel_id, eventId: asset.event_id });
+  // Frame index of the clip, for exact frames (services/frames).
+  await (await import('./frameIndex')).queueFrameIndex(p.vodAssetId);
   // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
   await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
 

@@ -5176,6 +5176,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/recordings/:id/frame",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "recordings: view",
+  "viewerTier": false,
+  "group": "/api/recordings"
+ },
+ {
+  "method": "GET",
   "path": "/api/recordings/:id/programmes",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -6536,6 +6545,24 @@
  {
   "method": "GET",
   "path": "/api/vod/:id/files/:fileId/proposal",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/frame",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/frame-index",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: view",

@@ -183,6 +183,8 @@ boot().then(async () => {
       const stopGraphics = startGraphicsRuntime();
       // Asset images: queue a pick for every asset that has none yet (services/media/assetImage.ts).
       startAssetImageSweep();
+      // Frame indexes for assets made before they existed, and old frame stills (services/frames).
+      void import('./services/jobs/handlers/frameIndex').then((m) => m.startFrameIndexSweep()).catch((e) => console.warn('[frames.index] sweep not started', e));
       // Uploads held for metadata before the gate stopped holding the media: encode them once.
       void import('./services/ingest/pipeline').then((m) => m.encodeHeldUploads()).catch((e) => console.warn('[ingest] held uploads not checked', e));
       return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); };
@@ -201,6 +203,7 @@ boot().then(async () => {
     registerVodImageHandlers();
     (await import('./services/jobs/handlers/songArtwork')).registerSongArtworkHandlers();
     registerRemoteIngestHandlers();
+    (await import('./services/jobs/handlers/frameIndex')).registerFrameIndexHandlers();
     (await import('./services/workflows/runs')).registerAddonHandlers();
     await registerFillerHandlers();
     await (await import('./services/social')).registerSocialHandlers();

@@ -27,6 +27,7 @@ import { fleetRouter } from './modules/fleet';
 import { playerRouter, playerAdminRouter } from './modules/player';
 import { mediaIngestRouter } from './modules/mediaIngest';
 import { recordingsRouter } from './modules/recordings';
+import { vodFramesRouter, recordingFramesRouter } from './modules/frames';
 import { jobsRouter } from './modules/jobs';
 import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
 import { timelineGridRouter } from './modules/timelineGrid';
@@ -488,6 +489,7 @@ export function createServer() {
   app.use('/api/live-streams', liveStreamsRouter);  // the stream aggregate: planes, preset, provider tiers (services/streamModel.ts)
   app.use('/api/streams', ingestRouter);  // encoder -> POST /api/streams/:id/report
   app.use('/api/media', mediaIngestRouter); // thumbnailer -> POST /api/media/thumbnails
+  app.use('/api/recordings', recordingFramesRouter);    // exact frames of a recording: /:id/frame (modules/frames.ts)
   app.use('/api/recordings', recordingsRouter);         // recordings library (+ publish/clip)
   app.use('/api/jobs', jobsRouter);                     // long-running work: progress, reasons, retry
   // Timeline, coverage and dayparts hang off a channel, so they mount UNDER the
@@ -510,6 +512,7 @@ export function createServer() {
   app.use('/api/vod', reframeRouter);                    // social formats per asset: /:id/reframe... (modules/reframe.ts)
   app.use('/api/vod', vodImageRouter);                   // the image that represents an asset (before vodRouter's /:id)
   app.use('/api/vod', contentLinksRouter);               // content links, Read from file name (before vodRouter's /:id; modules/contentLinks.ts)
+  app.use('/api/vod', vodFramesRouter);                  // frame index and exact frames: /:id/frame-index, /:id/frame (modules/frames.ts)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
   app.use('/api/collections', collectionsRouter);       // nested collections of library assets (modules/collections.ts)
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**841 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 661 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**844 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 664 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -880,6 +880,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/recordings/:id/clip-defaults` | admin session (Bearer) or account secret key | recordings: view |  |
 | GET | `/api/recordings/:id/derived` | admin session (Bearer) or account secret key | recordings: view |  |
 | GET | `/api/recordings/:id/download` | admin session (Bearer) or account secret key | recordings: view |  |
+| GET | `/api/recordings/:id/frame` | admin session (Bearer) or account secret key | recordings: view |  |
 | GET | `/api/recordings/:id/programmes` | admin session (Bearer) or account secret key | recordings: view |  |
 | POST | `/api/recordings/:id/publish` | admin session (Bearer) or account secret key | recordings: operate |  |
 | GET | `/api/recordings/:id/range/:kind(video\|audio).m3u8` | admin session (Bearer) or account secret key | recordings: view |  |
@@ -1107,6 +1108,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/vod/:id/files/:fileId/apply` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/files/:fileId/content` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/files/:fileId/proposal` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/frame` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/vod/:id/frame-index` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/from-filename` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/from-filename` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/history` | admin session (Bearer) or account secret key | vod: view |  |

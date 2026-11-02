@@ -444,6 +444,8 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   }
   // Skip markers: the intro and credits, against the other episodes of its series.
   await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
+  // Frame index of the rendition players get, for exact frames (services/frames).
+  await (await import('./frameIndex')).queueFrameIndex(p.vodAssetId);
   // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
   await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
   log.step('queued: skip marker detection (vod.markers) and social formats tracking');

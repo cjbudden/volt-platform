@@ -57,6 +57,17 @@ Everything changed since your last sync, oldest change first, page by page. Stor
 
 Filter further with any field the list offers, for example `published=true` or `kind=clip`. See [search, filter, sort and page](lists.md).
 
+### Show the exact frame at a timecode
+
+For an edit decision list, a review note or a thumbnail picked to the frame, ask for one frame of an asset by timecode, frame number or time, with an account secret key or an admin session:
+
+- `GET /api/vod/{id}/frame-index` gives the asset's frame rate, frame count and first and last timecode.
+- `GET /api/vod/{id}/frame?tc=00:12:04:17&w=1280` gives that frame: its number, timecode and time, and a signed image URL 1280 pixels wide. Use `n` for a frame number or `ms` for a time instead of `tc`.
+- Add `redirect=true` to be sent straight to the image, so the request itself can be an `<img>` source on your own server's pages.
+- `GET /api/recordings/{id}/frame?at=1793650800000` does the same for a moment in a recording, by wall-clock time (or `n` and `ms` from the recording's start).
+
+The picture is the frame itself, not the nearest keyframe, and the image URL can be cached. Timecode is `HH:MM:SS:FF` at the asset's own rate, with `;` before the frames at 29.97 and 59.94 fps (drop-frame). A new asset answers `409` for a few seconds after its encode while its frame index is made. See the [API reference](/api-reference) for every field.
+
 ### More recipes in the other guides
 
 | To | See |
@@ -74,4 +85,5 @@ Filter further with any field the list offers, for example `published=true` or `
 | `403` from the public guide or the play gate | The request came from a site the app does not allow | Add the site to the app; send `Origin` when testing with `curl` |
 | `404 Channel not found` from the public guide | Not a channel or event of the key's account | Check the id and the key |
 | The sync never ends | Your script is not reading the `Link` header's `rel="next"` | Stop when there is no `rel="next"`, as the example does |
+| `409` from a frame request | The asset's frame index is being made after its encode, or the asset has no video | Ask again after a few seconds; the `error` says which |
 | `curl: (3) bad range in URL` | `curl` read the `[...]` of a filter as a range | Use `curl -g` |

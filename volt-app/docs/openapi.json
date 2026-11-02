@@ -27505,6 +27505,42 @@
     }
    }
   },
+  "/api/recordings/{id}/frame": {
+   "get": {
+    "operationId": "getRecordingsByIDFrame",
+    "summary": "Get one exact frame of a recording",
+    "tags": [
+     "Recordings"
+    ],
+    "description": "Name the moment with `n` (frames from the recording's start), `ms` (time from the start) or `at` (wall clock, epoch ms). Answers the frame on screen at that moment: its number and timecode from the start, its wall-clock time, the capture segment that holds it and a signed image URL `w` pixels wide (default 640). `redirect=true` answers 302 to the image. 404 outside the recording or in a gap in the capture.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** recordings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/recordings/{id}/programmes": {
    "get": {
     "operationId": "getRecordingsByIDProgrammes",
@@ -35848,6 +35884,78 @@
      },
      {
       "name": "fileId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/frame": {
+   "get": {
+    "operationId": "getVODByIDFrame",
+    "summary": "Get one exact frame of an asset",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Name the frame with `n` (frame number from 0), `tc` (timecode) or `ms` (the frame on screen at that time). Answers the frame number, its timecode and time, the segment that holds it and a signed image URL `w` pixels wide (default 640, up to 4096). The picture is the frame itself, decoded from the one segment that holds it, not the nearest keyframe. `redirect=true` answers 302 to the image instead, for use in an `<img>`. 409 while the asset's frame index is being made, 404 for a frame outside the asset.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/frame-index": {
+   "get": {
+    "operationId": "getVODByIDFrameIndex",
+    "summary": "Get an asset's frame index",
+    "tags": [
+     "VOD"
+    ],
+    "description": "The frame rate, frame count, duration and first and last timecode of an asset's video, read from the rendition players get. `state` is `ready`, `none` (no video yet, or audio only; `note` says which) or `failed`. An asset with no index yet answers `{ \"state\": \"queued\" }` and one is made within seconds; `build=true` makes it now. Timecode is `HH:MM:SS:FF` at the asset's own rate, drop-frame (`HH:MM:SS;FF`) at 29.97 and 59.94 fps.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
       "in": "path",
       "required": true,
       "schema": {
