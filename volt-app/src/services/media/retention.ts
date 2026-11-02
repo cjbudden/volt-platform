@@ -499,6 +499,7 @@ export async function sweep(opts: {
           action: 'delete', actor,
           detail: 'every owner was deleted; the object was unreachable from any account',
         });
+        await afterDelete(obj);
         res.orphaned++;
       } catch (e) {
         res.failed++;
@@ -528,6 +529,10 @@ export async function sweep(opts: {
     const due = dueStage(obj, rule, locs.map((l) => l.tier), closedAtMsOf(obj));
     if (!due) continue;
     if (due.stage.action === 'delete' && manual != null && manual > Date.now()) continue;   // kept longer by hand
+    // FRAME STILLS take only the delete rung (services/frames/folders.ts): they
+    // are made again from the media in a fraction of a second, so moving them
+    // to cold or archive storage would cost more than it saves.
+    if (obj.kind === 'frame_stills' && due.stage.action !== 'delete') continue;
 
     if (due.stage.action !== 'delete' && !caps.archiveEnabled) {
       // The rule asked for something this deployment cannot do. Rules are
@@ -571,6 +576,7 @@ export async function sweep(opts: {
           action: 'delete', actor,
           detail: `rule "${rule.name}", stage ${due.stage.afterDays}d, age ${due.ageDays.toFixed(1)}d`,
         });
+        await afterDelete(obj);
         res.deleted++;
         continue;
       }
@@ -649,6 +655,14 @@ export async function sweep(opts: {
     }
   }
   return res;
+}
+
+/** Records that describe the bytes of a deleted object go with it. */
+async function afterDelete(obj: any): Promise<void> {
+  if (obj.kind === 'frame_stills') {
+    const { forgetStillsOf } = await import('../frames/folders');
+    await forgetStillsOf(obj.id).catch((e) => console.warn('[retention] frame still rows not removed for', obj.id, e));
+  }
 }
 
 /**

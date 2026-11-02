@@ -19,11 +19,11 @@
 //  buy nothing the scan does not already give (the cost rule, 27 Oct).
 //
 //  STILLS are JPEGs in the image store under derived/<account>/frames/, one
-//  per frame asked for, recorded in frame_stills and removed by the sweep after
-//  FRAME_STILL_TTL_DAYS (default 7): an editor stepping through a scene asks
-//  for the same few hundred frames repeatedly for a while, then never again.
-//  An asset's stills sit under its index build time, so a re-encode never
-//  serves a frame of the old file.
+//  per frame asked for. Each is recorded in frame_stills with the bucket and
+//  folder it went to, and each folder is a media object with its full address,
+//  so the retention sweep and the TTL prune both find them (folders.ts says
+//  which rules apply). An asset's stills sit under its index build time, so a
+//  re-encode never serves a frame of the old file.
 // ============================================================================
 import { posix, join } from 'node:path';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
@@ -39,6 +39,7 @@ import {
   type FrameIndex, type Located, type Rate, type SegmentFrames,
 } from './frameIndex';
 import { extractFrame, FrameError, probeTsSegment } from './exactFrame';
+import { frameFolderObject, refreshFolderBytes, retireFrameFolders, type FrameFolder } from './folders';
 
 // ------------------------------------------------------------- asset index
 
@@ -74,6 +75,12 @@ export async function buildAssetFrameIndex(assetId: string): Promise<StoredIndex
      RETURNING built_at, (extract(epoch from built_at) * 1000)::bigint AS v`,
     [assetId, state, error, a.master_key ?? null, index?.rate.num ?? null, index?.rate.den ?? null,
       index?.totalFrames ?? null, index?.durationMs ?? null, index ? JSON.stringify(index) : null]);
+  // The stills of an older build show frames of a file that is no longer
+  // there: retire their folders now rather than wait for the TTL.
+  await retireFrameFolders({
+    vodAssetId: assetId, logicalLike: `frames/assets/${assetId}/%`,
+    exceptLogicalKey: assetFolderKey(assetId, String(row.v)), reason: 'frame index rebuilt',
+  }).catch((e) => console.warn(`[frames] old stills of ${assetId} not retired`, e));
   return { state, error, builtAt: new Date(row.built_at).toISOString(), version: String(row.v), index };
 }
 
@@ -145,20 +152,32 @@ export async function indexFromMaster(masterKey: string | null | undefined): Pro
 
 const flights = new Map<string, Promise<void>>();
 
-/** Make the still at `key` once, however many requests arrive for it together. */
-async function ensureStill(accountId: string, key: string, make: () => Promise<Buffer>): Promise<'cached' | 'made'> {
-  if (await imageStore().exists(key)) return 'cached';
+/**
+ * Make the still `name` in `folder` once, however many requests arrive for it
+ * together. The folder's address is registered as a media object BEFORE the
+ * first byte is written, so a crash between the two can only leave a record
+ * with nothing in it, never bytes with no record.
+ */
+async function ensureStill(accountId: string, folder: FrameFolder, name: string, make: () => Promise<Buffer>): Promise<{ key: string; cache: 'cached' | 'made' }> {
+  const key = `${folder.key}/${name}`;
+  if (await imageStore().exists(key)) return { key, cache: 'cached' };
   let f = flights.get(key);
   if (!f) {
     f = (async () => {
       const jpg = await make();
+      const obj = await frameFolderObject(folder);
       await imageStore().put(key, jpg, 'image/jpeg');
-      await query(`INSERT INTO frame_stills (store_key, account_id) VALUES ($1,$2) ON CONFLICT (store_key) DO UPDATE SET created_at = now()`, [key, accountId]);
+      await query(
+        `INSERT INTO frame_stills (store_key, account_id, bucket, folder, bytes, media_object_id) VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (store_key) DO UPDATE SET created_at = now(), bucket = EXCLUDED.bucket, folder = EXCLUDED.folder,
+           bytes = EXCLUDED.bytes, media_object_id = EXCLUDED.media_object_id`,
+        [key, accountId, obj.address.bucket, folder.key, jpg.length, obj.id]);
+      await refreshFolderBytes(obj.id);
     })().finally(() => flights.delete(key));
     flights.set(key, f);
   }
   await f;
-  return 'made';
+  return { key, cache: 'made' };
 }
 
 export interface AssetStill { key: string; located: Located; index: FrameIndex; cache: 'cached' | 'made' }
@@ -169,10 +188,15 @@ export async function assetFrameStill(accountId: string, assetId: string, stored
   if (!index) throw new FrameError(409, stored.error ?? 'this asset has no frame index');
   const located = locateFrame(index, n);
   if (!located) throw new FrameError(404, `frame ${n} is outside the asset (0 to ${index.totalFrames - 1})`);
-  const key = `derived/${accountId}/frames/assets/${assetId}/${stored.version}/${n}.jpg`;
   const a = await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [assetId]);
   const masterRel = clipsPathOfMaster(a?.master_key);
-  const cache = await ensureStill(accountId, key, async () => {
+  // Owned by the asset alone (no channel), so deleting the asset leaves the
+  // folder ownerless and the retention sweep reclaims it.
+  const folder: FrameFolder = {
+    key: `derived/${accountId}/frames/assets/${assetId}/${stored.version}`,
+    logicalKey: assetFolderKey(assetId, stored.version), vodAssetId: assetId,
+  };
+  const { key, cache } = await ensureStill(accountId, folder, `${n}.jpg`, async () => {
     if (!masterRel) throw new FrameError(409, 'the asset has no packaged media any more');
     const dir = posix.dirname(posix.join(posix.dirname(masterRel), index.playlist));
     const seg = await readClipsFile(posix.join(dir, located.segment.uri));
@@ -246,28 +270,41 @@ export async function streamFrameAt(streamId: string, ms: number): Promise<Strea
 
 /** The still of the stream frame `fr` (from streamFrameAt), made if needed. */
 export async function streamFrameStill(accountId: string, streamId: string, fr: StreamFrame): Promise<{ key: string; cache: 'cached' | 'made' }> {
-  const key = `derived/${accountId}/frames/streams/${streamId}/${fr.runId}/${fr.rendition}/${fr.seq}-${fr.localFrame}.jpg`;
-  const cache = await ensureStill(accountId, key, async () => {
+  // Owned by the stream, like the run it was taken from, so it follows the
+  // stream's recording rule and goes with the run (services/media/prune.ts).
+  const isChannel = !!(await one(`SELECT 1 FROM channels WHERE id = $1`, [streamId]));
+  const folder: FrameFolder = {
+    key: `derived/${accountId}/frames/streams/${streamId}/${fr.runId}/${fr.rendition}`,
+    logicalKey: runFolderKey(fr.runId, fr.rendition),
+    channelId: isChannel ? streamId : null, eventId: isChannel ? null : streamId,
+  };
+  return ensureStill(accountId, folder, `${fr.seq}-${fr.localFrame}.jpg`, async () => {
     const segs = scanRun(streamId, fr.runId, fr.rendition);
     const s = segs.find((x) => x.seq === fr.seq);
     if (!s) throw new FrameError(410, 'the segment holding that moment is no longer stored');
     const f = await segmentFrames(streamId, s);
     return extractFrame(f.init, f.seg, fr.localFrame);
   });
-  return { key, cache };
 }
+
+/** Logical keys of frame folders (media_objects.logical_key). */
+export const assetFolderKey = (assetId: string, version: string) => `frames/assets/${assetId}/${version}`;
+export const runFolderKey = (runId: string, rendition: string) => `frames/run/${runId}/${rendition}`;
 
 // ------------------------------------------------------------- upkeep
 
 /** Remove stills older than the TTL, a batch at a time. Returns how many went. */
 export async function pruneFrameStills(ttlDays = Number(process.env.FRAME_STILL_TTL_DAYS ?? 7), batch = 500): Promise<number> {
-  const rows = await query<{ store_key: string }>(
-    `SELECT store_key FROM frame_stills WHERE created_at < now() - make_interval(days => $1) ORDER BY created_at LIMIT $2`,
+  const rows = await query<{ store_key: string; media_object_id: string | null }>(
+    `SELECT store_key, media_object_id FROM frame_stills WHERE created_at < now() - make_interval(days => $1) ORDER BY created_at LIMIT $2`,
     [Math.max(0, ttlDays), batch]);
+  const folders = new Set<string>();
   for (const r of rows) {
     await imageStore().delete(r.store_key).catch(() => {});
     await query(`DELETE FROM frame_stills WHERE store_key = $1`, [r.store_key]);
+    if (r.media_object_id) folders.add(r.media_object_id);
   }
+  for (const id of folders) await refreshFolderBytes(id).catch(() => {});
   return rows.length;
 }
 

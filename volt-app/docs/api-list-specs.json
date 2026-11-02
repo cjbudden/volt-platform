@@ -4025,7 +4025,7 @@
      "starts",
      "exists"
     ],
-    "doc": "run_rendition, clip_output or export"
+    "doc": "run_rendition, clip_output, export or frame_stills (a folder of exact-frame stills)"
    },
    "rendition": {
     "type": "string",

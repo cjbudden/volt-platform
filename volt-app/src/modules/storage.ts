@@ -60,7 +60,7 @@ const objectsList = defineList({
   fields: {
     id: { sql: 'o.id', type: 'uuid' },
     logical_key: { sql: 'o.logical_key', type: 'string' },
-    kind: { sql: 'o.kind', type: 'string', doc: 'run_rendition, clip_output or export' },
+    kind: { sql: 'o.kind', type: 'string', doc: 'run_rendition, clip_output, export or frame_stills (a folder of exact-frame stills)' },
     rendition: { sql: 'o.rendition', type: 'string' },
     state: { sql: 'o.state', type: 'enum', values: ['pending', 'writing', 'available', 'archiving', 'archived', 'restoring', 'restored', 'deleting', 'deleted'] },
     bytes: { sql: 'o.bytes', type: 'number' },

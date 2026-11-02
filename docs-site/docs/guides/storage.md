@@ -44,6 +44,8 @@ Each rung fires once, at the age you set, counted from when the recording closed
 
 Recordings also have their own keep period, set on each channel, station or event (**Keep recordings for**). Both apply, so a recording goes when the first of them says so.
 
+Exact-frame stills, the single frames Volt makes when someone asks for one frame of an asset or a recording, follow the same ladder, but only its **Delete** rung: they are made again in a moment, so they are never moved to cheaper storage or archived. They also go 7 days after they were last made, as soon as the recording they were taken from is removed, and when their asset is deleted. Each folder of them is listed here as **frames/...**.
+
 ### See what the next sweep would do
 
 1. Under **What the next sweep would do**, choose **Run a dry run**.

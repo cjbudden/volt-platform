@@ -30190,7 +30190,7 @@
       "schema": {
        "type": "string"
       },
-      "description": "run_rendition, clip_output or export. Filter: `kind=value` (comma list = any of), or `kind[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+      "description": "run_rendition, clip_output, export or frame_stills (a folder of exact-frame stills). Filter: `kind=value` (comma list = any of), or `kind[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
      },
      {
       "name": "rendition",

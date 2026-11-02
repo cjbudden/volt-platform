@@ -334,6 +334,70 @@ async function main() {
     ok('outside the recording: 404', (await get(`/api/recordings/${REC}/frame?ms=25000`)).status === 404);
     ok('another account: 404', (await get(`/api/recordings/${REC}/frame?n=1`, H2)).status === 404);
 
+    console.log('\n== where stills are kept, and the clean-up ==');
+    const { folderAddress } = await import('../src/services/frames/folders');
+    const { config } = await import('../src/config');
+    const st = await one<any>(`SELECT * FROM frame_stills WHERE store_key LIKE $1`, [`%/assets/${CMAF}/%/137.jpg`]);
+    ok('each still records its folder, its size and its folder object (bucket empty on a local store)',
+      !!st && st.bucket === null && /^derived\/[0-9a-f-]+\/frames\/assets\/[0-9a-f-]+\/\d+$/.test(st.folder) && st.bytes > 0 && !!st.media_object_id, st);
+    const fo = st && await one<any>(`SELECT o.*, l.uri, l.tier, l.bytes AS loc_bytes FROM media_objects o JOIN media_locations l ON l.object_id = o.id AND l.present WHERE o.id = $1`, [st.media_object_id]);
+    const sum = st && Number((await one<any>(`SELECT sum(bytes)::int AS n FROM frame_stills WHERE media_object_id = $1`, [st.media_object_id]))?.n);
+    ok('the folder is a media object of kind frame_stills, owned by the asset alone, its location the folder on disk, sized as its stills',
+      fo?.kind === 'frame_stills' && fo.vod_asset_id === CMAF && !fo.channel_id && fo.logical_key.startsWith(`frames/assets/${CMAF}/`)
+      && fo.uri === join(process.env.IMAGE_STORE_DIR!, st.folder) && fo.tier === 'local' && Number(fo.bytes) === sum && Number(fo.loc_bytes) === sum, { fo, sum });
+    const saved = { ...config.imageStore };
+    Object.assign(config.imageStore, { driver: 's3', s3Bucket: 'volt-media-test', s3Prefix: 'images/' });
+    const s3a = folderAddress('derived/acct/frames/assets/x/1');
+    Object.assign(config.imageStore, saved);
+    ok('on S3 the record is the bucket and the folder as a prefix (trailing slash, so only that tree is removed)',
+      s3a.bucket === 'volt-media-test' && s3a.uri === 's3://volt-media-test/images/derived/acct/frames/assets/x/1/' && s3a.tier === 's3_standard', s3a);
+    const rs = await one<any>(`SELECT s.*, o.channel_id, o.logical_key, o.kind FROM frame_stills s JOIN media_objects o ON o.id = s.media_object_id WHERE s.store_key LIKE $1`, [`%/streams/${CH}/%2-37.jpg`]);
+    ok('a recording still: its folder is owned by the channel, keyed by run and rendition',
+      rs?.kind === 'frame_stills' && rs.channel_id === CH && rs.logical_key === 'frames/run/20261102T120000Z/720p' && rs.folder.endsWith(`/streams/${CH}/20261102T120000Z/720p`), rs);
+
+    // A second capture run of the channel, ten minutes later, for the run removal.
+    const run2 = join(process.env.ORIGIN_DIR!, CH, 'runs', '20261102T121000Z', '720p');
+    mkdirSync(run2, { recursive: true });
+    for (const f of readdirSync(runDir)) {
+      writeFileSync(join(run2, f), readFileSync(join(runDir, f)));
+      const m = /^seg_(\d+)\.m4s$/.exec(f);
+      if (m) { const t = (T0 + 600_000 + (Number(m[1]) + 1) * 2000) / 1000; utimesSync(join(run2, f), t, t); }
+    }
+    const fr2 = await store.streamFrameAt(CH, T0 + 600_000 + 5480);
+    const s2 = fr2 && await store.streamFrameStill(A, CH, fr2);
+    const s2row = s2 && await one<any>(`SELECT * FROM frame_stills WHERE store_key = $1`, [s2.key]);
+    const { pruneRun } = await import('../src/services/media/prune');
+    await pruneRun({ streamId: CH, runId: '20261102T121000Z', accountId: A, reason: 'test removal', actor: 'test' });
+    const o2 = s2row && await one<any>(`SELECT state FROM media_objects WHERE id = $1`, [s2row.media_object_id]);
+    ok('removing a run (retention or clean-up) removes the stills taken from it: folder gone, object deleted, rows gone',
+      !!s2row && o2?.state === 'deleted' && !existsSync(join(process.env.IMAGE_STORE_DIR!, s2row.folder))
+      && !(await one(`SELECT 1 FROM frame_stills WHERE media_object_id = $1`, [s2row.media_object_id])), { s2row, o2 });
+    const firstRunStill = rs && join(process.env.IMAGE_STORE_DIR!, rs.store_key);
+    ok('the other run\'s stills are untouched', !!firstRunStill && existsSync(firstRunStill));
+
+    // The channel's retention rule: delete after a day. The folder is two days old.
+    const { saveRule, sweep } = await import('../src/services/media/retention');
+    await saveRule({ actingAccountId: A, channelId: CH, name: 'Frames test', appliesTo: 'recording', stages: [{ afterDays: 1, action: 'delete' }] });
+    await query(`UPDATE media_objects SET created_at = now() - interval '2 days' WHERE id = $1`, [rs.media_object_id]);
+    const swept = await sweep({ accountId: A, actor: 'test' });
+    const o1 = await one<any>(`SELECT state FROM media_objects WHERE id = $1`, [rs.media_object_id]);
+    ok(`the stream's retention rule deletes its stills folder at the delete rung (${swept.deleted} deleted)`,
+      o1?.state === 'deleted' && !existsSync(join(process.env.IMAGE_STORE_DIR!, rs.folder))
+      && !(await one(`SELECT 1 FROM frame_stills WHERE media_object_id = $1`, [rs.media_object_id])), { o1, swept });
+    const after = await get(`/api/recordings/${REC}/frame?n=137`);
+    ok('a still of media whose stills retention removed is refused (410), not left outside the clean-up', after.status === 410, after);
+
+    // An asset deleted: its folder is ownerless and the sweep reclaims it after the grace period.
+    const tsStill = await get(`/api/vod/${TS}/frame?n=10`);
+    const tsRow = await one<any>(`SELECT * FROM frame_stills WHERE store_key LIKE $1`, [`%/assets/${TS}/%/10.jpg`]);
+    await query(`DELETE FROM vod_assets WHERE id = $1`, [TS]);
+    await query(`UPDATE media_objects SET updated_at = now() - interval '2 days' WHERE id = $1`, [tsRow?.media_object_id]);
+    const orphan = await sweep({ actor: 'test', limit: 5000 });
+    const oTs = tsRow && await one<any>(`SELECT state FROM media_objects WHERE id = $1`, [tsRow.media_object_id]);
+    ok(`a deleted asset's stills: reclaimed as ownerless (${orphan.orphaned} reclaimed), folder and rows gone`,
+      tsStill.status === 200 && oTs?.state === 'deleted' && !existsSync(join(process.env.IMAGE_STORE_DIR!, tsRow.folder))
+      && !(await one(`SELECT 1 FROM frame_stills WHERE media_object_id = $1`, [tsRow.media_object_id])), { oTs, orphan: orphan.orphaned });
+
     console.log('\n== upkeep ==');
     await query(`UPDATE frame_stills SET created_at = now() - interval '8 days' WHERE store_key LIKE $1`, [`%/137.jpg`]);
     const oldKeys = (await query<any>(`SELECT store_key FROM frame_stills WHERE store_key LIKE $1`, [`%/137.jpg`])).map((r) => r.store_key);
@@ -345,6 +409,9 @@ async function main() {
     const rebuilt = await get(`/api/vod/${CMAF}/frame-index?build=1`);
     const fresh = await get(`/api/vod/${CMAF}/frame?n=300`);
     ok('after a rebuild (a re-encode) a frame is made again from the new index, not the old still', rebuilt.j?.state === 'ready' && fresh.j?.cache === 'made', fresh.j);
+    const objs = await query<any>(`SELECT logical_key, state FROM media_objects WHERE kind = 'frame_stills' AND vod_asset_id = $1 ORDER BY created_at`, [CMAF]);
+    ok('the rebuild retired the old version\'s stills folder; only the new one is live',
+      objs.length >= 2 && objs.filter((o) => o.state !== 'deleted').length === 1 && objs[objs.length - 1].state !== 'deleted', objs);
     await query(`DELETE FROM vod_assets WHERE id = $1`, [CMAF]);
     ok('deleting the asset removes its index row', !(await one(`SELECT 1 FROM asset_frame_indexes WHERE vod_asset_id = $1`, [CMAF])));
   } finally {

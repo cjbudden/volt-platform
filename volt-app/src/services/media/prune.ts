@@ -172,6 +172,15 @@ export async function pruneRun(o: {
     }
   }
 
+  // Exact-frame stills taken from this run (services/frames/folders.ts). They
+  // are derived and made again in a moment, so they go now rather than to the
+  // bin, whatever was kept for clips: a kept segment can be stilled again.
+  {
+    const { retireFrameFolders } = await import('../frames/folders');
+    await retireFrameFolders({ streamId: o.streamId, logicalLike: `frames/run/${o.runId}/%`, reason: `${o.reason}; the run was removed`, actor: o.actor })
+      .catch((e) => console.warn('[prune] frame stills of the run not removed', e));
+  }
+
   if (!bin.isEmpty || deletedObjects.length) {
     res.binId = await bin.save({ streamId: o.streamId, runId: o.runId, recordingId: o.recordingId ?? null, objects: deletedObjects, storyboards: sheetRows });
   }
