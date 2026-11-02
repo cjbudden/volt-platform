@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.27.0 (2026-11-02)
+
+### Product (in customer release notes)
+
+- added · Media Library: Exact frames through the API: ask for any frame of an on-demand asset by frame number, timecode or time, or any moment of a recording, and get that frame (not the nearest keyframe) as a signed image at the width you need. Each asset now has a frame index with its frame rate, frame count and timecode range.
+
+### Internal
+
+- added · Tests: frames check suite: frame index, exact frames against a ground-truth decode across segment boundaries (CMAF, MPEG-TS, 29.97 drop-frame with uneven segments), recordings, the API, the sweep and still upkeep.
+
 ## 0.26.1 (2026-11-02)
 
 ### Product (in customer release notes)
