@@ -15,6 +15,15 @@
 //  the break fills with the next ad or a house spot). That is how every
 //  server-side stitcher behaves; the alternative is waiting on an encode in
 //  the middle of a break.
+//
+//  WHERE THE DOWNLOAD LIVES (build queue 2.1a-2b-3). On the Mac it stays in
+//  CLIPS_DIR/ads/<creative>/ and the encode reads it there, as before. On AWS
+//  (VOD_SOURCE_DRIVER=s3) the encode job is taken by whichever task's worker
+//  is free, rarely this one, and a replaced task takes its disk with it; so the
+//  download is landed in the bucket like any upload's original
+//  (vod-src/ads/<creative>/source.mp4), the asset's source_key points at it
+//  (a re-encode can use it, and removing the asset removes it), and the encode
+//  takes its own scratch copy (fetchVodSource).
 // ============================================================================
 import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
@@ -23,6 +32,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { one, query } from '../../../db';
 import { config } from '../../../config';
+import { landVodSource, vodSourceDriver, vodSourceRoot } from '../../media/vodSource';
 import { PermanentError, registerHandler, type JobContext } from '../worker';
 
 export const AD_CONDITION = 'ad.condition';
@@ -42,15 +52,19 @@ export async function handleAdCondition(ctx: JobContext): Promise<Record<string,
   }
   await query(`UPDATE ad_creatives SET status = 'conditioning', error = NULL WHERE id = $1`, [c.id]);
   await ctx.progress(5, 'downloading the creative');
-  const dir = join(config.clips.dir, 'ads', c.id);
+  // On S3 it is assembled under vod-src so it lands under a name of its own
+  // (a bare basename would make every creative's key vod-src/source.mp4).
+  const inBucket = vodSourceDriver() === 's3';
+  const dir = inBucket ? join(vodSourceRoot(), 'ads', c.id) : join(config.clips.dir, 'ads', c.id);
   await mkdir(dir, { recursive: true });
-  const src = join(dir, 'source.mp4');
+  let src = join(dir, 'source.mp4');
   try {
     const r = await fetch(c.source_url);
     if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
     const len = Number(r.headers.get('content-length') ?? 0);
     if (len > MAX_BYTES) throw new PermanentError('the creative file is too large', 'too_large');
     await pipeline(Readable.fromWeb(r.body as any), createWriteStream(src));
+    if (inBucket) src = await landVodSource(src);
   } catch (e: any) {
     await query(`UPDATE ad_creatives SET status = 'error', error = $2 WHERE id = $1`, [c.id, String(e?.message ?? e).slice(0, 300)]);
     throw e;
@@ -58,10 +72,11 @@ export async function handleAdCondition(ctx: JobContext): Promise<Record<string,
   // The asset that holds the packaged copy. Account-owned, marked as an ad so
   // the library, lineups and portals never show it as content.
   const asset = await one<any>(
-    `INSERT INTO vod_assets (account_id, source_kind, kind, title, start_epoch_ms, end_epoch_ms, duration_ms, metadata, original_filename)
-     VALUES ($1, 'upload', 'clip', $2, 0, $3, $3, $4::jsonb, 'source.mp4') RETURNING id`,
+    `INSERT INTO vod_assets (account_id, source_kind, kind, title, start_epoch_ms, end_epoch_ms, duration_ms, metadata, original_filename, source_key)
+     VALUES ($1, 'upload', 'clip', $2, 0, $3, $3, $4::jsonb, 'source.mp4', $5) RETURNING id`,
     [p.accountId, c.title || `Ad ${c.creative_key}`, Math.max(1, Number(c.duration_ms ?? 1)),
-     JSON.stringify({ kind: 'ad', creativeKey: c.creative_key, adSystem: c.ad_system ?? null, title: c.title ?? null })]);
+     JSON.stringify({ kind: 'ad', creativeKey: c.creative_key, adSystem: c.ad_system ?? null, title: c.title ?? null }),
+     inBucket ? src : null]);
   await query(`UPDATE ad_creatives SET vod_asset_id = $2 WHERE id = $1`, [c.id, asset.id]);
   const { enqueue } = await import('../queue');
   await enqueue({ type: 'vod.encode', payload: { vodAssetId: asset.id, accountId: p.accountId, sourcePath: src, loudnorm: true }, dedupeKey: `vodenc:${asset.id}`, channelId: p.channelId ?? null });

@@ -13,6 +13,14 @@
 //  marked fastFiller, hidden from the Media Library. The channel's prepare
 //  then packages it like any slate or loop. Every channel using the same
 //  filler asset shares that one library asset.
+//
+//  WHERE THE RENDER LIVES (build queue 2.1a-2b-3). On the Mac it is written
+//  beside the filler files (FILLER_DIR/<account>/<id>.fast.mp4) and the asset's
+//  source_key is that path, as before. On AWS (VOD_SOURCE_DRIVER=s3) the
+//  prepare's encode runs on whichever task takes the job, and a replaced task
+//  takes its disk with it, so the render is landed in the bucket like any
+//  upload's original (vod-src/fast-filler/<account>/<id>.fast.mp4) and the
+//  encode takes its own scratch copy of it.
 // ============================================================================
 import { existsSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
@@ -22,6 +30,7 @@ import { one } from '../../db';
 import { config } from '../../config';
 import { fillerPath } from '../uploads';
 import { fillerDriver, localCopy } from '../media/fillerStore';
+import { landVodSource, vodSourceDriver, vodSourceRoot } from '../media/vodSource';
 
 const SLATE_SEC = 10;
 const LOOP_MAX_SEC = 120;
@@ -70,7 +79,10 @@ export async function vodForFiller(accountId: string, fillerId: string): Promise
 
   const src = await fillerSource(fa);
   if (!src) throw new FillerError(`The file behind "${fa.name}" is not on this server. Upload it again under Loops & Fillers.`);
-  const out = join(config.uploads.fillerDir, accountId, `${fa.id}.fast.mp4`);
+  const inBucket = vodSourceDriver() === 's3';
+  const out = inBucket
+    ? join(vodSourceRoot(), 'fast-filler', accountId, `${fa.id}.fast.mp4`)
+    : join(config.uploads.fillerDir, accountId, `${fa.id}.fast.mp4`);
   await mkdir(dirname(out), { recursive: true });
   const still = fa.kind === 'slate' || /\.(png|jpe?g|webp|gif|bmp)$/i.test(src);
   const silence = ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo'];
@@ -85,9 +97,10 @@ export async function vodForFiller(accountId: string, fillerId: string): Promise
   const bytes = (await stat(out)).size;
   const durMs = still ? SLATE_SEC * 1000 : Math.min(LOOP_MAX_SEC * 1000, Number(fa.duration_ms) || LOOP_MAX_SEC * 1000);
   const title = `${fa.name} (${fa.kind === 'slate' ? 'slate' : 'loop'})`;
+  const sourceKey = inBucket ? await landVodSource(out) : out;
   const row = await one<any>(
     `INSERT INTO vod_assets (account_id, source_kind, kind, title, source_key, source_bytes, start_epoch_ms, end_epoch_ms, duration_ms, thumb_status, metadata)
      VALUES ($1, 'upload', 'clip', $2, $3, $4, 0, $5, $5, 'processing', $6::jsonb) RETURNING id`,
-    [accountId, title, out, bytes, durMs, JSON.stringify({ title, fillerAssetId: fa.id, fillerKind: fa.kind, fastFiller: true })]);
+    [accountId, title, sourceKey, bytes, durMs, JSON.stringify({ title, fillerAssetId: fa.id, fillerKind: fa.kind, fastFiller: true })]);
   return { assetId: String(row.id), created: true, name: fa.name, kind: fa.kind };
 }

@@ -111,13 +111,19 @@ export async function openObject(key: string, range?: string): Promise<BucketObj
   }
 }
 
-/** A small object as text (a playlist), or null when it is not there. */
-export async function readObjectText(key: string): Promise<string | null> {
+/** A small object's bytes (a playlist, an init segment), or null when it is not there. */
+export async function readObjectBuffer(key: string): Promise<Buffer | null> {
   const o = await openObject(key);
   if (!o) return null;
   const chunks: Buffer[] = [];
   for await (const c of o.body) chunks.push(Buffer.from(c));
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
+}
+
+/** A small object as text (a playlist), or null when it is not there. */
+export async function readObjectText(key: string): Promise<string | null> {
+  const b = await readObjectBuffer(key);
+  return b == null ? null : b.toString('utf8');
 }
 
 /** An object's size without reading it, or null when it is not there. */

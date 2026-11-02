@@ -10,7 +10,7 @@
 // ============================================================================
 import type { Request, Response, NextFunction } from 'express';
 import { readFile } from 'node:fs/promises';
-import { join, dirname, resolve } from 'node:path';
+import { join, posix, resolve, sep } from 'node:path';
 import { one, query } from '../../db';
 import { config } from '../../config';
 import { imageStore } from '../imageStore';
@@ -65,31 +65,67 @@ export async function serveSubs(req: Request, res: Response, next: NextFunction)
 }
 
 /**
+ * The path under /clips that an asset's master_key names: '/clips/...' on the
+ * Mac and for clips, or the bare bucket key 'vod/<id>/master.m3u8' an encode
+ * gets on an S3 deployment (services/fast/vodStore.ts), which is the same file
+ * as /clips/vod/<id>/master.m3u8. Null for anything else (a URL, a live path).
+ */
+export function clipsPathOfMaster(masterKey: string | null | undefined): string | null {
+  const k = String(masterKey ?? '');
+  if (k.startsWith('/clips/')) return k.slice('/clips'.length);
+  if (/^vod\/[0-9a-f-]{36}\/[^/]/i.test(k)) return `/${k}`;
+  return null;
+}
+
+/**
+ * A file under /clips by its path there: from this task's disk, or, when the
+ * task does not hold it, from the bucket copy the job made (2.1a-2b-3; on AWS
+ * the task that cut the clip or ran the encode is rarely this one). Paths are
+ * normalised first and must stay inside CLIPS_DIR; the bucket side only maps
+ * the clip and encode prefixes (clipsStore.readThroughKey), never originals.
+ */
+export async function readClipsFile(rel: string): Promise<Buffer | null> {
+  const n = posix.normalize(`/${String(rel).replace(/^\/+/, '')}`);
+  const root = resolve(config.clips.dir);
+  const file = resolve(join(root, n));
+  if (!file.startsWith(root + sep)) return null;
+  const local = await readFile(file).catch(() => null);
+  if (local) return local;
+  const { readThroughKey, readObjectBuffer } = await import('../media/clipsStore');
+  const key = await readThroughKey(n);
+  return key ? readObjectBuffer(key) : null;
+}
+
+/**
  * X-TIMESTAMP-MAP for the asset: the first segment of the first variant of
  * its master, read from the files the player gets. Cached with the asset.
  */
 async function clockMap(assetId: string, masterKey: string | null): Promise<string | null> {
-  if (!masterKey || !/^\/clips\//.test(masterKey)) return null;
+  const masterRel = clipsPathOfMaster(masterKey);
+  if (!masterRel) return null;
   const { cached } = await import('../../scale/cache');
-  return cached(`vodsubclock:${assetId}`, { ttlSec: 3600, tags: [`asset:${assetId}`] }, async () => {
-    const root = resolve(config.clips.dir);
-    const inside = (p: string) => { const f = resolve(p); return f.startsWith(root) ? f : null; };
-    const masterFile = inside(join(root, masterKey.slice('/clips'.length)));
-    if (!masterFile) return null;
-    const master = await readFile(masterFile, 'utf8');
-    const lines = master.split('\n').map((l) => l.trim());
-    const vi = lines.findIndex((l) => l.startsWith('#EXT-X-STREAM-INF:'));
-    const variantRel = vi >= 0 ? lines.slice(vi + 1).find((l) => l && !l.startsWith('#')) : null;
-    const variantFile = variantRel ? inside(join(dirname(masterFile), variantRel)) : masterFile;
-    if (!variantFile) return null;
-    const media = (await readFile(variantFile, 'utf8')).split('\n').map((l) => l.trim());
-    const initRel = /#EXT-X-MAP:.*URI="([^"]+)"/.exec(media.find((l) => l.startsWith('#EXT-X-MAP:')) ?? '')?.[1];
-    const segRel = media.find((l) => l && !l.startsWith('#'));
-    if (!initRel || !segRel) return null;                       // not CMAF: leave cue times as they are
-    const initFile = inside(join(dirname(variantFile), initRel)), segFile = inside(join(dirname(variantFile), segRel));
-    if (!initFile || !segFile) return null;
-    const timescale = readTimescale(await readFile(initFile));
-    const tfdt = readTfdt(await readFile(segFile));
-    return timescale && tfdt != null ? timestampMap(tfdt, timescale) : null;
-  });
+  return cached(`vodsubclock:${assetId}`, { ttlSec: 3600, tags: [`asset:${assetId}`] }, () => timestampMapFor(masterRel));
+}
+
+/** The X-TIMESTAMP-MAP line for a master at this path under /clips, or null (not CMAF, or a file missing). */
+export async function timestampMapFor(masterRel: string): Promise<string | null> {
+  const text = async (rel: string) => (await readClipsFile(rel))?.toString('utf8') ?? null;
+  const master = await text(masterRel);
+  if (master == null) return null;
+  const lines = master.split('\n').map((l) => l.trim());
+  const vi = lines.findIndex((l) => l.startsWith('#EXT-X-STREAM-INF:'));
+  const variantRel = vi >= 0 ? lines.slice(vi + 1).find((l) => l && !l.startsWith('#')) : null;
+  const variantPath = variantRel ? posix.join(posix.dirname(masterRel), variantRel) : masterRel;
+  const variant = await text(variantPath);
+  if (variant == null) return null;
+  const media = variant.split('\n').map((l) => l.trim());
+  const initRel = /#EXT-X-MAP:.*URI="([^"]+)"/.exec(media.find((l) => l.startsWith('#EXT-X-MAP:')) ?? '')?.[1];
+  const segRel = media.find((l) => l && !l.startsWith('#'));
+  if (!initRel || !segRel) return null;                       // not CMAF: leave cue times as they are
+  const init = await readClipsFile(posix.join(posix.dirname(variantPath), initRel));
+  const seg = await readClipsFile(posix.join(posix.dirname(variantPath), segRel));
+  if (!init || !seg) return null;
+  const timescale = readTimescale(init);
+  const tfdt = readTfdt(seg);
+  return timescale && tfdt != null ? timestampMap(tfdt, timescale) : null;
 }

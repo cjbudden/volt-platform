@@ -104,7 +104,10 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
     const deny = /sid\s*=\s*"DenyCloudFrontPrivatePrefixes"[\s\S]*?effect\s*=\s*"Deny"[\s\S]*?resources\s*=\s*\[([^\]]*)\]/.exec(cdn);
     ok(!!deny && /\/vod-src\/\*/.test(deny[1]) && /\/upload-staging\/\*/.test(deny[1]), 'the CDN cannot read originals or upload parts from the origin bucket (2.1a-2b)');
   }
-  for (const [n, item] of [['CLIPS_DIR', '2.1a-2b-3'], ['VOLT_TRASH_DIR', '2.1a-2c'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
+  // 2.1a-2b-3: ad creatives and FAST renders of slates and loops land in the bucket like
+  // originals, and caption clocks read through the bucket, so CLIPS_DIR is only scratch.
+  ok(cov.settings.CLIPS_DIR?.class === 'default' && !cov.settings.CLIPS_DIR?.item, 'clips, encodes, ad creatives and FAST renders reach the bucket on AWS, CLIPS_DIR only scratch (2.1a-2b-3)');
+  for (const [n, item] of [['VOLT_TRASH_DIR', '2.1a-2c'], ['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
   // 2.1b wired radio, captions and the GPU pool; only the Icecast relay waits (2.1c).
   for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
   ok(cov.settings.ICECAST_HOST?.class === 'not-on-aws-yet' && cov.settings.ICECAST_HOST?.item === '2.1c', 'the Icecast relay is named as not on AWS yet (2.1c)');
