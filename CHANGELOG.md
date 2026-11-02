@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.28.0 (2026-11-02)
+
+### Product (in customer release notes)
+
+- changed · Storage: Exact-frame stills are now tracked by where they are kept (bucket and folder) and follow the retention ladder's Delete rung: they go when their recording is removed, when their asset is deleted or re-encoded, and 7 days after they were last made. Each folder of stills is listed on the Storage page.
+
 ## 0.27.0 (2026-11-02)
 
 ### Product (in customer release notes)
