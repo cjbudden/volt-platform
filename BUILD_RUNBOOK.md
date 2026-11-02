@@ -131,6 +131,14 @@ final `--amend` because of that: when it does, move the locks and finish it by
 hand: `git add release/state.json && git commit --no-verify -m "Release vX.Y.Z: record release baseline"`.
 The tag stays on the release commit, which is correct.
 
+`release.mjs` regenerates `volt-app/docs/openapi.json` from the working tree
+and commits it, so when another session has uncommitted changes to
+`openapi-overlay.json` or routes, its work lands in the release commit. Check
+`git show --stat HEAD` after the release: if `openapi.json` changed by more
+than the version line, commit the committed routes back (the previous
+commit's file with the new version) with `--no-verify`, then copy the other
+session's working copy back so its work stays uncommitted (2 Nov 2026).
+
 Every commit message ends with:
 
 ```
