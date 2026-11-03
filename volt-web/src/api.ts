@@ -490,6 +490,8 @@ export interface AccountSettings {
   defaults: { primary: string; secondary: string }
   /** Where anything of the account may be watched; null = anywhere. */
   geoAccess: { mode: 'block' | 'allow'; countries: string[] } | null
+  /** What a new output profile starts with for trick-play (build queue 3.2b). */
+  trickPlayDefault?: boolean
   canEdit: boolean; editReason: string | null
 }
 /** Admin > Captions: the account's engine and every output profile's captions (GET /api/account-settings/captions). */
@@ -1186,12 +1188,15 @@ export const api = {
     req('/users/security-policy', { method: 'PUT', body: JSON.stringify({ requireAdminMfa }) }),
   resetUserMfa: (id: string): Promise<null> => req(`/users/${id}/mfa/reset`, { method: 'POST', body: '{}' }),
   resetViewerMfa: (id: string): Promise<null> => req(`/viewers/${id}/mfa/reset`, { method: 'POST', body: '{}' }),
-  outputProfiles: (): Promise<{ id: string; name: string; workflow_type?: string }[]> => req('/output-profiles'),
+  outputProfiles: (): Promise<{ id: string; name: string; workflow_type?: string; trick_play?: boolean; rungs?: { height: number }[] }[]> => req('/output-profiles'),
+  /** The trick-play switch of an output profile (build queue 3.2b). */
+  patchOutputProfile: (id: string, b: { trickPlay: boolean }): Promise<{ id: string; trick_play: boolean }> =>
+    req(`/output-profiles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(b) }),
   // ---- plan and groups (docs/PLAN_AND_GROUPS.md) ----
   plan: (): Promise<PlanView> => req('/plan'),
   /** The account's logo and colours (Admin > Account settings; used by the share page). */
   accountSettings: (): Promise<AccountSettings> => req('/account-settings'),
-  patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null }): Promise<AccountSettings> =>
+  patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null; trickPlayDefault?: boolean }): Promise<AccountSettings> =>
     req('/account-settings', { method: 'PATCH', body: JSON.stringify(b) }),
   /** Admin > Captions (modules/captionsSettings.ts). */
   captionsSettings: (): Promise<CaptionsSettings> => req('/account-settings/captions'),

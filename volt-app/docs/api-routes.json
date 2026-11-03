@@ -3834,6 +3834,15 @@
   "group": "/api/output-profiles"
  },
  {
+  "method": "PATCH",
+  "path": "/api/output-profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/output-profiles"
+ },
+ {
   "method": "POST",
   "path": "/api/payments/grants",
   "api": "admin",

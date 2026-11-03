@@ -1,7 +1,7 @@
 ---
 title: Account settings
 sidebar_position: 10.1
-description: Your account's logo and colours, and the account-wide rule for where content can be watched.
+description: Your account's logo and colours, the account-wide rule for where content can be watched, and trick-play for Apple and smart-TV players.
 guide: section
 ---
 
@@ -63,6 +63,19 @@ Nothing lower down can undo it. A channel's own geo setting, an access rule or a
 
 The rule applies in the app play gate, on the public live address (HLS, DASH and radio MP3) and on share links, where viewers are told the content is not available in their region.
 
+### Turn on trick-play for Apple and smart-TV players
+
+Apple devices (iPhone, iPad, Apple TV), Safari and many smart TVs show pictures while a viewer scrubs or fast-forwards by reading a list of keyframes, called an I-frame playlist. Volt can list one for your on-demand media. It is off by default, and set per output profile.
+
+1. Under **Trick-play for Apple and smart-TV players**, turn on the switch beside an output profile. The page confirms **Trick-play is on for ...**.
+2. Media made with that profile gets its keyframe lists within a few minutes. They are read from the files Volt already has: nothing is re-encoded and no new video is stored.
+3. To stop, turn the switch off. Within a minute the lists are no longer offered to players. What was made is kept, so turning it on again takes effect at once.
+4. **New output profiles start with it on** sets what a profile you create from now on starts with. Profiles that exist keep their own setting.
+
+Which profile applies: a clip or a full recording follows the output profile of its channel's or event's group; an uploaded or watch-folder file follows the live profile its encoding ladder mirrors (see [Encoding Profiles](encoding-profiles.md)), and otherwise the account default. The Volt web player scrubs with its own preview images either way, so web viewers are unaffected. Live channels and FAST channels are not covered yet.
+
+![The Trick-play for Apple and smart-TV players card: the account default for new output profiles, then a switch for each output profile](/img/screens/account-settings-trick-play.png)
+
 ### Check it as a viewer
 
 The **Output** player on a channel page has **View as a viewer in [country]**. Choose a country, and whether the viewer is signed out, signed in or has paid, to see exactly what that viewer would get.
@@ -76,6 +89,7 @@ The **Output** player on a channel page has **View as a viewer in [country]**. C
 | [Channels](channels.md), [Events](events.md), [Radio](radio.md) | Their own geo settings narrow the account rule further |
 | [Publishing Rules](publishing-rules.md), [EPG](epg.md) | Access rules and programme geo rules sit below the account rule |
 | [Plan & limits](plan-and-limits.md) | **Plan & limits** at the top of the page opens the plan |
+| [Channel Groups](channel-groups.md), [Encoding Profiles](encoding-profiles.md) | Each group's output profile, and the ladders that mirror one, decide which trick-play switch an asset follows |
 | [Audit log](audit-log.md) | Every change here is recorded |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
@@ -86,6 +100,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See the branding and the geo rule | Account settings: View |
 | Change the logo, colours or geo rule | Owner or Administrator |
+| Turn trick-play on or off | Owner or Administrator |
 
 Users who can only see the page are told **Account administrators and owners change these settings.** and the fields are read-only.
 
@@ -107,7 +122,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | Request | Does |
 |---|---|
 | `GET /api/account-settings` | The logo, colours, geo rule and defaults |
-| `PATCH /api/account-settings` | Changes them (`logo`, `primary`, `secondary`, `geoAccess`). `null` puts a colour back to the default |
+| `PATCH /api/account-settings` | Changes them (`logo`, `primary`, `secondary`, `geoAccess`, `trickPlayDefault`). `null` puts a colour back to the default |
+| `GET /api/output-profiles`, `PATCH /api/output-profiles/{id}` | The output profiles, each with `trick_play`; turn it on or off with `{"trickPlay": true}` |
 
 ```bash
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

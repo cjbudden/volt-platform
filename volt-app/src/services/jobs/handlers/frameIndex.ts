@@ -31,6 +31,11 @@ async function handle(ctx: JobContext): Promise<Record<string, unknown>> {
   if (!id) return {};
   await ctx.progress(5, 'reading the segments');
   const r = await buildAssetFrameIndex(id);
+  // The same segments make the I-frame playlists, when the asset has trick-play on (3.2b).
+  try {
+    const tp = await import('../../trickplay/store');
+    if (await tp.trickPlayOn(id)) await tp.queueTrickPlay(id);
+  } catch (e) { console.warn(`[frames.index] ${id}: trick-play not queued`, e); }
   await ctx.progress(100, r.state === 'ready' ? `${r.index!.totalFrames} frames` : (r.error ?? r.state));
   return { state: r.state, frames: r.index?.totalFrames ?? null, note: r.error };
 }

@@ -496,6 +496,10 @@
     "summary": "Change a profile's captions",
     "description": "Any of `enabled`, `sourceLang` (`auto` or a language code), `targets` (languages from `GET /api/caption-languages`), `offsetSec` (0 to 60) and `modelSize` (`tiny`, `base`, `small`, `medium`, `large-v3`; whisper only). Applies to every channel, station and event in the groups that use the profile. Needs `settings: manage`. Refused with 409 `locked_while_running` while one of those streams is running. Recorded in the audit log."
   },
+  "PATCH /api/output-profiles/:id": {
+    "summary": "Turn trick-play on or off for an output profile",
+    "description": "Set `trickPlay` to `true` or `false`: I-frame playlists for the players that scrub and fast-forward with them (AVPlayer on iOS, iPadOS, tvOS and Safari, many smart-TV players). Off by default. On, every on-demand asset made with the profile lists an `EXT-X-I-FRAME-STREAM-INF` per video rendition in its HLS master, pointing at `<rendition>/iframes.m3u8`: byte ranges into the segments it already has, made within a few minutes and without a re-encode. Off, they are no longer listed or served. A clip follows its channel's or event's group profile; an upload follows the live profile its encoding ladder mirrors, else the account default. Account administrators and owners only. Recorded in the audit log."
+  },
   "GET /api/fast/channels/:id/ad-report": {
     "summary": "How a FAST channel's breaks were filled and reported",
     "description": "Over the last `days` (default 7, at most 90): decisions, paid fill, house and slate shares, ad server timeouts and errors, p95 answer time, the creatives offered, and `beacons`: what Volt reported to the ad servers for stitched breaks. Per event (`impression`, `start`, `firstQuartile`, `midpoint`, `thirdQuartile`, `complete`, VAST 4 `progress@` offsets) the number of ads that reached it and the tracking URLs answered (`sent`) or not (`failed`), with `impressions`, `completes` and `completionRate`. Beacons are sent server-side as each viewer's player reaches the moment, so a viewer who leaves halfway gives no complete."

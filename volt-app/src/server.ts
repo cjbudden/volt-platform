@@ -164,6 +164,23 @@ export function createServer() {
   app.get(/^\/clips\/.+\/subs\/[0-9a-f-]{36}(\.dash)?\.(m3u8|vtt)$/i, (req, res, next) => {
     import('./services/companions/serve').then((m) => m.serveSubs(req, res, next), () => next());
   });
+  // I-frame playlists (trick-play, build queue 3.2b, services/trickplay/):
+  // <variant>/iframes.m3u8 beside a media playlist, made from its segments'
+  // box headers and served only while the asset's switch is on.
+  app.get(/^\/clips\/.+\/iframes\.m3u8$/, async (req, res, next) => {
+    try {
+      const rel = decodeURIComponent(req.path.slice('/clips'.length));
+      const { assetIdFromClipsPath } = await import('./services/vodMarkers');
+      const id = assetIdFromClipsPath(rel);
+      if (!id) return next();
+      const text = await (await import('./services/trickplay/store')).iframePlaylistForPath(id, rel);
+      if (text == null) { res.status(404).end(); return; }
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.end(text);
+    } catch { next(); }
+  });
   app.get(/^\/clips\/.+\.(m3u8|mpd)$/, async (req, res, next) => {
     try {
       const { assetIdFromClipsPath, playlistContext, annotateHls, annotateMpd } = await import('./services/vodMarkers');
@@ -188,7 +205,9 @@ export function createServer() {
       res.setHeader('Cache-Control', 'public, max-age=10');
       res.setHeader('Access-Control-Allow-Origin', '*');
       // The asset's caption files as subtitle tracks (masters and MPDs only; fails open).
-      res.end(id ? await (await import('./services/companions/serve')).withTracks(out, id, isMpd) : out);
+      const tracked = id ? await (await import('./services/companions/serve')).withTracks(out, id, isMpd) : out;
+      // Its I-frame streams when the asset has trick-play on (masters only; fails open).
+      res.end(id && !isMpd ? await (await import('./services/trickplay/store')).withTrickPlay(tracked, id) : tracked);
     } catch { next(); }
   });
   // Generated clips and their renditions, served like origin. Segments are

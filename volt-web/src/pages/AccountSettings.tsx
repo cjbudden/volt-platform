@@ -77,6 +77,70 @@ function SharePreview({ name, logo, primary, secondary }: { name: string; logo: 
    country blocked here cannot be let back in by a channel or an access rule.
    ========================================================================== */
 type Geo = { mode: 'block' | 'allow'; countries: string[] } | null
+/**
+ * TRICK-PLAY (build queue 3.2b): I-frame playlists for the players that scrub
+ * and fast-forward with them (AVPlayer on Apple devices and Safari, many
+ * smart TVs). Off by default, per output profile; the account default is what
+ * a new profile starts with. Each switch saves on its own: there is nothing
+ * to discard, and the change reaches the profile's media within a minute.
+ */
+function TrickPlayCard({ accountDefault, canEdit, onSaved }: { accountDefault: boolean; canEdit: boolean; onSaved: (a: AS) => void }) {
+  const [profiles, setProfiles] = useState<{ id: string; name: string; trick_play?: boolean; rungs?: { height: number }[] }[] | null>(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const notify = useNotify()
+  useEffect(() => { api.outputProfiles().then(setProfiles).catch(e => setErr(e?.message || 'Could not load the output profiles')) }, [])
+  async function setDefault(on: boolean) {
+    setBusy('default'); setErr('')
+    try { onSaved(await api.patchAccountSettings({ trickPlayDefault: on })); notify({ kind: 'ok', message: on ? 'New output profiles start with trick-play on.' : 'New output profiles start with trick-play off.' }) }
+    catch (e: any) { setErr(e?.message || 'Could not save') } finally { setBusy('') }
+  }
+  async function setProfile(id: string, name: string, on: boolean) {
+    setBusy(id); setErr('')
+    try {
+      const r = await api.patchOutputProfile(id, { trickPlay: on })
+      setProfiles(ps => (ps ?? []).map(p => p.id === id ? { ...p, trick_play: r.trick_play } : p))
+      notify({ kind: 'ok', message: on
+        ? `Trick-play is on for ${name}. Its on-demand media gets I-frame playlists within a few minutes, without a re-encode.`
+        : `Trick-play is off for ${name}. Its media no longer lists I-frame playlists.` })
+    } catch (e: any) { setErr(e?.message || 'Could not save') } finally { setBusy('') }
+  }
+  const sw = (on: boolean, key: string, label: string, onPress: () => void) => (
+    <div className={`sw ${on ? '' : 'off'}`} role="switch" aria-checked={on} aria-label={label}
+      aria-disabled={!canEdit || busy === key || undefined} tabIndex={canEdit ? 0 : -1}
+      onClick={() => { if (canEdit && !busy) onPress() }}
+      onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && canEdit && !busy) { e.preventDefault(); onPress() } }}
+      style={!canEdit ? { cursor: 'default', opacity: .6 } : undefined}><i /></div>
+  )
+  return (
+    <div className="card trickplay-card" style={{ padding: 18, marginTop: 20 }}>
+      <div className="sec-label" style={{ marginTop: 0 }}>Trick-play for Apple and smart-TV players</div>
+      <div className="hintxt" style={{ marginTop: 0, marginBottom: 12 }}>
+        Apple devices, Safari and many smart TVs show pictures while scrubbing and fast-forwarding from a keyframe list (I-frame playlists).
+        With it on, Volt lists one for on-demand media made with that output profile, read from the segments it already has: nothing is re-encoded.
+        The Volt web player scrubs with its own preview images either way. Off by default.
+      </div>
+      <div className="toggle-row">
+        <div><div className="tt">New output profiles start with it on</div><div className="td">Profiles that exist keep their own setting.</div></div>
+        {sw(accountDefault, 'default', 'New output profiles start with trick-play on', () => setDefault(!accountDefault))}
+      </div>
+      {profiles === null && !err && <div className="loading" style={{ padding: 8 }}>Loading…</div>}
+      {profiles?.length === 0 && <div className="hintxt">No output profiles yet. Each channel group has one (Channel Groups).</div>}
+      {profiles?.map(p => {
+        const heights = (p.rungs ?? []).map(r => r.height).filter(Boolean)
+        return (
+          <div className="toggle-row" key={p.id}>
+            <div><div className="tt">{p.name}</div>{heights.length > 0 && <div className="td">{heights.map(h => `${h}p`).join(' · ')}</div>}</div>
+            {sw(!!p.trick_play, p.id, `Trick-play for ${p.name}`, () => setProfile(p.id, p.name, !p.trick_play))}
+          </div>
+        )
+      })}
+      {!canEdit && <div className="hintxt">Account administrators and owners change these settings.</div>}
+      <FormStatus error={err} />
+    </div>
+  )
+}
+
 function GeoAccessCard({ value, canEdit, onSaved }: { value: Geo; canEdit: boolean; onSaved: (a: AS) => void }) {
   const [mode, setMode] = useState<'anywhere' | 'block' | 'allow'>(value ? value.mode : 'anywhere')
   const [list, setList] = useState<string[]>(value?.countries ?? [])
@@ -217,6 +281,7 @@ export default function AccountSettings() {
         </div>
       </div>
       <GeoAccessCard value={a.geoAccess} canEdit={a.canEdit} onSaved={seed} />
+      <TrickPlayCard accountDefault={!!a.trickPlayDefault} canEdit={a.canEdit} onSaved={seed} />
     </>
   )
 }

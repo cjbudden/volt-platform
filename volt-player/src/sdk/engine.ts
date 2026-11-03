@@ -276,7 +276,10 @@ export class Engine {
         retryParameters: { maxAttempts: 4, baseDelay: 800, backoffFactor: 2, timeout: 20000 },
       },
       abr: { enabled: true },
-      manifest: { retryParameters: { maxAttempts: 4, baseDelay: 800, backoffFactor: 2, timeout: 15000 } },
+      // disableIFrames: an asset with trick-play on (build queue 3.2b) lists
+      // I-frame playlists for Apple and smart-TV players; the web player scrubs
+      // with sprites, so it never loads them or a keyframe from them.
+      manifest: { disableIFrames: true, retryParameters: { maxAttempts: 4, baseDelay: 800, backoffFactor: 2, timeout: 15000 } },
     });
     const drm = this.o.drm;
     if (drm?.servers && Object.keys(drm.servers).length) sp.configure({ drm: { servers: drm.servers } });

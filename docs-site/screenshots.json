@@ -14,6 +14,18 @@
       "alt": "The Account settings page, with the logo and colours at the top"
     },
     {
+      "name": "account-settings-trick-play",
+      "guide": "guides/account-settings.md",
+      "path": "/account-settings",
+      "waitFor": ".trickplay-card .toggle-row",
+      "settleMs": 1200,
+      "clip": ".trickplay-card",
+      "hide": [
+        ".topbar"
+      ],
+      "alt": "The Trick-play for Apple and smart-TV players card: the account default for new output profiles, then a switch for each output profile"
+    },
+    {
       "name": "audit-log",
       "guide": "guides/audit-log.md",
       "path": "/audit",

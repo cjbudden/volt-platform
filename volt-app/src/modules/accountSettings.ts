@@ -42,8 +42,8 @@ accountSettingsRouter.use(requireAuth);
 
 async function view(acc: string) {
   const b = await accountBrand(acc);
-  const g = await one<any>(`SELECT geo_access FROM accounts WHERE id = $1`, [acc]);
-  return { ...b, geoAccess: normGeo(g?.geo_access), defaults: BRAND_DEFAULTS };
+  const g = await one<any>(`SELECT geo_access, trick_play_default FROM accounts WHERE id = $1`, [acc]);
+  return { ...b, geoAccess: normGeo(g?.geo_access), trickPlayDefault: !!g?.trick_play_default, defaults: BRAND_DEFAULTS };
 }
 
 accountSettingsRouter.get('/', asyncHandler(async (req, res) => {
@@ -61,6 +61,8 @@ const patchSchema = z.object({
     mode: z.enum(['block', 'allow']),
     countries: z.array(z.string().regex(/^[A-Za-z]{2}$/, 'A country is a two-letter code (IL, AU)')).max(250),
   }).nullable().optional(),
+  /** What a new output profile starts with for trick-play (build queue 3.2b). */
+  trickPlayDefault: z.boolean().optional(),
 });
 
 accountSettingsRouter.patch('/', requireMinRole('admin'), asyncHandler(async (req, res) => {
@@ -94,6 +96,15 @@ accountSettingsRouter.patch('/', requireMinRole('admin'), asyncHandler(async (re
       const who = actor(req);
       await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'account_geo_access', entityId: acc,
         changes: { geo_access: { from: normGeo(prev?.geo_access), to: next } } });
+    }
+  }
+  if (body.trickPlayDefault !== undefined) {
+    const prev = await one<any>(`SELECT trick_play_default FROM accounts WHERE id = $1`, [acc]);
+    if (!!prev?.trick_play_default !== body.trickPlayDefault) {
+      await one(`UPDATE accounts SET trick_play_default = $2 WHERE id = $1 RETURNING id`, [acc, body.trickPlayDefault]);
+      const who = actor(req);
+      await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'account_trick_play', entityId: acc,
+        changes: { trick_play_default: { from: !!prev?.trick_play_default, to: body.trickPlayDefault } } });
     }
   }
   res.json({ ...(await view(acc)), canEdit: true, editReason: null });

@@ -21223,6 +21223,40 @@
       "$ref": "#/components/responses/Forbidden"
      }
     }
+   },
+   "patch": {
+    "operationId": "patchOutputProfilesByID",
+    "summary": "Turn trick-play on or off for an output profile",
+    "tags": [
+     "Output Profiles"
+    ],
+    "description": "Set `trickPlay` to `true` or `false`: I-frame playlists for the players that scrub and fast-forward with them (AVPlayer on iOS, iPadOS, tvOS and Safari, many smart-TV players). Off by default. On, every on-demand asset made with the profile lists an `EXT-X-I-FRAME-STREAM-INF` per video rendition in its HLS master, pointing at `<rendition>/iframes.m3u8`: byte ranges into the segments it already has, made within a few minutes and without a re-encode. Off, they are no longer listed or served. A clip follows its channel's or event's group profile; an upload follows the live profile its encoding ladder mirrors, else the account default. Account administrators and owners only. Recorded in the audit log.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
    }
   },
   "/api/payments/grants": {

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**844 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 664 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**848 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 668 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -793,6 +793,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/output-profiles` | admin session (Bearer) or account secret key | settings: any signed-in admin user (lookup for forms) |  |
 | POST | `/api/output-profiles` | admin session (Bearer) or account secret key | settings: manage |  |
 | DELETE | `/api/output-profiles/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| PATCH | `/api/output-profiles/:id` | admin session (Bearer) or account secret key | settings: manage |  |
 
 ### `/api/payments`
 
