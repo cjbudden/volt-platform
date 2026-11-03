@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.33.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- added · Radio: Each song is now listed in the station's HLS and DASH with its title, artist and, once found, album and cover, so a listener who goes back in time sees the song that was playing at that point, the songs before it and the next one.
+- improved · Player: On a radio station the Volt player shows now playing, recently played and coming up for the point being listened to, read from the station's own stream, with no now-playing requests. At the live edge, coming up names the next programme from the guide.
+
+### Internal
+
+- fixed · Radio: The radio container image now includes logstamp.py, which radio.py imports (missing since 26 Oct). New check suite radio-songs; radio-id3 checks the songs in the delivered manifests.
+
 ## 0.32.0 (2026-11-03)
 
 ### Product (in customer release notes)
