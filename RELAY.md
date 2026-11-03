@@ -1,5 +1,20 @@
 # The MP3 relay tier: what it is, how it scales, and what it costs
 
+> **Superseded, 3 Nov 2026 (build queue 2.1c-2).** Christian decided: no relay.
+> The Icecast relay, the MP3 push from stations, the relay probe, the relay tier
+> (`services/fleet/relays.ts`, the `/api/platform/relays` routes), the
+> `ICECAST_*` settings and the listener-auth gate (`modules/icecastAuth.ts`) are
+> removed. Stations write HLS and DASH only. MP3 for listeners is kept as the
+> control plane's on-demand transcode of the HLS (`services/radio/mp3Gateway.ts`),
+> **off by default** behind a per-account switch (`accounts.mp3_feed_enabled`,
+> set by the system admin through `PATCH /api/platform/accounts/{id}`
+> `mp3FeedEnabled`) until it is decided whether to offer it as a compatibility
+> feed. The Icecast / SHOUTcast / HTTP audio PULL input and its ICY now-playing
+> are unchanged. The relay tables (`relays`, `relay_accruals`,
+> `channels.relay_id`) are left in place, unread. The rest of this document is
+> kept as the record of why a relay was considered.
+
+
 Radio has one output that is not a file. HLS and DASH are segments a station
 writes into the origin and a CDN serves. MP3 is a **live push to an Icecast
 relay**, and the relay owns listener fan-out. That difference is why the relay

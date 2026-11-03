@@ -80,7 +80,9 @@ CH=$(curl -s -X POST "$B/channels" -H "$A" -H 'content-type:application/json' -d
 CID=$(J "$CH" id)
 ok "radio station created (kind=radio, icecast source)" '[ -n "$CID" ] && [ "$(J "$CH" kind)" = radio ]'
 LIST=$(curl -s "$B/radio" -H "$A")
-ok "station appears on /api/radio with output urls" 'echo "$LIST" | grep -q "$CID" && echo "$LIST" | grep -q "stream.mp3"'
+ok "station appears on /api/radio with output urls" 'echo "$LIST" | grep -q "$CID" && echo "$LIST" | grep -q "master.m3u8"'
+# NO MP3 UNLESS THE ACCOUNT HAS IT (build queue 2.1c-2): off by default.
+ok "with the account's MP3 feed off, no MP3 url is offered" '! echo "$LIST" | grep -q "stream.mp3"'
 ok "tv list does not show the station" '! curl -s "$B/channels?kind=tv" -H "$A" | grep -q "$CID"'
 
 # ---- start + outputs -----------------------------------------------------------
@@ -92,6 +94,10 @@ ok "HLS master is audio-only (mp4a, no avc1)" 'echo "$M" | grep -q "mp4a.40.2" &
 PL=$(curl -s "http://localhost:$PORT/origin/$CID/live/audio/index.m3u8")
 ok "audio playlist has fMP4 segments + PDT" 'echo "$PL" | grep -q "seg_00000.m4s" && echo "$PL" | grep -q PROGRAM-DATE-TIME && echo "$PL" | grep -q "init.mp4"'
 ok "DASH manifest serves" '[ "$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/origin/$CID/live/dash/manifest.mpd")" = 200 ]'
+ok "with the feed off, the MP3 preview answers 404" '[ "$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://localhost:$PORT/radio/$CID/stream.mp3")" = 404 ]'
+# The system admin's switch (PATCH /api/platform/accounts/{id} mp3FeedEnabled), set here directly.
+psql "$DATABASE_URL" -q -c "UPDATE accounts SET mp3_feed_enabled = true WHERE id='0000000a-0000-0000-0000-0000000000c1'"
+ok "with the feed on, the station offers its MP3 url" 'curl -s "$B/radio" -H "$A" | grep -q "stream.mp3"'
 curl -s -H 'Icy-MetaData: 1' -D /tmp/rc_mp3h.txt -o /tmp/rc_mp3b.bin --max-time 4 "http://localhost:$PORT/radio/$CID/stream.mp3" || true
 ok "MP3 fan-out: ICY headers + audio bytes" 'grep -qi "icy-metaint" /tmp/rc_mp3h.txt && [ "$(vsize /tmp/rc_mp3b.bin)" -gt 20000 ]'
 ok "MP3 fan-out: StreamTitle injected" 'grep -aq "StreamTitle=" /tmp/rc_mp3b.bin'

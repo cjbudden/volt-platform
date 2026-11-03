@@ -14,7 +14,7 @@ Triton Digital is the main competitor for radio streaming in Asia. What a statio
 | Transport | **MRV2**, Triton's own protocol, AAC or MP3 to Triton's Media Relay servers | Proprietary. This is the lock-in |
 | Metadata | Now-playing and ad-break cue points from the playout system go into the encoder and travel with the audio, timestamped to the millisecond | This is what makes their ad replacement accurate. We need the same timing |
 | Partner encoders | Wheatstone (Wheatstream, Streamblade, Layers Stream) and Telos speak MRV2 | Stations with these boxes can usually also send SRT, HLS or Icecast, so they can feed Volt without our agent |
-| Cloud | Media Gateways deliver to listeners and insert the ads each listener hears | Our equivalent is the radio relay tier plus the SSAI engine |
+| Cloud | Media Gateways deliver to listeners and insert the ads each listener hears | Our equivalent is the HLS/DASH delivery (and the on-demand MP3 gateway; the relay tier was removed in 2.1c-2) plus the SSAI engine |
 
 **Our position:** the same chain on open protocols (SRT, HLS, Icecast, SCTE-35, ID3). Linux or container as well as Windows. Ready for video (a visual-radio camera feed). A station can bring its own encoder, or use ours.
 

@@ -132,9 +132,9 @@ export async function applyReport(raw: unknown): Promise<void> {
     //  for an output the running station had dropped. Pressing Listen then
     //  attached to a URL with no audio behind it and said nothing.
     //
-    //  channel.start CLEARS the map. A run decides its own outputs at launch
-    //  (the relay probe runs per start), so inheriting the previous run's
-    //  verdict would hide an MP3 output that came back when Icecast did.
+    //  channel.start CLEARS the map. A run decides its own outputs at launch,
+    //  so inheriting the previous run's verdict would hide an output that came
+    //  back. (MP3 no longer lands here: there is no relay, 2.1c-2.)
     // ----------------------------------------------------------------------
     if (e.type === 'channel.start') {
       await query(

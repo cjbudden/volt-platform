@@ -192,7 +192,7 @@ export default function Radio() {
 
   return (
     <>
-      <PageHead title="Radio" sub="Audio-only stations: MP3, HLS and DASH out, Icecast in, and a timed now-playing log for search and clipping." />
+      <PageHead title="Radio" sub="Audio-only stations: HLS and DASH out, Icecast, HLS or SRT in, and a timed now-playing log for search and clipping." />
       {rows === null ? (
         loadErr ? null : <div className="loading">Loading stations…</div>
       ) : rows.length === 0 ? (
@@ -347,6 +347,10 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
     url: src0?.ingest_url || '', streamKey: src0?.stream_key || undefined,
   })
   const [outMp3, setOutMp3] = useState(cfg.outputs?.mp3 !== false)
+  // MP3 is offered only where the account has the on-demand feed (set by the
+  // system admin, build queue 2.1c-2); otherwise the station is HLS and DASH.
+  const [mp3Feed, setMp3Feed] = useState(false)
+  useEffect(() => { api.accountSettings().then(a => setMp3Feed(!!a.mp3FeedEnabled)).catch(() => {}) }, [])
   const [outHls, setOutHls] = useState(cfg.outputs?.hls !== false)
   const [outDash, setOutDash] = useState(cfg.outputs?.dash !== false)
   const [bitrate, setBitrate] = useState(cfg.bitrateKbps ?? 128)
@@ -385,7 +389,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
     if (!name.trim()) { setErr('Give the station a name'); return }
     if (!isEdit && !primary.url.trim()) { setErr('Add the source stream URL'); return }
     if (!isEdit && !groupId) { setErr('No group set up yet'); return }
-    if (!outMp3 && !outHls && !outDash) { setErr('Enable at least one output'); return }
+    if (!outHls && !outDash) { setErr('Turn on HLS or DASH: a station needs at least one of them'); return }
     const hlsWait = await hlsChoicePending([{ url: primary.url, protocol: primary.protocol, original: src0?.ingest_url }]); if (hlsWait) { setErr(hlsWait); return }
     const radio: RadioCfg = {
       outputs: { mp3: outMp3, hls: outHls, dash: outDash },
@@ -475,8 +479,10 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
           {isIcecast && <div className="hintxt">Icecast mounts carry now-playing (ICY) metadata: enable the log below to capture it.</div>}
 
           <div className="sec-label">Outputs — single bitrate</div>
-          <div className="toggle-row"><div><div className="tt">MP3 stream</div><div className="td">Universal HTTP audio (hardware receivers, old apps, VLC). Now-playing titles pass through.</div></div>
+          {mp3Feed && (
+          <div className="toggle-row"><div><div className="tt">MP3 stream</div><div className="td">Universal HTTP audio (hardware receivers, old apps, VLC), made from the HLS when someone listens. Now-playing titles pass through.</div></div>
             <div className={`sw ${outMp3 ? '' : 'off'}`} {...pressable((e: any) => { ((() => setOutMp3(v => !v)) as any)(e) })} data-a11y-click=""><i /></div></div>
+          )}
           <div className="toggle-row"><div><div className="tt">HLS (audio-only)</div><div className="td">Apple and modern web players; also what recording and clipping use.</div></div>
             <div className={`sw ${outHls ? '' : 'off'}`} {...pressable((e: any) => { ((() => setOutHls(v => !v)) as any)(e) })} data-a11y-click=""><i /></div></div>
           <div className="toggle-row"><div><div className="tt">DASH</div><div className="td">Android and TV stacks.</div></div>
@@ -485,7 +491,7 @@ export function RadioDrawer({ groups, station, onClose, onDone }: {
             <select className="inp" value={bitrate} onChange={e => setBitrate(Number(e.target.value))}>
               {[64, 96, 128, 192, 256, 320].map(b => <option key={b} value={b}>{b} kbps</option>)}
             </select>
-            <div className="hintxt">Radio is single bitrate by design: no ladder to manage. Packaging keeps the source bitrate for MP3 when the source is already MP3.</div>
+            <div className="hintxt">Radio is single bitrate by design: no ladder to manage.</div>
           </div>
 
           {isIcecast && (

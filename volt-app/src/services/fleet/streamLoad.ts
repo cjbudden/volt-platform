@@ -332,7 +332,7 @@ export function estimateRadioLoad(job: Record<string, any>): LoadEstimate {
   return {
     taskKind: 'radio', load, reservation: reserve(load), needsGpu: false,
     signature: `radio|${kbps}|${n}`, basis: 'estimate', lines, notes: [],
-    // Each segmented output (HLS, DASH) is written and uploaded; the MP3 mount is a live relay, not stored.
+    // Each segmented output (HLS, DASH) is written and uploaded. A station writes no MP3 (2.1c-2).
     storage: projectStorage(kbps * K.muxOverhead * ['hls', 'dash'].filter((k) => outs[k]).length, job.recording?.retention_sec ?? null),
   };
 }

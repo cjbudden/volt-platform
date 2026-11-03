@@ -490,8 +490,8 @@ export class Orchestrator {
       return this.startRadioInProcess(id, radioConfig);
     }
     // Already running? Hand back the same task rather than starting a rival
-    // station pushing to the same relay mount, which would leave listeners
-    // hearing whichever source Icecast happened to accept.
+    // station writing into the same origin, which would leave listeners
+    // hearing whichever run wrote last.
     const already = await this.existingTask('channel', id);
     if (already) {
       console.log(`[orchestrator] radio ${id} is already running as ${already}; start is a no-op`);

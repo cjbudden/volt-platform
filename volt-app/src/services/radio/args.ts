@@ -9,41 +9,16 @@
 //  the local launcher) calls it; volt-radio's entrypoint in the container is
 //  handed the same job config and builds the same argv from it.
 //
-//  WHY MP3 CHANGED SHAPE. The old pipeline wrote MP3 to `pipe:1` so the control
-//  plane could read the child's stdout and fan bytes out to listeners itself.
-//  That is exactly the property that made radio impossible to containerise: it
-//  is the one output that is a live connection rather than a file, so it kept
-//  the audio path inside the API process.
+//  NO MP3 FROM THE STATION (build queue 2.1c-2, Christian 3 Nov 2026). A
+//  station writes HLS and DASH: files, like television. It used to push MP3 to
+//  an Icecast relay; that relay, and the push, are gone. MP3 for listeners,
+//  where an account has it, is made on demand from the HLS by the control
+//  plane (mp3Gateway.ts), so the station never knows MP3 exists.
 //
-//  Television never had this problem because the encoder container accepts no
-//  inbound connections at all: it pushes segments to storage and pushes status
-//  to the API, and CloudFront serves viewers from S3. Radio now follows the
-//  same rule by doing what Icecast itself does. The station is a SOURCE:
-//  ffmpeg speaks `icecast://` natively, so MP3 is pushed to a relay tier that
-//  owns listener fan-out and ICY metadata, and nothing in our control plane is
-//  in the audio path.
-//
-//  `pipe:1` therefore survives only as a deliberate fallback for the in-process
-//  development path, where there is no relay to push to. Set `icecast` and you
-//  get the real topology; leave it null and you get the old preview pipe.
+//  `outputs.mp3` survives only for the in-process development path
+//  (RADIO_MODE=inprocess), where the control plane reads MP3 off the child's
+//  stdout (`pipe:1`) for its private preview. The container never writes it.
 // ============================================================================
-
-/** Where MP3 goes. Null means the legacy stdout pipe (dev preview only). */
-export interface IcecastTarget {
-  /** Host of the relay, e.g. `icecast` in compose or the service DNS name. */
-  host: string;
-  port: number;
-  /** Mount without a leading slash is accepted; it is normalised here. */
-  mount: string;
-  username: string;
-  password: string;
-  /** Sent as ICY headers so the relay's directory and players show it. */
-  stationName?: string;
-  description?: string;
-  genre?: string;
-  /** TLS to the relay. Off by default: the relay is normally in-VPC. */
-  tls?: boolean;
-}
 
 export interface RadioOutputs {
   mp3?: boolean;
@@ -68,7 +43,6 @@ export interface RadioJobConfig {
   /** Resolved by probing the source; null when unknown. Drives copy vs encode. */
   sourceCodec?: string | null;
   segmentSeconds?: number;
-  icecast?: IcecastTarget | null;
 }
 
 /** Absolute paths the pipeline writes to, resolved by whoever runs it. */
@@ -92,27 +66,10 @@ export function clampBitrate(kbps: number | undefined): number {
 /**
  * Which outputs are on, with the defaults applied once, in one place.
  *
- * MP3 IS OPT-IN. HLS AND DASH ARE NOT.
- *
- * The three are not alike, and defaulting them together was hiding that. HLS
- * and DASH are FILES this process writes into the origin: their cost is disk
- * and a CDN that is already there, and they cost the same whether anybody is
- * listening or not because nobody is served from here.
- *
- * MP3 is a live PUSH to a relay, and the relay's bill is EGRESS -- roughly 98%
- * of what the tier costs. A station with MP3 on and no MP3 listeners still
- * occupies a mount, still holds a source connection, and still counts against
- * the relay's capacity for stations that do have an audience. Defaulting it on
- * meant every station ever created reserved fan-out capacity on the assumption
- * somebody would want it.
- *
- * It is also the only output with an external dependency. A missing relay used
- * to take the whole ffmpeg down (one process carries every output and opens
- * them all before encoding), which is now handled by a probe -- but an output
- * nobody asked for should not be able to degrade a station at all.
- *
- * So: ask for MP3 and you get it. Say nothing and you get HLS and DASH, which
- * is what an OTT platform is for.
+ * HLS AND DASH ARE THE STATION'S OUTPUTS; MP3 IS OFF. HLS and DASH are files
+ * written into the origin. MP3 is only ever the in-process development pipe
+ * (args below); the container ignores it, and listeners who get MP3 get it
+ * from the control plane's on-demand gateway (2.1c-2).
  */
 export function resolveOutputs(outputs: RadioOutputs | undefined): Required<RadioOutputs> {
   return { mp3: false, hls: true, dash: true, ...(outputs || {}) };
@@ -158,9 +115,9 @@ export function looksLikeHls(protocol: string, url: string): boolean {
  *                         `-re` and `-2` since 11 Oct 2026. Read as fast as it
  *                         arrived, an HLS source came out in BURSTS (ABC Jazz:
  *                         10 s segments, so two or three output segments within
- *                         0.1 s, then nothing for 10 s). The Icecast relay drops
- *                         a source silent for 10 s, the mp3 output broke its
- *                         pipe, the pipeline exited and auto-connect started a
+ *                         0.1 s, then nothing for 10 s). The Icecast relay (since
+ *                         removed) dropped a source silent for 10 s, the mp3
+ *                         output broke its pipe, the pipeline exited and auto-connect started a
  *                         new run: 28 runs in an hour. `-re` reads at real time
  *                         so audio leaves evenly; it needs one segment in hand,
  *                         hence `-2`. The cost is one source segment of latency.
@@ -191,24 +148,6 @@ export function inputArgs(protocol: string, url: string): string[] {
   if (p === 'icecast' || http) return [...RECONNECT, '-i', url];
   if (p === 'srt') return ['-fflags', '+genpts', '-i', url];
   return ['-i', url];
-}
-
-/**
- * The URL ffmpeg pushes MP3 to. Credentials are in it because that is the only
- * form the icecast protocol accepts; see `redactIcecastUrl` for logging, and
- * never put the raw value in an event detail or an error message.
- */
-export function icecastUrl(t: IcecastTarget): string {
-  const scheme = t.tls ? 'icecast+https' : 'icecast';
-  const mount = t.mount.startsWith('/') ? t.mount : `/${t.mount}`;
-  return `${scheme}://${encodeURIComponent(t.username)}:${encodeURIComponent(t.password)}@${t.host}:${t.port}${mount}`;
-}
-
-/** The same URL with the password replaced, safe to log and to store. */
-export function redactIcecastUrl(t: IcecastTarget): string {
-  const scheme = t.tls ? 'icecast+https' : 'icecast';
-  const mount = t.mount.startsWith('/') ? t.mount : `/${t.mount}`;
-  return `${scheme}://${t.username}:***@${t.host}:${t.port}${mount}`;
 }
 
 /** The audio-only HLS master that sits at the run root. */
@@ -260,23 +199,9 @@ export function buildRadioArgs(cfg: RadioJobConfig, paths: RadioPaths): string[]
     if (isMp3Copy(cfg)) args.push('-map', '0:a:0', '-c:a', 'copy');
     else args.push('-map', '0:a:0', '-c:a', 'libmp3lame', '-b:a', br, '-ac', '2');
 
-    if (cfg.icecast) {
-      // ICY headers travel with the connection, so the relay's mount is
-      // self-describing and players show the station rather than a bare mount.
-      const t = cfg.icecast;
-      if (t.stationName) args.push('-ice_name', t.stationName);
-      if (t.description) args.push('-ice_description', t.description);
-      if (t.genre) args.push('-ice_genre', t.genre);
-      args.push('-ice_public', '1');
-      // `content_type` is required by the icecast muxer for MP3; without it the
-      // relay refuses the source with a 400 that reads like an auth failure.
-      args.push('-content_type', 'audio/mpeg');
-      args.push('-f', 'mp3', icecastUrl(t));
-    } else {
-      // DEV ONLY. No relay to push to, so the control plane reads stdout and
-      // fans out itself, which is the old topology and does not scale.
-      args.push('-f', 'mp3', 'pipe:1');
-    }
+    // DEV ONLY (RADIO_MODE=inprocess): the control plane reads stdout for its
+    // preview. There is no relay to push to (2.1c-2).
+    args.push('-f', 'mp3', 'pipe:1');
   }
 
   return args;

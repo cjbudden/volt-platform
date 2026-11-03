@@ -37,7 +37,7 @@ A channel processes its source in one of two ways:
 
 ## Outputs and going on air
 
-When a channel is started, Volt produces **outputs** in HLS and DASH (and MP3 for radio). At first the output is **private**: you can watch it in the console, but the public URL is closed. When you are happy with it, you **go on air**, which opens the public URL. Taking a channel off air closes the public URL again without stopping the encoder.
+When a channel is started, Volt produces **outputs** in HLS and DASH. At first the output is **private**: you can watch it in the console, but the public URL is closed. When you are happy with it, you **go on air**, which opens the public URL. Taking a channel off air closes the public URL again without stopping the encoder.
 
 ## Recordings, clips and on-demand
 

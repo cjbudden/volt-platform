@@ -623,20 +623,14 @@ export default function RadioDetail({ id, onBack }: { id: string; onBack: () => 
           {(onAir
             ? ([['MP3', st.publicUrls?.mp3, 'mp3'], ['HLS', st.publicUrls?.hls, 'hls'], ['DASH', st.publicUrls?.dash, 'dash']] as const)
             : ([['MP3', st.outputs.mp3, 'mp3'], ['HLS', st.outputs.hls, 'hls'], ['DASH', st.outputs.dash, 'dash']] as const)
-          ).map(([label, url, kind]) => (
+          // MP3 only where the account has the on-demand feed (build queue 2.1c-2).
+          ).filter(([, , kind]) => kind !== 'mp3' || st.mp3Feed).map(([label, url, kind]) => (
             <OutputPreview key={label} label={label} url={url || null} kind={kind}
               // WHY IT IS OFF, NOT JUST THAT IT IS OFF.
               //
-              // This row said "disabled" for two completely different
-              // situations: the operator turned MP3 off in Settings, and the
-              // encoder DROPPED it at launch because the Icecast relay was not
-              // reachable. The second is a fault in the environment, and
-              // "disabled" reads as a decision somebody made on purpose, so
-              // nobody goes looking for the relay.
-              //
-              // The reason is already in the payload — radio.py reports
-              // output.degraded and the API returns it as outputs.degraded —
-              // it simply was not being shown.
+              // An output the encoder DROPPED (radio.py reports output.degraded,
+              // the API returns it as outputs.degraded) says why, rather than
+              // reading as "disabled", a decision somebody made on purpose.
               reason={st.outputs.degraded?.[kind] || null}
               off={!cfgOutputs[kind]}
               playing={preview === label} onToggle={() => {

@@ -492,6 +492,8 @@ export interface AccountSettings {
   geoAccess: { mode: 'block' | 'allow'; countries: string[] } | null
   /** What a new output profile starts with for trick-play (build queue 3.2b). */
   trickPlayDefault?: boolean
+  /** The account has MP3 for radio listeners (set by the system admin, build queue 2.1c-2). */
+  mp3FeedEnabled?: boolean
   canEdit: boolean; editReason: string | null
 }
 /** Admin > Captions: the account's engine and every output profile's captions (GET /api/account-settings/captions). */
@@ -2186,6 +2188,8 @@ export interface RadioStationRow {
    *  on the server so the console does not keep a weaker second copy of the
    *  rule. Absent on a payload from an older API. */
   carriesTitles?: boolean
+  /** The account has the on-demand MP3 feed (station detail only, build queue 2.1c-2). */
+  mp3Feed?: boolean
   nowPlaying: string | null; nowPlayingClass: RadioClass | null
   nowPlayingView?: NowPlayingView
   outputs: RadioOutputs

@@ -10,11 +10,12 @@
 #
 #  It pushes segments to storage and pushes status to the API. Viewers are
 #  served by CloudFront from S3 and never touch it. This station does exactly
-#  the same, with one addition: MP3 is PUSHED to an Icecast relay, which is
-#  what Icecast is for. The station is a source client; the relay owns listener
-#  fan-out and ICY metadata. Nothing in the control plane sits in the audio
-#  path, so the control plane can be restarted, redeployed and replicated
-#  without taking stations off air.
+#  the same. It writes HLS and DASH and pushes nothing anywhere: there is no
+#  Icecast relay (build queue 2.1c-2, Christian 3 Nov 2026). MP3 for
+#  listeners, where an account has it, is made on demand from the HLS by the
+#  control plane (services/radio/mp3Gateway.ts). Nothing in the control plane
+#  sits in the station's path, so it can be restarted, redeployed and
+#  replicated without taking stations off air.
 #
 #  Outputs (all single bitrate, per the job config):
 #    HLS  : audio-only fMP4 into the standard per-run origin namespace
@@ -23,8 +24,8 @@
 #           the recording index, range playback and clipping work for radio
 #           with no special cases anywhere.
 #    DASH : manifest.mpd under <run>/dash/.
-#    MP3  : pushed to icecast://…  ffmpeg speaks the protocol natively, so this
-#           is configuration rather than code.
+#    MP3  : none. A job config that asks for it is told no (logged) and the
+#           station goes on air over HLS and DASH.
 #
 #  Cloud mode mirrors the run dir to S3 with the same s3-uploader.sh sidecar the
 #  encoder uses. Local mode writes straight into the origin dir the control
@@ -36,7 +37,6 @@ import json
 import os
 import re
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -104,11 +104,6 @@ def validate_config(cfg):
         die("job config turns every output off; there would be nothing to do")
     if not is_local(cfg) and not (cfg.get("s3") or {}).get("bucket"):
         die("s3.bucket is required unless output.mode is local")
-    ice = cfg.get("icecast")
-    if outs["mp3"] and ice:
-        for key in ("host", "port", "mount", "username", "password"):
-            if not ice.get(key):
-                die(f"icecast.{key} is required when mp3 is pushed to a relay")
 
 
 def is_local(cfg):
@@ -137,18 +132,18 @@ def clamp_bitrate(kbps):
     return min(320, max(32, n))
 
 
-# MP3 IS OPT-IN; HLS AND DASH ARE ON BY DEFAULT.
-#
-# Mirrors resolveOutputs() in volt-app/src/services/radio/args.ts, and see that
-# function for why the three are not alike: HLS and DASH are files this process
-# writes, MP3 is a live push to a relay whose bill is egress. An output nobody
-# asked for should not reserve fan-out capacity or be able to degrade a station.
+# HLS AND DASH ONLY. The container writes no MP3 (there is no relay to push to,
+# 2.1c-2); `mp3` is kept in the map, always False, so callers that read it
+# still work. Mirrors resolveOutputs() in volt-app/src/services/radio/args.ts
+# for HLS and DASH.
 OUTPUT_DEFAULTS = {"mp3": False, "hls": True, "dash": True}
 
 
 def resolve_outputs(cfg):
     outs = cfg.get("outputs") or {}
-    return {k: bool(outs.get(k, OUTPUT_DEFAULTS[k])) for k in ("mp3", "hls", "dash")}
+    res = {k: bool(outs.get(k, OUTPUT_DEFAULTS[k])) for k in ("hls", "dash")}
+    res["mp3"] = False
+    return res
 
 
 def is_mp3_copy(cfg):
@@ -188,7 +183,7 @@ def input_args(protocol, url):
                             arrived, an HLS source came out in BURSTS: ABC Jazz
                             delivers 10 s segments, so every 10 s the station
                             wrote two or three output segments within 0.1 s
-                            and then nothing. The Icecast relay drops a source
+                            and then nothing. The Icecast relay (since removed) dropped a source
                             that sends nothing for 10 s (its default
                             source-timeout), so whenever a burst came a little
                             late the mp3 output broke its pipe, the whole
@@ -226,21 +221,6 @@ def input_args(protocol, url):
     if p == "srt":
         return ["-fflags", "+genpts", "-i", url]
     return ["-i", url]
-
-
-def icecast_url(t):
-    from urllib.parse import quote
-    scheme = "icecast+https" if t.get("tls") else "icecast"
-    mount = t["mount"] if str(t["mount"]).startswith("/") else "/" + str(t["mount"])
-    user = quote(str(t["username"]), safe="")
-    pw = quote(str(t["password"]), safe="")
-    return f"{scheme}://{user}:{pw}@{t['host']}:{t['port']}{mount}"
-
-
-def redact_icecast_url(t):
-    scheme = "icecast+https" if t.get("tls") else "icecast"
-    mount = t["mount"] if str(t["mount"]).startswith("/") else "/" + str(t["mount"])
-    return f"{scheme}://{t['username']}:***@{t['host']}:{t['port']}{mount}"
 
 
 def master_playlist(kbps, media="audio/index.m3u8"):
@@ -375,37 +355,6 @@ def probe_audio_codec(url):
         return None
 
 
-def relay_reachable(ice, timeout=3.0):
-    """
-    Can we open a TCP connection to the Icecast relay?
-
-    THIS EXISTS BECAUSE ONE FFMPEG CARRIES EVERY OUTPUT.
-
-    ffmpeg opens all of its outputs before it encodes anything, so a refused
-    icecast:// connection does not cost you the MP3 — it kills the process, and
-    HLS and DASH are never written either. A station with no relay running
-    therefore produces NOTHING, exits rc=195 about a second after start, and
-    gets restarted by auto-connect twenty seconds later, forever. That is not a
-    hypothetical: it filled a demo machine with ninety run directories.
-
-    A TCP probe is deliberately shallow. It does not authenticate and does not
-    check the mount, because the question being answered is only "is it worth
-    including this output at all". A relay that accepts the connection and then
-    rejects the credentials is a real error and SHOULD fail loudly; a relay that
-    is not running at all is an environment that simply has no MP3, and the
-    station should still go on air over HLS and DASH.
-    """
-    host = str(ice.get("host") or "").strip()
-    port = int(ice.get("port") or 0)
-    if not host or not port:
-        return False
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
 #  ffmpeg's own words, promoted from a log file to the stop reason.
 #
 #  "encoder exited rc=251" tells an operator nothing they can act on. The line
@@ -485,25 +434,6 @@ def build_args(cfg, paths):
             "-window_size", "20", "-extra_window_size", "10", "-remove_at_exit", "0",
             os.path.join(paths["dash"], "manifest.mpd"),
         ]
-    if outs["mp3"]:
-        if is_mp3_copy(cfg):
-            args += ["-map", "0:a:0", "-c:a", "copy"]
-        else:
-            args += ["-map", "0:a:0", "-c:a", "libmp3lame", "-b:a", br, "-ac", "2"]
-        ice = cfg.get("icecast")
-        if not ice:
-            # There is no relay to push to, and this container has nobody to
-            # pipe stdout to either. Refuse rather than silently run a station
-            # whose MP3 goes nowhere.
-            die("mp3 output is on but no icecast relay is configured")
-        if ice.get("station_name"):
-            args += ["-ice_name", str(ice["station_name"])]
-        if ice.get("description"):
-            args += ["-ice_description", str(ice["description"])]
-        if ice.get("genre"):
-            args += ["-ice_genre", str(ice["genre"])]
-        args += ["-ice_public", "1", "-content_type", "audio/mpeg"]
-        args += ["-f", "mp3", icecast_url(ice)]
     return args
 
 
@@ -555,8 +485,9 @@ def shutdown(signum, _frame):
         _events.channel_stop(reason="stopped by launcher")
     # ESCALATE WELL INSIDE THE STOP GRACE.
     #
-    # ffmpeg pushing to a relay does not always go on the first SIGTERM, and
-    # waiting the full ten seconds for it put this right on Docker's default
+    # ffmpeg does not always go on the first SIGTERM (it did so least when it
+    # pushed to a relay, now gone), and waiting the full ten seconds put this
+    # right on Docker's default
     # stop timeout: the container was killed as often as it exited, so the
     # recorded exit code was 137 rather than 0 and an orchestrator could not
     # tell an ordinary stop from a crash. Give it a real chance, then insist,
@@ -594,7 +525,7 @@ def main():
     if "source_codec" not in cfg:
         cfg["source_codec"] = probe_audio_codec(cfg["url"])
     log(f"source codec: {cfg['source_codec'] or 'unknown'} "
-        f"({'copy' if is_mp3_copy(cfg) else 're-encode'} for mp3)")
+        f"({'mp3 source' if is_mp3_copy(cfg) else 'not mp3'})")
 
     paths = resolve_paths(cfg)
     if outs["hls"]:
@@ -612,41 +543,16 @@ def main():
                        status_path=os.path.join(paths["run"], "status.json"),
                        emit=log)
 
-    # ---- the relay preflight -------------------------------------------
-    #
-    # Dropped from THIS RUN's config, before build_args sees it, so the argv
-    # builder stays a pure function of the config and keeps its parity with
-    # services/radio/args.ts. Given the same config both still produce the same
-    # arguments; what changed is the config.
-    #
-    # The station is degraded, not failed: HLS and DASH go out, MP3 does not,
-    # and the control plane is told so explicitly rather than being left to
-    # infer it from silence.
-    ice = cfg.get("icecast")
-    if outs["mp3"] and ice and not relay_reachable(ice):
-        log(f"MP3 relay unreachable at {ice.get('host')}:{ice.get('port')} — "
-            f"going on air over HLS/DASH without it")
-        cfg.setdefault("outputs", {})["mp3"] = False
-        outs = resolve_outputs(cfg)
-        # Carry the ADDRESS into the reason. "mp3 relay unreachable" is true and
-        # useless: it names a component the operator may not know exists and
-        # gives them nowhere to go. The host and port are the whole diagnosis,
-        # and by the time anybody reads the event the container is gone.
-        _relay_down = f"no Icecast relay listening at {ice.get('host')}:{ice.get('port')}"
-        ice = None
-    else:
-        _relay_down = False
+    # No MP3 from the station (2.1c-2): say so if an old config asks for it.
+    if bool((cfg.get("outputs") or {}).get("mp3")):
+        log("mp3 asked for but not made: stations write HLS and DASH only (there is no relay)")
 
     args = build_args(cfg, paths)
     log(f"run {paths['run_id']} -> {paths['run']}")
-    if ice:
-        log(f"mp3 -> {redact_icecast_url(ice)}")
 
-    # A station with NO outputs left is a real failure and must not pretend to
-    # be on air. This can only happen if mp3 was the only output configured.
-    if not (outs["hls"] or outs["dash"] or outs["mp3"]):
-        die("no outputs remain: mp3 was the only one configured and the relay "
-            "is unreachable")
+    # A station with NO outputs is a real failure and must not pretend to be on air.
+    if not (outs["hls"] or outs["dash"]):
+        die("no outputs: HLS and DASH are both off (a station writes no MP3)")
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
@@ -667,21 +573,6 @@ def main():
 
     _events.channel_start(workflow="package" if is_mp3_copy(cfg) else "transcode",
                           renditions=1)
-    if _relay_down:
-        # Reported as an input/output fault rather than swallowed. An operator
-        # looking at a station whose MP3 URL 404s needs to find the reason here
-        # rather than in a log file on a container that has since been replaced.
-        # MP3 IS THE ONLY OUTPUT THAT NEEDS A SECOND PIECE OF INFRASTRUCTURE.
-        #
-        # HLS and DASH are files this process writes to the origin. MP3 is a
-        # live PUSH to an Icecast relay, so it is the one output that can be
-        # missing while the station is otherwise perfectly healthy — and it is
-        # missing for a reason that has nothing to do with the source. A station
-        # whose source is already MP3 would COPY those bytes to the relay for
-        # almost no CPU at all, and it is still the output that goes first,
-        # because copying costs nothing and having somewhere to copy TO costs a
-        # running relay.
-        _events.event("output.degraded", output="mp3", reason=_relay_down)
     # SOURCE UP IS A CLAIM, AND IT NEEDS EVIDENCE.
     #
     # This used to fire the instant Popen returned, which is a statement about
@@ -695,12 +586,9 @@ def main():
     # this pipeline proves audio actually arrived and was packaged.
     def watch_for_first_segment():
         global _said_up
-        # AN MP3-ONLY STATION WRITES NOTHING TO DISK. Its audio goes straight to
-        # the relay, so there is no segment to wait for and the only evidence
-        # available is that ffmpeg is still alive with its outputs open, which
-        # it would not be if the source had failed: a bad input kills it inside
-        # a second. Waiting a few of them is weaker evidence than a segment, and
-        # it is the strongest this configuration has.
+        # Every station writes HLS or DASH (no MP3-only stations since 2.1c-2),
+        # so there is always a segment to wait for. The deadline below only
+        # applies if neither directory is known.
         dirs = []
         if outs.get("hls") and paths.get("audio"):
             dirs.append(paths["audio"])

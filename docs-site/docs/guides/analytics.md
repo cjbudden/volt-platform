@@ -76,7 +76,7 @@ Programme and marketing staff use Audience; operations staff use Operating to pr
    | **Unknown** | The run ended without a recorded reason, for example a lost server |
    | **Running** | Still running |
 
-5. A radio station also shows **MP3 listeners**, counted separately from the players.
+5. A radio station also shows **MP3 listeners** (where the account has the MP3 stream), counted separately from the players.
 6. **Open channel** (or station, or event) goes to the stream itself; **Download CSV** downloads its runs; **Operating reports** in the breadcrumb goes back to the list with the same period.
 
 ### See what viewers saw

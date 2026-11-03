@@ -1,7 +1,7 @@
 ---
 title: Radio
 sidebar_position: 2.1
-description: Audio-only stations with MP3, HLS and DASH outputs and a timed now-playing log.
+description: Audio-only stations with HLS and DASH outputs and a timed now-playing log.
 guide: section
 ---
 
@@ -14,7 +14,7 @@ A radio station is an audio-only live stream. Volt takes the station's audio in 
 ## What it is for
 
 - **Running stations.** Start and stop, listen to each output, go on air and off air.
-- **Now playing.** Titles the source sends become a timed log, classified as **song**, **ad** or **content**, and are passed through to MP3 listeners.
+- **Now playing.** Titles the source sends become a timed log, classified as **song**, **ad** or **content**, and are carried to listeners in the HLS and DASH (and the MP3 stream, where your account has it).
 - **Quality.** Each station checks its own output (playlist continuity, timing and audio level) and shows the signal it is receiving.
 - **After the broadcast.** With recording on, the log drives search and clipping in Recordings; talk can be transcribed.
 
@@ -35,7 +35,7 @@ Radio managers and station operators use it day to day.
 3. Leave **Type** on **Packaging** to pass the source audio through as it is. Choose **Transcode** only to change the bitrate or format.
 4. Under **Audio source**, choose **Icecast / HTTP audio**, **HLS** or **SRT** and enter the address.
 5. Choose **Validate source**. Volt checks that the source plays, lets you listen to a sample and, for Icecast, reads the station's name, genre, bitrate and artwork. Nothing is saved until you apply it.
-6. Under **Outputs**, choose **MP3 stream**, **HLS (audio-only)** and **DASH**, and an **Output bitrate**. Radio is a single bitrate by design.
+6. Under **Outputs**, choose **HLS (audio-only)** and **DASH**, and an **Output bitrate**. Radio is a single bitrate by design. An **MP3 stream** for hardware receivers and older apps is available only where your Volt provider has turned it on for your account; it is then made from the HLS output when someone listens. **MP3 stream** is shown under **Outputs** only then.
 7. Turn on **Capture now-playing log** for an Icecast source, and **Recording and clipping** if you want to clip later. **Transcribe speech segments** transcribes only the parts classified as content.
 8. Choose **Create station**.
 
@@ -44,7 +44,7 @@ Radio managers and station operators use it day to day.
 1. Open the station from the list.
 2. Choose **Start station** and watch the five gates turn green ([channel status](channel-status.md)).
 3. The monitor starts muted, so the page never makes noise on its own. Unmute it to listen. The level meter works whether you listen or not.
-4. Under **Output previews**, play **MP3**, **HLS** or **DASH** to check each output on its own. One plays at a time.
+4. Under **Output previews**, play **HLS** or **DASH** (or **MP3**, where your account has it) to check each output on its own. One plays at a time.
 5. When the output is valid, choose **Go on air** to open the public URLs.
 
 ### Read and search the now-playing log
@@ -90,7 +90,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | The now-playing log stays empty | The source sends no titles (HLS and SRT sources usually do not), or the log is off | For titles, use the station's Icecast mount and turn on **Capture now-playing log** |
 | **Validate source** fails | Volt cannot play the address | Check the URL in a player; a mount URL usually ends in the stream's name |
 | No sound when you unmute | The station is stopped, or another output preview is playing | Start the station; stop the other preview |
-| **DEGRADED** with every gate green | One of the outputs, for example the MP3 stream, is not being served | Open the station and check **Quality checks** and the event log |
+| **DEGRADED** with every gate green | One of the outputs is not being served | Open the station and check **Quality checks** and the event log |
 | **New station** is unavailable | The group or the plan is at its channel limit | Remove a station or channel, or ask for a higher limit |
 
 ## Through the API

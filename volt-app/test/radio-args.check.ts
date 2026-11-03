@@ -9,14 +9,14 @@
 //  if the argv is pinned by something other than "it worked when I ran it".
 //
 //  The assertions are about the decisions, not the spelling: whether MP3 is
-//  copied or re-encoded, whether it goes to a relay or to a pipe, and whether
-//  a password can escape into somewhere it should not be.
+//  copied or re-encoded, and that it only ever goes to the in-process pipe:
+//  there is no relay since build queue 2.1c-2, and the container writes no MP3.
 //
 //  Usage: npx tsx test/radio-args.check.ts   (no database, no ffmpeg)
 // ============================================================================
 import {
-  buildRadioArgs, clampBitrate, resolveOutputs, isMp3Copy, icecastUrl,
-  redactIcecastUrl, masterPlaylist, type RadioJobConfig, type IcecastTarget,
+  buildRadioArgs, clampBitrate, resolveOutputs, isMp3Copy,
+  masterPlaylist, type RadioJobConfig,
 } from '../src/services/radio/args';
 
 let pass = 0, fail = 0;
@@ -28,18 +28,10 @@ const truthy = (m: string, v: unknown) => (v ? ok(m) : bad(m, `expected truthy, 
 const falsy = (m: string, v: unknown) => (!v ? ok(m) : bad(m, `expected falsy, got [${String(v)}]`));
 
 const PATHS = { runDir: '/o/ch/runs/R', audioDir: '/o/ch/runs/R/audio', dashDir: '/o/ch/runs/R/dash' };
-const RELAY: IcecastTarget = {
-  host: 'icecast', port: 8000, mount: 'ch.mp3',
-  username: 'source', password: 'p@ss word/1', stationName: 'Test FM',
-};
+// What a station container is given: HLS and DASH, never MP3 (2.1c-2).
 const base = (over: Partial<RadioJobConfig> = {}): RadioJobConfig => ({
   channelId: 'ch', protocol: 'icecast', url: 'http://up.example/stream',
-  // MP3 asked for explicitly: it is opt-in now, and a base fixture that did
-  // not say so would silently stop exercising the relay path at all.
-  outputs: { mp3: true, hls: true, dash: true }, bitrateKbps: 128,
-  // The relay IS the default now; `over` can still put it back to null to get
-  // the development pipe, which is what the fallback assertions below do.
-  icecast: RELAY, ...over,
+  outputs: { mp3: false, hls: true, dash: true }, bitrateKbps: 128, ...over,
 });
 /** The value ffmpeg would receive for a flag, i.e. the token after it. */
 const after = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
@@ -57,7 +49,7 @@ check('a string that is not a number does not become NaN', clampBitrate('x' as a
 // The three used to default together, which hid that they are different kinds
 // of thing. HLS and DASH are files this process writes: they cost the same
 // whether anybody listens, because nobody is served from here. MP3 is a live
-// push to a relay whose bill is EGRESS, and it is the only output with an
+// push to a relay (removed in 2.1c-2) whose bill was EGRESS, and the only output with an
 // external dependency that can degrade a station. An output nobody asked for
 // should not reserve fan-out capacity.
 check('MP3 is OFF unless asked for', resolveOutputs(undefined).mp3, false);
@@ -74,43 +66,20 @@ falsy('an mp3 source with transcode ON is not a copy',
 falsy('an aac source is never a copy', isMp3Copy({ sourceCodec: 'aac' }));
 falsy('an unprobed source is not assumed to be mp3', isMp3Copy({ sourceCodec: null }));
 
-// ---- the relay topology ----------------------------------------------------
+// ---- no relay (2.1c-2) -------------------------------------------------------
 //
-// This is the change that lets radio be a container at all: MP3 leaves as a
-// PUSH to a relay rather than a pipe the control plane reads.
-const relayed = buildRadioArgs(base(), { ...PATHS });
-truthy('with a relay configured, MP3 is pushed to icecast',
-  relayed.some((a) => a.startsWith('icecast://')));
-falsy('and nothing is piped to stdout', relayed.includes('pipe:1'));
-truthy('the mount carries the station name for the relay directory',
-  relayed.includes('-ice_name') && after(relayed, '-ice_name') === 'Test FM');
-check('content type is set, or the relay rejects the source as a bad request',
-  after(relayed, '-content_type'), 'audio/mpeg');
-
-const piped = buildRadioArgs(base({ icecast: null }), { ...PATHS });
-truthy('with NO relay, MP3 falls back to the stdout pipe', piped.includes('pipe:1'));
-falsy('and no icecast url is built', piped.some((a) => a.startsWith('icecast://')));
-
-// ---- credentials -----------------------------------------------------------
-//
-// The password can only travel inside the URL, because that is the only form
-// the icecast protocol takes. So the thing to pin down is that the redacted
-// form is genuinely redacted, since that is what gets logged and stored.
-const url = icecastUrl(RELAY);
-truthy('the url carries the credentials ffmpeg needs', url.includes('source'));
-truthy('a password with url-unsafe characters is encoded',
-  url.includes(encodeURIComponent('p@ss word/1')));
-truthy('a mount without a leading slash still produces one', url.includes(':8000/ch.mp3'));
-check('tls selects the secure scheme',
-  icecastUrl({ ...RELAY, tls: true }).startsWith('icecast+https://'), true);
-const safe = redactIcecastUrl(RELAY);
-falsy('the redacted form does NOT contain the password', safe.includes('p@ss'));
-truthy('but still says which mount, so it is useful in a log', safe.includes('/ch.mp3'));
+// MP3 asked for goes to the in-process development pipe and nowhere else;
+// nothing is ever pushed to an icecast:// address.
+const piped = buildRadioArgs(base({ outputs: { mp3: true, hls: true, dash: true } }), { ...PATHS });
+truthy('MP3 asked for in-process goes to the stdout pipe', piped.includes('pipe:1'));
+falsy('and nothing is pushed to an icecast address', piped.some((a) => a.startsWith('icecast')));
+falsy('no ICY source headers either', piped.includes('-ice_name') || piped.includes('-content_type'));
+const plain = buildRadioArgs(base(), { ...PATHS });
+falsy('a station as the container gets it writes no MP3 at all', plain.includes('pipe:1') || plain.some((a) => /mp3/.test(a) && a !== 'mp3'));
 
 // ---- outputs actually switch off -------------------------------------------
 const audioOnlyHls = buildRadioArgs(base({ outputs: { mp3: false, hls: true, dash: false } }), { ...PATHS });
-falsy('mp3 off means no mp3 destination',
-  audioOnlyHls.includes('pipe:1') || audioOnlyHls.some((a) => a.startsWith('icecast://')));
+falsy('mp3 off means no mp3 destination', audioOnlyHls.includes('pipe:1'));
 falsy('dash off means no manifest', audioOnlyHls.some((a) => a.endsWith('manifest.mpd')));
 truthy('hls on still writes the media playlist',
   audioOnlyHls.some((a) => a.endsWith('/audio/index.m3u8')));
@@ -192,13 +161,6 @@ if (!existsSync(RADIO_PY) || !spawnSync('python3', ['--version']).stdout) {
     outputs: c.outputs, bitrate_kbps: c.bitrateKbps,
     transcode: c.transcode ?? false, source_codec: c.sourceCodec ?? null,
     segment_seconds: c.segmentSeconds ?? 4,
-    icecast: c.icecast ? {
-      host: c.icecast.host, port: c.icecast.port, mount: c.icecast.mount,
-      username: c.icecast.username, password: c.icecast.password,
-      station_name: c.icecast.stationName ?? null,
-      description: c.icecast.description ?? null,
-      genre: c.icecast.genre ?? null, tls: c.icecast.tls ?? false,
-    } : null,
   });
 
   const pyArgs = (c: RadioJobConfig): string[] | string => {
@@ -215,8 +177,8 @@ if (!existsSync(RADIO_PY) || !spawnSync('python3', ['--version']).stdout) {
   };
 
   const cases: Array<[string, RadioJobConfig]> = [
-    ['an mp3 source copied to a relay', base({ sourceCodec: 'mp3' })],
-    ['an aac source re-encoded to a relay', base({ sourceCodec: 'aac' })],
+    ['an mp3 source', base({ sourceCodec: 'mp3' })],
+    ['an aac source', base({ sourceCodec: 'aac' })],
     ['a transcode forced on an mp3 source', base({ sourceCodec: 'mp3', transcode: true })],
     ['hls only, no mp3 and no dash', base({ outputs: { mp3: false, hls: true, dash: false } })],
     ['an srt source, so no reconnect flags', base({ protocol: 'srt', url: 'srt://h:9000' })],
@@ -225,9 +187,13 @@ if (!existsSync(RADIO_PY) || !spawnSync('python3', ['--version']).stdout) {
     ['a playlist url on a row labelled icecast',
       base({ protocol: 'icecast', url: 'https://cdn.example/live.m3u8?token=a' })],
     ['a non-default bitrate and segment length', base({ bitrateKbps: 256, segmentSeconds: 6 })],
-    ['a tls relay with an awkward password',
-      base({ icecast: { ...RELAY, tls: true, password: 'a b/c@d' } })],
   ];
+
+  // An old config that still asks for MP3: the container makes none (it has
+  // nowhere to put it), the same argv as with MP3 off.
+  const asked = pyArgs(base({ outputs: { mp3: true, hls: true, dash: true } }));
+  const without = pyArgs(base());
+  check('the container ignores an MP3 request: same argv as without', JSON.stringify(asked), JSON.stringify(without));
 
   for (const [name, cfg] of cases) {
     const ts = buildRadioArgs(cfg, { ...PATHS });

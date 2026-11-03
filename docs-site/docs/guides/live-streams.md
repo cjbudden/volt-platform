@@ -78,7 +78,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|---|
 | A stream is missing from the **Board** | It is not running | Choose **Show N not running**, or use **List** |
 | **Down** is above zero | A running stream has a failed gate | Open it and choose **Diagnose**, or open [Monitoring](monitoring.md) |
-| **Degraded** is above zero but every gate is green | One of the stream's outputs is not being delivered (for example a radio station's MP3 stream) | Open the stream and check its outputs |
+| **Degraded** is above zero but every gate is green | One of the stream's outputs is not being delivered | Open the stream and check its outputs |
 | **updated** time stops moving | The page lost its connection to Volt | Choose **Refresh**, or reload the page |
 
 ## Through the API

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**848 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 668 · Platform API: 36 · Machine-to-machine: 14 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**842 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 668 · Platform API: 32 · Machine-to-machine: 12 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1274,15 +1274,6 @@ Volt staff only. Needs a platform session, minted after the authenticator step.
 |---|---|---|---|---|
 | GET | `/api/platform/overview` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 
-### `/api/platform/relays`
-
-| Method | Path | Credential | Access | Viewer tier |
-|---|---|---|---|---|
-| GET | `/api/platform/relays` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
-| POST | `/api/platform/relays` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
-| PATCH | `/api/platform/relays/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
-| GET | `/api/platform/relays/:id/stations` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
-
 ### `/api/platform/signups`
 
 | Method | Path | Credential | Access | Viewer tier |
@@ -1338,13 +1329,6 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/payments/webhooks/:provider/:accountId` | payment provider signature | callback |  |
-
-### `/api/radio`
-
-| Method | Path | Credential | Access | Viewer tier |
-|---|---|---|---|---|
-| POST | `/api/radio/icecast/listener-auth` | Icecast auth callback secret | callback |  |
-| POST | `/api/radio/icecast/listener-remove` | Icecast auth callback secret | callback |  |
 
 ### `/api/social`
 

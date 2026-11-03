@@ -93,9 +93,7 @@ const containerOf = (cfgKey: string) => (launcherSrc.match(new RegExp(`config\\.
   const cov = JSON.parse(readFileSync(join(TF, 'env-coverage.json'), 'utf8')).settings as Record<string, any>;
   const left = Object.entries(cov).filter(([, v]) => v.item === '2.1b').map(([k]) => k);
   ok(left.length === 0, `nothing in env-coverage.json waits on 2.1b any more${left.length ? ` (${left.join(', ')})` : ''}`);
-  const ice = Object.entries(cov).filter(([k]) => k.startsWith('ICECAST_'));
-  ok(ice.length > 0 && ice.every(([, v]) => v.class === 'not-on-aws-yet' && v.item === '2.1c'), 'the Icecast relay is named as waiting on 2.1c');
-  ok(/^\| 2\.1c \|/m.test(readFileSync(join(ROOT, 'BUILD_QUEUE.md'), 'utf8')), 'queue item 2.1c exists');
+  ok(!Object.keys(cov).some((k) => k.startsWith('ICECAST_')), 'no Icecast relay settings are left (the relay is gone, 2.1c-2)');
 
   console.log('launching through the real launcher, mocked ECS');
   Object.assign(process.env, {

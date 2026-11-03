@@ -41,7 +41,7 @@ Everything the gate checks is set up in Volt: the app's allowed sites, the asset
 }
 ```
 
-The full answer also has `assetId`, the `playbackToken` and `meta` (title, description, artwork, length, live or not, kind). `delivery` holds the addresses to play: `hls` and `dash` (and `mp3` for a radio station). It is `null` while a live channel is off air, so show "not on air" and ask again later.
+The full answer also has `assetId`, the `playbackToken` and `meta` (title, description, artwork, length, live or not, kind). `delivery` holds the addresses to play: `hls` and `dash` (and `mp3` for a radio station whose account has the MP3 stream; otherwise `null`). It is `null` while a live channel is off air, so show "not on air" and ask again later.
 
 The anonymous `GET` is the fast path for free content: the answer is the same for everyone with the same key, site and country, so it is cached at the edge, never past the next programme change.
 

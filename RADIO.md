@@ -403,6 +403,12 @@ stations publish.
 - ~~MP3 fan-out is in-process.~~ **Done.** The station is an Icecast SOURCE and
   pushes MP3 to a relay tier that owns listener fan-out, so nothing in the
   control plane sits in the audio path.
+- **No relay (3 Nov 2026, build queue 2.1c-2).** Christian decided against the
+  relay: stations write HLS and DASH only, and the relay, the MP3 push and the
+  `ICECAST_*` settings are removed (see `RELAY.md`). MP3 for listeners is the
+  control plane's on-demand transcode of the HLS (`mp3Gateway.ts`), off unless
+  the account's `mp3_feed_enabled` switch is on. Icecast and SHOUTcast mounts
+  remain a station SOURCE, with ICY now-playing.
 - Two things stayed in the control plane and must not move into the container:
   the **level monitor** (reads segments off the origin) and **ICY metadata
   capture** (a second connection to the source, writing titles to the

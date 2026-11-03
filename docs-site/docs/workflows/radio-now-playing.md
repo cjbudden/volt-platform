@@ -28,7 +28,7 @@ Radio managers and station operators use it to put a station on air with now pla
 ![The source sends audio and titles to the station; the station sends them to listeners, logs each title in the EPG and records the audio; Recordings uses the log to clip songs into the Media Library](/img/flows/radio-now-playing.svg)
 
 - **Source to Radio:** the audio, with each now-playing title in the stream's metadata.
-- **Radio to listeners:** MP3, HLS and DASH, each carrying the current title.
+- **Radio to listeners:** HLS and DASH (and MP3, where your account has it), each carrying the current title.
 - **Radio to EPG:** every title change, as a timed entry in the station's guide.
 - **Radio to Recordings:** the station's audio, kept for the period you choose.
 - **EPG to Recordings:** the log entries, which mark each song and programme on the recording's timeline.
@@ -50,7 +50,7 @@ Radio managers and station operators use it to put a station on air with now pla
 2. Enter a **Station name**. Leave **Type** on **Packaging**.
 3. Under **Audio source**, choose **Icecast / HTTP audio** and paste the mount's address.
 4. Choose **Validate source**. Volt checks the source plays, lets you listen to a sample and reads the station's name, genre, bitrate and artwork from the stream, each with a button to use it.
-5. Under **Outputs**, keep **MP3 stream**, **HLS (audio-only)** and **DASH** on, and pick the **Output bitrate**.
+5. Under **Outputs**, keep **HLS (audio-only)** and **DASH** on, and pick the **Output bitrate**. An **MP3 stream** for hardware receivers and older apps is available only where your Volt provider has turned it on for your account; it is then made from the HLS output when someone listens.
 6. Under **Metadata log**, turn on **Capture now-playing log**. This switch is only offered for an Icecast source.
 7. Under **Recording**, turn on **Recording and clipping**, and set **Keep recordings for** if you do not want to keep recordings indefinitely.
 8. Choose **Create station**.
@@ -60,14 +60,14 @@ The [Radio guide](../guides/radio.md#create-a-station) explains each field.
 ### 2. Start it, check it and go on air
 
 1. Open the station and choose **Start station**. Volt connects to your source and starts the outputs and the recording.
-2. Unmute the monitor to listen, and play **MP3**, **HLS** and **DASH** under **Output previews** to check each output.
-3. When the output is producing audio, choose **Go on air**. The public addresses of the three outputs open, and **Output previews (public URLs)** lists them with a **Copy** button each.
+2. Unmute the monitor to listen, and play **HLS** and **DASH** (and **MP3**, where your account has it) under **Output previews** to check each output.
+3. When the output is producing audio, choose **Go on air**. The public addresses of the outputs open, and **Output previews (public URLs)** lists them with a **Copy** button each.
 
 Starting a station needs a real source that Volt can reach. In your deployment the level meter moves and the first titles appear within a few seconds of **Start station**.
 
 ### 3. What listeners get
 
-- **MP3 stream:** the current title is passed through as the stream's own now-playing text, so hardware receivers, car radios and apps like VLC show it.
+- **MP3 stream** (where your account has it): the current title is passed through as the stream's own now-playing text, so hardware receivers, car radios and apps like VLC show it.
 - **HLS and DASH:** each title change is carried in the audio as timed metadata, so web and app players that read it (Safari, and the common web players) show the song at the moment it is heard.
 - **The Volt player:** choose **Player** on the station's page to style an embeddable player with the audio skins. They show the track now playing with its artwork, otherwise the programme on air. See [Embed the player](../guides/embedding.md) and the [player SDK](../guides/player-sdk.md).
 
@@ -124,7 +124,7 @@ The **Radio Manager** role covers the station, its guide and its clips; an Owner
 | **ICY headers appear here once the source connects and announces itself.** | The station has not received the source's headers yet | Start the station; if it stays, check the address with **Validate source** |
 | **Received metadata log** stays empty on an Icecast station | The station is stopped, the log is off, or the source sends no titles | Start the station and turn on **Capture now-playing log** in **Settings** |
 | A song is classed as **Ad** or **Content** | Its title did not look like "Artist - Title" | Choose **Song** in its **Class** column on the station's page (Radio stations: Operate) |
-| Listeners see no title | Their player does not read now-playing data, or the station is off air | Check with the Volt player; MP3 receivers need the MP3 output on |
+| Listeners see no title | Their player does not read now-playing data, or the station is off air | Check with the Volt player; MP3 receivers need the MP3 stream, which your Volt provider turns on for your account |
 | The station is not under **Radio** in Recordings | It has not run with recording on | Turn on **Recording and clipping** in **Settings**; it applies from the next start |
 
 ## Through the API

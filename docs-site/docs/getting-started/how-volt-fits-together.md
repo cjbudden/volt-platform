@@ -30,7 +30,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | Section | What it is for |
 |---|---|
 | [**Channels**](../guides/channels.md) | Live channels that run around the clock: a source in, adaptive outputs out, with backup sources and failover ([first channel](first-channel.md), [status](../guides/channel-status.md), [failover](../guides/failover.md), [share links](../guides/share-links.md)) |
-| [**Radio**](../guides/radio.md) | Audio-only stations with MP3, HLS and DASH outputs and a now-playing log |
+| [**Radio**](../guides/radio.md) | Audio-only stations with HLS and DASH outputs and a now-playing log |
 | [**Events**](../guides/events.md) | Scheduled one-off broadcasts: the stream starts for its window, then recordings and replays follow the event's settings |
 | [**FAST**](../guides/fast.md) | Channels played out from the library: a run order of programmes that loops, with the guide written for you and ad breaks signalled |
 | **EPG** | The programme guide for each stream: what is on when, and per slot, where it can be watched, what replaces it and what is clipped afterwards ([guide](../guides/epg.md)) |

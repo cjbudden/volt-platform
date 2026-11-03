@@ -12,8 +12,8 @@
 #   2. Checks Docker is RUNNING, and starts it if it is not
 #   3. Makes sure a Postgres is running (uses Docker if it has to start one)
 #   4. Loads the exact database snapshot from Claude's test (same 2 channels)
-#   5. Starts the control-plane API on :8080 and the React app on :5173,
-#      with an Icecast relay on :8000 so radio stations can serve MP3
+#   5. Starts the control-plane API on :8080 and the React app on :5173
+#      (no Icecast relay: stations write HLS and DASH, build queue 2.1c-2)
 #
 #   6. Checks and builds the customer docs (guides, API reference, release
 #      notes) and serves them on :3000, so the ? button in the app works
@@ -44,12 +44,11 @@ docker_up() { docker info >/dev/null 2>&1; }
 #  DOCKER: INSTALLED AND RUNNING ARE DIFFERENT QUESTIONS.
 #
 #  Everything optional in this script goes through Docker -- Postgres when
-#  there is no local one, the containerised encoder, the Icecast relay -- and
+#  there is no local one, the containerised encoder -- and
 #  every one of those checks used to ask `have docker`, which answers "is the
 #  CLI on PATH". The CLI is on PATH whether or not the daemon is running, so
 #  with Docker Desktop closed the Postgres branch ran `docker run` and died on
-#  a raw daemon error, and the Icecast branch skipped in silence and left you
-#  with a station whose MP3 never worked and nothing saying why.
+#  a raw daemon error.
 #
 #  So: ask the daemon, and if it is not up, START it rather than reporting the
 #  problem back to somebody who would only go and do the same thing.
@@ -57,8 +56,7 @@ docker_up() { docker info >/dev/null 2>&1; }
 DOCKER_OK=0
 ensure_docker() {
   if ! have docker; then
-    echo "    Docker is not installed. Postgres must then be local, and there will be"
-    echo "    no Icecast relay, so stations go on air over HLS/DASH without MP3."
+    echo "    Docker is not installed. Postgres must then be local."
     return 1
   fi
   if docker_up; then DOCKER_OK=1; echo "    Docker is running."; return 0; fi
@@ -101,7 +99,7 @@ echo "==> 1/5  Checking the app is present (the repo now syncs via GitHub, not t
 # 'git pull' from GitHub before running this. The stale bundle used to abort here.
 [ -d volt-web ] || { echo "    volt-web/ is missing. Run 'git pull' to fetch the latest from GitHub, then re-run."; exit 1; }
 
-echo "==> 2/5  Checking Docker (Postgres, the encoder and the MP3 relay all use it)..."
+echo "==> 2/5  Checking Docker (Postgres and the encoder use it)..."
 ensure_docker || true
 
 echo "==> 3/5  Ensuring Postgres is available on localhost:5432..."
@@ -374,84 +372,11 @@ pkill -f "$ROOT/volt-app/origin" 2>/dev/null || true
 if command -v docker >/dev/null 2>&1; then docker ps -q --filter "name=volt-enc-" 2>/dev/null | xargs -r docker rm -f >/dev/null 2>&1 || true; fi
 fi
 # ---------------------------------------------------------------------------
-#  THE MP3 RELAY.
-#
-#  A radio station pushes its MP3 to an Icecast relay; HLS and DASH are written
-#  to disk. This script never started one, so every station pushed at
-#  localhost:8000 with nothing listening.
-#
-#  That used to take the WHOLE station down, not just the MP3: one ffmpeg
-#  carries every output and opens them all before encoding, so a refused
-#  icecast:// connection killed the process and no HLS or DASH was written
-#  either. bin/radio.py now probes the relay first and drops the MP3 output
-#  when it is unreachable, so a station without Icecast still goes on air —
-#  but it is a better demo with one, so start it if Docker can.
+#  NO MP3 RELAY (build queue 2.1c-2, Christian 3 Nov 2026). Stations write HLS
+#  and DASH; nothing pushes MP3 anywhere, so no Icecast container is started.
+#  A volt-icecast container left from an older run is not used and can be
+#  removed by hand (docker rm -f volt-icecast).
 # ---------------------------------------------------------------------------
-#  A CONNECTED PORT IS NOT A RUNNING ICECAST. The old check was a TCP connect
-#  to :8000, which any process holding that port satisfies, so a Vite server or
-#  a leftover container could report the relay as ready and every station would
-#  then fail to push to it. Ask Icecast to identify itself instead: it names
-#  itself in the Server header on any response, including its 404.
-icecast_alive() {
-  curl -sI --max-time 2 "http://localhost:8000/" 2>/dev/null | grep -qi 'icecast' \
-    || curl -s --max-time 2 "http://localhost:8000/status-json.xsl" 2>/dev/null | grep -q 'icestats'
-}
-
-ICE_OK=0
-if [ "$DOCS_ONLY" = "1" ]; then
-  echo "    docs only: no Icecast relay needed."
-elif [ "$DOCKER_OK" != "1" ]; then
-  echo "    no Docker, so no Icecast relay on :8000."
-elif icecast_alive; then
-  echo "    Icecast is already running on :8000."
-  ICE_OK=1
-elif port_open 8000; then
-  # Something holds the port and it is not Icecast. Name it: this is the whole
-  # diagnosis and it is one command away, and without it the operator sees only
-  # a station whose MP3 does not serve.
-  echo "    :8000 is in use by something that is NOT Icecast:"
-  lsof -nP -iTCP:8000 -sTCP:LISTEN 2>/dev/null | sed -n '2,4p' | sed 's/^/      /' \
-    || echo "      (could not identify the process)"
-  echo "    Free that port and re-run, or stations will have no MP3 output."
-else
-  echo "    starting the Icecast relay (MP3) on :8000..."
-  docker rm -f volt-icecast >/dev/null 2>&1 || true
-  #  DO NOT SWALLOW THE ERROR. This was `>/dev/null 2>&1 || true`, so a failed
-  #  image pull, a port clash or a name conflict all produced the same silence
-  #  followed by twenty seconds of waiting and a NOTE that blamed Docker being
-  #  off. The reason docker prints is the answer; keep it and show it.
-  ICE_ERR=""
-  if ! ICE_ERR=$(docker run -d --name volt-icecast -p 8000:8000 \
-      -e ICECAST_SOURCE_PASSWORD=hackme -e ICECAST_ADMIN_PASSWORD=hackme \
-      -e ICECAST_RELAY_PASSWORD=hackme -e ICECAST_PASSWORD=hackme \
-      libretime/icecast:2.4.4 2>&1); then
-    echo "    could not start the Icecast container:"
-    echo "$ICE_ERR" | tail -3 | sed 's/^/      /'
-  else
-    printf "    waiting for Icecast"
-    for i in $(seq 1 25); do
-      if icecast_alive; then ICE_OK=1; printf " ready after %ss\n" "$i"; break; fi
-      printf "."; sleep 1
-    done
-    if [ "$ICE_OK" != "1" ]; then
-      printf "\n"
-      #  The container started and never answered. Its own log says why, and it
-      #  is about to be the only record: nobody goes looking for `docker logs`
-      #  on a container they did not know existed.
-      echo "    the container started but Icecast never answered. Its last lines:"
-      docker logs --tail 12 volt-icecast 2>&1 | sed 's/^/      /' || true
-      echo "    (inspect further with: docker logs volt-icecast)"
-    fi
-  fi
-fi
-
-if [ "$ICE_OK" = "1" ]; then
-  echo "    Icecast relay ready — stations that ask for MP3 will serve it."
-else
-  echo "    NOTE: no Icecast on :8000. Stations go on air over HLS/DASH, and any"
-  echo "          station configured to push MP3 reports its output as DEGRADED"
-  echo "          with the reason, rather than failing to start."
-fi
 
 # ---------------------------------------------------------------------------
 #  REMOTE TESTING (phone / away from the desk):  REMOTE=1 bash run-on-mac.sh
@@ -503,8 +428,6 @@ fi
 export DATABASE_URL="$DBURL" JWT_ACCESS_SECRET=dev-access-secret JWT_REFRESH_SECRET=dev-refresh-secret \
        INGEST_TOKEN=dev-ingest PORT=8080 ORCH_LAUNCHER="$ENCODER_MODE" CORS_ORIGIN='*' \
        ENCODER_BIN="$ROOT/volt-encoder/bin" ORIGIN_DIR="$ROOT/volt-app/origin" \
-       ICECAST_HOST=localhost ICECAST_PORT=8000 ICECAST_SOURCE_USER=source \
-       ICECAST_SOURCE_PASSWORD=hackme \
        PACKAGER_BIN="${PACKAGER_BIN:-packager}"
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,7 @@ import { icyState, probeIcySource } from '../services/radio/icyMeta';
 import { programmeMedia } from '../services/programmeMedia';
 import { epgLane } from '../services/epgLane';
 import { radioLevels } from '../services/radio/monitor';
+import { mp3FeedForAccount } from '../services/radio/mp3Feed';
 import { loadRadioHealth, radioEventLog, radioQc, radioStatusBoard, radioHasValidContent } from '../services/radio/detail';
 import { writeAudit, actor } from '../services/audit';
 import { requireMinRole } from '../auth/roles';
@@ -52,16 +53,14 @@ async function ownedStation(req: any) {
 
 /** PREVIEW urls: private monitoring paths, available as soon as the station runs
  *  (the radio equivalent of a channel's /origin preview). */
-function outputUrls(id: string, cfg: any, degraded: Record<string, string> = {}) {
+function outputUrls(id: string, cfg: any, degraded: Record<string, string> = {}, mp3Feed = false) {
   // THE CONFIG IS A REQUEST; THE RUNNING ENCODER HAS THE CASTING VOTE.
   //
-  // A URL offered here is a promise that there is audio behind it. radio.py
-  // drops the MP3 output when the Icecast relay is unreachable and goes on air
-  // over HLS and DASH instead, so on a machine with no relay the configured MP3
-  // URL leads nowhere. Advertising it regardless is what made a perfectly
-  // healthy station play silence: the console tries MP3 first, and a URL with
-  // nothing behind it is indistinguishable from a broken player.
+  // A URL offered here is a promise that there is audio behind it. MP3 is
+  // offered only where the account has the on-demand MP3 feed (mp3Feed.ts,
+  // build queue 2.1c-2): there is no relay, and a station writes HLS and DASH.
   const outs: Record<string, boolean> = { mp3: true, hls: true, dash: true, ...(cfg?.outputs ?? {}) };
+  outs.mp3 = outs.mp3 && mp3Feed;
   const live = (k: string) => !!outs[k] && !degraded[k];
   return {
     mp3: live('mp3') ? `/radio/${id}/stream.mp3` : null,
@@ -82,8 +81,9 @@ async function degradedOutputs(id: string): Promise<Record<string, string>> {
 }
 
 /** PUBLIC urls: only serve once the station is ON AIR (see publicLive/radio gate). */
-function publicUrls(id: string, cfg: any) {
+function publicUrls(id: string, cfg: any, mp3Feed = false) {
   const outs = { mp3: true, hls: true, dash: true, ...(cfg?.outputs ?? {}) };
+  outs.mp3 = outs.mp3 && mp3Feed;   // only where the account has the MP3 feed (2.1c-2)
   return {
     mp3: outs.mp3 ? `/live/${id}/stream.mp3` : null,
     hls: outs.hls ? `/live/${id}/master.m3u8` : null,
@@ -141,6 +141,7 @@ radioRouter.get('/', asyncHandler(async (req, res) => {
        ${from} ${pageSql(pl)}`,
     params
   );
+  const mp3Acct = await mp3FeedForAccount(accountId(req));
   const cParams = [...base];
   const cWhere = pl.count ? whereSql(parseList(stationList, { ...req.query, cursor: undefined, offset: undefined }, cParams)) : '';
   const total = pl.count ? (await one<any>(`SELECT count(*)::int AS n FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1 AND c.kind='radio'${cWhere}`, cParams))?.n : undefined;
@@ -178,8 +179,8 @@ radioRouter.get('/', asyncHandler(async (req, res) => {
         epgTitle: null,
         carriesTitles: sourceCarriesTitles(cfg.protocol, cfg.url),
       }),
-      outputs: outputUrls(r.id, r.radio_config, await degradedOutputs(r.id)),
-      publicUrls: publicUrls(r.id, r.radio_config),
+      outputs: outputUrls(r.id, r.radio_config, await degradedOutputs(r.id), mp3Acct),
+      publicUrls: publicUrls(r.id, r.radio_config, mp3Acct),
       // same roll-up the channels list uses, so radio and TV statuses agree
       pipelineState: health.overall,
       onAir: health.onAir,
@@ -227,8 +228,11 @@ radioRouter.get('/:id', asyncHandler(async (req, res) => {
       icyTitle: icyNow?.title ?? null, epgTitle, carriesTitles: carries,
     }),
     icy: icyNow,
-    outputs: outputUrls(c.id, c.radio_config, await degradedOutputs(c.id)),
-    publicUrls: publicUrls(c.id, c.radio_config),
+    // Whether the account has the on-demand MP3 feed at all (2.1c-2): the
+    // console offers MP3 only then.
+    mp3Feed: await mp3FeedForAccount(accountId(req)),
+    outputs: outputUrls(c.id, c.radio_config, await degradedOutputs(c.id), await mp3FeedForAccount(accountId(req))),
+    publicUrls: publicUrls(c.id, c.radio_config, await mp3FeedForAccount(accountId(req))),
     openRecording: openRec ?? null,
     recentLog: recent,
     // The station's own programme guide (not the now-playing log), as the
@@ -392,7 +396,7 @@ radioRouter.post('/:id/air', asyncHandler(async (req, res) => {
     action: 'update', entityType: 'channel', entityId: c.id,
     snapshot: { name: c.name, kind: 'radio', on_air: on },
   }).catch(() => {});
-  res.json({ ...row, publicUrls: on ? publicUrls(c.id, c.radio_config) : null });
+  res.json({ ...row, publicUrls: on ? publicUrls(c.id, c.radio_config, await mp3FeedForAccount(accountId(req))) : null });
 }));
 
 /** AUTO CONNECT, BY HAND. See channels.ts: off halts retries and leaves the

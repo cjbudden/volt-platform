@@ -4,8 +4,9 @@
 //  The counterpart of buildEncoderJobConfig, and deliberately the same shape of
 //  thing: everything the task needs, handed over as JSON at launch, so the
 //  container needs no database, no credentials of its own and no discovery. It
-//  is given a source to read, somewhere to put the output, a relay to push MP3
-//  to, and an address to report status back to. Nothing else.
+//  is given a source to read, somewhere to put the output, and an address to
+//  report status back to. Nothing else: it pushes nothing to a relay (there is
+//  none since build queue 2.1c-2) and writes HLS and DASH only.
 //
 //  The keys are snake_case because this crosses into Python. That is the only
 //  reason, and it is worth the small ugliness: the boundary is a wire format,
@@ -13,7 +14,6 @@
 //  station in production.
 // ============================================================================
 import { config } from '../../config';
-import { resolveRelayFor } from '../fleet/relays';
 import { clampBitrate, resolveOutputs, type RadioOutputs } from './args';
 
 export interface RadioJobCtx {
@@ -29,51 +29,13 @@ export interface RadioJobCtx {
 }
 
 /**
- * The mount a station publishes on.
- *
- * Derived from the channel id rather than its name on purpose: a name can be
- * edited, and a listener URL that changes when somebody fixes a typo is a
- * broken URL. Hardware receivers in particular are configured once and never
- * again.
- */
-export function mountFor(channelId: string): string {
-  return `${channelId}.mp3`;
-}
-
-/**
- * The URL a LISTENER is given. This is the relay's public face, which is
- * normally a CDN or load balancer, and is never the in-VPC host:port the
- * station uses to reach Icecast. Falling back to host:port is a development
- * convenience and would be wrong to serve in production, which is why
- * ICECAST_PUBLIC_BASE exists and why this is the only place that decides it.
- */
-export function publicMp3Url(channelId: string): string {
-  const ice = config.icecast;
-  const base = ice.publicBase
-    || `${ice.tls ? 'https' : 'http'}://${ice.host}:${ice.port}`;
-  return `${base.replace(/\/+$/, '')}/${mountFor(channelId)}`;
-}
-
-/**
- * Build the job config, with the relay resolved from the station's assignment.
- *
- * ASYNC BECAUSE THE RELAY IS NOW A FACT ABOUT THIS STATION rather than a global
- * constant. It used to read config.icecast, which is one host from the
- * environment and therefore the same answer for every station on the platform.
- * With a relay tier that has to be assignable and countable, the address is a
- * row, and reading a row means a round trip.
- *
- * A deployment with no relays registered gets the environment exactly as
- * before, so nothing about a development machine or a single-Icecast install
- * changes. See services/fleet/relays.ts.
+ * Build the job config. The station's outputs are HLS and DASH; `mp3` is
+ * always sent as false (the container would ignore it anyway): MP3 for
+ * listeners is the control plane's on-demand gateway (mp3Gateway.ts).
  */
 export async function buildRadioJobConfig(ctx: RadioJobCtx): Promise<Record<string, any>> {
   const rc = ctx.radioConfig ?? {};
-  const outs = resolveOutputs(rc.outputs);
-  // Only resolve when MP3 is actually wanted: a station with mp3 off has no
-  // business being assigned a relay, and assigning one would make the fleet's
-  // station counts include stations that never push a byte to it.
-  const ice = outs.mp3 ? await resolveRelayFor(ctx.channelId) : null;
+  const outs = { ...resolveOutputs(rc.outputs), mp3: false };
 
   return {
     channel_id: ctx.channelId,
@@ -89,16 +51,6 @@ export async function buildRadioJobConfig(ctx: RadioJobCtx): Promise<Record<stri
     // usually cannot, and a probe that fails from here would silently force a
     // re-encode on a station that could have been copied.
     // radio.py probes when this key is absent.
-
-    icecast: ice ? {
-      host: ice.host,
-      port: ice.port,
-      mount: mountFor(ctx.channelId),
-      username: ice.username,
-      password: ice.password,
-      station_name: ctx.channelName ?? null,
-      tls: ice.tls,
-    } : null,
 
     s3: {
       bucket: config.aws.s3Bucket,

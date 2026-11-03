@@ -260,15 +260,7 @@ export class DockerTaskLauncher implements TaskLauncher {
     return { taskArn, lifecycle: 'on_demand' };
   }
 
-  /**
-   * A station in its own container, from the volt-radio image.
-   *
-   * Note what is NOT rewritten here that is rewritten for the encoder: the
-   * icecast host. The status-report callback points at the host control plane
-   * and so needs host.docker.internal, but the relay is a peer container that
-   * the station reaches by its compose service name. Rewriting it would send
-   * the station's audio to the developer's laptop instead of to Icecast.
-   */
+  /** A station in its own container, from the volt-radio image. */
   async launchRadio(streamId: string, job: Record<string, any>): Promise<LaunchResult> {
     const out = this.originFor(streamId);
     await this.requireImage(streamId, this.radioImage(), 'station');
@@ -293,17 +285,8 @@ export class DockerTaskLauncher implements TaskLauncher {
     // callback, the timed-events feed, a source served from this machine), the
     // same rule as the encoder (toHostDocker). The radio used to rewrite only
     // the status callback, so the log said "timed events: control plane not
-    // answering" on every Docker start. The relay is a host, not a URL, and is
-    // handled just below.
+    // answering" on every Docker start.
     const localJob: Record<string, any> = toHostDocker({ ...job, output: { mode: 'local', dir: out } });
-    // Icecast on the developer's machine is published on the HOST (run-on-mac
-    // maps :8000), and inside the container localhost is the container. Only a
-    // loopback host is rewritten: a named relay (a compose service, a real
-    // relay host) is reachable as-is and must not be touched.
-    const ice = localJob.icecast;
-    if (ice && typeof ice.host === 'string' && /^(localhost|127\.0\.0\.1)$/.test(ice.host)) {
-      localJob.icecast = { ...ice, host: 'host.docker.internal' };
-    }
     const name = `volt-radio-${streamId}`;
     const taskArn = `docker:radio:${name}:${++this.n}`;
     spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' });

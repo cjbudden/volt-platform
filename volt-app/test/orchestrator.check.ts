@@ -233,22 +233,16 @@ async function radioContainerTests() {
     ok('the job names the channel', job.channel_id === RCH);
     ok('the job carries the source url', job.url === 'http://up.example/stream');
     ok('the configured bitrate survives into the job', job.bitrate_kbps === 192);
-    // MP3 IS OPT-IN, so the fixture asks for it. It used to be defaulted on,
-    // which meant this assertion passed without anyone having decided anything.
-    ok('mp3, WHEN ASKED FOR, is pushed to a relay mount derived from the id',
-      job.icecast?.mount === `${RCH}.mp3`);
+    // NO RELAY (2.1c-2). The fixture still asks for MP3 (an old station's
+    // config): the container is told no MP3 and given nowhere to push it.
+    ok('a station that asks for MP3 is given no relay and no MP3 output',
+      !('icecast' in job) && job.outputs?.mp3 === false);
     ok('the container is told where to report status',
       typeof job.status_report?.url === 'string' && job.status_report.url.includes(RCH));
     ok('the source codec is NOT pre-decided; the container probes it',
       !('source_codec' in job));
 
-    // A STATION THAT DID NOT ASK FOR MP3 GETS NO RELAY AT ALL.
-    //
-    // Not merely "the output is off": no icecast block in the job config, so the
-    // container never probes a relay, never occupies a mount, and cannot be
-    // degraded by a relay it was never going to use. MP3 is the only output
-    // whose bill is egress, so one nobody asked for must not reserve fan-out
-    // capacity on the assumption that somebody might.
+    // A STATION THAT DID NOT ASK FOR MP3 IS THE SAME: HLS and DASH, no relay.
     //
     // Asserted on the BUILDER rather than by restarting the station, because the
     // running station is the subject of the assertions below and stopping it
@@ -259,8 +253,8 @@ async function radioContainerTests() {
       protocol: 'icecast', url: 'http://up.example/stream',
       radioConfig: { bitrateKbps: 192 },
     });
-    ok('a station that did not ask for MP3 is given no relay at all',
-      quiet.icecast === null);
+    ok('a station that did not ask for MP3 is given no relay either',
+      !('icecast' in quiet) && quiet.outputs?.mp3 === false);
     ok('and still gets the outputs that are files rather than fan-out',
       quiet.outputs?.hls === true && quiet.outputs?.dash === true);
 

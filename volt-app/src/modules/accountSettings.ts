@@ -42,8 +42,9 @@ accountSettingsRouter.use(requireAuth);
 
 async function view(acc: string) {
   const b = await accountBrand(acc);
-  const g = await one<any>(`SELECT geo_access, trick_play_default FROM accounts WHERE id = $1`, [acc]);
-  return { ...b, geoAccess: normGeo(g?.geo_access), trickPlayDefault: !!g?.trick_play_default, defaults: BRAND_DEFAULTS };
+  const g = await one<any>(`SELECT geo_access, trick_play_default, mp3_feed_enabled FROM accounts WHERE id = $1`, [acc]);
+  // mp3FeedEnabled is read-only here: the system admin sets it (build queue 2.1c-2).
+  return { ...b, geoAccess: normGeo(g?.geo_access), trickPlayDefault: !!g?.trick_play_default, mp3FeedEnabled: !!g?.mp3_feed_enabled, defaults: BRAND_DEFAULTS };
 }
 
 accountSettingsRouter.get('/', asyncHandler(async (req, res) => {

@@ -294,7 +294,7 @@ function StreamReportView({ id }: { id: string }) {
           <thead><tr>
             <th>Started</th><th>Ended</th><th>Run</th><th>On air</th><th>Stop</th>
             <th>Peak</th><th>Views</th><th>Watch</th>
-            {isRadio && <th title="MP3 relay listeners, a separate delivery path">MP3 listeners</th>}
+            {isRadio && <th title="MP3 listeners, where the account has the on-demand MP3 feed">MP3 listeners</th>}
             {hasCost && <th>Cost basis</th>}
           </tr></thead>
           <tbody>

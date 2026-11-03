@@ -80,9 +80,9 @@ export interface LiveRow {
    * station whose MP3 URL does not serve. The number is defending its own
    * definition and telling the operator the wrong thing.
    *
-   * Only MP3 can land here today, and only in the relay topology: HLS and DASH
-   * are files the encoder writes itself, while MP3 is a push to a second piece
-   * of infrastructure that can be absent while everything else is perfect.
+   * MP3 used to be the one output that landed here (a push to an Icecast
+   * relay that could be absent). There is no relay since 2.1c-2, so this is
+   * empty unless an encoder reports another dropped output.
    *
    * Cleared on channel.start, so this always describes the CURRENT run.
    */

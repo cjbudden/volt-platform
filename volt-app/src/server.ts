@@ -57,7 +57,6 @@ import { usersRouter } from './modules/users';
 import { userGroupsRouter } from './modules/userGroups';
 import { radioRouter } from './modules/radio';
 import { attachMp3Listener } from './services/radio/pipeline';
-import { icecastAuthRouter } from './modules/icecastAuth';
 import { analyticsRouter, analyticsBeaconRouter } from './modules/analytics';
 import { platformRouter } from './modules/platform';
 import { platformGraphicsRouter } from './modules/platformGraphics';
@@ -372,18 +371,23 @@ export function createServer() {
       const ch = await (await import('./db')).one<any>(
         `SELECT id, name, kind FROM channels WHERE id=$1 AND kind='radio'`, [req.params.id]);
       if (!ch) return res.status(404).end();
-      // CONTAINER MODE: there is no local pipeline to attach to. The preview
-      // and the public URL resolve to the same relay mount, which is a real
-      // change in meaning worth stating: with the station in a container there
-      // is ONE stream, and "preview before going on air" is enforced by
-      // Icecast's listener auth rather than by which endpoint you called.
+      // MP3 ONLY WHERE THE ACCOUNT HAS IT (build queue 2.1c-2): 404 otherwise.
+      if (!(await (await import('./services/radio/mp3Feed')).mp3FeedFor(ch.id))) {
+        return res.status(404).json({ error: 'no MP3 for this station' });
+      }
+      // CONTAINER MODE: there is no local pipeline to attach to, and no relay
+      // any more; the preview is made on demand from the station's HLS, like
+      // the public address.
       const { radioIsContainerised, radioRunState } = await import('./services/radio/state');
       if (radioIsContainerised()) {
         if (!(await radioRunState(ch.id)).running) {
           return res.status(404).json({ error: 'station is not live' });
         }
-        const { publicMp3Url } = await import('./services/radio/jobConfig');
-        return res.redirect(302, publicMp3Url(ch.id));
+        const rc = (await (await import('./db')).one<any>(`SELECT c.radio_config, g.account_id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1`, [ch.id])) ?? {};
+        const { attachListener } = await import('./services/radio/mp3Gateway');
+        const r = await attachListener(ch.id, req as any, res as any, { bitrateKbps: rc.radio_config?.bitrateKbps ?? 128, stationName: ch.name, accountId: rc.account_id ?? null });
+        if (!r.ok) res.status(404).json({ error: 'station is not live' });
+        return;
       }
       const ok = attachMp3Listener(ch.id, req as any, res as any, ch.name);
       if (!ok) return res.status(404).json({ error: 'station is not live' });
@@ -559,10 +563,6 @@ export function createServer() {
   app.use('/api/fast', fastRouter);
   app.use('/fast', fastPublicRouter);
   app.use('/vod-ads', vodAdsPublicRouter);              // on-demand ads: a viewer's stitched or guided playlists, beacons, clicks (public)
-  // Icecast asks this before admitting a listener; it is the on-air gate now
-  // that the control plane is not the one holding the socket. Mounted BEFORE
-  // the authed radio router because the caller is the relay, not a user.
-  app.use('/api/radio/icecast', icecastAuthRouter);
   app.use('/api/radio', radioRouter);                    // radio (audio-only) stations
   app.use('/api/apps', appsRouter);                      // app registration + API keys
   app.use('/api/users', usersRouter);                    // tenant user management (admin+)

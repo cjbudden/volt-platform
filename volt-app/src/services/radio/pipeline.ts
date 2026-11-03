@@ -33,7 +33,7 @@ import { query } from '../../db';
 import type { Response } from 'express';
 import {
   buildRadioArgs, resolveOutputs, isMp3Copy, masterPlaylist,
-  DEFAULT_BITRATE_KBPS, type RadioJobConfig, type IcecastTarget,
+  DEFAULT_BITRATE_KBPS, type RadioJobConfig,
 } from './args';
 
 /** Lifecycle/error telemetry — the same stream_events table channels use, so the
@@ -82,8 +82,6 @@ export interface StartRadioOpts {
   protocol: string;
   url: string;
   cfg: RadioConfig;
-  /** Push MP3 to a relay instead of piping it to us. Null keeps the dev pipe. */
-  icecast?: IcecastTarget | null;
 }
 
 /** Start the station's pipeline. Returns the run id (also the recording run). */
@@ -104,10 +102,7 @@ export function startRadio(opts: StartRadioOpts): { runId: string; pid: number }
   // ONE description of the pipeline, shared with the container. Everything that
   // decides what ffmpeg does now lives in args.ts, so the in-process path here
   // and volt-radio's entrypoint cannot drift into two different stations.
-  //
-  // `icecast: opts.icecast ?? null` is what selects the topology. Null keeps
-  // MP3 on `pipe:1` for the in-process preview, which is the old behaviour and
-  // the reason this path still exists at all.
+  // MP3, when asked for, goes to `pipe:1` for the in-process preview.
   const jobConfig: RadioJobConfig = {
     channelId: opts.channelId,
     protocol: opts.protocol,
@@ -116,10 +111,9 @@ export function startRadio(opts: StartRadioOpts): { runId: string; pid: number }
     bitrateKbps: cfg.bitrateKbps ?? DEFAULT_BITRATE_KBPS,
     transcode: cfg.transcode,
     sourceCodec,
-    icecast: opts.icecast ?? null,
   };
   const mp3Copy = isMp3Copy(jobConfig);
-  const wantsPipe = outs.mp3 && !jobConfig.icecast;
+  const wantsPipe = outs.mp3;
 
   if (outs.dash) mkdirSync(dashDir, { recursive: true });
   const args = buildRadioArgs(jobConfig, { runDir, audioDir, dashDir });

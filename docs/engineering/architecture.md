@@ -14,7 +14,7 @@ AWS. The module-by-module design and the workflows through the modules are in
 | Console | `volt-web/src` (React and Vite), routes in `volt-web/src/App.tsx` | Vite dev server on :5173 | built bundle served by the control plane (`volt-app/test/console-serving.check.sh` holds that to its rules) |
 | Player SDK | `volt-player/src` | built into the console and the embed pages | the same, from the CDN |
 | Live video encoder | `volt-encoder/bin/encoder.py` with ffmpeg and Shaka Packager | a child process (`ORCH_LAUNCHER=local`) or a container (`ORCH_LAUNCHER=docker`) | an ECS task on EC2, Spot first (`ORCH_LAUNCHER=ecs`) |
-| Radio | `volt-encoder/bin/radio.py`, MP3 through an Icecast relay | child process or container, Icecast in Docker on :8000 | an ECS task from its own image (`volt-encoder/Dockerfile.radio`); the stack does not create that image's repository or task definition yet (item 2.1) |
+| Radio | `volt-encoder/bin/radio.py`, HLS and DASH only (no relay since 2.1c-2; MP3, where an account has it, made on demand from the HLS by `volt-app/src/services/radio/mp3Gateway.ts`) | child process or container | an ECS task from its own image (`volt-encoder/Dockerfile.radio`); the stack does not create that image's repository or task definition yet (item 2.1) |
 | FAST playout | `volt-encoder/bin/fast_playout.py`, server side ads in `volt-app/src/services/fast` | child process | one small task per FAST channel (`volt-encoder/Dockerfile.fast`) |
 | Thumbnailer | `volt-encoder/bin/thumbnailer.py` | child process beside the encoder | a task from the encoder image |
 | Captions | `volt-encoder/bin/captions.py` | beside the encoder | sidecar image (`volt-encoder/Dockerfile.captions`) |
@@ -93,7 +93,7 @@ hypermedia links) are in `volt-app/docs/API_STANDARDS.md`.
 ## Where to read more
 
 - Failover and failback: `FAILOVER.md`
-- Radio and the relay: `RADIO.md`, `RELAY.md`
+- Radio: `RADIO.md` (`RELAY.md` is the superseded relay design, kept as a record)
 - FAST playout: `PLAYOUT.md`
 - Edge rights variants: `EDGE_RIGHTS_VARIANTS.md`
 - Placement and consolidation of encoders: `PLACEMENT.md`, `CONSOLIDATION.md`

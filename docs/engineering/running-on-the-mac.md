@@ -1,8 +1,8 @@
 # Running Volt on a Mac
 
 One script brings up the whole product on one Mac: Postgres, the control
-plane, the console, the encoder, the Icecast relay for radio and the customer
-docs. This is the single server the build queue tests against before AWS.
+plane, the console, the encoder and the customer docs (radio needs no relay:
+stations write HLS and DASH). This is the single server the build queue tests against before AWS.
 
 ## What you need
 
@@ -30,7 +30,7 @@ It prints five steps and then the addresses:
 | 2 | checks Docker and starts it if it is installed but not running |
 | 3 | makes sure Postgres answers on :5432, starting a container if it has to |
 | 4 | loads the demo snapshot (`volt_web_demo.sql`) into a fresh database; an existing database is kept. The snapshot is the RTM account, its admin login (the script prints it), two channel groups and two encoding profiles, with the migration ledger, so newer migrations apply on top. It has no channels |
-| 5 | starts the control plane on :8080, the Icecast relay on :8000 and the console on :5173 |
+| 5 | starts the control plane on :8080 and the console on :5173 |
 
 Then it checks and builds the customer docs and serves them on :3000, so the
 **?** button in the console works. The console opens in your browser; the
@@ -41,7 +41,6 @@ docs and every encoder the run started.
 |---|---|
 | http://localhost:5173 | the console |
 | http://localhost:8080 | the API (`/health`, `/api/...`, `/live/...`) |
-| http://localhost:8000 | the Icecast relay (radio MP3) |
 | http://localhost:3000 | the customer docs |
 
 ## Options
@@ -119,7 +118,7 @@ What each step checks, the settings and what a pass looks like:
 
 - **API failed:** the script prints the last lines of
   `volt-app/origin/_control-plane.log`. A port already in use is freed for
-  :8080 and :5173; anything else on :8000 that is not Icecast is named.
+  :8080 and :5173.
 - **API failed after a fresh load or `RESET_DB=1`:** the snapshot must carry
   the migration ledger (`schema_migrations`). One without it (before 25 Oct
   2026) stopped the runner in
@@ -128,8 +127,9 @@ What each step checks, the settings and what a pass looks like:
   does and boots on it; when you regenerate the snapshot, dump a database the
   migration runner has brought up to date (`pg_dump --no-owner --no-privileges`)
   and run that suite.
-- **Stations have no MP3:** there is no Icecast relay, usually because Docker
-  could not start. Stations still go on air over HLS and DASH.
+- **Stations have no MP3:** MP3 is off unless the account has the MP3 feed
+  (`accounts.mp3_feed_enabled`, set through `PATCH /api/platform/accounts/{id}`
+  with `mp3FeedEnabled`). Stations go on air over HLS and DASH either way.
 - **No subtitles on a captioned channel:** the start-up line for the captions
   engine says NOT AVAILABLE and prints the fix.
 - **Hands-on test plans** for failover, captions, recordings and radio on the

@@ -4213,42 +4213,6 @@
  },
  {
   "method": "GET",
-  "path": "/api/platform/relays",
-  "api": "platform",
-  "credential": "platform session (aud volt:platform, after TOTP)",
-  "access": "platform_role (saas_admin / support as the route says)",
-  "viewerTier": false,
-  "group": "/api/platform/relays"
- },
- {
-  "method": "POST",
-  "path": "/api/platform/relays",
-  "api": "platform",
-  "credential": "platform session (aud volt:platform, after TOTP)",
-  "access": "platform_role (saas_admin / support as the route says)",
-  "viewerTier": false,
-  "group": "/api/platform/relays"
- },
- {
-  "method": "PATCH",
-  "path": "/api/platform/relays/:id",
-  "api": "platform",
-  "credential": "platform session (aud volt:platform, after TOTP)",
-  "access": "platform_role (saas_admin / support as the route says)",
-  "viewerTier": false,
-  "group": "/api/platform/relays"
- },
- {
-  "method": "GET",
-  "path": "/api/platform/relays/:id/stations",
-  "api": "platform",
-  "credential": "platform session (aud volt:platform, after TOTP)",
-  "access": "platform_role (saas_admin / support as the route says)",
-  "viewerTier": false,
-  "group": "/api/platform/relays"
- },
- {
-  "method": "GET",
   "path": "/api/platform/signups",
   "api": "platform",
   "credential": "platform session (aud volt:platform, after TOTP)",
@@ -5126,24 +5090,6 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "radio: operate",
-  "viewerTier": false,
-  "group": "/api/radio"
- },
- {
-  "method": "POST",
-  "path": "/api/radio/icecast/listener-auth",
-  "api": "machine",
-  "credential": "Icecast auth callback secret",
-  "access": "callback",
-  "viewerTier": false,
-  "group": "/api/radio"
- },
- {
-  "method": "POST",
-  "path": "/api/radio/icecast/listener-remove",
-  "api": "machine",
-  "credential": "Icecast auth callback secret",
-  "access": "callback",
   "viewerTier": false,
   "group": "/api/radio"
  },

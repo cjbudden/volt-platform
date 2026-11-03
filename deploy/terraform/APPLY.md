@@ -220,9 +220,8 @@ These are queued, not forgotten (`BUILD_QUEUE.md`, and class
   ffmpeg, packager or Python for the jobs that run in it (clip extract, VOD
   encode, loop preparation, intro detection, the FAST render of a slate or
   loop), so on AWS those jobs fail until they run as their own tasks (2.1a-4).
-- **2.1c.** Radio's Icecast relay: stations run (HLS and DASH), but their
-  MP3 output is dropped because no relay is configured. Where it should run
-  is waiting on a decision.
+- **2.1c.** Decided (3 Nov 2026): no relay. Stations run HLS and DASH; the
+  relay and its settings are removed (2.1c-2).
 
 The rest of phase 2 (per-run S3 prefixes, recording retention,
 consolidation, S3 watch folders, WAF blocking, CDN logs) builds on this

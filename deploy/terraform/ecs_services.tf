@@ -209,9 +209,8 @@ resource "aws_ecs_task_definition" "fast" {
 
 # ---- Radio station task definition (one per station; launched by the orchestrator)
 # volt-encoder/Dockerfile.radio: ffmpeg alone, audio in, HLS and DASH into the
-# station's origin prefix and, when an Icecast relay is configured, MP3 pushed
-# to it. With no relay reachable radio.py drops the MP3 output and the HLS and
-# DASH carry on. Container name `radio` is what EcsTaskLauncher.launchRadio
+# station's origin prefix; no MP3 and no relay (build queue 2.1c-2). Container
+# name `radio` is what EcsTaskLauncher.launchRadio
 # overrides. The reservation here is the floor; placement sizes each station
 # with a task-level override (estimateRadioLoad).
 resource "aws_ecs_task_definition" "radio" {

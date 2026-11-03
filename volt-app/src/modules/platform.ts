@@ -76,7 +76,7 @@ platformRouter.get(
   asyncHandler(async (_req, res) => {
     const rows = await query(
       `SELECT a.id, a.name, a.plan_tier, a.max_channels, a.max_concurrent_sources,
-              COALESCE(a.status,'active') AS status, a.created_at, a.x_enabled, (a.x_client_id IS NOT NULL) AS x_own_app,
+              COALESCE(a.status,'active') AS status, a.created_at, a.x_enabled, a.mp3_feed_enabled, (a.x_client_id IS NOT NULL) AS x_own_app,
               (SELECT count(*) FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=a.id) AS channels,
               (SELECT count(*) FROM users u WHERE u.account_id=a.id) AS users
          FROM accounts a ORDER BY a.name`
@@ -162,6 +162,9 @@ const patchAccountSchema = z.object({
   status: z.enum(['active', 'suspended']).optional(),
   /** X for this account on the deployment's X app (build queue 1.14h); off by default. */
   xEnabled: z.boolean().optional(),
+  /** MP3 for this account's radio listeners, made on demand from the HLS (build
+   *  queue 2.1c-2). Off by default until it is decided whether to offer it. */
+  mp3FeedEnabled: z.boolean().optional(),
 });
 
 platformRouter.patch(
@@ -184,10 +187,11 @@ platformRouter.patch(
          max_concurrent_sources=COALESCE($5,max_concurrent_sources),
          status=COALESCE($6,status),
          x_enabled=COALESCE($7,x_enabled),
+         mp3_feed_enabled=COALESCE($8,mp3_feed_enabled),
          updated_at=now()
        WHERE id=$1
-       RETURNING id, name, plan_tier, max_channels, max_concurrent_sources, status, x_enabled, created_at`,
-      [req.params.id, b.name ?? null, b.planTier ?? null, b.maxChannels ?? null, b.maxConcurrentSources ?? null, b.status ?? null, b.xEnabled ?? null]
+       RETURNING id, name, plan_tier, max_channels, max_concurrent_sources, status, x_enabled, mp3_feed_enabled, created_at`,
+      [req.params.id, b.name ?? null, b.planTier ?? null, b.maxChannels ?? null, b.maxConcurrentSources ?? null, b.status ?? null, b.xEnabled ?? null, b.mp3FeedEnabled ?? null]
     );
     if (!row) throw notFound('account not found');
     if (b.status === 'suspended') {
@@ -345,124 +349,11 @@ platformRouter.post(
 );
 
 /* ============================================================================
- *  THE RELAY TIER — SYSTEM ADMIN ONLY, and the boundary is the point.
- *
- *  Everything below is on /api/platform behind requirePlatform, and none of it
- *  is reachable from the tenant API. That is not tidiness, it is the commercial
- *  boundary:
- *
- *    - The relay topology is SHARED infrastructure. One tenant learning which
- *      relay carries their stations learns which relay carries everyone else's.
- *    - relay_accruals and cost_actuals are the platform's own COST BASIS.
- *      Showing a customer what their traffic costs us to serve tells them our
- *      margin, and they will ask for it back.
- *
- *  A client's ACCOUNT ADMIN gets everything about their account: their stations,
- *  their users, their usage, their bill. That is usage_accruals, which is
- *  already account-scoped and stays exactly where it is. What they never get is
- *  the machinery underneath, and the way to keep that true is for it to have no
- *  route on the surface they can reach at all — rather than a route that checks
- *  a role and could one day stop checking.
- * ========================================================================= */
-
-/** The fleet view for relays: assignment, live performance, uptime. */
-platformRouter.get(
-  '/relays',
-  ...requirePlatform('read_only'),
-  asyncHandler(async (_req, res) => {
-    const { relayHealth } = await import('../services/fleet/relays');
-    res.json({ relays: await relayHealth() });
-  })
-);
-
-/** Which stations are on a relay. The direct answer to "what is on this box". */
-platformRouter.get(
-  '/relays/:id/stations',
-  ...requirePlatform('read_only'),
-  asyncHandler(async (req, res) => {
-    const relay = await one<any>(`SELECT id, name FROM relays WHERE id=$1`, [req.params.id]);
-    if (!relay) throw notFound('relay not found');
-    const stations = await query<any>(
-      `SELECT c.id, c.name, c.status, a.name AS account_name
-         FROM channels c
-         JOIN groups g ON g.id = c.group_id
-         JOIN accounts a ON a.id = g.account_id
-        WHERE c.relay_id = $1 AND c.kind = 'radio'
-        ORDER BY c.name`, [relay.id]);
-    res.json({ relay, stations });
-  })
-);
-
-const relayBody = z.object({
-  name: z.string().min(1),
-  sourceHost: z.string().min(1),
-  sourcePort: z.number().int().positive().optional(),
-  sourceUser: z.string().optional(),
-  tls: z.boolean().optional(),
-  // The NAME of a secret, never a secret. See relays.secret_ref.
-  secretRef: z.string().optional(),
-  publicBase: z.string().optional(),
-  adminBase: z.string().optional(),
-  maxListeners: z.number().int().positive().optional(),
-  region: z.string().optional(),
-  hostId: z.string().uuid().optional(),
-  note: z.string().optional(),
-});
-
-platformRouter.post(
-  '/relays',
-  ...requirePlatform('saas_admin'),
-  asyncHandler(async (req, res) => {
-    const b = relayBody.parse(req.body);
-    const row = await one<any>(
-      `INSERT INTO relays(name, source_host, source_port, source_user, tls, secret_ref,
-                          public_base, admin_base, max_listeners, region, host_id, note)
-       VALUES ($1,$2,COALESCE($3,8000),COALESCE($4,'source'),COALESCE($5,false),$6,$7,$8,$9,$10,$11,$12)
-       RETURNING *`,
-      [b.name, b.sourceHost, b.sourcePort ?? null, b.sourceUser ?? null, b.tls ?? null,
-       b.secretRef ?? null, b.publicBase ?? null, b.adminBase ?? null,
-       b.maxListeners ?? null, b.region ?? null, b.hostId ?? null, b.note ?? null]);
-    res.status(201).json(row);
-  })
-);
-
-/**
- * DRAINING IS THE INTERESTING TRANSITION, which is why state is not a boolean.
- *
- * Retiring a relay must stop it taking NEW stations while the stations already
- * on it keep broadcasting. 'offline' is the harder statement — it makes every
- * station on this relay reassign on its next start — and an operator must be
- * able to say the first without accidentally saying the second.
- */
-platformRouter.patch(
-  '/relays/:id',
-  ...requirePlatform('saas_admin'),
-  asyncHandler(async (req, res) => {
-    const b = z.object({
-      state: z.enum(['active', 'draining', 'offline']).optional(),
-      publicBase: z.string().nullable().optional(),
-      maxListeners: z.number().int().positive().nullable().optional(),
-      hostId: z.string().uuid().nullable().optional(),
-      note: z.string().nullable().optional(),
-    }).parse(req.body);
-    const row = await one<any>(
-      `UPDATE relays SET
-         state = COALESCE($2, state),
-         public_base = CASE WHEN $3::boolean THEN $4 ELSE public_base END,
-         max_listeners = CASE WHEN $5::boolean THEN $6 ELSE max_listeners END,
-         host_id = CASE WHEN $7::boolean THEN $8 ELSE host_id END,
-         note = CASE WHEN $9::boolean THEN $10 ELSE note END,
-         updated_at = now()
-       WHERE id=$1 RETURNING *`,
-      [req.params.id, b.state ?? null,
-       'publicBase' in b, b.publicBase ?? null,
-       'maxListeners' in b, b.maxListeners ?? null,
-       'hostId' in b, b.hostId ?? null,
-       'note' in b, b.note ?? null]);
-    if (!row) throw notFound('relay not found');
-    res.json(row);
-  })
-);
+ *  COSTS — SYSTEM ADMIN ONLY. usage_accruals and cost_actuals are the
+ *  platform's own cost basis, so none of this is reachable from the tenant
+ *  API. (The relay tier and its routes were removed with the relay, build
+ *  queue 2.1c-2; its tables are left in place, unread.)
+ * ========================================================================== */
 
 /**
  * ESTIMATED AGAINST ACTUAL — the reason for accruing anything at all.
@@ -476,7 +367,7 @@ platformRouter.get(
   ...requirePlatform('read_only'),
   asyncHandler(async (req, res) => {
     const months = Math.min(36, Math.max(1, Number(req.query.months ?? 6) || 6));
-    const { costComparison } = await import('../services/fleet/relays');
+    const { costComparison } = await import('../services/fleet/costs');
     res.json({ months, rows: await costComparison(months) });
   })
 );

@@ -139,20 +139,11 @@ export const config = {
     //
     // 'container' is the default now. The read side was migrated off the
     // in-process table onto the instance row plus status reports, which is what
-    // was blocking it, and the whole path is covered end to end against a real
-    // relay by test/radio-container.check.sh.
+    // was blocking it, and the whole path is covered end to end by
+    // test/radio-container.check.sh.
     //
-    // THIS HAS A DEPLOYMENT PREREQUISITE. A station pushes MP3 to Icecast, so
-    // ICECAST_HOST and friends must point at a running relay.
-    //
-    // That sentence used to end "the MP3 output fails while HLS and DASH carry
-    // on regardless", and that was simply FALSE. One ffmpeg carries every
-    // output and opens them all before encoding anything, so a refused
-    // icecast:// connection killed the process and no HLS or DASH was written
-    // either — the station produced nothing, exited rc=195 a second after
-    // start, and was relaunched by auto connect twenty seconds later, forever.
-    // bin/radio.py now probes the relay first and drops the MP3 output when it
-    // is unreachable, which is what makes the claim true. Set
+    // No deployment prerequisite beyond the origin: a station writes HLS and
+    // DASH and pushes nothing anywhere (there is no relay, 2.1c-2). Set
     // RADIO_MODE=inprocess to
     // get the old behaviour back, which is the only reason that path still
     // exists; it cannot be deployed, replicated or reaped like anything else
@@ -231,25 +222,11 @@ export const config = {
      */
     settleSeconds: Number(process.env.HEALTH_SETTLE_SECONDS ?? 90),
   },
-  // RADIO RELAY. The Icecast tier that fans MP3 out to listeners. The station
-  // container is a SOURCE client; nothing in the control plane sits in the
-  // audio path, which is what lets a station survive an API restart.
-  //
-  // `publicBase` is what a listener is given and is normally the CDN or load
-  // balancer in front of Icecast, NOT `host:port` — those are how the station
-  // reaches the relay from inside the VPC and must never be handed to a client.
-  icecast: {
-    host: process.env.ICECAST_HOST ?? 'localhost',
-    port: Number(process.env.ICECAST_PORT ?? 8000),
-    sourceUser: process.env.ICECAST_SOURCE_USER ?? 'source',
-    sourcePassword: process.env.ICECAST_SOURCE_PASSWORD ?? 'hackme',
-    tls: process.env.ICECAST_TLS === '1',
-    publicBase: process.env.ICECAST_PUBLIC_BASE ?? '',
-    // Shared secret the relay presents when it asks us whether to admit a
-    // listener. Empty disables the check, which is only safe when the relay
-    // can reach the control plane on a network nobody else can.
-    authSecret: process.env.ICECAST_AUTH_SECRET ?? '',
-  },
+  // NO RADIO RELAY (build queue 2.1c-2, Christian 3 Nov 2026). Stations write
+  // HLS and DASH only; the Icecast relay tier, its ICECAST_* settings and the
+  // listener-auth gate are gone. An Icecast or SHOUTcast mount is still a
+  // SOURCE a station can pull. MP3 for listeners, where an account has it, is
+  // made on demand from the HLS (services/radio/mp3Gateway.ts).
   // NOW-PLAYING ENRICHMENT. Turning a station's ICY string into an album and a
   // cover, via MusicBrainz and the Cover Art Archive.
   //

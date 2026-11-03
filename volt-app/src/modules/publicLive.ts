@@ -155,6 +155,12 @@ publicLiveRouter.get(
     if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
     const ch = await one<any>(`SELECT id, name, status, on_air, kind FROM channels WHERE id=$1 AND kind='radio'`, [id]);
     if (!ch || !ch.on_air) { res.status(404).json({ available: false, reason: 'not_on_air' }); return; }
+    // NO MP3 UNLESS THE ACCOUNT HAS IT (build queue 2.1c-2): 404, the same
+    // answer as a station that has no MP3 at all, before anything else is asked.
+    if (!(await (await import('../services/radio/mp3Feed')).mp3FeedFor(id))) {
+      res.status(404).json({ available: false, reason: 'no_mp3' });
+      return;
+    }
     const { radioHasValidContent } = await import('../services/radio/detail');
     if (ch.status !== 'live' || !radioHasValidContent(id)) {
       res.status(503).json({ available: false, reason: 'no_valid_content' });
@@ -174,26 +180,12 @@ publicLiveRouter.get(
     // measurement per-listener — every one of which a relay or a CDN in front of
     // one would have collapsed into a single anonymous connection.
     //
-    // A station that pushes to a relay is still supported (radio_config
-    // outputs.mp3), and where one is configured its public URL still points at
-    // the relay. This route is the on-demand path.
-    // THREE TOPOLOGIES, and the discriminator is not "is mp3 enabled".
-    //
-    // `outputs.mp3` means different things in different modes, which is exactly
-    // the confusion to avoid here:
-    //
+    // There is no relay (build queue 2.1c-2). Where the account has MP3 on
+    // (checked above), two topologies remain:
     //   legacy in-process   the control plane spawns the station's ffmpeg and
-    //                       reads MP3 off its stdout. mp3 enabled means WE have
-    //                       the bytes; serve them from the pipeline.
-    //   container + relay   the station PUSHES to a relay. mp3 enabled means the
-    //                       audio is somewhere else, so redirect: proxying would
-    //                       put the control plane back in the audio path, which
-    //                       is the thing containerising radio removed.
-    //   container, no relay the station writes HLS and knows nothing of MP3.
-    //                       Derive it on demand.
-    //
-    // Keying on `outputs.mp3` alone read the legacy case as the relay case and
-    // sent a 302 to a mount nothing was pushing to.
+    //                       reads MP3 off its stdout; serve it from there.
+    //   container           the station writes HLS and knows nothing of MP3:
+    //                       derive it on demand.
     const rc = (await one<any>(`SELECT radio_config FROM channels WHERE id=$1`, [id]))?.radio_config ?? {};
     const { radioIsContainerised } = await import('../services/radio/state');
     if (!radioIsContainerised()) {
@@ -201,11 +193,6 @@ publicLiveRouter.get(
       if (!attachMp3Listener(id, req as any, res as any, ch.name)) {
         res.status(503).json({ available: false, reason: 'no_valid_content' });
       }
-      return;
-    }
-    if (rc?.outputs?.mp3 === true) {
-      const { publicMp3Url } = await import('../services/radio/jobConfig');
-      res.redirect(302, publicMp3Url(id));
       return;
     }
     const acct = await one<any>(

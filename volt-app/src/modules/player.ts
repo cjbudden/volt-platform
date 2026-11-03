@@ -37,7 +37,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { verifyKey, checkRestrictions, appForKey } from '../services/apiKeys';
 import { cachedTrackMeta, buildCard, parseIcyTitle } from '../services/radio/trackMeta';
-import { publicMp3Url } from '../services/radio/jobConfig';
+import { mp3FeedFor, publicMp3Path } from '../services/radio/mp3Feed';
 import { icyState } from '../services/radio/icyMeta';
 import { cached } from '../scale/cache';
 import { scaleConfig } from '../scale/config';
@@ -177,7 +177,8 @@ playerRouter.post('/session', asyncHandler(async (req, res) => {
     // back without another round trip when a manifest fails on somebody's
     // corporate network.
     sources: {
-      mp3: publicMp3Url(ch.id),
+      // MP3 only where the account has the on-demand feed (build queue 2.1c-2).
+      mp3: (await mp3FeedFor(ch.id)) ? `${base}${publicMp3Path(ch.id)}` : null,
       hls: `${base}/live/${ch.id}/master.m3u8`,
       dash: `${base}/live/${ch.id}/manifest.mpd`,
     },

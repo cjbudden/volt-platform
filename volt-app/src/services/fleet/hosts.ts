@@ -165,7 +165,7 @@ export async function liveHosts(): Promise<LiveHost[]> {
         -- shape rather than a decision, and it would stop being true the moment
         -- anything gives a relay a task. Stated explicitly so the protection
         -- does not depend on a join that was written for another reason.
-        -- The system-admin view is /api/platform/relays.
+        -- (The radio relay tier itself was removed in 2.1c-2.)
         AND h.role = 'compute'
       GROUP BY h.id
       ORDER BY h.kind, h.external_id`

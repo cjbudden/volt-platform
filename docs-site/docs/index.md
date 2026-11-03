@@ -15,7 +15,7 @@ Volt runs your live and on-demand video and audio from one place. You bring a so
 |---|---|
 | **Channels** | 24/7 TV channels: one source in, a full set of adaptive bitrate outputs (HLS and DASH) out, with backup sources, failover and catch-up |
 | **Events** | One-off or scheduled live events with a countdown, a public window, paid or members-only access and a replay afterwards |
-| **Radio** | Audio-only stations with MP3, HLS and DASH outputs, now-playing metadata and a log of what was played |
+| **Radio** | Audio-only stations with HLS and DASH outputs, now-playing metadata and a log of what was played |
 | **Recordings and clips** | Everything that goes out is recorded, so you can find a moment, cut a clip and publish it |
 | **Media library** | On-demand assets, images, slates and loops, with search and a URL-based image service |
 | **Programme guide (EPG)** | A schedule per channel or event, with per-programme geo access, replacement and automatic conversion to on-demand |

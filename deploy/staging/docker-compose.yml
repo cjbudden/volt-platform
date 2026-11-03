@@ -61,12 +61,6 @@ x-volt-env: &volt-env
   # encoder image built (see volt-encoder/README).
   ORCH_LAUNCHER: ${ORCH_LAUNCHER:-mock}
   RADIO_MODE: container
-  ICECAST_HOST: icecast
-  ICECAST_PORT: "8000"
-  ICECAST_SOURCE_USER: source
-  ICECAST_SOURCE_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
-  ICECAST_PUBLIC_BASE: ${PUBLIC_BASE_URL:-http://localhost}:8000
-  ICECAST_AUTH_SECRET: ${ICECAST_AUTH_SECRET:-staging-relay-secret}
   PREWARM_MODE: log
 
 x-volt-app: &volt-app
@@ -125,17 +119,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-
-  icecast:
-    image: libretime/icecast:2.4.4
-    restart: unless-stopped
-    environment:
-      ICECAST_SOURCE_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
-      ICECAST_ADMIN_PASSWORD: ${ICECAST_ADMIN_PASSWORD:-hackme}
-      ICECAST_RELAY_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
-      ICECAST_PASSWORD: ${ICECAST_SOURCE_PASSWORD:-hackme}
-    ports:
-      - "8000:8000"
 
   # Owns the schema (migrates on boot) and serves the console + admin API.
   api-admin:

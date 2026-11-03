@@ -24,7 +24,7 @@ import type { ViewerCtx } from '../services/accessRules';
 import { cached } from '../scale/cache';
 import { config, mediaBaseUrl } from '../config';
 import { manifestUrls } from '../services/shareLinks';
-import { publicMp3Url } from '../services/radio/jobConfig';
+import { mp3FeedFor, publicMp3Path } from '../services/radio/mp3Feed';
 import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
 import { adsForPlay } from '../services/vodAds';
 
@@ -405,7 +405,8 @@ async function deliveryFor(kind: string, assetId: string, acct: string, sid?: st
     const [h, d] = await Promise.all([resolveLiveManifest(assetId, 'master.m3u8', sid), resolveLiveManifest(assetId, 'manifest.mpd')]);
     if (!(h.ok && d.ok)) return null;
     const m = await assetMeta(acct, 'channel', assetId);
-    return { hls: h.url, dash: d.url, mp3: m?.radio ? publicMp3Url(assetId) : null };
+    // MP3 only where the account has the on-demand feed (build queue 2.1c-2).
+    return { hls: h.url, dash: d.url, mp3: m?.radio && await mp3FeedFor(assetId) ? `${config.publicBaseUrl.replace(/\/+$/, '')}${publicMp3Path(assetId)}` : null };
   }
   if (kind === 'vod') {
     const m = await assetMeta(acct, 'vod', assetId);

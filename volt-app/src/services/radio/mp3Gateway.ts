@@ -339,7 +339,7 @@ function endListener(feed: Feed, l: Listener, reason: string): void {
 /** A listener's IP, hashed. We need to count and rate-limit, not to identify. */
 function hashIp(ip: string | undefined): string | null {
   if (!ip) return null;
-  return createHash('sha256').update(`${ip}:${config.icecast.authSecret || 'volt'}`)
+  return createHash('sha256').update(`${ip}:${config.jwt.accessSecret || 'volt'}`)
     .digest('hex').slice(0, 32);
 }
 
