@@ -587,7 +587,14 @@ export async function timelineFor(channelId: string, from: Date, to: Date) {
     }
   }
   const ladder = lm.ladder ? { groupId: lm.ladder.groupId, name: lm.ladder.groupName, segmentSeconds: lm.ladder.segmentSeconds, fps: lm.ladder.fps, rungs: lm.ladder.rungs } : null;
-  return { channelId, segmentSec: SEGMENT_SEC, from: from.toISOString(), to: to.toISOString(), adsMode: ads.mode, ladder, items };
+  // TRICK-PLAY (build queue 3.2b-5): the switch on the channel's output profile
+  // (its group's), as for a live channel. The playout reads it when it starts and
+  // then writes I-frame playlists into the same segments it lists; off, it
+  // writes none and the master names none.
+  const trick = await one<{ on: boolean }>(
+    `SELECT COALESCE(op.trick_play, false) AS on FROM channels c JOIN groups g ON g.id = c.group_id
+       LEFT JOIN output_profiles op ON op.id = g.output_profile_id WHERE c.id = $1`, [channelId]);
+  return { channelId, segmentSec: SEGMENT_SEC, from: from.toISOString(), to: to.toISOString(), adsMode: ads.mode, ladder, trickPlay: !!trick?.on, items };
 }
 
 // ---------------------------------------------------------------- decisions

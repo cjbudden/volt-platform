@@ -938,7 +938,10 @@ fastPublicRouter.get('/:id/s/:sid/:file', asyncHandler(async (req, res) => {
   res.type('application/vnd.apple.mpegurl');
   const text = await readChannelPlaylist(id, file);
   if (text == null) throw notFound('The channel is not playing');
-  if (file === 'master.m3u8') return res.send(text); // relative media URIs resolve under this session's path
+  // Relative media URIs resolve under this session's path. The channel's I-frame
+  // playlists (trick-play) index the house fill, not this session's stitched
+  // ads, so a session master does not offer them.
+  if (file === 'master.m3u8') return res.send(text.split('\n').filter((l) => !l.startsWith('#EXT-X-I-FRAME-STREAM-INF')).join('\n'));
   // SESSION STATE IS SHARED (sessionStore.ts): refreshes land on any API task.
   const ctx = await sessionStore.context(sid, () => ({ channelId: id, ip: req.ip, userAgent: req.header('user-agent') ?? null, country: req.header('cloudfront-viewer-country') ?? null }));
   const track = file.replace(/\.m3u8$/, '');

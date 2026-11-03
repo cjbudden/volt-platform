@@ -39,6 +39,15 @@ Rules
   player's graphics all key on the same break.
 * MEDIA SEQUENCE NUMBERS NEVER REPEAT OR GO BACK: state.json keeps the counters,
   so a restart continues the numbering.
+* TRICK-PLAY (build queue 3.2b-5), only when the channel's output profile has
+  the switch on (the timeline says `trickPlay`; read once, at start, like a
+  live channel): v<height>.iframes.m3u8 per video rung, one entry per listed
+  segment, a byte range from the segment's moof to the end of its opening
+  keyframe. Nothing new is encoded or stored: the ranges point into the same
+  segments the media playlists list, so breaks, slates and loops are covered
+  exactly as they air. Finding a range costs one small ranged read of the
+  segment's head, once per segment (cached, and loops repeat their segments).
+  The master lists them once every rung has one.
 
 The core (Playout) is pure: no IO, an injected clock. main() does the IO.
 """
@@ -157,12 +166,15 @@ def parse_mpd_timelines(text):
 
 class Track:
     """One rendition of one asset: init + segments with media start times."""
-    def __init__(self, init, segs, base):
+    def __init__(self, init, segs, base, key_base=None):
         self.init = base + init if init and not init.startswith(("/", "http")) else init
         self.segs = []
         t = 0.0
         for i, (u, d) in enumerate(segs):
-            self.segs.append({"uri": base + u if not u.startswith(("/", "http")) else u, "dur": d, "start": t, "index": i})
+            # src: where the segment is STORED (a /clips/ path or a bucket key), for
+            # reading its head (trick-play); uri is how a player fetches it.
+            src = (key_base + u) if key_base is not None and not u.startswith(("/", "http")) else None
+            self.segs.append({"uri": base + u if not u.startswith(("/", "http")) else u, "dur": d, "start": t, "index": i, "src": src})
             t += d
         self.duration = t
 
@@ -173,18 +185,18 @@ class Track:
 
 class AssetMedia:
     """An asset's tracks, read from its VOD master (+ MPD for DASH)."""
-    def __init__(self, master_text, media_texts, url_base, mpd_text=None):
+    def __init__(self, master_text, media_texts, url_base, mpd_text=None, key_base=None):
         variants, audio = parse_master(master_text)
         self.video = {}
         for v in variants:
             init, segs = parse_media_playlist(media_texts[v["uri"]])
-            tr = Track(init, segs, url_base)
+            tr = Track(init, segs, url_base, key_base)
             tr.meta = v
             self.video[v["height"]] = tr
         self.audio = None
         if audio and audio in media_texts:
             init, segs = parse_media_playlist(media_texts[audio])
-            self.audio = Track(init, segs, url_base)
+            self.audio = Track(init, segs, url_base, key_base)
         self.dash = parse_mpd_timelines(mpd_text) if mpd_text else None
         self.url_base = url_base
 
@@ -382,7 +394,7 @@ class Playout:
                         tags.append(f'#EXT-X-CUE-OUT-CONT:ElapsedTime={el:.3f},Duration={float(p["break"]["durationSec"]):.3f}')
                     elif k == 0 and i > 0 and parts[i - 1].get("break_close"):
                         tags.append("#EXT-X-CUE-IN")
-                    entries[n].append({"uri": sg["uri"], "dur": sg["dur"], "pdt": pdt, "map": tr.init, "key": p["key"], "idx": sg["index"],
+                    entries[n].append({"uri": sg["uri"], "src": sg.get("src"), "dur": sg["dur"], "pdt": pdt, "map": tr.init, "key": p["key"], "idx": sg["index"],
                                        "disc": k == 0, "tags": tags})
             t_anchor += part_dur
         # each track: drop what it has already published
@@ -463,6 +475,39 @@ class Playout:
             L.append(f"#EXT-X-PROGRAM-DATE-TIME:{iso(s['pdt'])}")
             L.append(f"#EXTINF:{s['dur']:.3f},")
             L.append(s["uri"])
+        return "\n".join(L) + "\n"
+
+    def iframes(self, name, kf):
+        """The I-frame playlist of a video track: one entry per listed segment,
+        the byte range of its opening keyframe (kf: segment uri -> (offset,
+        length), see keyframe_range). Numbered like the media playlist (an entry
+        has its segment's media sequence number and discontinuity count), so a
+        player can line the two up. A segment whose range is not known yet
+        cannot be skipped without breaking that numbering, so the list starts
+        after the last such segment; None when nothing can be listed."""
+        pub = self.t[name]["pub"]
+        start = 0
+        for k, sg in enumerate(pub):
+            if kf.get(sg["uri"]) is None:
+                start = k + 1
+        pub = pub[start:]
+        if not pub:
+            return None
+        target = max(1, int(math.ceil(max(s["dur"] for s in pub))))
+        L = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{target}",
+             f"#EXT-X-MEDIA-SEQUENCE:{pub[0]['msn']}", f"#EXT-X-DISCONTINUITY-SEQUENCE:{pub[0]['dnum']}", "#EXT-X-I-FRAMES-ONLY"]
+        cur_map = None
+        for k, sg in enumerate(pub):
+            if k > 0 and sg["disc"]:
+                L.append("#EXT-X-DISCONTINUITY")
+            if sg["map"] != cur_map or (k > 0 and sg["disc"]):
+                L.append(f'#EXT-X-MAP:URI="{sg["map"]}"')
+                cur_map = sg["map"]
+            off, ln = kf[sg["uri"]]
+            L.append(f"#EXT-X-PROGRAM-DATE-TIME:{iso(sg['pdt'])}")
+            L.append(f"#EXTINF:{sg['dur']:.3f},")
+            L.append(f"#EXT-X-BYTERANGE:{ln}@{off}")
+            L.append(sg["uri"])
         return "\n".join(L) + "\n"
 
     # ------------------------------------------------------------------ DASH out
@@ -592,6 +637,139 @@ def hex_to_b64(h):
     return base64.b64encode(bytes.fromhex(h)).decode()
 
 
+# ---------------------------------------------------------------------- trick-play
+
+TRICK_HEAD_BYTES = 16384   # a moof is a few hundred bytes to a few KB; read more only if it is bigger
+
+
+def _box_walk(d, i, end):
+    while i + 8 <= end:
+        size = int.from_bytes(d[i:i + 4], "big")
+        typ = d[i + 4:i + 8]
+        hdr = 8
+        if size == 1:
+            if i + 16 > end:
+                return
+            size, hdr = int.from_bytes(d[i + 8:i + 16], "big"), 16
+        elif size == 0:
+            size = end - i
+        if size < hdr:
+            return
+        yield typ, i, i + hdr, i + size
+        i += size
+
+
+def keyframe_range(head):
+    """(offset, length) of a CMAF segment's opening keyframe, from the start of
+    its first moof to the end of its first sample: what an I-frame playlist's
+    BYTERANGE names (the same rule as on-demand, services/trickplay/iframes.ts).
+
+    `head` is the segment's first bytes. Returns ("more", n) when the moof is
+    not all in `head` (read n bytes and ask again), or None when there is no
+    usable keyframe: no moof, the sample size is not in the moof (it would be
+    in the init's trex), or the first sample is not a sync sample.
+    """
+    n = len(head)
+    for typ, hs, ps, pe in _box_walk(head, 0, n):
+        if typ != b"moof":
+            continue
+        if pe > n:
+            return ("more", pe)
+        moof_start = hs
+        traf = next(((p2, e2) for t2, _h2, p2, e2 in _box_walk(head, ps, pe) if t2 == b"traf"), None)
+        if traf is None:
+            return None
+        tfhd = trun = None
+        for t3, _h3, p3, e3 in _box_walk(head, traf[0], traf[1]):
+            if t3 == b"tfhd":
+                tfhd = (p3, e3)
+            elif t3 == b"trun" and trun is None:
+                trun = (p3, e3)
+        if tfhd is None or trun is None:
+            return None
+        # tfhd: base data offset, default sample size and flags
+        f = int.from_bytes(head[tfhd[0] + 1:tfhd[0] + 4], "big")
+        o = tfhd[0] + 8
+        base = moof_start  # default-base-is-moof (CMAF), and the rule for the first traf without one
+        if f & 0x01:
+            base = int.from_bytes(head[o:o + 8], "big")
+            o += 8
+        if f & 0x02:
+            o += 4
+        if f & 0x08:
+            o += 4
+        def_size = def_flags = None
+        if f & 0x10:
+            def_size = int.from_bytes(head[o:o + 4], "big")
+            o += 4
+        if f & 0x20:
+            def_flags = int.from_bytes(head[o:o + 4], "big")
+        # trun: data offset, first sample's size and flags
+        tf = int.from_bytes(head[trun[0] + 1:trun[0] + 4], "big")
+        if int.from_bytes(head[trun[0] + 4:trun[0] + 8], "big") < 1:
+            return None
+        o = trun[0] + 8
+        data = 0
+        if tf & 0x001:
+            data = int.from_bytes(head[o:o + 4], "big", signed=True)
+            o += 4
+        first_flags = None
+        if tf & 0x004:
+            first_flags = int.from_bytes(head[o:o + 4], "big")
+            o += 4
+        if tf & 0x100:
+            o += 4
+        size = def_size
+        if tf & 0x200:
+            size = int.from_bytes(head[o:o + 4], "big")
+            o += 4
+        if tf & 0x400 and first_flags is None:
+            first_flags = int.from_bytes(head[o:o + 4], "big")
+        flags = first_flags if first_flags is not None else def_flags
+        if not size:
+            return None
+        if flags is not None and flags & 0x00010000:  # sample_is_non_sync_sample
+            return None
+        end = base + data + size
+        if end <= moof_start:
+            return None
+        return (moof_start, end - moof_start)
+    return None
+
+
+def video_codecs(codecs):
+    """The video part of a variant's CODECS: an I-frame stream has no audio."""
+    v = [c for c in (codecs or "").split(",") if c.strip() and not c.strip().startswith(("mp4a", "ac-3", "ec-3", "opus", "flac"))]
+    return ",".join(c.strip() for c in v)
+
+
+def master_with_iframes(master, play, kf):
+    """The master with an EXT-X-I-FRAME-STREAM-INF per video rung, or None while
+    any rung has no I-frame playlist yet (the master never names a playlist that
+    is not there). BANDWIDTH is the peak keyframe rate over what is listed."""
+    lines = master.splitlines()
+    rungs = [(i, lines[i + 1].strip()[:-len(".m3u8")]) for i, L in enumerate(lines)
+             if L.startswith("#EXT-X-STREAM-INF:") and i + 1 < len(lines) and lines[i + 1].strip()[:-len(".m3u8")] in play.t]
+    if not rungs or any(play.iframes(n, kf) is None for _, n in rungs):
+        return None
+    extra = []
+    for i, name in rungs:
+        L = lines[i]
+        pub = [sg for sg in play.t[name]["pub"] if kf.get(sg["uri"])]
+        peak = max(int(kf[sg["uri"]][1] * 8 / max(sg["dur"], 0.001)) for sg in pub)
+        co = re.search(r'CODECS="([^"]+)"', L)
+        res = re.search(r"RESOLUTION=(\d+x\d+)", L)
+        attrs = [f"BANDWIDTH={peak}"]
+        vc = video_codecs(co.group(1) if co else "")
+        if vc:
+            attrs.append(f'CODECS="{vc}"')
+        if res:
+            attrs.append(f"RESOLUTION={res.group(1)}")
+        attrs.append(f'URI="{name}.iframes.m3u8"')
+        extra.append("#EXT-X-I-FRAME-STREAM-INF:" + ",".join(attrs))
+    return "\n".join([L for L in lines if L] + extra) + "\n"
+
+
 def master_playlist(assets_any, tracks, ladder=None):
     """The multivariant playlist. Each variant's attributes come from an asset
     that carries that exact rung (its real CODECS and BANDWIDTH); a rung no
@@ -653,6 +831,37 @@ def _write(path, text):
 
 
 CONTENT_TYPES = {".m3u8": "application/vnd.apple.mpegurl", ".mpd": "application/dash+xml", ".json": "application/json"}
+
+
+class KeyframeCache:
+    """Keyframe ranges of segments, found by reading each segment's head once.
+    Bounded (loops and house spots repeat their segments, so the window plus
+    a few thousand recent ones covers them). A failed read is retried on later
+    ticks, up to three times, then the segment stays out of the I-frame list
+    (and the list starts after it, see Playout.iframes)."""
+    def __init__(self, reader, cap=5000):
+        self.reader, self.cap, self.kf, self.tries = reader, cap, {}, {}
+
+    def resolve(self, segs):
+        for sg in segs:
+            u = sg["uri"]
+            if u in self.kf or not sg.get("src") or self.tries.get(u, 0) >= 3:
+                continue
+            try:
+                head = self.reader.read_range(sg["src"], 0, TRICK_HEAD_BYTES)
+                r = keyframe_range(head)
+                if isinstance(r, tuple) and r and r[0] == "more" and r[1] <= 1 << 20:
+                    r = keyframe_range(self.reader.read_range(sg["src"], 0, r[1]))
+                if isinstance(r, tuple) and r and r[0] != "more":
+                    self.kf[u] = r
+                    continue
+                self.tries[u] = 3  # read fine, no usable keyframe: do not ask again
+            except Exception as e:
+                self.tries[u] = self.tries.get(u, 0) + 1
+                print(f"[fast] keyframe of {sg['src']} not read: {e}", file=sys.stderr)
+        if len(self.kf) > self.cap:
+            for u in list(self.kf)[: len(self.kf) - self.cap]:
+                del self.kf[u]
 
 
 class LocalSink:
@@ -719,6 +928,24 @@ class MediaReader:
                 return r.read().decode()
         raise OSError(f"no way to read {key}: not under /clips and no S3 or media base configured")
 
+    def read_range(self, key, start, end):
+        """Bytes [start, end) of a stored file (fewer at its end): the head of a
+        segment, for its keyframe range. Never the whole segment."""
+        if key.startswith("/clips/"):
+            with open(self.clips_dir.rstrip("/") + key[len("/clips"):], "rb") as f:
+                f.seek(start)
+                return f.read(end - start)
+        k = key.lstrip("/")
+        rng = f"bytes={start}-{end - 1}"
+        if self.s3 is not None and self.bucket:
+            return self.s3.get_object(Bucket=self.bucket, Key=k, Range=rng)["Body"].read()
+        if self.media_base:
+            req = urllib.request.Request(f"{self.media_base}/{k}", headers={"Range": rng})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                b = r.read()
+                return b[start:end] if r.status == 200 else b
+        raise OSError(f"no way to read {key}: not under /clips and no S3 or media base configured")
+
     def exists(self, key):
         try:
             self.read(key)
@@ -745,7 +972,7 @@ def load_asset(master_key, clips_dir="clips", url_prefix="", reader=None):
         mpd = reader.read(f"{folder}/manifest.mpd")
     except Exception:
         mpd = None
-    return AssetMedia(master, media, url_base, mpd)
+    return AssetMedia(master, media, url_base, mpd, key_base=folder + "/")
 
 
 def config_from_env_and_args():
@@ -800,6 +1027,7 @@ def main():
 
     assets, play, tl, tl_at, trig, trig_at, beat_at, unreadable = {}, None, None, 0, [], 0, 0, set()
     play_ladder = None
+    trick, kfc, master_txt, master_has_iframes = False, KeyframeCache(reader), None, False
     while True:
         now = time.time()
         try:
@@ -834,7 +1062,10 @@ def main():
                         continue
                     tracks = [f"v{h}" for h in (want or sorted(first.video, reverse=True))] + (["audio"] if first.audio else [])
                     play = Playout(tracks, dvr_sec=a.dvr, seg_sec=float(tl.get("segmentSec", 2)), state=state)
-                    sink.put("master.m3u8", master_playlist(first, tracks, ladder))
+                    master_txt = master_playlist(first, tracks, ladder)
+                    sink.put("master.m3u8", master_txt)
+                    # read once, like a live channel's profile: a change takes effect on the next start
+                    trick = bool(tl.get("trickPlay"))
                     play_ladder = (ladder or {}).get("groupId")
                 elif (tl.get("ladder") or {}).get("groupId") != play_ladder:
                     # the channel's ladder changed: the tracks are fixed for this run (a player
@@ -857,6 +1088,18 @@ def main():
                 txt = play.hls(n, trig)
                 if txt:
                     sink.put(f"{n}.m3u8", txt)
+            if trick:
+                vids = [n for n in play.tracks if n != "audio"]
+                for n in vids:
+                    kfc.resolve(play.t[n]["pub"])
+                    txt = play.iframes(n, kfc.kf)
+                    if txt:
+                        sink.put(f"{n}.iframes.m3u8", txt)
+                if not master_has_iframes:
+                    m2 = master_with_iframes(master_txt, play, kfc.kf)
+                    if m2:
+                        sink.put("master.m3u8", m2)
+                        master_has_iframes = True
             mpd = play.dash(assets, now, trig)
             if mpd:
                 sink.put("manifest.mpd", mpd)

@@ -221,7 +221,8 @@ process.env.INGEST_TOKEN ??= 'z';
         writeFileSync(join(out, `${tr}.m3u8.tmp`), L.join('\n') + '\n');
         renameSync(join(out, `${tr}.m3u8.tmp`), join(out, `${tr}.m3u8`));
       }
-      writeFileSync(join(out, 'master.m3u8'), '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nv360.m3u8\n');
+      // With trick-play on the playout also lists the channel's I-frame playlist (3.2b-5).
+      writeFileSync(join(out, 'master.m3u8'), '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nv360.m3u8\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=90000,CODECS="avc1.64001e",RESOLUTION=640x360,URI="v360.iframes.m3u8"\n');
     };
     writer = setInterval(write, 200);
     while (Date.now() < T0 + 2300) await sleep(100);
@@ -245,6 +246,10 @@ process.env.INGEST_TOKEN ??= 'z';
     await sleep(1500); // the last sends finish
     clearInterval(writer); writer = null;
 
+    // A session's master: the channel's I-frame playlists index the house fill,
+    // not this viewer's stitched ads, so they are not offered (3.2b-5).
+    const sm = await (await fetch(`${base}/fast/${ch}/s/${S1.sid}/master.m3u8`)).text();
+    ok(sm.includes('v360.m3u8') && !sm.includes('I-FRAME'), 'a session master offers no I-frame playlist (trick-play indexes the house fill)', sm);
     const stitchedSeen = (v: Viewer) => v.got.some((t) => t.includes(`/clips/vod/${aA}/`));
     ok(stitchedSeen(S1) && stitchedSeen(S2), 'S1 and S2 were given the stitched pod (ad A segments in their playlists)');
     ok(!stitchedSeen(S3) && S3.got.some((t) => t.includes('/clips/house/')), 'S3, joining mid-break, was given the house fill');

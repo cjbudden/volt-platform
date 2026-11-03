@@ -71,6 +71,8 @@ Programmers and channel managers use it.
 2. Open **On air**. The channel starts **Private**: only the console can preview it. Turn it on to give viewers the channel. It can be turned on only once a run order is active: before that the switch reads **Activate the run order first** and the channel has nothing to play.
 3. **Playout** shows where the channel runs, when it was last heard from, restarts and segments published. **Media** lists every title, house spot and slate it uses.
 
+**Trick-play.** When the output profile of the channel's group has **Trick-play for Apple and smart-TV players** on (see [Account settings](account-settings.md#turn-on-trick-play-for-apple-and-smart-tv-players)), the channel's HLS lists a keyframe list for each video size from its next start, so Apple devices and smart TVs show pictures while viewers scrub back. Ad breaks and slates show their own pictures as they air. Nothing is re-encoded or stored. Viewers who get their own ads (stitched per viewer) are not offered it, since the list shows the house fill rather than their ads.
+
 ### Change a channel that is on air
 
 1. Edit the run order. Volt makes a draft; the channel keeps playing the active version.
