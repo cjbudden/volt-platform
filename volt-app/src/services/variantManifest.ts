@@ -510,6 +510,11 @@ export async function renderVariant(inp: {
     return { body: renderVariantMpd(text, { timeline: inp.timeline, loop, base, key: inp.key, shiftSec: inp.shiftSec }), type: 'application/dash+xml' };
   }
   if (isMaster(text)) return { body: renderVariantMaster(text, inp.carry ?? ''), type: 'application/vnd.apple.mpegurl' };
+  // An I-frame playlist (trick-play, 3.2b-3) indexes the live segments by byte
+  // range, so the loop cannot be swapped into it: a variant master never lists
+  // one, and one asked for by name is refused rather than served with the
+  // programme's pictures inside a window.
+  if (/#EXT-X-I-FRAMES-ONLY/.test(text)) throw new VariantError('trick-play (I-frame) playlists are not offered in a rights variant');
   const loop = inp.timeline.length ? await loadLoop(inp.kind, inp.id) : null;
   return {
     body: renderVariantMedia(text, { timeline: inp.timeline, loop, base, emptyVtt: 'empty.vtt', shiftSec: inp.shiftSec }),

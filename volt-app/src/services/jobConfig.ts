@@ -46,6 +46,8 @@ export interface ProfileRow {
   caption_targets?: string[];
   caption_offset_sec?: number;
   drm_enabled?: boolean;
+  /** Trick-play for Apple and smart-TV players (build queue 3.2b, live 3.2b-3). */
+  trick_play?: boolean;
 }
 export interface DrmRow {
   scheme: string;
@@ -163,6 +165,11 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       poll_sec: 5,
     },
   };
+
+  // I-frame playlists from the packager (encoder.py build_shaka), HLS only: a
+  // DASH-only profile has no HLS master to list them in. Sent only when on, so
+  // an encoder image from before 3.2b-3 sees exactly the config it knew.
+  if (profile.trick_play && profile.packaging !== 'dash') cfg.trick_play = true;
 
   if (profile.workflow_type === 'transcode') {
     // one mezzanine input; we build the ladder from the profile rungs

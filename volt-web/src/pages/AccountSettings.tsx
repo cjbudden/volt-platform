@@ -101,7 +101,7 @@ function TrickPlayCard({ accountDefault, canEdit, onSaved }: { accountDefault: b
       const r = await api.patchOutputProfile(id, { trickPlay: on })
       setProfiles(ps => (ps ?? []).map(p => p.id === id ? { ...p, trick_play: r.trick_play } : p))
       notify({ kind: 'ok', message: on
-        ? `Trick-play is on for ${name}. Its on-demand media gets I-frame playlists within a few minutes, without a re-encode.`
+        ? `Trick-play is on for ${name}. Its on-demand media gets I-frame playlists within a few minutes, without a re-encode; its live channels and events from their next start.`
         : `Trick-play is off for ${name}. Its media no longer lists I-frame playlists.` })
     } catch (e: any) { setErr(e?.message || 'Could not save') } finally { setBusy('') }
   }
@@ -117,7 +117,7 @@ function TrickPlayCard({ accountDefault, canEdit, onSaved }: { accountDefault: b
       <div className="sec-label" style={{ marginTop: 0 }}>Trick-play for Apple and smart-TV players</div>
       <div className="hintxt" style={{ marginTop: 0, marginBottom: 12 }}>
         Apple devices, Safari and many smart TVs show pictures while scrubbing and fast-forwarding from a keyframe list (I-frame playlists).
-        With it on, Volt lists one for on-demand media made with that output profile, read from the segments it already has: nothing is re-encoded.
+        With it on, Volt lists one for on-demand media made with that output profile, and for its live channels and events from their next start, read from the segments it already has: nothing is re-encoded.
         The Volt web player scrubs with its own preview images either way. Off by default.
       </div>
       <div className="toggle-row">

@@ -72,7 +72,9 @@ Apple devices (iPhone, iPad, Apple TV), Safari and many smart TVs show pictures 
 3. To stop, turn the switch off. Within a minute the lists are no longer offered to players. What was made is kept, so turning it on again takes effect at once.
 4. **New output profiles start with it on** sets what a profile you create from now on starts with. Profiles that exist keep their own setting.
 
-Which profile applies: a clip or a full recording follows the output profile of its channel's or event's group; an uploaded or watch-folder file follows the live profile its encoding ladder mirrors (see [Encoding Profiles](encoding-profiles.md)), and otherwise the account default. The Volt web player scrubs with its own preview images either way, so web viewers are unaffected. Apps built with the Volt iOS player get trick-play from Apple's own player, with nothing to set up. Live channels and FAST channels are not covered yet.
+Which profile applies: a clip or a full recording follows the output profile of its channel's or event's group; an uploaded or watch-folder file follows the live profile its encoding ladder mirrors (see [Encoding Profiles](encoding-profiles.md)), and otherwise the account default. The Volt web player scrubs with its own preview images either way, so web viewers are unaffected. Apps built with the Volt iOS player get trick-play from Apple's own player, with nothing to set up.
+
+**Live channels and events** get I-frame playlists in their HLS from their next start once their group's output profile has trick-play on (a running stream keeps what it started with). Not yet covered for live: DASH trick-mode, FAST channels, streams with ad breaks or slates spliced in, and viewers in a rights blackout, who get the stream without trick-play rather than pictures of the programme they may not see.
 
 ![The Trick-play for Apple and smart-TV players card: the account default for new output profiles, then a switch for each output profile](/img/screens/account-settings-trick-play.png)
 

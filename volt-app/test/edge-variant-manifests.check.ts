@@ -15,7 +15,7 @@
 //    DATABASE_URL=... npx tsx test/edge-variant-manifests.check.ts
 // ============================================================================
 process.env.TRUST_EDGE_GEO = '1';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, utimesSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, utimesSync, renameSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -268,6 +268,25 @@ function segsOf(text: string) {
     check('...MY gets the normal stream, not a variant', [my.status, my.loc], [302, `/origin/${ch}/live/master_cc.m3u8`]);
     x = await get(`/live/${ch}/v/${kAU}/stream_1_cc.m3u8?as=MY`);
     check('...MY asking for AU\'s variant by name gets its own (the normal stream through the same path)', [x.status, x.variant, x.text.includes('/filler/')], [200, 'none', false]);
+    // TRICK-PLAY ON A LIVE CHANNEL (3.2b-3): the packager's I-frame playlist
+    // indexes the programme's own segments, so a blacked-out audience never
+    // gets it, listed or asked for by name; everyone else keeps it.
+    process.env.VARIANT_SOURCE_CACHE_MS = '0';
+    writeFileSync(join(run, 'master_cc.m3u8'), readFileSync(join(run, 'master_cc.m3u8'), 'utf8') + '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=400000,CODECS="avc1.64001f",RESOLUTION=1280x720,URI="720p.iframes.m3u8"\n');
+    writeFileSync(join(run, '720p.iframes.m3u8'), ['#EXTM3U', '#EXT-X-VERSION:6', '#EXT-X-TARGETDURATION:4', '#EXT-X-MEDIA-SEQUENCE:0', '#EXT-X-I-FRAMES-ONLY',
+      '#EXT-X-MAP:URI="720p/init.mp4"', `#EXT-X-PROGRAM-DATE-TIME:${iso(t0)}`, '#EXTINF:4.000,', '#EXT-X-BYTERANGE:40000@1024', '720p/seg_1.m4s',
+      `#EXT-X-PROGRAM-DATE-TIME:${iso(now - 10)}`, '#EXTINF:4.000,', '#EXT-X-BYTERANGE:40000@1024', '720p/seg_39.m4s', ''].join('\n'));
+    x = await get(`/live/${ch}/v/${kAU}/master.m3u8?as=AU`);
+    check('trick-play: AU\'s variant master lists no I-frame playlist', [x.status, x.text.includes('I-FRAME'), x.text.includes('stream_1_cc.m3u8')], [200, false, true]);
+    x = await get(`/live/${ch}/v/${kAU}/720p.iframes.m3u8?as=AU`);
+    check('...asked for by name in AU\'s window: refused, never the programme\'s pictures', [x.status, x.j?.reason, x.text.includes('seg_39')], [503, 'variant_unavailable', false]);
+    x = await get(`/channel/${ch}/v/${kAU}/720p.iframes.m3u8`, { 'CloudFront-Viewer-Country': 'AU' });
+    check('...the same through the CDN-shaped path', [x.status, x.text.includes('seg_39')], [503, false]);
+    x = await get(`/live/${ch}/master.m3u8?as=MY`);
+    check('...MY is sent to the normal master, which lists it', [x.status, x.loc, readFileSync(join(run, 'master_cc.m3u8'), 'utf8').includes('URI="720p.iframes.m3u8"')], [302, `/origin/${ch}/live/master_cc.m3u8`, true]);
+    unlinkSync(join(run, '720p.iframes.m3u8'));
+    writeOutput();
+    delete process.env.VARIANT_SOURCE_CACHE_MS;
     x = await get(`/live/${ch}/v/${kAU}/stream_1_cc.m3u8?as=CN`);
     check('...a country the channel blocks: 451 on the variant path too', [x.status, x.j?.reason], [451, 'geo']);
     x = await get(`/live/${ch}/v/${kAU}/stream_1_cc.m3u8?as=FJ`);

@@ -1069,6 +1069,14 @@ def _audio_descriptor(in_url, slot, lang, name, default):
     return ",".join(parts)
 
 
+def iframe_playlist_name(label):
+    """The I-frame playlist of a video rendition, beside the master. Only the
+    characters a playlist name may safely carry (the label comes from the
+    rendition label of a package-only input)."""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(label)) or "video"
+    return f"{safe}.iframes.m3u8"
+
+
 def build_shaka(cfg, keys):
     seg = cfg["segment_seconds"]
     channel = cfg["channel_id"]
@@ -1080,6 +1088,13 @@ def build_shaka(cfg, keys):
         rends = [(i, f"{r['height']}p", False) for i, r in enumerate(cfg["ladder"])]
 
     cmd = [PACKAGER_BIN]
+    # TRICK-PLAY (build queue 3.2b-3): with the output profile's switch on, the
+    # packager writes an I-frame playlist per video rendition beside the master
+    # (<label>.iframes.m3u8) and lists it there as EXT-X-I-FRAME-STREAM-INF.
+    # Byte ranges into the segments it already writes: no new media, nothing
+    # re-encoded. Off (the default) nothing changes. Read at start, so a
+    # channel picks a change up on its next start.
+    trick_play = bool(cfg.get("trick_play"))
     # VIDEO streams (audio for transcode is added separately below; for package_only
     # audio still rides with each input that carries it).
     audio_slot = 0
@@ -1089,6 +1104,7 @@ def build_shaka(cfg, keys):
         cmd.append(
             f"in={udp_out(idx)},stream=video,"
             f"init_segment={vinit},segment_template={vseg}"
+            + (f",iframe_playlist_name={iframe_playlist_name(label)}" if trick_play else "")
         )
         # package_only: keep each source input's audio, but give every track its OWN
         # output dir + language so multiple audio inputs no longer overwrite one another.
@@ -1643,6 +1659,13 @@ def _write_companion(out_dir, langs, default_lang, seg_dur):
             return
     out, inserted, expect_uri = [], False, False
     for line in src:
+        # PLAYOUT SPLICES WHAT THE I-FRAME PLAYLISTS DO NOT SEE (build queue
+        # 3.2b-3). The packager's I-frame playlists index its own segments; with
+        # playout on, viewers get ad breaks and slates spliced in instead, so a
+        # scrubbing player would show the programme under a break. Left out of
+        # the delivered master while playout runs.
+        if spliced is not None and line.startswith("#EXT-X-I-FRAME-STREAM-INF"):
+            continue
         if spliced is not None and line.startswith("#EXT-X-MEDIA:") and "TYPE=AUDIO" in line:
             mo = re.search(r'URI="([^"]+)"', line)
             if mo and mo.group(1) in spliced:
