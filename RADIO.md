@@ -286,6 +286,25 @@ blank rather than drawn as a quiet bar. Bar height is the square root of linear
 peak amplitude, so speech at -13 dBFS reads as speech, not as a soft hum. When the operator does press Listen, the Web Audio analyser adds a
 live spectrum overlay on top: detail, never the proof of signal.
 
+## Songs in the manifest, read at the playhead (3 Nov 2026, build queue 1.7b)
+
+DVR must show what was playing where the listener is, not what is playing now.
+Every song in the ICY content log becomes a timed entry in the station's own
+manifests: an `EXT-X-DATERANGE` with `CLASS="com.boomlabs.volt.song"` (HLS) and
+an Event in `urn:com:boomlabs:volt:song:2026` (DASH), with `X-TITLE`,
+`X-ARTIST`, `X-STARTED` and, once settled, `X-ALBUM`, `X-ARTWORK` (the cover
+stored on the guide entry, never the live lookup's link) and `X-LISTEN-URL`.
+The control plane builds them (`volt-app/src/services/radio/songTriggers.ts`)
+and hands them to the container on the timed-events poll (six hours back); the
+container places them (`volt-encoder/bin/timed_events.py`), keeping only those
+inside each playlist's own window. Nothing already written changes: `DURATION`
+is added when the next entry starts, the cover and album when found. The Volt
+player reads them at its playhead (`volt-player/src/sdk/songs.ts`): now
+playing, the last five, and the next song, or at the live edge the guide's next
+programme; it no longer calls the now-playing API, which stays for websites,
+apps and partners. Checked by `test/radio-songs.check.ts` and, through the
+real container, `test/radio-id3.check.ts`.
+
 ## Validate source (24 Oct 2026)
 
 The station form's **Validate source** button (it was "View metadata") answers

@@ -241,6 +241,16 @@ ingestRouter.get(
     if (to.getTime() - from.getTime() > 6 * 3600_000 || to <= from) throw badRequest('window must be positive and at most six hours');
     const { triggersForStream, wireFormat } = await import('../services/graphicTriggers');
     const list = await triggersForStream(kind, id, from, to);
+    // SONGS, for a radio station (build queue 1.7b): every logged song as a
+    // timed entry the player reads at its playhead. Further back than the
+    // graphics (a listener scrubs the DVR), up to the six hours a window may
+    // span; the encoder keeps only those inside each playlist's own window.
+    if (kind === 'channel') {
+      const { songTriggersForStream } = await import('../services/radio/songTriggers');
+      const songFrom = req.query.from ? from : new Date(Math.max(now - 6 * 3600_000 + (to.getTime() - now), now - 6 * 3600_000 + 60_000));
+      const songs = await songTriggersForStream(id, songFrom, to).catch(() => null);
+      if (songs) list.push(...songs);
+    }
     res.setHeader('Cache-Control', 'no-store');
     // breaks: the ad-break windows on their own, for a burn-in compositor that
     // must take graphics off air during a break (the same windows the triggers carry)

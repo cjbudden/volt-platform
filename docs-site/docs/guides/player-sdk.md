@@ -38,7 +38,7 @@ The Volt player is the same player everywhere Volt plays: your websites and apps
 | `audio_nowplaying` | Large artwork, track details, the last five tracks and what is coming up |
 | `audio_radio` | A station player: the programme on air and how far through it is, a waveform, and a Coming up banner before the next programme |
 
-The audio skins show, best first: the track now playing (with artwork), otherwise the programme on air, otherwise the item's own title and artwork.
+The audio skins show, best first: the track now playing (with artwork), otherwise the programme on air, otherwise the item's own title and artwork. On a radio station the player reads the songs from the station's own playlists at the point being listened to: after going back an hour it shows that hour's song, the songs before it and the next one, counting down. At the live edge, where the next song is not known yet, **Coming up** shows the next programme from the guide. The player makes no now-playing request for this; `POST /api/public/player/now-playing` stays for websites, apps and partners that want now playing without playing the station.
 
 ## Before you start
 
@@ -81,7 +81,7 @@ The example above wires **Next** to `player.next()` and calls `player.setTheme(.
 
 ### State
 
-The player's state includes: `status` (idle, loading, ready, playing, paused, buffering, ended, error, offline, or `locked` when a purchase or sign-in is needed), `playing`, `error`, `currentTime`, `duration`, `live`, `dvr`, `atLiveEdge`, `behindLive`, `programme`, `nextProgramme`, `schedule`, `canStartOver`, `qualities`, `quality`, `textTracks`, `audioTracks`, `items`, `index`, `item`, `upNext`, `ad` (an on-demand ad on screen), `nowPlaying`, `history`, `cast`, `airplay`, `fullscreen`, `pip`, `volume`, `muted`, and for events `event`, `presentation`, `msToStart`, `access` and `replaying`.
+The player's state includes: `status` (idle, loading, ready, playing, paused, buffering, ended, error, offline, or `locked` when a purchase or sign-in is needed), `playing`, `error`, `currentTime`, `duration`, `live`, `dvr`, `atLiveEdge`, `behindLive`, `programme`, `nextProgramme`, `schedule`, `canStartOver`, `qualities`, `quality`, `textTracks`, `audioTracks`, `items`, `index`, `item`, `upNext`, `ad` (an on-demand ad on screen), `nowPlaying`, `history`, `nextTrack`, `cast`, `airplay`, `fullscreen`, `pip`, `volume`, `muted`, and for events `event`, `presentation`, `msToStart`, `access` and `replaying`.
 
 ## Themes
 

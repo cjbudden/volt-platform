@@ -35,6 +35,8 @@ RUN ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx icecast \
 
 WORKDIR /app
 COPY bin/radio.py /app/bin/radio.py
+# Stamps ffmpeg's log lines with the time they were written (radio.py imports it).
+COPY bin/logstamp.py /app/bin/logstamp.py
 COPY bin/events.py /app/bin/events.py
 # In-stream graphic triggers (Up next) in the delivered playlists: radio.py imports it.
 COPY bin/timed_events.py /app/bin/timed_events.py

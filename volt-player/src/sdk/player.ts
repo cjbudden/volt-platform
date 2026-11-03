@@ -18,12 +18,13 @@ import { Beacons } from './beacons';
 import { Caster, contentTypeFor, showAirPlayPicker, watchAirPlay } from './cast';
 import { applyTheme, resolveTheme } from './theme';
 import { canStartOver, cleanSchedule, hasSource, normalizePlaylist, programmeAfter, programmeAt, startOverTarget, upNextFor } from './schedule';
-import { defaultApiBase, fetchEvent, fetchNowPlaying, fetchSchedule, fillUrl, GateError, mergeResolved, resolveAsset } from './resolver';
+import { defaultApiBase, fetchEvent, fetchSchedule, fillUrl, GateError, mergeResolved, resolveAsset } from './resolver';
 import { getSkin } from './skins';
 import { STRINGS, format } from './strings';
 import { injectBaseStyles } from './skins/kit';
 import { GraphicsOverlay, snapshotAt, mergeSnapshots, cameOn, feedUrl, type OverlayDef, type OverlaySnapshot } from './overlay';
 import { activeAt, adBreakAt, fromDashRegion, fromHlsRegions, fromNativeCues, mergeGraphics, upNextFromGraphic } from './triggers';
+import { songsAt } from './songs';
 import type { TriggerReport } from './engine';
 import { errorCode, errorStep } from './engine';
 import { CmcdSender, PlayAttempt, deviceModel, identityKeys } from './cmcd';
@@ -31,7 +32,6 @@ import { VodAds } from './ads';
 import { StatsPanel, bindDebugMenu, combineProbes, mediaProbe, isDebugKey, watchConnection, SDK_VERSION, type StatsSample } from './stats';
 
 const EPG_REFRESH_MS = 5 * 60_000;
-const NOW_PLAYING_MS = 15_000;
 const store = {
   get(k: string): string | null { try { return localStorage.getItem(`volt-player:${k}`); } catch { return null; } },
   set(k: string, v: string): void { try { localStorage.setItem(`volt-player:${k}`, v); } catch { /* private mode */ } },
@@ -91,6 +91,8 @@ export class VoltPlayer {
   private dismissedFor: string | null = null;
   /** In-stream graphic triggers seen so far for this item, by id (sdk/triggers.ts). */
   private streamGraphics = new Map<string, StreamGraphic>();
+  /** What the last songs update said, so state changes only when they do. */
+  private songKey = '';
   private activeGraphicIds = '';
   /** HTML graphics from the console (sdk/overlay.ts): the layer, its graphics, their state over time. */
   private overlay: GraphicsOverlay | null = null;
@@ -207,7 +209,8 @@ export class VoltPlayer {
 
     if (this.o.epg) void this.loadSchedule();
     if (this.o.eventId && this.o.appKey) await this.pollEvent();
-    if (this.o.stationId && this.o.appKey) void this.pollNowPlaying();
+    // A station's now playing is read from its own playlists at the playhead
+    // (sdk/songs.ts, build queue 1.7b): no now-playing API calls.
     this.tick = setInterval(() => this.derive(), 500);
     if (items.length) await this.load(Math.min(Math.max(0, this.o.startIndex ?? 0), items.length - 1), !!this.o.autoplay);
     this.emit('ready');
@@ -439,7 +442,9 @@ export class VoltPlayer {
     const list = r.kind === 'hls' ? fromHlsRegions(r.regions)
       : r.kind === 'dash' ? [fromDashRegion(r.region)].filter((g): g is StreamGraphic => !!g)
       : fromNativeCues(r.cues);
-    if (list.length) mergeGraphics(this.streamGraphics, list, this.media.currentTime - 3600);
+    // Six hours kept behind the playhead: a listener scrubbing a station's DVR
+    // still has the songs of where they go (sdk/songs.ts).
+    if (list.length) mergeGraphics(this.streamGraphics, list, this.media.currentTime - 6 * 3600);
   }
 
   /** Twice a second: the clock-driven parts (live position, programme, up next). */
@@ -462,7 +467,8 @@ export class VoltPlayer {
     const fillerNow = !adBreak && this.fillerAt(e.live, wallClock);
     const graphics = !graphicsOn ? [] : adBreak ? [adBreak]
       : fillerNow ? activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic === 'up-next')
-      : activeAt(this.streamGraphics.values(), currentTime);
+      // Songs are data for now playing (sdk/songs.ts), not something drawn.
+      : activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic !== 'song');
     // No guide loaded: the stream's own programme marker names what is on.
     // Read whether or not graphics are drawn: now / next is data, not a graphic.
     const inband = !sched.length && e.presentationStart != null ? activeAt(this.streamGraphics.values(), currentTime).find((g) => g.graphic === 'programme') : undefined;
@@ -544,6 +550,14 @@ export class VoltPlayer {
     const fillerProg = fillerNow ? this.fillerAt(e.live, wallClock) : null;
     const between: PlayerState['between'] = adBreak ? { kind: 'break', resumesAt: breakEnds, next: programme }
       : fillerProg ? { kind: 'filler', resumesAt: (nextProgramme ?? fillerProg.next)?.startsAt ?? fillerProg.endsAt, next: nextProgramme ?? fillerProg.next } : null;
+    // SONGS AT THE PLAYHEAD (1.7b): only when the stream carries them, so a
+    // station that sends no titles keeps whatever it had (the programme).
+    const songs = songsAt(this.streamGraphics.values(), currentTime, e.presentationStart, guideNext);
+    const songKey = songs.carries ? `${songs.nowPlaying?.startedAt ?? ''}|${songs.nowPlaying?.title ?? ''}|${songs.nowPlaying?.artworkUrl ?? ''}|${songs.next?.title ?? ''}|${songs.next?.startedAt ?? ''}|${songs.history.map((h) => h.startedAt).join(',')}` : '';
+    if (songs.carries && songKey !== this.songKey) {
+      this.songKey = songKey;
+      this.set({ nowPlaying: songs.nowPlaying, history: songs.history, nextTrack: songs.next });
+    }
     this.root.classList.toggle('vp-between', !!between);
     this.root.classList.toggle('vp-in-break', !!adBreak);
     this.set({
@@ -803,15 +817,6 @@ export class VoltPlayer {
     };
     await run();
     if (!Array.isArray(this.o.epg)) this.timers.push(setInterval(run, EPG_REFRESH_MS));
-  }
-
-  private async pollNowPlaying() {
-    const run = async () => {
-      const r = await fetchNowPlaying(this.api, this.o.appKey!, this.o.stationId!).catch(() => null);
-      if (r && !this.destroyed) this.set({ nowPlaying: r.nowPlaying, history: r.history, nextTrack: r.next });
-    };
-    await run();
-    this.timers.push(setInterval(run, NOW_PLAYING_MS));
   }
 
   // -------------------------------------------------------------- media wiring

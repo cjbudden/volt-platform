@@ -35,6 +35,8 @@ export const CLASS_GRAPHIC = 'com.boomlabs.volt.graphic';
 /** DASH schemes. Versioned so the payload can change shape without breaking old players. */
 export const SCHEME_GRAPHIC = 'urn:com:boomlabs:volt:graphic:2026';
 export const SCHEME_PROGRAMME = 'urn:com:boomlabs:volt:programme:2026';
+/** A radio station's songs (services/radio/songTriggers.ts, build queue 1.7b). */
+export const SCHEME_SONG = 'urn:com:boomlabs:volt:song:2026';
 
 export interface ScheduleItem {
   id: string;
@@ -128,7 +130,8 @@ export interface Trigger {
   id: string;
   cls: string;
   /** What to draw. 'programme' is the boundary marker; the rest are graphics. */
-  graphic: 'programme' | 'ad' | 'up-next' | 'ad-break';
+  /** 'song': a radio station's song, at its playhead (services/radio/songTriggers.ts, 1.7b). */
+  graphic: 'programme' | 'ad' | 'up-next' | 'ad-break' | 'song';
   start: Date;
   /** Null for an open-ended programme. */
   durationSec: number | null;
@@ -310,7 +313,7 @@ export function dashEvent(t: Trigger): { schemeIdUri: string; value: string; id:
   const data: Record<string, string> = {};
   for (const [k, v] of Object.entries(t.data)) data[k.toLowerCase()] = String(v);
   return {
-    schemeIdUri: t.graphic === 'up-next' ? SCHEME_GRAPHIC : t.graphic === 'ad-break' ? SCHEME_AD : SCHEME_PROGRAMME,
+    schemeIdUri: t.graphic === 'up-next' ? SCHEME_GRAPHIC : t.graphic === 'ad-break' ? SCHEME_AD : t.graphic === 'song' ? SCHEME_SONG : SCHEME_PROGRAMME,
     value: t.graphic,
     id: t.id,
     start: t.start.toISOString(),

@@ -17,6 +17,8 @@
 //  ffmpeg's own files (what recordings and clips read) left untouched; audio in
 //  the tagged copies byte-identical to the originals.
 //
+//  The same run checks the songs as DATERANGEs and a DASH EventStream in the
+//  delivered manifests (build queue 1.7b; the rules are radio-songs.check.ts).
 //  Placement details on fixed inputs are volt-encoder/bin/test_id3_emsg.py.
 //  Usage: DATABASE_URL=... npx tsx test/radio-id3.check.ts
 // ============================================================================
@@ -236,8 +238,25 @@ function hlsSegments(text: string): { uri: string; start: number; dur: number }[
   const order = frames.map((f) => f.at);
   check('tags in time order', order.every((x, i) => i === 0 || x >= order[i - 1]), true);
 
+  // ---- songs as DATERANGEs, the real path (build queue 1.7b) -------------------
+  // Each logged song is in the delivered playlist at the moment it changed,
+  // as the station container placed it from the timed-events poll.
+  const songTags = cc.split('\n').filter((l) => l.startsWith('#EXT-X-DATERANGE:') && l.includes('CLASS="com.boomlabs.volt.song"'));
+  const loggedSongs = (await query<any>(`SELECT title, starts_at FROM programmes WHERE channel_id = $1 AND metadata->>'source' = 'icy' AND COALESCE(metadata->>'class','song') = 'song' ORDER BY starts_at`, [C]));
+  const winLo = Date.parse(/#EXT-X-PROGRAM-DATE-TIME:(\S+)/.exec(cc)?.[1] ?? '');
+  const lastPdt = [...cc.matchAll(/#EXT-X-PROGRAM-DATE-TIME:(\S+)/g)].pop()?.[1];
+  const winHi = Date.parse(lastPdt ?? '') + SEG * 1000;
+  // A song is in once a poll (5 s) and a write (1 s) have passed since it
+  // started: those that started in the last few seconds of the run may not be.
+  const inWin = loggedSongs.filter((r) => { const t = new Date(r.starts_at).getTime(); return t >= winLo - 60_000 && t <= winHi - (5 + 1 + 2) * 1000; });
+  check(`the delivered playlist carries the logged songs as song DATERANGEs (${inWin.length} in the window)`, songTags.length > 0 && inWin.length >= 2 && inWin.every((r) => songTags.some((l) => l.includes(`START-DATE="${new Date(r.starts_at).toISOString()}"`))), true);
+  const aurora = songTags.find((l) => l.includes('X-TITLE="Neon Rain"'));
+  check('with the title and artist split', !!aurora && aurora.includes('X-ARTIST="Aurora Skies"'), true);
+  check('a song that has ended says how long it ran; only the one on air is open', songTags.filter((l) => !/DURATION=/.test(l)).length <= 1, true);
+
   // ---- DASH -----------------------------------------------------------------
   const mpd = readFileSync(join(run, 'dash', 'manifest_cc.mpd'), 'utf8');
+  check('the delivered MPD carries the songs as an EventStream', /<EventStream schemeIdUri="urn:com:boomlabs:volt:song:2026"/.test(mpd), true);
   check('the delivered MPD declares the ID3 InbandEventStream', mpd.includes('<InbandEventStream schemeIdUri="https://aomedia.org/emsg/ID3" value=""/>'), true);
   check('inside the AdaptationSet, ahead of the Representation', mpd.indexOf('InbandEventStream') > mpd.indexOf('<AdaptationSet') && mpd.indexOf('InbandEventStream') < mpd.indexOf('<Representation'), true);
   const media = /media="([^"]+)"/.exec(mpd)?.[1] ?? '';

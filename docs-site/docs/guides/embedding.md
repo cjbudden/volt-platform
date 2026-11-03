@@ -42,7 +42,7 @@ The key is a **publishable** key (`pk_live_...`). It is meant to be public: it w
 | `data-playlist` | Several ids, separated by commas |
 | `data-src` | A manifest URL to play directly |
 | `data-epg-channel` | A channel id whose programme guide to show |
-| `data-station-id` | A radio station, for now-playing information |
+| `data-station-id` | A radio station. Now playing is read from the station's own stream, at the point being listened to |
 | `data-theme` | Theme settings as JSON, for example `'{"radius":4,"logoUrl":"https://example.com/logo.png"}'` |
 | `data-logo`, `data-poster` | A logo, and an image shown before the first frame |
 | `data-autoplay`, `data-muted` | Start by itself, start muted |

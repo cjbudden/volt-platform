@@ -68,7 +68,7 @@ Starting a station needs a real source that Volt can reach. In your deployment t
 ### 3. What listeners get
 
 - **MP3 stream** (where your account has it): the current title is passed through as the stream's own now-playing text, so hardware receivers, car radios and apps like VLC show it.
-- **HLS and DASH:** each title change is carried in the audio as timed metadata, so web and app players that read it (Safari, and the common web players) show the song at the moment it is heard.
+- **HLS and DASH:** each title change is carried in the audio as timed metadata, so web and app players that read it (Safari, and the common web players) show the song at the moment it is heard. Each song is also listed in the playlists themselves with its title, artist and, once found, album and cover, so a listener who goes back in time sees the song that was playing at that point, the ones before it and the one that came next.
 - **The Volt player:** choose **Player** on the station's page to style an embeddable player with the audio skins. They show the track now playing with its artwork, otherwise the programme on air. See [Embed the player](../guides/embedding.md) and the [player SDK](../guides/player-sdk.md).
 
 ### 4. Read now playing on the station page

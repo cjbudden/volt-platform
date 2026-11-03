@@ -1971,3 +1971,14 @@ What: Christian decided (3 Nov) there is no relay. Stations write HLS and DASH; 
 - **Docs**: RELAY.md and DECISION_mp3_delivery.md superseded with the decision, RADIO.md, engineering guides, APPLY.md, customer guides (Radio, radio now-playing, overview, how Volt fits together, home, live streams, analytics, play gate); Radio screenshot retaken.
 - **Checked**: mp3-feed 20/20, radio-container (no relay) 20/20, radio 44/44, radio-args 43/43, orchestrator ok and 22 more suites green (see the queue row); browser 4/4.
 - **Not done / waiting**: whether to offer MP3 as a compatibility feed is Christian's decision (the switch is ready, off). Relay tables stay in the database, unread.
+
+## 2026-11-03 - Songs in the manifest, read at the playhead (build queue 1.7b; vRELVER)
+
+What: Christian (3 Nov): DVR must show what was playing where the listener is. Every logged song is a timed entry in the station's HLS and DASH; the player reads it at its playhead and stops polling the now-playing API.
+
+- **Server** (`volt-app/src/services/radio/songTriggers.ts`, `services/graphicTriggers.ts` song scheme, `modules/status.ts` timed-events): song triggers from the ICY log, six hours back for radio, attributes only ever added (DURATION when the next entry starts, X-ARTWORK and X-ALBUM once settled).
+- **Encoder**: placement unchanged (`timed_events.py`), trimmed to each playlist's window; `Dockerfile.radio` now copies `logstamp.py` (missing since 26 Oct, radio.py imports it).
+- **Player** (`volt-player/src/sdk/songs.ts`, `player.ts`): now playing, history and next at the playhead; live edge next from the guide; no now-playing calls.
+- **Docs**: RADIO.md, radio now-playing workflow, player SDK, embedding.
+- **Checked**: radio-songs 25/25, radio-id3 40/40 (real container), graphic-triggers 47/47, player-triggers 38/38, player-sdk 47/47, player-sdk-api 28/28, live-scte35 43/43, now-playing 32/32, radio 44/44, timed-metadata 37/37, hls-master-pure 27/27, test_timed_events 65/65, test_id3_emsg 51/51, test_radio_triggers 22/22; typechecks clean.
+- **Not done**: a browser playing a real station (no AAC in the container's Chromium): Christian to check in Safari and Chrome on the Mac.
