@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.39.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- improved · Channels: Live channels and events with trick-play on keep their I-frame playlists while the slate or loop is on air after the source drops (or when you force it). Scrubbing over that stretch shows the slate or loop, never the programme it covered.
+
+### Internal
+
+- added · Encoder: test_splice_trick_play.py: delivered I-frame playlists checked entry for entry against the spliced media playlists, with every byte range decoded against the media; edge-variant-manifests refuses the delivered I-frame playlist by name in a blackout.
+
 ## 0.38.0 (2026-11-03)
 
 ### Product (in customer release notes)
