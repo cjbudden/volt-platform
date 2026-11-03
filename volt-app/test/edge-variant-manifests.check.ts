@@ -174,6 +174,25 @@ function segsOf(text: string) {
   check('...no loop: refused', err, 'refused');
   check('...an empty timeline: only the addresses change', vm.renderVariantMpd(mpd(450), { timeline: [], loop: null, base: '', key: 'k' }).replace(/\s*<Location>[^<]*<\/Location>/, ''), mpd(450).replace(/\s*<Location>[^<]*<\/Location>/, ''));
 
+  // DASH TRICK-MODE ON A LIVE MPD (3.2b-4): the packager's keyframe-only set (one
+  // small rendition, dashif trickmode) is never part of a variant. Inside a window
+  // its keyframes are the programme's, and the loop has no trick track to fill it
+  // with; outside, a set that comes and goes between Periods helps no player.
+  {
+    const trickSet = (count: number) => `<AdaptationSet id="3" contentType="video" maxWidth="640" maxHeight="360"><EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="0"/><Representation id="3" bandwidth="120000" codecs="avc1.64001e" width="640" height="360" maxPlayoutRate="2"><SegmentTemplate timescale="90000" presentationTimeOffset="0" initialization="360p_trick/init.mp4" media="360p_trick/seg_$Number$.m4s" startNumber="1"><SegmentTimeline><S t="0" d="360000" r="${count - 1}"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>`;
+    const withTrick = (count: number) => mpd(count).replace('<AdaptationSet id="1" contentType="audio">', trickSet(count) + '<AdaptationSet id="1" contentType="audio">');
+    let terr = '', tm = '';
+    try { tm = vm.renderVariantMpd(withTrick(450), { timeline: TL, loop: LOOP, base: '/origin/X/live/', key: 'vabc12345' }); } catch (e: any) { terr = String(e?.message ?? e); }
+    check('DASH trick-mode: a blacked-out variant renders (not refused for the trick set)', terr, '');
+    check('...and lists no trick-mode set and no trick segment, in any Period', [tm.includes('trickmode'), tm.includes('_trick/'), tm.includes('maxPlayoutRate')], [false, false, false]);
+    check('...everything else is exactly the variant of the MPD without it', tm, dm);
+    check('...valid XML', xmlOk(tm), true);
+    const open = vm.renderVariantMpd(withTrick(450), { timeline: [], loop: null, base: '', key: 'k' });
+    check('...an empty timeline: the set goes there too (a variant never carries one)', [open.includes('trickmode'), open.replace(/\s*<Location>[^<]*<\/Location>/, '') === mpd(450).replace(/\s*<Location>[^<]*<\/Location>/, '')], [false, true]);
+    // the main video set right before it is untouched, even though the regex starts at an AdaptationSet
+    check('...the main video set beside it is kept whole', /<AdaptationSet id="0" contentType="video">[\s\S]*?720p\/init\.mp4[\s\S]*?<\/AdaptationSet>/.test(tm), true);
+  }
+
   // ---- 4. the edge function picks the variants origin --------------------------------------------
   {
     const fsrc = readFileSync(join(__dirname, '../../deploy/edge/rights-viewer-request.js'), 'utf8');

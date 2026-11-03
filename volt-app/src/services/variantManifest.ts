@@ -322,8 +322,17 @@ interface Period { open: string; body: string; id: string; start: number; end: n
  * Only what is already available is listed: loop segments past the live
  * edge come with the next MPD, as live ones do.
  */
+/** An AdaptationSet marked as a DASH trick-mode track (dashif trickmode). */
+const TRICK_SET_RE = /<AdaptationSet\b[^>]*>(?:(?!<\/AdaptationSet>)[\s\S])*?dashif\.org\/guidelines\/trickmode[\s\S]*?<\/AdaptationSet>\s*/g;
+
 export function renderVariantMpd(text: string, o: { timeline: Timeline; loop: Loop | null; base: string; key: string; shiftSec?: number }): string {
   if (/<BaseURL/.test(text)) throw new VariantError('BaseURL in the MPD is not supported');
+  // DASH trick-mode sets (3.2b-4) go, as I-frame playlists do from a variant
+  // master: their keyframes are the programme's, and the loop has no
+  // keyframe-only track to put inside a window (3.2b-5 builds that). Left in, a
+  // fast-forwarding viewer would see the programme the window hides, and the
+  // loop Periods would have no rendition to fill the set with.
+  text = text.replace(TRICK_SET_RE, '');
   const mpdOpen = text.match(/<MPD\b[^>]*>/)?.[0];
   if (!mpdOpen) throw new VariantError('not an MPD');
   const ast = Date.parse(attr(mpdOpen, 'availabilityStartTime') ?? '') / 1000;

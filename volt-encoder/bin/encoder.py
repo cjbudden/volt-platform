@@ -1073,8 +1073,35 @@ def iframe_playlist_name(label):
     """The I-frame playlist of a video rendition, beside the master. Only the
     characters a playlist name may safely carry (the label comes from the
     rendition label of a package-only input)."""
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(label)) or "video"
-    return f"{safe}.iframes.m3u8"
+    return f"{_safe_label(label)}.iframes.m3u8"
+
+
+def _safe_label(label):
+    return re.sub(r"[^A-Za-z0-9_-]", "_", str(label)) or "video"
+
+
+def trick_rendition(cfg, rends):
+    """The one video rendition the DASH trick-mode track is cut from (build queue
+    3.2b-4). Trick-mode pictures are only seen while scrubbing or fast-forwarding,
+    so one small rendition is enough and keeps the extra keyframe segments (the only
+    new bytes this costs) small: the smallest rung that is at least 360p, else the
+    smallest. A package-only input carries no height, so the lowest bitrate wins
+    there, and the last input when no bitrate is known either."""
+    if not rends:
+        return None
+    if cfg["workflow"] != "package_only":
+        hs = [(int(cfg["ladder"][i].get("height") or 0), i) for i, _l, _a in rends]
+        big = [h for h in hs if h[0] >= 360]
+        h, i = min(big) if big else min(hs)
+        return next(r for r in rends if r[0] == i)
+    inputs = primary_inputs(cfg)
+    known = [(int(inputs[i].get("rendition_bitrate_kbps") or inputs[i].get("bitrate_kbps") or 0), i)
+             for i, _l, _a in rends]
+    known = [k for k in known if k[0] > 0]
+    if known:
+        i = min(known)[1]
+        return next(r for r in rends if r[0] == i)
+    return rends[-1]
 
 
 def build_shaka(cfg, keys):
@@ -1114,6 +1141,27 @@ def build_shaka(cfg, keys):
             name = inp.get("audio_name") or inp.get("audio_label") or (lang.upper() if lang else None)
             cmd.append(_audio_descriptor(udp_out(idx), audio_slot, lang, name, audio_slot == 0))
             audio_slot += 1
+
+    # DASH TRICK-MODE ON LIVE (build queue 3.2b-4 (a)). With the switch on and DASH
+    # delivered (cfg trick_play_dash), the packager reads one video rendition a
+    # second time with trick_play_factor=1 and writes a keyframe-only
+    # Representation in its own AdaptationSet, marked with the dashif trickmode
+    # property, beside the main one in manifest.mpd. Chosen over re-wrapping the
+    # keyframes per request (the on-demand way): live MPDs and segments reach
+    # viewers from the origin or CloudFront without the API, so a per-request path
+    # would put the API in front of every live trick request; the packager's way
+    # costs only the keyframes of one small rendition, written once and cached at
+    # the edge like any segment. dash_only=1 keeps it out of the HLS master, which
+    # already has its I-frame playlists. Read at start, like the rest.
+    trick = trick_rendition(cfg, rends) if cfg.get("trick_play_dash") else None
+    if trick is not None:
+        tidx, tlabel, _ = trick
+        tdir = f"{OUT_DIR}/{_safe_label(tlabel)}_trick"
+        cmd.append(
+            f"in={udp_out(tidx)},stream=video,"
+            f"init_segment={tdir}/init.mp4,segment_template={tdir}/seg_$Number$.m4s,"
+            f"trick_play_factor=1,dash_only=1"
+        )
 
     # transcode: one manifest audio track per source audio stream, from its dedicated port.
     if transcode:

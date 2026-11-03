@@ -8,6 +8,7 @@
 //      an encoder sees is exactly the one it saw before 3.2b-3;
 //    - on: trick_play true, for transcode and package-only, HLS or both;
 //    - a DASH-only profile: not sent (no HLS master to list them in).
+//    - DASH trick-mode (3.2b-4): trick_play_dash, whenever DASH is delivered.
 //  The packager side is volt-encoder/dev/test_trick_play.py; the rights
 //  variant side is edge-variant-manifests.check.ts.
 //
@@ -27,15 +28,19 @@ const job = (profile: Record<string, unknown>, extra: Record<string, unknown> = 
 
 const off = job({});
 ok(!('trick_play' in off), 'off by default: the job has no trick_play key');
-ok(!('trick_play' in job({ trick_play: false })), 'switched off: no key either');
+ok(!('trick_play_dash' in off), 'off by default: no trick_play_dash key either (3.2b-4)');
+ok(!('trick_play' in job({ trick_play: false })) && !('trick_play_dash' in job({ trick_play: false })), 'switched off: no key either');
 ok(job({ trick_play: true }).trick_play === true, 'on, HLS and DASH: trick_play true');
+ok(job({ trick_play: true }).trick_play_dash === true, 'on, HLS and DASH: trick_play_dash true (3.2b-4)');
 ok(job({ trick_play: true, packaging: 'hls' }).trick_play === true, 'on, HLS only: true');
+ok(!('trick_play_dash' in job({ trick_play: true, packaging: 'hls' })), 'on, HLS only: no DASH trick-mode (no keyframe segments written for nobody)');
 ok(!('trick_play' in job({ trick_play: true, packaging: 'dash' })), 'on, DASH only: not sent (no HLS master)');
+ok(job({ trick_play: true, packaging: 'dash' }).trick_play_dash === true, 'on, DASH only: DASH trick-mode sent');
 const pkg = job({ trick_play: true, workflow_type: 'package_only' }, {
   inputs: [{ role: 'primary', rendition_label: '1080p', rendition_bitrate_kbps: 6000, protocol: 'srt', ingest_url: 'srt://y', stream_key: null }] });
-ok(pkg.trick_play === true, 'package-only: true as well');
+ok(pkg.trick_play === true && pkg.trick_play_dash === true, 'package-only: true as well');
 ok(job({ trick_play: true }, { kind: 'event', owner: { id: 'ev1' } }).trick_play === true, 'an event: the same');
-const { trick_play: _t, ...rest } = job({ trick_play: true });
+const { trick_play: _t, trick_play_dash: _d, ...rest } = job({ trick_play: true });
 ok(JSON.stringify(rest) === JSON.stringify(off), 'nothing else in the job changes');
 
 console.log(`\ntrickplay-live: ${pass} passed, ${fail} failed`);

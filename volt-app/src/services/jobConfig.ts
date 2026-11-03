@@ -170,6 +170,10 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
   // DASH-only profile has no HLS master to list them in. Sent only when on, so
   // an encoder image from before 3.2b-3 sees exactly the config it knew.
   if (profile.trick_play && profile.packaging !== 'dash') cfg.trick_play = true;
+  // DASH trick-mode (3.2b-4): a keyframe-only Representation of one small
+  // rendition in the packager's MPD, when DASH is delivered. Its own key so an
+  // encoder from before 3.2b-4 ignores it, and an HLS-only profile pays nothing.
+  if (profile.trick_play && profile.packaging !== 'hls') cfg.trick_play_dash = true;
 
   if (profile.workflow_type === 'transcode') {
     // one mezzanine input; we build the ladder from the profile rungs
