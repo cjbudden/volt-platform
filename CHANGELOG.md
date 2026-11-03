@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.36.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- added · Trick-play: Live channels and events with trick-play on now also get a trick-mode track in their DASH from their next start, so smart TVs that fast-forward over DASH show pictures. It is made from one smaller rendition, so it adds little to storage and delivery, and viewers in a rights blackout never get it.
+
+### Internal
+
+- added · Trick-play: test_trick_play.py covers the packager's DASH trick-mode stream (one rendition, DASH only, the spliced MPD never lists it); trickplay-live and edge-variant-manifests cover the job key and the variant MPD dropping trick-mode sets.
+
 ## 0.35.0 (2026-11-03)
 
 ### Product (in customer release notes)
