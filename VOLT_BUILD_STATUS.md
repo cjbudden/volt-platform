@@ -1972,7 +1972,7 @@ What: Christian decided (3 Nov) there is no relay. Stations write HLS and DASH; 
 - **Checked**: mp3-feed 20/20, radio-container (no relay) 20/20, radio 44/44, radio-args 43/43, orchestrator ok and 22 more suites green (see the queue row); browser 4/4.
 - **Not done / waiting**: whether to offer MP3 as a compatibility feed is Christian's decision (the switch is ready, off). Relay tables stay in the database, unread.
 
-## 2026-11-03 - Songs in the manifest, read at the playhead (build queue 1.7b; vRELVER)
+## 2026-11-03 - Songs in the manifest, read at the playhead (build queue 1.7b; v0.33.0)
 
 What: Christian (3 Nov): DVR must show what was playing where the listener is. Every logged song is a timed entry in the station's HLS and DASH; the player reads it at its playhead and stops polling the now-playing API.
 
