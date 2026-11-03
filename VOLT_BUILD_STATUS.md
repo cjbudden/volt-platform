@@ -2043,7 +2043,7 @@ What: FAST channels with trick-play on list a DASH trick-mode track. Spliced liv
 - **Not done**: 3.2b-7; Christian's checks on the Mac (a real FAST channel's titles are Shaka Packager output, not available here).
 
 
-## 2026-11-03 - I-frame trick-play that follows the playout splice, HLS (build queue 3.2b-7 (c); VERSION)
+## 2026-11-03 - I-frame trick-play that follows the playout splice, HLS (build queue 3.2b-7 (c); v0.39.0)
 
 What: live channels and events with trick-play on and playout splicing on (input failover to the slate or loop) keep I-frame playlists in their HLS, and those playlists follow the splice. Before (3.2b-3) they were left out of the master for as long as playout could splice. The DASH trick set under a splice, rights variants and Christian's checks are split to 3.2b-8.
 
