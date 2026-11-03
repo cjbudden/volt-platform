@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.37.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- added · Trick-play: FAST channels now get I-frame playlists in their HLS when their output profile has trick-play on, from their next start, so Apple devices and smart TVs show pictures while viewers scrub back, ad breaks and slates included. Nothing is re-encoded or stored.
+
+### Internal
+
+- added · Tests: test_fast_trick_play.py (keyframe ranges decoded against the media, splice, numbering, rolling window, ranged reads, playout on and off) and a session-master case in fast-beacons.
+
 ## 0.36.0 (2026-11-03)
 
 ### Product (in customer release notes)
