@@ -16,6 +16,18 @@ async function handle(ctx: JobContext): Promise<Record<string, unknown>> {
   return { ...r };
 }
 
+/** trickplay.ladder: the DASH trick track of a packaged asset a FAST channel airs (3.2b-6, trickplay/ladder.ts). */
+async function handleLadder(ctx: JobContext): Promise<Record<string, unknown>> {
+  const key = String((ctx.job.payload as any)?.masterKey ?? '');
+  if (!key) return {};
+  await ctx.progress(5, 'making the trick track');
+  const { buildLadderTrick } = await import('../../trickplay/ladder');
+  const r = await buildLadderTrick(key);
+  await ctx.progress(100, r.state === 'exists' ? 'already made' : `${r.trick.segments} trick segments`);
+  return { state: r.state, segments: r.trick.segments, rep: r.trick.rep };
+}
+
 export function registerTrickPlayHandlers(): void {
   registerHandler('trickplay.build', handle);
+  registerHandler('trickplay.ladder', handleLadder);
 }

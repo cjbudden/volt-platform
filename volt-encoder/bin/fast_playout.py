@@ -146,11 +146,19 @@ def parse_mpd_timelines(text):
                 for _ in range(int(s.get("r", "0")) + 1):
                     times.append((t, d))
                     t += d
+            # $RepresentationID$ and $Bandwidth$ are the ASSET's, resolved here: the
+            # channel's MPD gives its Representations its own ids (v360, v360_trick),
+            # so a template carried over unresolved named files that do not exist
+            # (ffmpeg's DASH muxer writes them; Shaka Packager writes literal names).
+            rid, rbw = r.get("id") or "", r.get("bandwidth") or ""
+
+            def sub(v, rid=rid, rbw=rbw):
+                return v.replace("$RepresentationID$", rid).replace("$Bandwidth$", rbw) if v else v
             rep = {
                 "id": r.get("id"), "bandwidth": int(r.get("bandwidth", "0")), "codecs": r.get("codecs", ""),
                 "mime": r.get("mimeType", ""), "width": r.get("width"), "height": int(r.get("height") or 0),
                 "sar": r.get("sar"), "sample_rate": r.get("audioSamplingRate"),
-                "timescale": int(st.get("timescale", "1")), "init": st.get("initialization"), "media": st.get("media"),
+                "timescale": int(st.get("timescale", "1")), "init": sub(st.get("initialization")), "media": sub(st.get("media")),
                 "start_number": int(st.get("startNumber", "1")), "times": times,
                 "channels": None,
             }
@@ -199,6 +207,11 @@ class AssetMedia:
             self.audio = Track(init, segs, url_base, key_base)
         self.dash = parse_mpd_timelines(mpd_text) if mpd_text else None
         self.url_base = url_base
+        # DASH trick track (build queue 3.2b-6): trick.json beside the asset's MPD,
+        # written by the control plane (services/trickplay/ladder.ts) once its
+        # keyframe segments are in place. None until then.
+        self.trick = None
+        self.folder = None
 
     def track(self, name):
         if name == "audio":
@@ -512,7 +525,7 @@ class Playout:
 
     # ------------------------------------------------------------------ DASH out
 
-    def dash(self, assets, now, triggers=(), dash_events=None):
+    def dash(self, assets, now, triggers=(), dash_events=None, trick=False):
         lead = self.tracks[0]
         pub = self.t[lead]["pub"]
         if not pub or self.ast is None:
@@ -582,7 +595,10 @@ class Playout:
                 if not reps:
                     continue
                 ctype = 'contentType="audio"' if kind == "audio" else 'contentType="video"'
-                out.append(f'    <AdaptationSet {ctype} segmentAlignment="true" startWithSAP="1">')
+                # Ids, so the trick-mode set below can name the video set it belongs to.
+                as_id = "1" if kind == "audio" else "0"
+                out.append(f'    <AdaptationSet id="{as_id}" {ctype} segmentAlignment="true" startWithSAP="1">')
+                emitted = {}
                 for n, rep, segs in reps:
                     ts = rep["timescale"]
                     tr = a.track(n)
@@ -614,17 +630,47 @@ class Playout:
                         out.append(f'        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="{rep["channels"]}"/>')
                     init = a.url_base + rep["init"]
                     media = a.url_base + rep["media"]
-                    out.append(f'        <SegmentTemplate timescale="{ts}" presentationTimeOffset="{pto}" initialization="{xml_attr(init)}" media="{xml_attr(media)}" startNumber="{nums[0]}">')
-                    out.append('          <SegmentTimeline>')
-                    for j, (t0, d0) in enumerate(times):
-                        out.append(f'            <S t="{t0}" d="{d0}"/>' if j == 0 or times[j - 1][0] + times[j - 1][1] != t0 else f'            <S d="{d0}"/>')
-                    out.append('          </SegmentTimeline>')
-                    out.append('        </SegmentTemplate>')
+                    out.extend(_segment_template(ts, pto, init, media, nums[0], times, "        "))
                     out.append('      </Representation>')
+                    emitted[n] = (rep, ts, pto, init, nums, times)
                 out.append('    </AdaptationSet>')
+                # DASH TRICK-MODE (build queue 3.2b-6 (a)): the asset's keyframe
+                # segments (services/trickplay/ladder.ts) for its trick rendition, on
+                # the same numbers and timeline, in a set of their own marked with the
+                # dashif trickmode property. Only where the asset has them (trick.json)
+                # and the rendition airs in this period; nothing else changes.
+                if kind == "video" and trick and a.trick:
+                    hit = next(((n, e) for n, e in emitted.items() if str(e[0].get("id")) == str(a.trick["rep"])), None)
+                    if hit:
+                        n, (rep, ts, pto, init, nums, times) = hit
+                        fr = (a.track(n).meta or {}).get("frame_rate") if a.track(n) is not None and hasattr(a.track(n), "meta") else None
+                        try:
+                            fps = float(fr) if fr else 25.0
+                        except ValueError:
+                            fps = 25.0
+                        rate = max(1, int(round(self.seg * fps)))
+                        attrs = [f'id="{n}_trick"', f'bandwidth="{int(a.trick.get("bandwidth") or 1)}"', f'codecs="{rep["codecs"]}"', 'mimeType="video/mp4"']
+                        if rep.get("width"):
+                            attrs += [f'width="{rep["width"]}"', f'height="{rep["height"]}"']
+                        attrs += [f'maxPlayoutRate="{rate}"', 'codingDependency="false"']
+                        out.append('    <AdaptationSet id="2" contentType="video" segmentAlignment="true" startWithSAP="1">')
+                        out.append('      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="0"/>')
+                        out.append(f'      <Representation {" ".join(attrs)}>')
+                        out.extend(_segment_template(ts, pto, init, a.url_base + a.trick["media"], nums[0], times, "        "))
+                        out.append('      </Representation>')
+                        out.append('    </AdaptationSet>')
             out.append('  </Period>')
         out.append('</MPD>')
         return "\n".join(out) + "\n"
+
+
+def _segment_template(ts, pto, init, media, start, times, ind):
+    out = [f'{ind}<SegmentTemplate timescale="{ts}" presentationTimeOffset="{pto}" initialization="{xml_attr(init)}" media="{xml_attr(media)}" startNumber="{start}">',
+           f'{ind}  <SegmentTimeline>']
+    for j, (t0, d0) in enumerate(times):
+        out.append(f'{ind}    <S t="{t0}" d="{d0}"/>' if j == 0 or times[j - 1][0] + times[j - 1][1] != t0 else f'{ind}    <S d="{d0}"/>')
+    out += [f'{ind}  </SegmentTimeline>', f'{ind}</SegmentTemplate>']
+    return out
 
 
 def xml_attr(v):
@@ -972,7 +1018,23 @@ def load_asset(master_key, clips_dir="clips", url_prefix="", reader=None):
         mpd = reader.read(f"{folder}/manifest.mpd")
     except Exception:
         mpd = None
-    return AssetMedia(master, media, url_base, mpd, key_base=folder + "/")
+    am = AssetMedia(master, media, url_base, mpd, key_base=folder + "/")
+    am.folder = folder
+    load_trick(am, reader)
+    return am
+
+
+def load_trick(am, reader):
+    """The asset's trick.json (3.2b-6), when it has one and DASH to list it in."""
+    if am.trick is not None or not am.dash or not am.folder:
+        return am.trick
+    try:
+        t = json.loads(reader.read(f"{am.folder}/trick.json"))
+        if t.get("version") == 1 and t.get("media") and t.get("rep") is not None:
+            am.trick = t
+    except Exception:
+        pass
+    return am.trick
 
 
 def config_from_env_and_args():
@@ -1028,6 +1090,7 @@ def main():
     assets, play, tl, tl_at, trig, trig_at, beat_at, unreadable = {}, None, None, 0, [], 0, 0, set()
     play_ladder = None
     trick, kfc, master_txt, master_has_iframes = False, KeyframeCache(reader), None, False
+    trick_at = 0
     while True:
         now = time.time()
         try:
@@ -1100,7 +1163,13 @@ def main():
                     if m2:
                         sink.put("master.m3u8", m2)
                         master_has_iframes = True
-            mpd = play.dash(assets, now, trig)
+            if trick and now - trick_at > 60:
+                # trick tracks made since the asset was loaded (3.2b-6): the control
+                # plane builds them when the channel first asks for its timeline
+                trick_at = now
+                for am in assets.values():
+                    load_trick(am, reader)
+            mpd = play.dash(assets, now, trig, trick=trick)
             if mpd:
                 sink.put("manifest.mpd", mpd)
             if a.out:

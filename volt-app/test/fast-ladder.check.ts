@@ -129,6 +129,17 @@ async function main() {
   const content = tl.items.filter((x: any) => x.kind === 'content');
   check('each asset plays its packaging for the ladder', content.map((x: any) => x.master), ['/clips/vod/a/master.m3u8', '/clips/vod/b/ladders/x/4s/master.m3u8']);
   check('the playout is handed the ladder', [tl.ladder?.groupId, tl.ladder?.rungs.map((r: any) => r.height)], [LG, [1080, 720, 480]]);
+  // TRICK-PLAY (3.2b-5, 3.2b-6 (a)): off, nothing asked of the jobs; on, the
+  // playout is told and each aired asset's DASH trick track is queued once.
+  const ladderJobs = async () => (await query<any>(`SELECT payload->>'masterKey' AS k FROM jobs WHERE type = 'trickplay.ladder' ORDER BY 1`)).map((r: any) => r.k);
+  check('trick-play off: the playout is told so, and no trick track is queued', [tl.trickPlay, await ladderJobs()], [false, []]);
+  const OP = (await one<any>(`INSERT INTO output_profiles(account_id,name,rungs,trick_play) VALUES ($1,'TP','[]',true) RETURNING id`, [ACC])).id;
+  await query(`UPDATE groups SET output_profile_id = $2 WHERE id = $1`, [GRP, OP]);
+  const tlT: any = await timelineFor(CH, new Date(t0.getTime() - 1000), new Date(t0.getTime() + 1_300_000));
+  await timelineFor(CH, new Date(t0.getTime() - 1000), new Date(t0.getTime() + 1_300_000));
+  await new Promise((r) => setTimeout(r, 300));
+  check('trick-play on: the playout is told, and each aired asset\'s trick track is queued once', [tlT.trickPlay, await ladderJobs()], [true, ['/clips/vod/a/master.m3u8', '/clips/vod/b/ladders/x/4s/master.m3u8']]);
+  await query(`UPDATE groups SET output_profile_id = NULL WHERE id = $1`, [GRP]);
 
   console.log('== changing the ladder ==');
   const LG2 = (await one<any>(`INSERT INTO encode_ladder_groups(account_id,name,segment_dur,fps) VALUES ($1,'UHD',4,25) RETURNING id`, [ACC])).id;

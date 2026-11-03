@@ -2031,3 +2031,14 @@ What: FAST channels with trick-play on (the group's output profile) get I-frame 
 - **Checked**: typechecks clean on the device. `test_fast_trick_play.py` 37/37 on the device (every range decodes alone to exactly one keyframe, the segment's first picture), test_fast_playout 31/31; fast-beacons 52/52 (new session-master case fails on HEAD), fast-access 50/50, fast-ad-schedule 34/34, fast-ads 48/48, fast-brand 28/28, fast-graphics 15/15, fast-ladder 54/54, fast-lineup 62/62, trickplay-live 12/12, edge-variant-manifests 72/72, edge-variants 62/62. fast.check.sh and docs-seed-fast fail identically on HEAD in the container (no packager to encode the seed).
 - **Not done**: 3.2b-6 (DASH for FAST, spliced live streams, inside rights variants, Christian's checks on the Mac).
 
+## 2026-11-03 - DASH trick-mode on FAST channels (build queue 3.2b-6 (a); v0.38.0)
+
+What: FAST channels with trick-play on list a DASH trick-mode track. Spliced live streams, rights variants and Christian's checks are split to 3.2b-7.
+
+- **Trick tracks per packaged asset** (`volt-app/src/services/trickplay/ladder.ts`, job `trickplay.ladder` in `jobs/handlers/trickPlay.ts`): one rendition (the smallest at 360p or above) cut into `trick/<rep>/seg_<n>.m4s` beside the asset's or ladder's MPD, each segment's opening keyframe re-wrapped as a fragment lasting the segment; `trick.json` written last. Local disk, and the origin bucket when the library is there. Made once, shared by every channel and airing.
+- **Queued** by `services/fast/store.ts` `timelineFor` for every aired asset of a channel with trick-play on (once an hour per asset per task).
+- **Playout** (`volt-encoder/bin/fast_playout.py`): `load_trick` reads trick.json (again each minute for assets without one); `dash(trick=)` adds AdaptationSet id 2 with the dashif trickmode property naming the video set (id 0) in every Period, same SegmentTimeline and numbers as the rendition. Fixed: `$RepresentationID$`/`$Bandwidth$` from an asset MPD resolved per asset.
+- **Docs**: FAST and Account settings guides.
+- **Checked**: typechecks clean. trickplay-fast-dash 28/28 (ground-truth decodes, playout MPD, Shaka in Chromium fetching trick segments at 4x with no error, VP9), fast-ladder 56/56, test_fast_trick_play 37/37, test_fast_playout 31/31, fast suites, jobs, trickplay, trickplay-dash green.
+- **Not done**: 3.2b-7; Christian's checks on the Mac (a real FAST channel's titles are Shaka Packager output, not available here).
+

@@ -594,6 +594,16 @@ export async function timelineFor(channelId: string, from: Date, to: Date) {
   const trick = await one<{ on: boolean }>(
     `SELECT COALESCE(op.trick_play, false) AS on FROM channels c JOIN groups g ON g.id = c.group_id
        LEFT JOIN output_profiles op ON op.id = g.output_profile_id WHERE c.id = $1`, [channelId]);
+  // DASH trick tracks (3.2b-6 (a), trickplay/ladder.ts): made once per packaged
+  // asset the channel airs; the playout lists one when its trick.json is there.
+  if (trick?.on) {
+    const masters: string[] = [];
+    for (const it of items) {
+      if (it.kind === 'content' && it.master) masters.push(String(it.master));
+      if (it.kind !== 'content') for (const f of it.fill) if (f.master) masters.push(String(f.master));
+    }
+    void (await import('../trickplay/ladder')).queueLadderTricks(masters);
+  }
   return { channelId, segmentSec: SEGMENT_SEC, from: from.toISOString(), to: to.toISOString(), adsMode: ads.mode, ladder, trickPlay: !!trick?.on, items };
 }
 
