@@ -271,15 +271,22 @@ export function ReviewPanel({ assetId, onDecided }: { assetId: string; onDecided
 
 export default function ReviewPage() {
   const [rows, setRows] = useState<ReviewQueueRow[] | null>(null)
+  // Failed QC with nobody's decision on it yet: the dashboard's "assets failed
+  // QC" alert lands here (#failed-qc), so they are listed, not left to be found.
+  const [failed, setFailed] = useState<ReviewQueueRow[]>([])
   const [err, setErr] = useState('')
   // ?open=<asset id>: the Media Library's "Open in Review" lands on that clip.
   const [open, setOpen] = useState<string | null>(() => new URLSearchParams(window.location.search).get('open'))
 
   async function load() {
-    try { const q = await api.reviewQueue(); setRows(q.queue); setErr('') }
+    try { const q = await api.reviewQueue(); setRows(q.queue); setFailed(q.qcFailed ?? []); setErr('') }
     catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() }, [])
+  // Arriving from the alert: scroll to the Failed QC list once it is drawn.
+  useEffect(() => {
+    if (rows && window.location.hash === '#failed-qc') document.getElementById('failed-qc')?.scrollIntoView({ block: 'start' })
+  }, [rows])
   usePageNotice('load', err && rows ? { kind: 'error', title: "Couldn't load the review queue.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
   if (err && !rows) return <PageError message={err} onRetry={load} />
@@ -290,37 +297,60 @@ export default function ReviewPage() {
       <div className="page-head">
         <div>
           <h1>Review</h1>
-          <p>Clips waiting for a decision, with what QC already found in them.</p>
+          <p>Clips waiting for a decision, and anything that failed QC, with what QC found in them.</p>
         </div>
         <div className="spacer" />
         <button className="btn ghost" onClick={load}>Refresh</button>
       </div>
 
-      {rows.length === 0 ? (
+      {rows.length === 0 && failed.length === 0 ? (
         <div className="empty">
           <h3>Nothing waiting</h3>
           <p>Clips appear here when they are sent for review: open a clip in the
              Media Library and choose Send for review beside its Review state.
              QC runs on every clip as it is cut, so they arrive with their
-             findings already attached.</p>
+             findings already attached. Anything that fails QC is listed here too.</p>
         </div>
       ) : (
-        <div className="card">
-          <table>
-            <thead>
-              <tr><th>Clip</th><th>Source</th><th>Length</th><th>QC</th><th>State</th><th>Cut</th><th /></tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <FragmentRow key={r.id} r={r} open={open === r.id}
-                  onToggle={() => setOpen(open === r.id ? null : r.id)}
-                  onDecided={load} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="sec-label">Waiting for a decision</div>
+          {rows.length === 0
+            ? <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginBottom: 18 }}>Nothing has been sent for review.</div>
+            : <QueueTable rows={rows} open={open} setOpen={setOpen} onDecided={load} />}
+          {failed.length > 0 && (
+            <div id="failed-qc" style={{ marginTop: 22 }}>
+              <div className="sec-label">Failed QC</div>
+              <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginBottom: 8 }}>
+                QC found errors in these and nobody has decided on them yet. Open one to see what was measured,
+                re-run QC once it is fixed, or send it for review to approve it over the findings. They cannot publish until then.
+              </div>
+              <QueueTable rows={failed} open={open} setOpen={setOpen} onDecided={load} />
+            </div>
+          )}
+        </>
       )}
     </>
+  )
+}
+
+function QueueTable({ rows, open, setOpen, onDecided }: {
+  rows: ReviewQueueRow[]; open: string | null; setOpen: (id: string | null) => void; onDecided: () => void
+}) {
+  return (
+    <div className="card">
+      <table>
+        <thead>
+          <tr><th>Clip</th><th>Source</th><th>Length</th><th>QC</th><th>State</th><th>Made</th><th /></tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <FragmentRow key={r.id} r={r} open={open === r.id}
+              onToggle={() => setOpen(open === r.id ? null : r.id)}
+              onDecided={onDecided} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

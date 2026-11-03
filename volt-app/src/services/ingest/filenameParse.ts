@@ -225,10 +225,14 @@ function tagOf(tok: Tok, nowYear: number, allowLang: boolean): Signal | null {
   if (VERSION_WORDS.has(l) && l !== 'v') return { kind: 'version', token: s, value: l, confidence: 0.6, reason: `"${s}": a workflow word, not part of the title` };
   const y = isYear(l, nowYear);
   if (y != null) return { kind: 'year', token: s, value: y, confidence: tok.bracketed ? 0.9 : 0.75, reason: `"${s}": a year` };
-  if (/^(19|20)\d{6}$/.test(l)) {
-    const d = `${l.slice(0, 4)}-${l.slice(4, 6)}-${l.slice(6, 8)}`;
-    if (!Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().startsWith(d))
-      return { kind: 'date', token: s, value: d, confidence: 0.85, reason: `"${s}": the date ${d}` };
+  // Eight digits: YYYYMMDD (20250614) or DDMMYYYY (14062025). They never both
+  // read as a real date: YYYYMMDD has a month (01-12) where DDMMYYYY has 19 or 20.
+  if (/^\d{8}$/.test(l)) {
+    const real = (d: string) => !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().startsWith(d);
+    const ymd = `${l.slice(0, 4)}-${l.slice(4, 6)}-${l.slice(6, 8)}`;
+    const dmy = `${l.slice(4, 8)}-${l.slice(2, 4)}-${l.slice(0, 2)}`;
+    if (/^(19|20)/.test(l) && real(ymd)) return { kind: 'date', token: s, value: ymd, confidence: 0.85, reason: `"${s}": the date ${ymd} (year, month, day)` };
+    if (/^(19|20)/.test(l.slice(4)) && real(dmy)) return { kind: 'date', token: s, value: dmy, confidence: 0.8, reason: `"${s}": the date ${dmy} (day, month, year)` };
   }
   // Language codes are words too (may, it, de), so only in capitals or brackets.
   if (allowLang && (tok.bracketed || (/[A-Z]/.test(s) && s === s.toUpperCase()))) {

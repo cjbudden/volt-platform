@@ -8,7 +8,7 @@
 //  created that extends another. The right-hand pane is the field editor.
 // ============================================================================
 import { useEffect, useState } from 'react'
-import { api, type ContentType, type SchemaField } from '../api'
+import { api, dateAllowsYear, type ContentType, type SchemaField } from '../api'
 import { PageHead } from '../scaffold'
 import { RuleEditor } from '../RuleEditor'
 import { useNotify, usePageNotice } from '../notices'
@@ -136,7 +136,7 @@ function TypeEditor({ type, all, onChanged, onDeleted }: { type: ContentType; al
               <tr key={i}>
                 <td><input {...inp} value={f.key} onChange={e => setField(i, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })} style={{ ...inp.style, width: 120, fontFamily: 'ui-monospace,monospace' }} /></td>
                 <td><input {...inp} value={f.label ?? ''} onChange={e => setField(i, { label: e.target.value })} style={{ ...inp.style, width: 150 }} /></td>
-                <td><select className="inp sel-sm" value={f.type} onChange={e => setField(i, { type: e.target.value as any })}>{FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
+                <td><select className="inp sel-sm" value={f.type} onChange={e => setField(i, { type: e.target.value as any, ...(e.target.value !== 'date' ? { allowYear: undefined } : {}) })}>{FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
                 <td>
                   {/* An enum takes its options from its own list, or from the
                       account's Genres list (Admin > Genres), filled in on save. */}
@@ -159,6 +159,8 @@ function TypeEditor({ type, all, onChanged, onDeleted }: { type: ContentType; al
                   )}
                   {f.type === 'enum' && !f.optionsList && <input {...inp} placeholder="a, b, c" value={(f.options ?? []).join(', ')} onChange={e => setField(i, { options: e.target.value.split(',').map(x => x.trim()).filter(Boolean) })} style={{ ...inp.style, width: 160 }} />}
                   {f.type === 'enum' && <label style={{ fontSize: 'var(--fs-micro)', marginLeft: 6 }}><input type="checkbox" checked={!!f.multiple} onChange={e => setField(i, { multiple: e.target.checked })} /> multi</label>}
+                  {/* date: whether a year on its own is enough (a release date known only to the year). */}
+                  {f.type === 'date' && <label style={{ fontSize: 'var(--fs-micro)' }} title="Accept a year on its own (e.g. 1987) as well as a full date"><input type="checkbox" checked={dateAllowsYear(f)} onChange={e => setField(i, { allowYear: e.target.checked })} /> year only OK</label>}
                   {f.type === 'reference' && <input {...inp} placeholder="sports-team" value={f.refDomain ?? ''} onChange={e => setField(i, { refDomain: e.target.value })} style={{ ...inp.style, width: 120 }} />}
                   {/* content: a link to another library record (services/contentLinks.ts); the relation says which way it points. */}
                   {f.type === 'content' && (

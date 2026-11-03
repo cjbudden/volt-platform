@@ -150,17 +150,28 @@ export class GraphicsOverlay {
     const pw = vw * k, ph = vh * k;
     this.root.style.left = `${(sw - pw) / 2}px`; this.root.style.top = `${(sh - ph) / 2}px`;
     this.root.style.width = `${pw}px`; this.root.style.height = `${ph}px`;
+    // The black band under a letterboxed picture: the bar covers that first, so
+    // a bottom graphic lifts only by the part of the bar that is over the picture.
+    this.root.style.setProperty('--vp-gfx-band', `${Math.max(0, (sh - ph) / 2)}px`);
     for (const l of this.layers.values()) {
       const [cw, ch] = l.def.canvas;
       const s = Math.min(pw / cw, ph / ch);
       const p = l.def.placement ?? {};
       l.box.style.cssText = `position:absolute;left:0;top:0;width:${cw}px;height:${ch}px;transform-origin:0 0;transform:scale(${s});z-index:${p.layer ?? 2}`;
+      l.box.classList.toggle('bottom', isBottom(l.def));
       l.frame.style.transformOrigin = ORIGIN[p.anchor ?? 'top_left'] ?? '0 0';
       l.frame.style.transform = `translate(${p.x ?? 0}px, ${p.y ?? 0}px) scale(${p.scale ?? 1})`;
     }
   }
 
   get count(): number { return this.layers.size; }
+
+  /** A bottom graphic (lower third, ticker...) is on screen now: the player keeps its own cards clear of it. */
+  bottomOn(): boolean {
+    if (!this.visible) return false;
+    for (const l of this.layers.values()) if (l.on && isBottom(l.def)) return true;
+    return false;
+  }
 
   destroy(): void {
     window.removeEventListener('message', this.onMsg);
@@ -169,4 +180,17 @@ export class GraphicsOverlay {
     this.root.remove();
     this.layers.clear();
   }
+}
+
+/**
+ * A graphic that lives at the bottom of the picture (a lower third, a ticker,
+ * anything anchored or placed in the bottom half): it moves up while the
+ * player's control bar is shown, so the bar never sits on top of it. Burned-in
+ * graphics are part of the picture and are not touched.
+ */
+export function isBottom(d: Pick<OverlayDef, 'kind' | 'placement' | 'canvas'>): boolean {
+  const p = d.placement ?? {};
+  if (/^bottom/.test(p.anchor ?? '')) return true;
+  if (d.kind === 'lower_third' || d.kind === 'ticker') return true;
+  return (p.y ?? 0) > (d.canvas?.[1] ?? 1080) / 2;
 }

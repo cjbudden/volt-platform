@@ -231,5 +231,46 @@ if mock_aws:
 else:
     print("SKIP S3 checks (pip install moto boto3)")
 
+
+# ---------------------------------------------------------------- gaps at programme joins (30 Oct 2026)
+# A programme shorter than its guide slot leaves a gap the channel's loop fills.
+# When the loop had no media (or was never looked up) the gap was dead air: the
+# playlist stopped growing for the gap, players rebuffered, iOS stopped for good.
+
+def longest_wait(tl, t_from, t_to):
+    ps = expand_parts(tl, assets, 2.0)
+    pl = Playout(tracks, dvr_sec=120, seg_sec=2.0)
+    last, longest, t, n = None, 0.0, t_from, 0
+    while t <= t_to:
+        if int(t - t_from) % 20 == 0:
+            pl.schedule(ps, assets, t)
+        pl.tick(t)
+        if pl.t["v720"]["msn"] > n:
+            n = pl.t["v720"]["msn"]
+            if last is not None:
+                longest = max(longest, t - last)
+            last = t
+        t += 0.5
+    segs = pl.t["v720"]["pub"]
+    holes = [round(b["pdt"] - a["pdt"] - a["dur"], 3) for a, b in zip(segs, segs[1:]) if abs(b["pdt"] - a["pdt"] - a["dur"]) > 0.05]
+    return longest, holes, pl
+
+G0 = parse_iso("2026-10-30T00:00:00Z")
+gap_tl = lambda fill_id: [
+    {"kind": "content", "id": "g1", "start": iso(G0), "durationSec": 46, "assetId": "filmB", "inSec": 0, "outSec": 46, "title": "B"},
+    {"kind": "filler", "id": "g1:pad", "start": iso(G0 + 46), "durationSec": 14, "fill": [{"kind": "slate", "assetId": fill_id, "durationSec": 14}]},
+    {"kind": "content", "id": "g2", "start": iso(G0 + 60), "durationSec": 60, "assetId": "filmA", "inSec": 0, "outSec": 60, "title": "A"},
+]
+w, h, pl = longest_wait(gap_tl("slate"), G0 + 20, G0 + 100)
+ok(w <= 2.5 and not h, f"gap filled by the loop: the playlist keeps growing (longest wait {w:.1f}s), no holes ({h})")
+keys = [s["key"] for s in pl.t["v720"]["pub"]]
+ok(any(k.startswith("g1:pad") for k in keys) and keys.index(next(k for k in keys if k == "g2")) > keys.index(next(k for k in keys if k.startswith("g1:pad"))),
+   "the loop plays between the programmes, then the next programme")
+g2 = next(s for s in pl.t["v720"]["pub"] if s["key"] == "g2")
+ok(abs(g2["pdt"] - (G0 + 60)) < 1.01, f"the next programme starts on its guide time ({iso(g2['pdt'])})")
+w, h, pl = longest_wait(gap_tl(None), G0 + 20, G0 + 100)
+ok(w <= 2.5 and not h, f"gap with NO playable filler: closed up, not dead air (longest wait {w:.1f}s, holes {h})")
+ok(any(k.endswith(":hole") for k in [p["key"] for p in expand_parts(gap_tl(None), assets, 2.0)]), "an unfillable gap is kept as a hole marker")
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -28,8 +28,11 @@ const P: Record<string, string> = {
   replay: 'M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z',
   back10: 'M11.5 6V3L7 7l4.5 4V8a5 5 0 1 1-5 5H4.5a7 7 0 1 0 7-7zM9.6 16.5h-1v-3.3l-.9.3v-.8l1.8-.6h.1zm4.5-1.6c0 1.1-.6 1.7-1.5 1.7s-1.5-.6-1.5-1.7v-.7c0-1.1.6-1.7 1.5-1.7s1.5.6 1.5 1.7zm-1-.8c0-.6-.2-.9-.5-.9s-.5.3-.5.9v.9c0 .6.2.9.5.9s.5-.3.5-.9z',
   fwd10: 'M12.5 6V3L17 7l-4.5 4V8a5 5 0 1 0 5 5h2a7 7 0 1 1-7-7zM9.6 16.5h-1v-3.3l-.9.3v-.8l1.8-.6h.1zm4.5-1.6c0 1.1-.6 1.7-1.5 1.7s-1.5-.6-1.5-1.7v-.7c0-1.1.6-1.7 1.5-1.7s1.5.6 1.5 1.7zm-1-.8c0-.6-.2-.9-.5-.9s-.5.3-.5.9v.9c0 .6.2.9.5.9s.5-.3.5-.9z',
-  volume: 'M4 9v6h4l5 4V5L8 9zm11.5 3A4.5 4.5 0 0 0 13 8v8a4.5 4.5 0 0 0 2.5-4zM13 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z',
-  mute: 'M4 9v6h4l5 4V5L8 9zm12.6 3 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4z',
+  // The waves start at x 15, two clear of the speaker, so they read as sound and not part of it.
+  volume: 'M4 9v6h4l5 4V5L8 9zm13 3A4 4 0 0 0 15 8.5v7a4 4 0 0 0 2-3.5zM15 4.3v2.1a6 6 0 0 1 0 11.2v2.1a8 8 0 0 0 0-15.4z',
+  // The speaker of `volume`, and an X centred at (18.5, 12) spanning x 15-22, so it
+  // clears the speaker (which ends at x 13) instead of running over it.
+  mute: 'M4 9v6h4l5 4V5L8 9zM18.5 10.6l2.1-2.1 1.4 1.4-2.1 2.1 2.1 2.1-1.4 1.4-2.1-2.1-2.1 2.1-1.4-1.4 2.1-2.1-2.1-2.1 1.4-1.4z',
   cc: 'M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1zm7 0h-1.5v-.5h-2v3h2V13H18v1a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1z',
   gear: 'M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z',
   list: 'M4 6h2v2H4zm4 0h12v2H8zM4 11h2v2H4zm4 0h12v2H8zm-4 5h2v2H4zm4 0h12v2H8z',
@@ -336,7 +339,14 @@ const CSS = `
 .vp .shaka-text-container{position:absolute;left:0;right:0;top:0;bottom:6%;pointer-events:none;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;font-size:clamp(14px,3.6cqw,30px);line-height:1.35;color:#fff;z-index:3;transition:bottom .25s}
 .vp .shaka-text-container>div,.vp .shaka-text-container span{font-family:var(--vp-font)}
 .vp .shaka-text-container span.shaka-text-wrapper{background:rgba(8,10,14,.78);padding:.08em .4em;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
-.vp:is([data-skin=video],[data-skin=event]):not(.vp-idle) .shaka-text-container{bottom:max(6%,92px)}
+/* THE LIFT: how far above the picture's bottom edge a player-drawn overlay sits.
+   16px with the controls hidden; above the measured bar (--vp-bar-h, player.ts)
+   while they are shown. Every bottom overlay uses it and slides with the bar. */
+.vp{--vp-lift:16px}
+.vp:is([data-skin=video],[data-skin=event]):not(.vp-idle){--vp-lift:calc(var(--vp-bar-h,64px) + 12px)}
+.vp:is([data-skin=video],[data-skin=event]):not(.vp-idle) .shaka-text-container{bottom:max(6%,var(--vp-lift))}
+.vp .vp-gfx-layer{transition:translate .25s ease}
+.vp:is([data-skin=video],[data-skin=event]):not(.vp-idle) .vp-gfx-layer.bottom{translate:0 calc(-1 * max(0px, var(--vp-bar-h,64px) + 8px - var(--vp-gfx-band,0px)))}
 .vp .vp-stage{container-type:inline-size}
 .vp .vp-gfx{position:absolute;overflow:hidden;pointer-events:none;z-index:1}
 .vp .vp-brandmark{position:absolute;width:auto;pointer-events:none;user-select:none;z-index:2;filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}
@@ -383,7 +393,7 @@ const CSS = `
 .vpv-title b{display:block;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.5)}
 .vpv-title span{display:block;font-size:13px;color:rgba(255,255,255,.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vpv-logo{max-height:34px;max-width:140px;object-fit:contain;flex:none}
-.vpv-logo.br{position:absolute;right:16px;bottom:78px;opacity:.85;z-index:4;pointer-events:none}
+.vpv-logo.br{position:absolute;right:16px;bottom:var(--vp-lift);transition:bottom .25s ease;opacity:.85;z-index:4;pointer-events:none}
 .vpv-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4;pointer-events:none}
 .vpv-center>*{pointer-events:auto}
 .vpv-big{width:72px;height:72px;border-radius:50%;background:var(--vp-primary);color:var(--vp-primary-ink);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 30px rgba(0,0,0,.4);transition:transform .15s}
@@ -405,13 +415,13 @@ const CSS = `
 .vp-idle .vpv-bar,.vp-idle .vpv-top,.vp-idle .vpv-shade{opacity:0;pointer-events:none}
 .vp-idle .vpv-bar{transform:translateY(8px)}
 .vp-idle{cursor:none}
-.vpv-up{position:absolute;right:16px;bottom:84px;z-index:7;width:min(320px,70%);background:rgba(14,16,22,.94);border-radius:calc(var(--vp-radius) - 2px);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.vpv-up{position:absolute;right:16px;bottom:var(--vp-lift);transition:bottom .25s ease;z-index:7;width:min(320px,70%);background:rgba(14,16,22,.94);border-radius:calc(var(--vp-radius) - 2px);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.45)}
 .vpv-up-b{display:flex;gap:12px;padding:12px}
 .vpv-up img{width:96px;height:54px;object-fit:cover;border-radius:6px;flex:none;background:#222}
 .vpv-up small{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary)}
 .vpv-up b{display:block;font-size:14px;line-height:1.3;max-height:2.6em;overflow:hidden}
 .vpv-up span{font-size:12px;color:rgba(255,255,255,.65)}
-.vp .vp-skip{position:absolute;right:16px;bottom:84px;z-index:7;display:inline-flex;align-items:center;gap:6px;padding:10px 14px 10px 18px;border-radius:999px;background:rgba(14,16,22,.82);border:1px solid rgba(255,255,255,.28);color:#fff;font-weight:700;font-size:14px;letter-spacing:.01em;backdrop-filter:blur(6px);box-shadow:0 8px 28px rgba(0,0,0,.35);animation:vp-skip-in .25s ease-out}
+.vp .vp-skip{position:absolute;right:16px;bottom:var(--vp-lift);transition:bottom .25s ease;z-index:7;display:inline-flex;align-items:center;gap:6px;padding:10px 14px 10px 18px;border-radius:999px;background:rgba(14,16,22,.82);border:1px solid rgba(255,255,255,.28);color:#fff;font-weight:700;font-size:14px;letter-spacing:.01em;backdrop-filter:blur(6px);box-shadow:0 8px 28px rgba(0,0,0,.35);animation:vp-skip-in .25s ease-out}
 .vp .vp-skip:hover,.vp .vp-skip:focus-visible{background:#fff;color:#0b0d12;border-color:#fff}
 .vp .vp-skip svg{width:16px;height:16px}
 @keyframes vp-skip-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -491,6 +501,7 @@ const CSS = `
 .vpa-err{background:rgba(0,0,0,.75);color:#fca5a5;padding:10px 14px;border-radius:8px;font-size:13px;max-width:80%;text-align:center}
 .vpa-stats{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.72);font:12px/1.5 ui-monospace,Menlo,monospace;padding:6px 9px;border-radius:6px;color:#d1fae5;pointer-events:none;white-space:pre}
 .vpa-bar{background:#11141a;padding:4px 8px 6px;border-top:1px solid rgba(255,255,255,.06)}
+.vpa-meta{background:#0c0e13;color:rgba(255,255,255,.72);font-size:11.5px;line-height:1.4;padding:6px 12px;border-top:1px solid rgba(255,255,255,.05);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .vpa-bar .vp-btn{width:34px;height:34px}
 .vpa-bar .vp-btn:hover{background:rgba(255,255,255,.1)}
 .vpa-row{display:flex;align-items:center;gap:2px}

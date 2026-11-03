@@ -10,7 +10,9 @@
 //  API: GET /api/filler-assets/:id/details, POST /api/filler-assets/:id/rebuild.
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
-import { apiRequest, getToken } from '../api'
+import { api, apiRequest, getToken, derivedThumb, type FillerAsset } from '../api'
+import MediaPreview from '../MediaPreview'
+import { SpriteHover } from '../SpriteHover'
 import { navigate } from '../router'
 import { Notice, useNotify } from '../notices'
 
@@ -28,6 +30,7 @@ interface StreamUse {
 interface Details {
   asset: { id: string; name: string; kind: 'slate' | 'loop'; status: string; filename: string | null; width: number | null; height: number | null
     duration_ms: number | string | null; bytes: number | string | null; content_type: string | null; created_at: string; uploaded_at: string | null; error: string | null }
+    & Pick<FillerAsset, 'poster_key' | 'poster_source' | 'poster_candidates' | 'sprite' | 'thumb_status' | 'thumb_error' | 'probe'>
   media: string | null
   streams: StreamUse[]
   summary: { streams: number; ready: number; outOfDate: number; failed: number; renditions: number }
@@ -37,6 +40,127 @@ const KIND = { slate: 'Slate', loop: 'Loop' } as const
 const fmtBytes = (n: unknown) => { const v = Number(n) || 0; return v >= 1 << 30 ? `${(v / (1 << 30)).toFixed(1)} GB` : v >= 1 << 20 ? `${(v / (1 << 20)).toFixed(1)} MB` : v ? `${Math.round(v / 1024)} KB` : '—' }
 const fmtDur = (ms: unknown) => { const s = Math.round((Number(ms) || 0) / 1000); return s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—' }
 const when = (t: string | null) => t ? new Date(t).toLocaleString() : '—'
+const CODEC: Record<string, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', vp9: 'VP9', prores: 'ProRes', mpeg2video: 'MPEG-2', aac: 'AAC', mp3: 'MP3', ac3: 'AC-3', eac3: 'E-AC-3', opus: 'Opus', pcm_s16le: 'PCM 16-bit', pcm_s24le: 'PCM 24-bit', png: 'PNG', mjpeg: 'JPEG', webp: 'WebP' }
+const codec = (c?: string | null) => c ? CODEC[c] ?? c.toUpperCase() : '—'
+const chans = (n: number | null, layout: string | null) => n === 1 ? 'mono' : n === 2 ? 'stereo' : layout || (n ? `${n} channels` : '')
+const join = (...xs: (string | number | null | undefined | false)[]) => xs.filter((x) => x != null && x !== '' && x !== false).join(' · ')
+/**
+ * CAN THIS BROWSER PLAY THE FILE AS UPLOADED? The "As uploaded" player plays the
+ * original, and a ProRes, MXF or (outside Safari) HEVC loop cannot play in a
+ * browser at all. Asked of the browser itself (canPlayType with the codec), so
+ * Safari's HEVC counts. Unknown answers count as playable: the player then says
+ * what went wrong, as before.
+ */
+const CODEC_TYPE: Record<string, string> = { h264: 'avc1.640028', hevc: 'hvc1.1.6.L120.90', av1: 'av01.0.08M.08', vp9: 'vp09.00.40.08', vp8: 'vp8' }
+function canPlayOriginal(a: Details['asset']): { ok: boolean; why: string | null } {
+  const v = a.probe?.video
+  if (!v || v.still) return { ok: true, why: null }
+  const name = codec(v.codec)
+  const container = a.probe?.container ?? ''
+  const codecId = CODEC_TYPE[v.codec]
+  if (!codecId) return { ok: false, why: `${name}${container ? ` in ${container}` : ''}` }
+  const mime = /webm/i.test(container) ? 'video/webm' : /QuickTime/i.test(container) ? 'video/quicktime' : 'video/mp4'
+  try {
+    const el = document.createElement('video')
+    const r = el.canPlayType(`${mime}; codecs="${codecId}"`) || (mime === 'video/quicktime' ? el.canPlayType(`video/mp4; codecs="${codecId}"`) : '')
+    return r ? { ok: true, why: null } : { ok: false, why: `${name}${container ? ` in ${container}` : ''}` }
+  } catch { return { ok: true, why: null } }
+}
+const at = (ms?: number | null) => ms == null ? '' : `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+
+/**
+ * THE THUMBNAIL, like a media asset's (migration 0120): what Loops & Fillers and
+ * the fallback pickers show. A loop's is the best of a dozen frames, or the one
+ * a person picks here; a slate's is the image itself.
+ */
+/**
+ * EVERY RENDITION MADE FROM THIS FILE, in one place: each stream that falls back
+ * to it gets its own copy at its own ladder (fillerPrep.ts), so the same file can
+ * exist as several sets. Copies built from an earlier file are left out here and
+ * flagged under Used by.
+ */
+function MadeFromFile({ streams }: { streams: StreamUse[] }) {
+  const rows = new Map<string, { r: Rendition; by: string[] }>()
+  for (const s of streams) {
+    if (s.build?.status !== 'ready' || s.build.fromThisAsset === false) continue
+    for (const r of s.build.renditions) {
+      const k = `${r.width}x${r.height}@${r.fps}/${r.bitrate_kbps}/${r.profile ?? ''}`
+      const e = rows.get(k) ?? { r, by: [] }
+      e.by.push(s.name); rows.set(k, e)
+    }
+  }
+  const list = [...rows.values()].sort((x, y) => y.r.height - x.r.height || y.r.bitrate_kbps - x.r.bitrate_kbps)
+  const pending = streams.filter((s) => s.build && (s.build.status === 'queued' || s.build.status === 'building')).length
+  return (
+    <section className="card">
+      <div className="card-h"><h3>Renditions made from this file</h3>
+        <span className="sub">{list.length ? `${list.length} distinct, across ${new Set(list.flatMap((x) => x.by)).size} stream${new Set(list.flatMap((x) => x.by)).size === 1 ? '' : 's'}` : 'none yet'}{pending ? ` · ${pending} being built` : ''}</span></div>
+      <div className="card-b">
+        {list.length === 0
+          ? <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Renditions are made when a channel, station or event uses this as its fallback: one set per stream, to its own ladder.</div>
+          : <div style={{ overflowX: 'auto' }}><table>
+              <thead><tr><th>Rendition</th><th>Picture</th><th>Bitrate</th><th>Profile</th><th>Made for</th></tr></thead>
+              <tbody>{list.map(({ r, by }) => (
+                <tr key={`${r.label}-${by.join()}`}><td>{r.label}</td><td className="mono">{r.width}×{r.height} · {r.fps}fps</td><td className="mono">{r.bitrate_kbps} kbps</td><td>{r.profile ?? '—'}</td><td>{by.join(', ')}</td></tr>
+              ))}</tbody>
+            </table></div>}
+      </div>
+    </section>
+  )
+}
+
+function Thumbnail({ a, onChanged }: { a: Details['asset']; onChanged: () => void }) {
+  const [busy, setBusy] = useState('')
+  const notify = useNotify()
+  const frames = (a.poster_candidates ?? []).slice().sort((x, y) => (x.atMs ?? 0) - (y.atMs ?? 0))
+  const run = async (what: string, fn: () => Promise<unknown>, ok: string) => {
+    setBusy(what)
+    try { await fn(); notify({ kind: 'ok', message: ok }); onChanged() } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy('') }
+  }
+  const making = a.status === 'ready' && !a.thumb_status
+  return (
+    <section className="card">
+      <div className="card-h"><h3>Thumbnail</h3>
+        <span className="sub">{a.kind === 'slate' ? 'The image, scaled' : a.poster_source === 'manual' ? 'Chosen by hand' : 'The best frame, picked automatically'}</span>
+        <span style={{ flex: 1 }} />
+        {a.kind === 'loop' && a.poster_source === 'manual' && (
+          <button className="btn ghost sm" disabled={!!busy} onClick={() => run('auto', () => api.setFillerPoster(a.id, { auto: true }), 'Back to the automatic thumbnail.')}>Pick automatically</button>
+        )}
+        <button className="btn ghost sm" disabled={!!busy || making || a.status !== 'ready'} style={{ marginLeft: 6 }}
+          onClick={() => run('rebuild', () => api.rebuildFillerThumbnails(a.id), 'Making the thumbnails again.')}>
+          {busy === 'rebuild' ? 'Queuing…' : 'Make again'}
+        </button>
+      </div>
+      <div className="card-b">
+        {a.thumb_status === 'failed' && <div style={{ color: 'var(--down)', fontSize: 'var(--fs-sm)', marginBottom: 8 }}>Could not make thumbnails: {a.thumb_error}</div>}
+        {making && <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginBottom: 8 }}>Being made from the file. This takes a few seconds.</div>}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+          <div style={{ width: 256, maxWidth: '100%', aspectRatio: '16 / 9', background: '#000', borderRadius: 8, overflow: 'hidden', flex: 'none' }}>
+            {derivedThumb(a.poster_key, 512, 288) && <img src={derivedThumb(a.poster_key, 512, 288)!} alt={`Thumbnail of ${a.name}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
+          </div>
+          {frames.length > 0 && (
+            <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+              <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginBottom: 6 }}>Frames from the loop: choose one to use it.</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
+                {frames.map((f) => {
+                  const on = f.key === a.poster_key
+                  return (
+                    <button key={f.key} type="button" disabled={!!busy || on} onClick={() => run(f.key, () => api.setFillerPoster(a.id, { key: f.key }), 'Thumbnail changed.')}
+                      title={f.rejected ? `${at(f.atMs)}: ${f.rejected}` : `${at(f.atMs)}${on ? ' (in use)' : ''}`} aria-pressed={on}
+                      style={{ padding: 0, border: `2px solid ${on ? 'var(--brand)' : 'transparent'}`, borderRadius: 6, background: '#000', cursor: on ? 'default' : 'pointer', position: 'relative', opacity: f.rejected ? 0.55 : 1 }}>
+                      {derivedThumb(f.key, 224, 126) && <img src={derivedThumb(f.key, 224, 126)!} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block', borderRadius: 4 }} />}
+                      <span style={{ position: 'absolute', left: 4, bottom: 3, fontSize: 'var(--fs-micro)', color: '#fff', background: 'rgba(0,0,0,.6)', padding: '0 4px', borderRadius: 3 }}>{at(f.atMs)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
 
 function BuildPill({ b }: { b: StreamUse['build'] }) {
   if (!b || b.status === 'none') return <span className="tag idle">Not built</span>
@@ -100,6 +224,7 @@ export default function LoopDetail({ id }: { id: string }) {
   const [err, setErr] = useState('')
   const [playing, setPlaying] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
+  const [vtt, setVtt] = useState<string | null>(null)
   const notify = useNotify()
   const load = async () => {
     try { const x = await apiRequest(`/filler-assets/${id}/details`) as Details; setD(x); setErr('')
@@ -109,6 +234,15 @@ export default function LoopDetail({ id }: { id: string }) {
   useEffect(() => { void load() /* eslint-disable-next-line */ }, [id])
   // follow a rebuild while it runs
   const running = !!d?.streams.some((s) => s.build && (s.build.status === 'queued' || s.build.status === 'building'))
+    || (d?.asset.status === 'ready' && !d.asset.thumb_status)
+  // A loop's scrub previews (sprite sheets): loaded once they exist.
+  const sheets = d?.asset.sprite?.sheets?.length ?? 0
+  useEffect(() => {
+    let gone = false
+    if (!sheets) { setVtt(null); return }
+    api.fillerThumbnailsVtt(id).then((v) => { if (!gone) setVtt(v) }).catch(() => { /* none yet */ })
+    return () => { gone = true }
+  }, [id, sheets])
   useEffect(() => { if (!running) return; const h = setInterval(load, 3000); return () => clearInterval(h) /* eslint-disable-next-line */ }, [running])
 
   async function rebuild(s: StreamUse) {
@@ -148,12 +282,39 @@ export default function LoopDetail({ id }: { id: string }) {
             {d.media && a.status === 'ready'
               ? a.kind === 'slate'
                 ? <img src={d.media} alt="" style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'contain', background: '#000', borderRadius: 8, display: 'block' }} />
-                : <video src={d.media} controls muted loop playsInline style={{ width: '100%', aspectRatio: '16 / 9', background: '#000', borderRadius: 8, display: 'block' }} />
+                : canPlayOriginal(a).ok
+                  ? <MediaPreview sources={{ file: d.media }} audioOnly={false} title={a.name} thumbnailsVtt={vtt} poster={derivedThumb(a.poster_key, 1280, 720)} />
+                  : <div>
+                      <div style={{ position: 'relative', aspectRatio: '16 / 9', background: '#000', borderRadius: 8, overflow: 'hidden' }}>
+                        {a.sprite?.sheets?.length
+                          ? <SpriteHover id={a.id} poster={derivedThumb(a.poster_key, 1280, 720)} loadVtt={() => api.fillerThumbnailsVtt(a.id)} label={`Preview of ${a.name}`} />
+                          : derivedThumb(a.poster_key, 1280, 720) && <img src={derivedThumb(a.poster_key, 1280, 720)!} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
+                      </div>
+                      <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 8 }}>
+                        This browser can't play the file as uploaded ({canPlayOriginal(a).why}). Hover over the picture for a preview made from it.
+                        Streams don't play the original either: each gets its own encoded copy, shown under <b>Built copy</b>.
+                      </div>
+                    </div>
               : <div style={{ aspectRatio: '16 / 9', display: 'grid', placeItems: 'center', background: 'var(--panel-2)', borderRadius: 8, color: 'var(--faint)' }}>No preview</div>}
             <table style={{ marginTop: 12 }}>
               <tbody>
                 <tr><td style={{ color: 'var(--faint)' }}>File</td><td style={{ wordBreak: 'break-all' }}>{a.filename ?? '—'}</td></tr>
-                <tr><td style={{ color: 'var(--faint)' }}>Picture</td><td>{a.width && a.height ? `${a.width}×${a.height}` : '—'}{a.kind === 'loop' ? ` · ${fmtDur(a.duration_ms)}` : ''}</td></tr>
+                <tr><td style={{ color: 'var(--faint)' }}>Picture</td><td>{a.width && a.height ? `${a.width}×${a.height}` : '—'}{a.kind === 'loop' ? ` · ${fmtDur(a.duration_ms)}` : ''}
+                  {a.probe?.video && !a.probe.video.still && <>{a.probe.video.fps ? ` · ${a.probe.video.fps} fps` : ''}{a.probe.video.scan === 'interlaced' ? ' · interlaced' : ''}</>}</td></tr>
+                {/* THE FILE AS DELIVERED (read with the thumbnails, migration 0120). */}
+                {a.probe?.video && (
+                  <tr><td style={{ color: 'var(--faint)' }}>{a.probe.video.still ? 'Image' : 'Video'}</td>
+                    <td>{join(codec(a.probe.video.codec), a.probe.video.profile, a.probe.video.level && `level ${a.probe.video.level}`,
+                      a.probe.video.bitrateKbps && `${a.probe.video.bitrateKbps} kbps`, a.probe.video.pixFmt, a.probe.video.bitDepth && a.probe.video.bitDepth > 8 && `${a.probe.video.bitDepth}-bit`, a.probe.video.colour)}</td></tr>
+                )}
+                {a.probe && !a.probe.video?.still && (
+                  <tr><td style={{ color: 'var(--faint)' }}>Audio</td>
+                    <td>{a.probe.audio ? join(codec(a.probe.audio.codec), a.probe.audio.profile, chans(a.probe.audio.channels, a.probe.audio.layout),
+                      a.probe.audio.sampleRate && `${a.probe.audio.sampleRate / 1000} kHz`, a.probe.audio.bitrateKbps && `${a.probe.audio.bitrateKbps} kbps`,
+                      a.probe.audio.tracks > 1 && `${a.probe.audio.tracks} tracks`) : 'None (a fallback adds silence)'}</td></tr>
+                )}
+                {a.probe?.container && <tr><td style={{ color: 'var(--faint)' }}>Container</td><td>{join(a.probe.container, a.probe.bitrateKbps && !a.probe.video?.still && `${a.probe.bitrateKbps} kbps overall`)}</td></tr>}
+                {a.status === 'ready' && !a.probe && <tr><td style={{ color: 'var(--faint)' }}>Format</td><td style={{ color: 'var(--faint)' }}>{a.thumb_status === 'failed' ? 'Could not be read' : 'Being read from the file'}</td></tr>}
                 <tr><td style={{ color: 'var(--faint)' }}>Size</td><td>{fmtBytes(a.bytes)}{a.content_type ? ` · ${a.content_type}` : ''}</td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>Added</td><td>{when(a.created_at)}</td></tr>
               </tbody>
@@ -172,6 +333,10 @@ export default function LoopDetail({ id }: { id: string }) {
           </div>
         </section>
       </div>
+
+      <Thumbnail a={a} onChanged={load} />
+
+      <MadeFromFile streams={d.streams} />
 
       <section className="card">
         <div className="card-h"><h3>Used by</h3><span className="sub">Each stream gets its own copy, encoded to its ladder and segment length</span></div>

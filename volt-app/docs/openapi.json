@@ -14940,6 +14940,42 @@
     }
    }
   },
+  "/api/filler-assets/{id}/poster": {
+   "put": {
+    "operationId": "putFillerAssetsByIDPoster",
+    "summary": "Choose a loop's thumbnail",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "`{ \"key\": <a frame from poster_candidates> }` uses that frame; `{ \"auto\": true }` goes back to the best-scoring frame. A frame that is not one of this loop's is refused (404).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/filler-assets/{id}/rebuild": {
    "post": {
     "operationId": "postFillerAssetsByIDRebuild",
@@ -14948,6 +14984,78 @@
      "Filler Assets"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/thumbnails": {
+   "post": {
+    "operationId": "postFillerAssetsByIDThumbnails",
+    "summary": "Make a slate or loop's thumbnails again",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "Queues the thumbnail job again: the thumbnail, a loop's frames and sprite sheets, and the file's format (resolution, codecs, frame rate, bitrates) read again. A thumbnail chosen by hand is kept while that frame is made again. 409 while the file is still uploading.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/thumbnails.vtt": {
+   "get": {
+    "operationId": "getFillerAssetsByIDThumbnailsVtt",
+    "summary": "A loop's preview thumbnails (WebVTT)",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "One cue per sprite tile, pointing into the loop's signed sprite sheets, for hover and scrub previews in a player. 404 for a slate (a still has no timeline) or a loop whose thumbnails are not made yet.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
     "security": [
      {
       "adminBearer": []

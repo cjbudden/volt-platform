@@ -1868,6 +1868,11 @@ export const api = {
     req(`/filler-assets${kind ? `?kind=${kind}` : ''}`),
   patchFillerAsset: (id: string, b: { name?: string }): Promise<FillerAsset> =>
     req(`/filler-assets/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  fillerThumbnailsVtt: (id: string): Promise<string> => textReq(`/filler-assets/${id}/thumbnails.vtt`),
+  rebuildFillerThumbnails: (id: string): Promise<{ queued: boolean }> =>
+    req(`/filler-assets/${id}/thumbnails`, { method: 'POST' }),
+  setFillerPoster: (id: string, b: { key: string } | { auto: true }): Promise<FillerAsset> =>
+    req(`/filler-assets/${id}/poster`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteFillerAsset: (id: string, force = false): Promise<null> =>
     req(`/filler-assets/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
   /** Fallbacks not in Loops & Fillers yet, grouped by address. */
@@ -1945,7 +1950,7 @@ export const api = {
     req('/analytics/retention/sweep', { method: 'POST' }),
 
   // ---- review and QC ----
-  reviewQueue: (): Promise<{ queue: ReviewQueueRow[]; count: number }> => req('/vod/review/queue'),
+  reviewQueue: (): Promise<{ queue: ReviewQueueRow[]; count: number; qcFailed?: ReviewQueueRow[] }> => req('/vod/review/queue'),
   assetReview: (id: string): Promise<AssetReview> => req(`/vod/${id}/review`),
   decideReview: (id: string, to: ReviewStateId, note?: string): Promise<any> =>
     req(`/vod/${id}/review`, { method: 'POST', body: JSON.stringify({ to, note }) }),
@@ -2926,7 +2931,18 @@ export interface FillerAsset {
   width: number | null
   height: number | null
   duration_ms: number | string | null
+  /** The thumbnail (derived/<account>/filler/<id>/...): a loop's best frame or one a person chose, a slate scaled. */
   poster_key: string | null
+  poster_source?: 'auto' | 'manual' | null
+  /** A loop's frames to choose the thumbnail from, best first. */
+  poster_candidates?: { key: string; atMs?: number | null; score?: number; rejected?: string }[] | null
+  /** A loop's sprite sheets (hover and scrub previews; the VTT is /filler-assets/:id/thumbnails.vtt). */
+  sprite?: { sheets: { key: string }[] } | null
+  /** null: not made yet. */
+  thumb_status?: 'ready' | 'failed' | null
+  thumb_error?: string | null
+  /** The file as delivered, read when the thumbnails are made. */
+  probe?: FillerProbe | null
   status: 'uploading' | 'processing' | 'ready' | 'error'
   bytes: number | string | null
   content_type: string | null
@@ -2937,6 +2953,12 @@ export interface FillerAsset {
   updated_at: string
   /** The channels, stations and events that fall back to this asset. */
   used_by?: FillerUser[]
+}
+export interface FillerProbe {
+  container: string | null; bitrateKbps: number | null
+  video: null | { codec: string; profile: string | null; level: string | null; width: number; height: number; fps: number | null
+    scan: 'progressive' | 'interlaced' | null; pixFmt: string | null; colour: string | null; bitDepth: number | null; bitrateKbps: number | null; still: boolean }
+  audio: null | { codec: string; profile: string | null; channels: number | null; layout: string | null; sampleRate: number | null; bitrateKbps: number | null; tracks: number }
 }
 export interface FillerUser { kind: 'channel' | 'radio' | 'event'; id: string; name: string; href: string }
 /** A fallback still held as a pasted address (usually an Image Library image). */
@@ -3275,7 +3297,12 @@ export interface SchemaField {
   /** EPG slot: title | sub-title | description | category | episode | language | icon | credits.<role> | custom:<name> */
   epg?: string
   schemaOrg?: string
+  /** date: a year on its own ("1987") is valid. Unset, a datePublished field allows it (dateAllowsYear). */
+  allowYear?: boolean
 }
+/** Whether a date field takes a year on its own (the server's metadataValidator.dateAllowsYear). */
+export const dateAllowsYear = (f: Pick<SchemaField, 'type' | 'allowYear' | 'schemaOrg'>) =>
+  f.type === 'date' && (f.allowYear ?? f.schemaOrg === 'datePublished')
 export type MetadataListKey = 'genres'
 export interface MetadataList {
   key: MetadataListKey; name: string; description: string
@@ -3506,3 +3533,12 @@ export async function apiRequestWithHeaders(path: string, opts: RequestInit = {}
 
 /** A programme outside the guide strip's window (services/epgLane.ts EpgNeighbour). */
 export interface EpgNeighbour { name: string; startMs: number; endMs: number }
+
+/** A derived image (a slate or loop thumbnail, a frame) through the signed image service, or null until signing is ready. */
+export function derivedThumb(key: string | null | undefined, w: number, h: number, fit: 'cover' | 'inside' = 'cover'): string | null {
+  if (!key) return null
+  const signed = signImage(`${w}x${h},${fit}`, key.replace(/^\/+/, ''))
+  if (signed) return signed
+  void ensureImageSigning()
+  return null
+}

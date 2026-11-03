@@ -202,6 +202,15 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
   const audioOnly: boolean = d.audioOnly === true
   const file = audioOnly ? (d.export_mp3_key || d.export_m4a_key || d.progressive_key || null) : (d.progressive_key || null)
   const hls = d.master_key || null
+  // DASH is packaged beside the HLS master when the asset's formats say so (the
+  // same rule as the server's deliveries list, services/vodLibrary.ts).
+  const dash = d.formats?.dash && typeof d.master_key === 'string' && /master\.m3u8$/.test(d.master_key) ? d.master_key.replace(/master\.m3u8$/, 'manifest.mpd') : null
+  // WHAT IT IS, as the library card says it: Video, Audio or Song. The stored
+  // vod kind (clip | full_event | export) is how it was cut from a recording, so
+  // it is shown only for assets made from one; an upload is just video or audio.
+  const mediaKind = d.schema?.standard_key === 'song' || d.metadata?.class === 'song' ? 'Song' : audioOnly ? 'Audio' : 'Video'
+  const CUT_LABEL: Record<string, string> = { clip: 'clip of a recording', full_event: 'full recording', export: 'export of a recording' }
+  const cut = (!d.source_kind || d.source_kind === 'recording') && d.kind ? CUT_LABEL[d.kind] ?? d.kind : null
   // NOTHING TO PLAY IS SAID, NOT TRIED. A clip whose build failed still has a
   // master_key (the placeholder it was created with), so the player used to
   // load it and report "Playback failed" with no reason. The usage status
@@ -281,7 +290,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
             <table>
               <tbody>
                 <tr><td style={{ color: 'var(--faint)' }}>Status</td><td>{d.usage_status ? <UsageBadge row={d} /> : '—'}</td></tr>
-                <tr><td style={{ color: 'var(--faint)' }}>Kind</td><td>{d.kind}</td></tr>
+                <tr><td style={{ color: 'var(--faint)' }}>Kind</td><td>{mediaKind}{cut ? ` · ${cut}` : ''}</td></tr>
                 {(d.source_kind === 'upload' || d.source_kind === 'watchfolder') && <>
                   {/* THE SOURCE (mezzanine) FILE: kept as uploaded; every rendition is made from it. */}
                   <tr><td style={{ color: 'var(--faint)' }}>Source file</td>
@@ -315,6 +324,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
             {d.master_key && !noMedia && (
               <div style={{ marginTop: 10 }}>
                 <a className="btn ghost" href={d.master_key} target="_blank" rel="noreferrer">HLS manifest</a>
+                {dash && <a className="btn ghost" href={dash} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>DASH manifest</a>}
                 {/* Downloads follow the Downloads permission (modules/downloads.ts), not the page. */}
                 <DownloadFiles id={d.id} compact />
               </div>

@@ -7,7 +7,7 @@ import { validateMetadata, SchemaField } from '../services/metadataValidator';
 import { videoObjectFromAsset } from '../services/schemaOrg';
 import { traceClip } from '../services/clips/provenance';
 import { enqueueClipBuild } from '../services/clips';
-import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, IllegalReview } from '../services/review';
+import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, qcFailedQueue, IllegalReview } from '../services/review';
 import { qcFindings } from '../services/qc';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
@@ -440,7 +440,7 @@ vodRouter.get(
     if (!row) throw notFound('VOD asset not found');
     let schema = null;
     if (row.schema_id) {
-      schema = await one('SELECT id, name, fields FROM metadata_schemas WHERE id = $1', [
+      schema = await one('SELECT id, name, fields, standard_key FROM metadata_schemas WHERE id = $1', [
         row.schema_id,
       ]);
     }
@@ -573,7 +573,9 @@ vodRouter.get(
   '/review/queue',
   asyncHandler(async (req, res) => {
     const rows = await reviewQueue(accountId(req));
-    res.json({ queue: rows, count: rows.length });
+    // Failed QC with no decision yet: what the dashboard alert points here for.
+    const qcFailed = await qcFailedQueue(accountId(req));
+    res.json({ queue: rows, count: rows.length, qcFailed });
   })
 );
 

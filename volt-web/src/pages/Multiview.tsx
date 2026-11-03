@@ -235,7 +235,9 @@ function Flags({ flags, align }: { flags: Flag[]; align: 'left' | 'right' }) {
 /** The URL a tile plays for the chosen output and viewer location. */
 export function tileUrl(s: LiveStream, output: 'delivered' | 'packager', cc: string): string {
   const base = output === 'packager' ? s.previewUrl : (s.deliveredUrl || s.previewUrl)
-  if (!cc || s.audioOnly) return base
+  // The viewer-location view (/origin/<id>/as/<CC>/...) exists for encoder
+  // outputs under /live/ only. A FAST channel plays its own playlists as they are.
+  if (!cc || s.audioOnly || !/\/live\//.test(base)) return base
   const file = base.replace(/^.*\/live\//, '')
   return `/origin/${s.id}/as/${cc}/${file}`
 }

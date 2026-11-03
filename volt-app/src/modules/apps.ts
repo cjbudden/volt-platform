@@ -22,7 +22,7 @@ import { cachedEntitlements } from '../services/viewerPath';
 import { viewerEntitlements } from '../services/entitlements';
 import type { ViewerCtx } from '../services/accessRules';
 import { cached } from '../scale/cache';
-import { config } from '../config';
+import { config, mediaBaseUrl } from '../config';
 import { manifestUrls } from '../services/shareLinks';
 import { publicMp3Url } from '../services/radio/jobConfig';
 import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
@@ -451,7 +451,7 @@ function assetMeta(acct: string, kind: string, id: string): Promise<AssetMeta | 
             WHERE v.id = $1 AND COALESCE(g.account_id, v.account_id) = $2`, [id, acct]);  // uploads belong to the account directly (vod.ts OWNER_ACCOUNT)
         if (!a) return null;
         const m = manifestUrls('vod', a.id, a.master_key, a.formats ?? {});
-        const cdn = config.aws.cdnBaseUrl.replace(/\/$/, '');
+        const cdn = mediaBaseUrl();
         return { title: a.title ?? null, description: a.metadata?.description ?? null,
           artworkUrl: a.poster_key ? `${cdn}/${String(a.poster_key).replace(/^\//, '')}` : imageUrl(a.metadata?.image),
           durationMs: a.duration_ms != null ? Number(a.duration_ms) : null, live: false, kind: 'vod', manifests: { hls: m.hls, dash: m.dash },

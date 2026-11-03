@@ -730,6 +730,18 @@
     "summary": "Recorded sources",
     "description": "One row per channel, radio station or event with recorded content, with its counts, available range and live state. `q` matches the source's name, or a programme or song title that aired inside one of its recordings (guide entries and a station's now-playing log); a guide entry with no recording under it is not a match. With `q`, each row's `match` says why: `{ \"by\": \"name\" }`, or `{ \"by\": \"aired\", \"title\", \"atMs\", \"count\" }` naming the latest matching entry and how many matched. Also `type` (csv of channel, radio, event), `sort`, `dir`, `recordedFrom`/`recordedTo`, `createdFrom`/`createdTo` (epoch ms) and `recordingNow=1`."
   },
+  "PUT /api/filler-assets/:id/poster": {
+    "summary": "Choose a loop's thumbnail",
+    "description": "`{ \"key\": <a frame from poster_candidates> }` uses that frame; `{ \"auto\": true }` goes back to the best-scoring frame. A frame that is not one of this loop's is refused (404)."
+  },
+  "POST /api/filler-assets/:id/thumbnails": {
+    "summary": "Make a slate or loop's thumbnails again",
+    "description": "Queues the thumbnail job again: the thumbnail, a loop's frames and sprite sheets, and the file's format (resolution, codecs, frame rate, bitrates) read again. A thumbnail chosen by hand is kept while that frame is made again. 409 while the file is still uploading."
+  },
+  "GET /api/filler-assets/:id/thumbnails.vtt": {
+    "summary": "A loop's preview thumbnails (WebVTT)",
+    "description": "One cue per sprite tile, pointing into the loop's signed sprite sheets, for hover and scrub previews in a player. 404 for a slate (a still has no timeline) or a loop whose thumbnails are not made yet."
+  },
   "GET /api/vod/:id/frame-index": {
     "tag": "VOD",
     "summary": "Get an asset's frame index",

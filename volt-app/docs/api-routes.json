@@ -2457,11 +2457,38 @@
   "group": "/api/filler-assets"
  },
  {
+  "method": "PUT",
+  "path": "/api/filler-assets/:id/poster",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
   "method": "POST",
   "path": "/api/filler-assets/:id/rebuild",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/filler-assets/:id/thumbnails",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets/:id/thumbnails.vtt",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
   "viewerTier": false,
   "group": "/api/filler-assets"
  },

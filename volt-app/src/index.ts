@@ -185,6 +185,8 @@ boot().then(async () => {
       startAssetImageSweep();
       // Frame indexes for assets made before they existed, and old frame stills (services/frames).
       void import('./services/jobs/handlers/frameIndex').then((m) => m.startFrameIndexSweep()).catch((e) => console.warn('[frames.index] sweep not started', e));
+      // Slates and loops: thumbnails, frames and sprites for any without (services/media/fillerThumbs.ts).
+      void import('./services/jobs/handlers/fillerThumbs').then((m) => m.startFillerThumbsSweep()).catch((e) => console.warn('[filler.thumbs] sweep not started', e));
       // Uploads held for metadata before the gate stopped holding the media: encode them once.
       void import('./services/ingest/pipeline').then((m) => m.encodeHeldUploads()).catch((e) => console.warn('[ingest] held uploads not checked', e));
       return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); };
@@ -201,6 +203,7 @@ boot().then(async () => {
     registerVodMarkerHandlers();
     (await import('./services/jobs/handlers/reframe')).registerReframeHandlers();
     registerVodImageHandlers();
+    (await import('./services/jobs/handlers/fillerThumbs')).registerFillerThumbsHandlers();
     (await import('./services/jobs/handlers/songArtwork')).registerSongArtworkHandlers();
     registerRemoteIngestHandlers();
     (await import('./services/jobs/handlers/frameIndex')).registerFrameIndexHandlers();

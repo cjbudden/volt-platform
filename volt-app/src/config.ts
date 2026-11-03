@@ -468,3 +468,16 @@ export function imageServiceConfig(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 export type ImageServiceConfig = ReturnType<typeof imageServiceConfig>;
+
+/**
+ * Where viewers fetch library media and images (posters, programme images).
+ * The CDN when one is configured; otherwise this server, which serves the
+ * same keys itself (/library/*). CDN_BASE_URL defaults to a placeholder
+ * (cdn.example.com) that resolves nowhere, and every poster in a programme
+ * marker, the guide and the player drew as a broken image without one.
+ */
+export function mediaBaseUrl(): string {
+  const cdn = String(config.aws.cdnBaseUrl ?? '');
+  const real = !!process.env.CDN_BASE_URL && /^https?:\/\//.test(cdn) && !/(^|\.)example\.com/.test(cdn);
+  return (real ? cdn : config.publicBaseUrl).replace(/\/+$/, '');
+}

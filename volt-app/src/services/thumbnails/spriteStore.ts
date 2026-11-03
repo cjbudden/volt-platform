@@ -43,13 +43,15 @@ export const isSpriteKey = (key: string | null | undefined) => !!key && /^derive
 
 export interface SpriteRow {
   accountId: string;
-  ownerKind: 'stream' | 'asset';
+  ownerKind: 'stream' | 'asset' | 'filler';
   kind?: 'sheet' | 'vtt';
   storeKey: string;
   streamKind?: 'channel' | 'event' | null;
   streamId?: string | null;
   storyboardId?: string | null;
   vodAssetId?: string | null;
+  /** A slate or loop's own sheets (migration 0120). */
+  fillerAssetId?: string | null;
   startMs?: number | null;
   intervalMs?: number | null;
   tileW?: number | null;
@@ -66,8 +68,8 @@ export interface SpriteRow {
 export async function recordSprite(r: SpriteRow): Promise<void> {
   await query(
     `INSERT INTO sprite_sheets (account_id, owner_kind, kind, store_key, stream_kind, stream_id, storyboard_id, vod_asset_id,
-       start_ms, interval_ms, tile_w, tile_h, cols, rows, tiles, width, height, size_bytes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       start_ms, interval_ms, tile_w, tile_h, cols, rows, tiles, width, height, size_bytes, filler_asset_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (store_key) DO UPDATE SET
        storyboard_id = COALESCE(EXCLUDED.storyboard_id, sprite_sheets.storyboard_id),
        vod_asset_id = COALESCE(EXCLUDED.vod_asset_id, sprite_sheets.vod_asset_id),
@@ -76,7 +78,7 @@ export async function recordSprite(r: SpriteRow): Promise<void> {
        size_bytes = EXCLUDED.size_bytes, updated_at = now()`,
     [r.accountId, r.ownerKind, r.kind ?? 'sheet', r.storeKey, r.streamKind ?? null, r.streamId ?? null, r.storyboardId ?? null,
      r.vodAssetId ?? null, r.startMs ?? null, r.intervalMs ?? null, r.tileW ?? null, r.tileH ?? null, r.cols ?? null, r.rows ?? null,
-     r.tiles ?? 0, r.width ?? null, r.height ?? null, r.sizeBytes]);
+     r.tiles ?? 0, r.width ?? null, r.height ?? null, r.sizeBytes, r.fillerAssetId ?? null]);
 }
 
 /** Delete sprite objects and their rows (best effort on the objects). */

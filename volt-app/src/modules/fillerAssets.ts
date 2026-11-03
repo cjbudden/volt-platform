@@ -206,6 +206,7 @@ fillerAssetsRouter.post(
     await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
       action: 'create', entityType: 'filler_asset', entityId: row.id,
       snapshot: { copiedFrom: file.path, mediaFileId: file.id, relinked: relinked.map((r: any) => ({ owner: r.owner, id: r.id, name: r.name })) } });
+    await (await import('../services/jobs/handlers/fillerThumbs')).queueFillerThumbs(row.id);
     const usedBy = relinked.map(userOf);
     res.status(201).json({ asset: { ...ready, used_by: usedBy }, relinked: usedBy });
   })
@@ -345,6 +346,52 @@ fillerAssetsRouter.post(
   })
 );
 
+// ---------------------------------------------------------------------------
+//  THUMBNAILS (migration 0120, services/media/fillerThumbs.ts): the thumbnail,
+//  the frames to choose it from, and the sprite sheets' WebVTT for previews.
+// ---------------------------------------------------------------------------
+
+/** The loop's hover and scrub previews: one cue per tile, into its signed sheets. */
+fillerAssetsRouter.get(
+  '/:id/thumbnails.vtt',
+  asyncHandler(async (req, res) => {
+    const { fillerVtt } = await import('../services/media/fillerThumbs');
+    const vtt = await fillerVtt(String(req.params.id), accountId(req));
+    if (!vtt) throw notFound('No preview thumbnails for this slate or loop');
+    res.type('text/vtt').set('Cache-Control', 'private, max-age=60').send(vtt);
+  })
+);
+
+/** Make the thumbnail, frames and sprites again (a person asked, or the first try failed). */
+fillerAssetsRouter.post(
+  '/:id/thumbnails',
+  asyncHandler(async (req, res) => {
+    const acc = accountId(req);
+    const row = await one<any>(`SELECT id, status FROM filler_assets WHERE id=$1 AND account_id=$2`, [req.params.id, acc]);
+    if (!row) throw notFound('Filler asset not found');
+    if (row.status !== 'ready') throw conflict(`It is still ${row.status}; thumbnails are made once the file is in`);
+    await query(`UPDATE filler_assets SET thumb_status = NULL, thumb_error = NULL WHERE id = $1`, [row.id]);
+    await (await import('../services/jobs/handlers/fillerThumbs')).queueFillerThumbs(row.id);
+    res.status(202).json({ queued: true });
+  })
+);
+
+/** Choose one of the loop's frames as its thumbnail, or `auto` for the best-scoring one. */
+fillerAssetsRouter.put(
+  '/:id/poster',
+  asyncHandler(async (req, res) => {
+    const acc = accountId(req);
+    const b = z.object({ key: z.string().min(1).optional(), auto: z.boolean().optional() }).parse(req.body ?? {});
+    const ft = await import('../services/media/fillerThumbs');
+    const ok = b.auto ? await ft.autoFillerPoster(String(req.params.id), acc) : b.key ? await ft.setFillerPoster(String(req.params.id), acc, b.key) : false;
+    if (!ok) throw notFound(b.auto ? 'No frames to choose from yet' : 'That frame is not one of this loop\'s');
+    const who = actor(req);
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
+      entityId: String(req.params.id), changes: { thumbnail: { from: null, to: b.auto ? 'automatic' : b.key } } }).catch(() => {});
+    res.json(await one(`SELECT * FROM filler_assets WHERE id = $1`, [req.params.id]));
+  })
+);
+
 const createSchema = z.object({
   kind: z.enum(['slate', 'loop']),
   name: z.string().min(1),
@@ -416,6 +463,8 @@ fillerAssetsRouter.delete(
       [req.params.id, accountId(req)]
     );
     if (!row) throw notFound('Filler asset not found');
+    // Its thumbnail, frames and sprite sheets go with it (sprite_sheets rows cascade).
+    await (await import('../services/media/fillerThumbs')).deleteFillerThumbs(accountId(req), String(req.params.id)).catch(() => {});
     res.status(204).end();
   })
 );

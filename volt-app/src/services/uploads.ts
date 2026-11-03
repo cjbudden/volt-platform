@@ -459,6 +459,8 @@ export async function completeLanded(session: UploadSession, dest: string, writt
         WHERE id = $1`,
       [session.filler_asset_id, sourceKey, written]
     );
+    // Its thumbnail, frames and sprites, like a media asset's (migration 0120).
+    await (await import('./jobs/handlers/fillerThumbs')).queueFillerThumbs(session.filler_asset_id);
   }
   let ingestStatus: string = 'ingested';
   let encodeSource = dest;

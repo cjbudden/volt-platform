@@ -8,7 +8,8 @@
 //  The Stats button opens the shared playback stats panel (sdk/stats.ts).
 // ============================================================================
 import type { PlayerState, Skin, SkinContext } from '../types';
-import { button, el, fmtTime, label, menu, setIcon, show, skipButton, slider, text, type MenuItem } from './kit';
+import { metaLine, onAir, secondsTo, type OnAir } from './onair';
+import { button, el, fmtClock, fmtTime, label, menu, setIcon, show, skipButton, slider, text, type MenuItem } from './kit';
 
 export function adminSkin(): Skin {
   let c!: SkinContext;
@@ -17,6 +18,7 @@ export function adminSkin(): Skin {
   let prog!: ReturnType<typeof slider>;
   let vol!: ReturnType<typeof slider>;
   let skip!: ReturnType<typeof skipButton>;
+  let air!: OnAir;
 
   function mount(ctx: SkinContext) {
     c = ctx;
@@ -32,6 +34,8 @@ export function adminSkin(): Skin {
     // markers sees exactly what a viewer will.
     skip = skipButton(ctx);
     top.append(p.ov, skip.el);
+    // The programme card and countdown, as viewers get them: proof the stream's metadata is there and read.
+    air = onAir(ctx, 'console');
 
     prog = slider('vpa-sl', 'Seek', (f, final) => {
       if (!s || !final) return;
@@ -54,8 +58,10 @@ export function adminSkin(): Skin {
     const bar = el('div', 'vpa-bar', undefined, prog.root,
       el('div', 'vpa-row', undefined, p.play, p.back, p.fwd, el('div', 'vpv-vol', undefined, p.mute, vol.root), p.time, p.live,
         el('div', 'vpv-spacer'), p.q, p.cc, p.qb, p.statsBtn, p.fs));
+    // STREAM DATA: what the stream's own markers say is on, next, and whether it is the loop/slate or a break.
+    p.meta = el('div', 'vpa-meta', { 'aria-live': 'polite' });
     p.root = root;
-    root.append(top, bar);
+    root.append(top, bar, p.meta);
     ctx.root.appendChild(root);
   }
 
@@ -80,6 +86,7 @@ export function adminSkin(): Skin {
 
   function update(st: PlayerState) {
     skip.update(st);
+    air.update(st);
     s = st;
     const t = c.t;
     p.root.classList.toggle('audio', st.audioOnly && !st.hasPicture);
@@ -115,6 +122,24 @@ export function adminSkin(): Skin {
     show(p.qb, st.qualities.length > 1);
     show(p.fs, !(st.audioOnly && !st.hasPicture));
     p.statsBtn.classList.toggle('on', st.stats);
+    text(p.meta, st.live ? streamData(st) : '');
+    show(p.meta, st.live);
+  }
+
+  /** One line: on now (from the stream), its metadata, next, and the loop/slate or break state. */
+  function streamData(st: PlayerState): string {
+    const pr = st.programme;
+    if (!pr) return 'Stream data: no programme marker at the playhead';
+    const parts = [`On now: ${pr.title}`];
+    const m = metaLine(pr);
+    if (m) parts.push(m);
+    if (pr.meta?.duration) parts.push(`content ${fmtTime(Number(pr.meta.duration))}`);
+    if (st.between) {
+      const sec = secondsTo(st.between.resumesAt, st);
+      parts.push(st.between.kind === 'break' ? `AD BREAK${sec != null ? `, back in ${fmtTime(sec)}` : ''}` : `LOOP / SLATE${sec != null ? `, next in ${fmtTime(sec)}` : ''}`);
+    }
+    if (st.nextProgramme) parts.push(`Next: ${st.nextProgramme.title}${Number.isFinite(st.nextProgramme.startsAt) ? ` ${fmtClock(st.nextProgramme.startsAt)}` : ''}`);
+    return parts.join('  ·  ');
   }
 
   return { mount, update };

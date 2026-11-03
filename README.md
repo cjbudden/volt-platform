@@ -47,6 +47,16 @@ present (`ORCH_LAUNCHER=local`). Open http://localhost:5173 and sign in:
 Test data PERSISTS between runs (channels, sources you create stay). To wipe and reload
 the demo snapshot: `RESET_DB=1 bash run-on-mac.sh`.
 
+### Test from your phone (away from the desk)
+One-time: install Tailscale on the Mac and the phone, same account, and enable MagicDNS +
+HTTPS Certificates at https://login.tailscale.com/admin/dns. Then:
+```bash
+REMOTE=1 bash run-on-mac.sh
+```
+It prints `https://<mac>.<tailnet>.ts.net`, open that on the phone with Tailscale on. Only
+your own devices can reach it. Share links, player snippets and image URLs use that address,
+and the Mac is kept awake while the script runs. Ctrl-C stops publishing.
+
 ### Two encoder layers for feature testing
 - **Layer 1 — app/UI + native encoder (default).** `bash run-on-mac.sh` runs the React app
   and control plane on your Mac and, when ffmpeg + python3 + Shaka are present, the real

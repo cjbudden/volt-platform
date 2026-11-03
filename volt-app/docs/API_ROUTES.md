@@ -585,7 +585,10 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: view |  |
 | PATCH | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/:id/details` | admin session (Bearer) or account secret key | media: view |  |
+| PUT | `/api/filler-assets/:id/poster` | admin session (Bearer) or account secret key | media: manage |  |
 | POST | `/api/filler-assets/:id/rebuild` | admin session (Bearer) or account secret key | media: manage |  |
+| POST | `/api/filler-assets/:id/thumbnails` | admin session (Bearer) or account secret key | media: manage |  |
+| GET | `/api/filler-assets/:id/thumbnails.vtt` | admin session (Bearer) or account secret key | media: view |  |
 | POST | `/api/filler-assets/copy-from-library` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/elsewhere` | admin session (Bearer) or account secret key | media: view |  |
 

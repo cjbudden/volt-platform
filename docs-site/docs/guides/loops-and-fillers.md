@@ -37,9 +37,19 @@ Large files are sent in pieces. If an upload is interrupted (the tab closed, the
 ### Find, check and rename
 
 1. Use **All**, **Loops** or **Slates** to narrow the list.
-2. Hover over a loop's preview to play it, or choose **Open** to see the file at full size.
+2. Hover over a loop's thumbnail for a moving preview. It is made from the loop's own frames, so it looks the same in every browser, whatever format the file was uploaded in (ProRes and MXF included). Choose **Details** to see the file at full size.
 3. **Used by** names every channel and event that falls back on it; choose a name to open that stream.
 4. To rename, click the name, type the new one and press Enter (Escape cancels). The file name stays underneath.
+
+### Check the file and its thumbnail
+
+Choose **Details** to open one slate or loop.
+
+- **As uploaded** plays the file (when your browser can play its format; for ProRes, MXF and similar it says so and shows the hover preview instead) and lists what it is: resolution, length and frame rate, the video codec with its profile, level and bitrate, the audio (codec, channels, sample rate, bitrate) and the container. A loop with no sound shows **None**: a fallback adds silence. Hover over the player's timeline to preview any moment.
+- **Thumbnail** is the picture the list and the stream pickers show. For a loop, Volt takes a dozen frames from it and uses the best one (not black, not blurred, not colour bars). To use another, choose one of the frames; **Pick automatically** goes back to Volt's choice. A slate's thumbnail is the image itself. **Make again** reads the file again, for example after a failure.
+- **Renditions made from this file** lists every rendition built from it, and for which stream. Each stream that falls back on the file gets its own copy, encoded to that stream's ladder, so one file can have several sets.
+
+Thumbnails are made a few seconds after an upload finishes. Slates and loops added before this existed get theirs automatically.
 
 ### Use one on a channel
 
@@ -88,6 +98,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A file stays at **uploading** | The page has not refreshed, or the upload was interrupted | Choose **Refresh**; if it is listed under **Unfinished uploads**, resume it with the same file |
 | **error** in the Status column | The file could not be stored or used; the reason is shown under it | Delete it and upload it again, in a common format (PNG or JPEG for a slate, MP4 for a loop) |
 | **no preview** | The file is not ready yet | Wait for **ready**, then choose **Refresh** |
+| **Could not make thumbnails** on the details page | The file could not be read (the reason is shown) | Choose **Make again**; if it fails again, upload the file again in a common format |
 | A stream's settings say the chosen slate or loop **is no longer in Loops & Fillers** | It was deleted while the stream still used it | Choose another one in the stream's settings |
 | The loop picker on a stream is empty | No loops have been uploaded yet | Upload one from the picker, or here |
 
@@ -101,6 +112,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `DELETE /api/filler-assets/{id}` | Deletes it; add `?force=true` when streams still use it |
 | `POST /api/filler-assets/copy-from-library` | Copies an Image Library image in and moves its streams over |
 | `GET /api/channels/{id}/filler`, `GET /api/events/{id}/filler` | What a stream falls back on |
+| `GET /api/filler-assets/{id}/details` | One slate or loop with its format (`asset.probe`), thumbnail, frames and the copies built for each stream |
+| `PUT /api/filler-assets/{id}/poster` | Chooses a loop's thumbnail: `{"key": "<a frame from poster_candidates>"}`, or `{"auto": true}` |
+| `POST /api/filler-assets/{id}/thumbnails` | Makes the thumbnails again |
+| `GET /api/filler-assets/{id}/thumbnails.vtt` | A loop's preview thumbnails as WebVTT, for a player's scrub bar |
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" "https://your-volt-host/api/filler-assets"

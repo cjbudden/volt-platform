@@ -10,7 +10,7 @@
 import { parseFilename, titleCase, episodeTitleFrom } from '../src/services/ingest/filenameParse';
 import { classify, BUILTIN_RULES, checkRule, type ClassRule } from '../src/services/ingest/classify';
 import { decideMatch, titleSimilarity, normTitle, yearInTitle, AUTO_LINK } from '../src/services/relatedMatch';
-import { fieldValues, titleFor, matchQuery, DEFAULT_SETTINGS } from '../src/services/ingest/filenameApply';
+import { fieldValues, titleFor, matchQuery, withPromoWord, DEFAULT_SETTINGS } from '../src/services/ingest/filenameApply';
 import { STANDARD_TYPES } from '../src/services/contentTypes';
 import { validateMetadata, validateSchemaFields } from '../src/services/metadataValidator';
 
@@ -40,6 +40,11 @@ eq('dotted name: 2049 stays, 2017 is the year', [tech.title, tech.year, tech.res
 eq('codec recorded', tech.signals.find((s) => s.kind === 'videoCodec')?.value, 'h265');
 eq('h.264 and a date with dashes', (({ title, date }) => [title, date])(P('my-show.2026-10-28.h.264.aac.mp4')), ['My Show', '2026-10-28']);
 eq('compact date and version', (({ date }) => date)(P('Interview_20261028_v2.mxf')), '2026-10-28');
+eq('date as YYYYMMDD', P('Movie_Title_20250614_Trailer.mp4').date, '2025-06-14');
+eq('date as DDMMYYYY', P('Movie_Title_14062025_Trailer.mp4').date, '2025-06-14');
+eq('date as DD-MM-YYYY', P('Movie_Title_14-06-2025_Trailer.mp4').date, '2025-06-14');
+eq('DDMMYYYY is not also read as a year', P('Movie_Title_14062025_Trailer.mp4').year, null);
+eq('not a real date (31 Feb) is left alone', P('Show_31022025.mp4').date, null);
 eq('5.1 audio is one token', P('Film_Name_5.1_1080p.mp4').signals.find((s) => s.kind === 'audio')?.value, '5.1');
 eq('frame rate', P('Concert_50fps_1080p.mov').fps, 50);
 eq('language in capitals or brackets', [P('Movie (2025) [EN] Teaser.mp4').language, P('News_Bulletin_THA.mxf').language], ['en', 'th']);
@@ -112,7 +117,21 @@ yes('a rule needs a type', ruleErr({ when: { words: ['x'] }, then: {} }));
 console.log('== fields for a type ==');
 const typeFields = (k: string) => STANDARD_TYPES.find((t) => t.key === k)!.fields;
 const fv = (n: string, k: string) => Object.fromEntries(fieldValues(P(n), k, typeFields(k), DEFAULT_SETTINGS).map((v) => [v.field, v.value]));
-eq('trailer: title and kind (year has no field on a trailer)', fv('Movie_Title_2025_Official_Trailer.mp4', 'trailer'), { title: 'Movie Title', trailerType: 'Trailer' });
+eq('trailer: title, kind, and the year as the release date of the title', fv('Movie_Title_2025_Official_Trailer.mp4', 'trailer'), { title: 'Movie Title Trailer', releaseDate: '2025', trailerType: 'Trailer' });
+// A TRAILER OR TEASER SAYS SO IN ITS TITLE (3 Nov 2026), so a search for the film tells them apart.
+eq('teaser: the title says Teaser', fv('Movie_Teaser.mp4', 'trailer').title, 'Movie Teaser');
+eq('a numbered trailer keeps its number', fv('Final_Destination_Trailer_2.mp4', 'trailer').title, 'Final Destination Trailer 2');
+eq('Official Trailer 2 becomes "Trailer 2"', fv('Movie_Official_Trailer_2.mp4', 'trailer').title, 'Movie Trailer 2');
+eq('a trailer for an episode: programme, episode, Trailer', fv('Bluey_S01E03_Trailer.mp4', 'trailer').title, 'Bluey: Episode 3 (S1) Trailer');
+eq('a promo, featurette or clip keeps its title', [fv('X_promo.mp4', 'trailer').title, fv('X_featurette.mp4', 'trailer').title], ['X', 'X']);
+eq('no second Trailer when the title already has it', withPromoWord('The Trailer Show', { kind: 'Trailer', token: 'trailer', confidence: 1 }), 'The Trailer Show');
+eq('the name used to find the film is the bare title', matchQuery(P('Movie_Title_2025_Official_Trailer.mp4')).title, 'Movie Title');
+eq('trailer: a full date in the name wins over a year', fv('Movie_Title_2025-06-14_Official_Trailer.mp4', 'trailer').releaseDate, '2025-06-14');
+eq('interview: a year alone never fills Recorded (not a release date)', fv('Chat_With_Someone_2025.mp4', 'interview').recordedAt, undefined);
+eq('trailer: DDMMYYYY fills the release date in full', fv('Movie_Title_14062025_Official_Trailer.mp4', 'trailer').releaseDate, '2025-06-14');
+eq('trailer: YYYYMMDD fills the release date in full', fv('Movie_Title_20250614_Official_Trailer.mp4', 'trailer').releaseDate, '2025-06-14');
+eq('movie: the year field takes the year of a full date', fv('Movie_Title_14062025.mp4', 'movie').year, 2025);
+eq('song: a year alone fills the release date as a year', fv('Artist_-_Song_1987.mp3', 'song').released, '1987');
 eq('movie: title and year', fv('Movie_Title_2025_1080p.mp4', 'movie'), { title: 'Movie Title', year: 2025 });
 eq('episode: series, season, number, title', fv('bluey_s1_ep01.mp4', 'episode'), { title: 'Episode 1 (S1)', series: 'Bluey', season: 1, episodeNumber: 1 });
 eq('promo of an episode is titled with the programme', titleFor(P('Show_S01E03_Promo.mp4'), 'trailer', DEFAULT_SETTINGS.episodeTemplate), 'Show: Episode 3 (S1)');

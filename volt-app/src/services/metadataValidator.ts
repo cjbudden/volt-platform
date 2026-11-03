@@ -50,9 +50,20 @@ export interface SchemaField {
   epg?: string;
   /** The schema.org property this field maps to in JSON-LD output. */
   schemaOrg?: string;
+  /** date: a year on its own ("1987") is a valid value, for when that is all
+   *  that is known (a release date). Unset, a date field that maps to
+   *  schema.org datePublished allows it, so accounts seeded before this
+   *  existed get it on their release dates too. See dateAllowsYear. */
+  allowYear?: boolean;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T.*)?$/;
+const YEAR_ONLY = /^\d{4}$/;
+
+/** Whether a date field takes a year on its own as well as a full date. */
+export function dateAllowsYear(field: Pick<SchemaField, 'type' | 'allowYear' | 'schemaOrg'>): boolean {
+  return field.type === 'date' && (field.allowYear ?? field.schemaOrg === 'datePublished');
+}
 
 /**
  * Merge an inherited (extends) field list with a child's, child overriding by
@@ -82,6 +93,8 @@ export function validateSchemaFields(fields: unknown): SchemaField[] {
       throw new ApiError(422, `${f.key}: a list can only feed an enum field`);
     if (f.relation != null && (f.type !== 'content' || !/^[a-z][a-z0-9_]{1,39}$/.test(String(f.relation))))
       throw new ApiError(422, `${f.key}: only a content field has a relation`);
+    if (f.allowYear != null && f.type !== 'date')
+      throw new ApiError(422, `${f.key}: only a date field can allow a year on its own`);
     if (f.epg != null && !/^(title|sub-title|description|category|episode|language|icon|credits\.[a-z-]+|custom:[a-zA-Z0-9_-]+)$/.test(String(f.epg)))
       throw new ApiError(422, `bad epg slot on ${f.key}: ${f.epg}`);
   }
@@ -110,8 +123,10 @@ function checkOne(field: SchemaField, value: any): any {
       if (typeof value !== 'boolean') throw new ApiError(422, `${field.key} must be a boolean`);
       return value;
     case 'date':
+      if (typeof value === 'number' && Number.isInteger(value) && dateAllowsYear(field)) value = String(value);
+      if (typeof value === 'string' && YEAR_ONLY.test(value) && dateAllowsYear(field)) return value;
       if (typeof value !== 'string' || !ISO_DATE.test(value))
-        throw new ApiError(422, `${field.key} must be an ISO date`);
+        throw new ApiError(422, dateAllowsYear(field) ? `${field.key} must be an ISO date or a year` : `${field.key} must be an ISO date`);
       return value;
     case 'tags':
       if (!Array.isArray(value) || value.some((v) => typeof v !== 'string'))

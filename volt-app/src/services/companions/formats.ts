@@ -405,7 +405,7 @@ function flattenTable(t: string, d: string): Flat {
 
 // ---------------------------------------------------------------- matching fields
 
-export interface FieldDef { key: string; label?: string; type?: string; options?: string[]; multiple?: boolean }
+export interface FieldDef { key: string; label?: string; type?: string; options?: string[]; multiple?: boolean; schemaOrg?: string; allowYear?: boolean }
 export interface Proposal { field: string; label: string; value: any; from: string; current: any; changes: boolean }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -487,7 +487,8 @@ function shape(raw: string | string[], f: FieldDef): any {
     switch (f.type) {
       case 'number': case 'integer': { const n = Number(v.replace(/[^\d.-]/g, '')); return Number.isFinite(n) && /\d/.test(v) ? (f.type === 'integer' ? Math.round(n) : n) : undefined; }
       case 'boolean': return /^(1|true|yes|y|on)$/i.test(v) ? true : /^(0|false|no|n|off)$/i.test(v) ? false : undefined;
-      case 'date': { const d = /^\d{4}$/.test(v) ? `${v}-01-01` : v; const t = Date.parse(d); return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : undefined; }
+      // A year on its own stays a year where the field takes one (a release date, metadataValidator.dateAllowsYear).
+      case 'date': { if (/^\d{4}$/.test(v) && (f.allowYear ?? f.schemaOrg === 'datePublished')) return v; const d = /^\d{4}$/.test(v) ? `${v}-01-01` : v; const t = Date.parse(d); return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : undefined; }
       case 'datetime': { const t = Date.parse(v); return Number.isFinite(t) ? new Date(t).toISOString() : undefined; }
       case 'enum': return f.options?.find((o) => o.toLowerCase() === v.toLowerCase());
       default: return v;

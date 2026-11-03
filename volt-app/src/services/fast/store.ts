@@ -491,6 +491,24 @@ export async function timelineFor(channelId: string, from: Date, to: Date) {
   if (brandIds.length) {
     for (const r of await query<any>(`SELECT id, master_key FROM vod_assets WHERE id = ANY($1::uuid[])`, [brandIds])) brandMasters.set(String(r.id), r.master_key);
   }
+  // FILLER PACKAGED ONLY FOR THE LADDER. A loop or slate made from Loops &
+  // Fillers (fillerBridge.ts), and often a house spot, has no encode of its own
+  // (vod_assets.master_key is null): prepare() packages it as a variant for the
+  // channel's ladder. Gating on master_key alone ruled every such loop out, so
+  // a gap fell back to "slate with no media", the playout dropped it, and the
+  // channel's playlists stopped growing for the length of the gap (a rebuffer
+  // at the end of every programme; iOS gave up and stopped). Read the ladder
+  // packaging for the fill assets here, before deciding what can play.
+  {
+    const { ladderMasters } = await import('./ladder');
+    const fillIds = [...brandIds, ...ads.house.map((h) => String(h.assetId)), ...(slate ? [String(slate.id)] : [])];
+    if (fillIds.length) {
+      const flm = await ladderMasters(channelId, fillIds);
+      for (const id of brandIds) if (!brandMasters.get(id)) brandMasters.set(id, flm.masterFor(id, id === brand.loopAssetId ? 'loop' : 'ident'));
+      for (const h of ads.house) if (!masters.get(String(h.assetId))) masters.set(String(h.assetId), flm.masterFor(String(h.assetId), 'house'));
+      if (slate && !slate.master_key) slate.master_key = flm.masterFor(String(slate.id), 'slate');
+    }
+  }
   // The loop fills gaps whenever one is set, idents or not (a brand loop, or a
   // loop from Loops & Fillers: fillerBridge.ts). With breaksUseLoop it also
   // plays where an ad break would show the slate.
@@ -565,7 +583,7 @@ export async function timelineFor(channelId: string, from: Date, to: Date) {
     const roleOf = (f: TimelineFill): Role => (f.assetId && f.assetId === brand.loopAssetId ? 'loop' : f.kind === 'ad' ? 'house' : f.kind);
     for (const it of items) {
       if (it.kind === 'content') it.master = lm.masterFor(String(it.assetId), 'content') ?? it.master;
-      else for (const f of it.fill) if (f.assetId && f.master) f.master = lm.masterFor(String(f.assetId), roleOf(f)) ?? f.master;
+      else for (const f of it.fill) if (f.assetId) f.master = lm.masterFor(String(f.assetId), roleOf(f)) ?? f.master;
     }
   }
   const ladder = lm.ladder ? { groupId: lm.ladder.groupId, name: lm.ladder.groupName, segmentSeconds: lm.ladder.segmentSeconds, fps: lm.ladder.fps, rungs: lm.ladder.rungs } : null;

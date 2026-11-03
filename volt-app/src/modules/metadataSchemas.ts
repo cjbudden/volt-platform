@@ -105,6 +105,7 @@ const fieldSchema = z.object({
   targetTypes: z.array(z.string()).optional(),
   epg: z.string().optional(),        // EPG slot, validated in validateSchemaFields
   schemaOrg: z.string().optional(),  // schema.org property
+  allowYear: z.boolean().optional(), // date: a year on its own is valid (release dates)
 });
 const upsertSchema = z.object({
   name: z.string().min(1),

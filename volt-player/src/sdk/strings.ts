@@ -10,6 +10,7 @@ export const STRINGS: Record<string, string> = {
   subtitles: 'Subtitles', off: 'Off', audio: 'Audio', speed: 'Speed', normal: 'Normal',
   fullscreen: 'Full screen', exitFullscreen: 'Exit full screen', pip: 'Picture in picture',
   cast: 'Cast to a TV', stopCasting: 'Stop casting', castingTo: 'Playing on {device}', airplay: 'AirPlay',
+  backIn: 'Back in {time}', paused: 'Paused', aboutProgramme: 'About this programme',
   upNext: 'Up next', skipIntro: 'Skip intro', skipRecap: 'Skip recap', skipCredits: 'Skip credits', skip: 'Skip', nextIn: 'Next in {time}', startsIn: 'Starts in {time}', playNow: 'Play now', cancel: 'Cancel',
   schedule: 'Schedule', playlist: 'Playlist', now: 'Now', next: 'Next', later: 'Later', onNow: 'On now',
   ad: 'Ad', adOf: 'Ad {number} of {of}', learnMore: 'Learn more', adBreak: 'Ad break', adBreakWatched: 'Ad break, watched',

@@ -9,7 +9,7 @@
 //  field type, and hands back the values object the API validates.
 // ============================================================================
 import { useEffect, useState } from 'react'
-import { api, type ContentType, type SchemaField } from './api'
+import { api, dateAllowsYear, type ContentType, type SchemaField } from './api'
 import { ImageRefField } from './ImageRefField'
 import { ContentLinkField } from './ContentLinkField'
 import type { LinkedContent } from './pages/vod/libraryApi'
@@ -138,7 +138,9 @@ export function MetadataForm({ typeId, value, onChange, compact, entityName, hid
             <input className="inp" type="number" value={v ?? ''} onChange={e => set(f.key, e.target.value === '' ? '' : Number(e.target.value))} /></div>)
         if (f.type === 'date') return (
           <div key={f.key} className="field">{label}
-            <input className="inp" type="date" value={toText(v).slice(0, 10)} onChange={e => set(f.key, e.target.value)} /></div>)
+            {dateAllowsYear(f)
+              ? <DateOrYear value={toText(v)} onChange={x => set(f.key, x)} label={f.label || f.key} />
+              : <input className="inp" type="date" value={toText(v).slice(0, 10)} onChange={e => set(f.key, e.target.value)} />}</div>)
         // IMAGE: the library picker, or a web address that the server copies
         // into the Image Library when the form is saved (libraryImages.ts).
         if (f.type === 'image') return (
@@ -159,6 +161,40 @@ export function MetadataForm({ typeId, value, onChange, compact, entityName, hid
               placeholder={f.type === 'reference' ? `${f.refDomain ?? 'entity'} name` : undefined}
               onChange={e => set(f.key, f.type === 'reference' ? (e.target.value ? { name: e.target.value } : '') : e.target.value)} /></div>)
       })}
+    </div>
+  )
+}
+
+/**
+ * A date that may be known only to the year (a release date): a full date, or
+ * a year on its own ("1987"), which is what the API stores for it. A stored
+ * year opens in Year mode. Switching to Full date keeps the year until a date
+ * is picked; switching to Year keeps the year of the date.
+ */
+function DateOrYear({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+  const isYear = /^\d{1,4}$/.test(value)
+  const [mode, setMode] = useState<'date' | 'year'>(isYear ? 'year' : 'date')
+  // The value decides the mode when it changes from outside (a file name read, a
+  // feed): a year on its own opens Year only, a full date opens Full date.
+  const isFull = /^\d{4}-\d{2}-\d{2}/.test(value)
+  useEffect(() => { if (isYear) setMode('year'); else if (isFull) setMode('date') }, [isYear, isFull])
+  const year = value.slice(0, 4)
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      {mode === 'year'
+        ? <input className="inp" inputMode="numeric" placeholder="YYYY" maxLength={4} aria-label={`${label} (year)`} style={{ width: 90 }}
+            value={/^\d{1,4}$/.test(value) ? value : year} onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+        : <input className="inp" type="date" aria-label={label} value={/^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : ''} onChange={e => onChange(e.target.value)} />}
+      <select className="inp sel-sm" aria-label={`${label}: precision`} value={mode} style={{ width: 'auto' }}
+        onChange={e => {
+          const m = e.target.value as 'date' | 'year'
+          setMode(m)
+          if (m === 'year' && /^\d{4}-/.test(value)) onChange(year)
+        }}>
+        <option value="date">Full date</option>
+        <option value="year">Year only</option>
+      </select>
+      {mode === 'year' && value && value.length < 4 && <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--warn,#fbbf24)' }}>four digits</span>}
     </div>
   )
 }

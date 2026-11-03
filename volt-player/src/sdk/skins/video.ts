@@ -12,6 +12,7 @@
 //  named by the ads overlay (sdk/ads.ts) in the player's own words.
 // ============================================================================
 import type { PlayerState, Programme, Skin, SkinContext } from '../types';
+import { onAir, type OnAir } from './onair';
 import { autoHide, button, el, fmtClock, fmtTime, label, menu, setIcon, show, skipButton, slider, text, upNextCard, type MenuItem, type UpNextCard } from './kit';
 
 export function videoSkin(): Skin {
@@ -29,6 +30,7 @@ export function videoSkin(): Skin {
 
   const t = (k: string, v?: Record<string, string | number>) => c.t(k, v);
 
+  let air!: OnAir;
   function mount(ctx: SkinContext) {
     c = ctx;
     const k = ctx.commands;
@@ -58,6 +60,8 @@ export function videoSkin(): Skin {
     parts.up = up.el;
     // Skip intro / credits (on-demand only), where Up next would sit.
     skip = skipButton(ctx);
+    // Live: the countdown between programmes and the programme card (pause, a new programme, between).
+    air = onAir(ctx, 'overlay');
     parts.skip = skip.el;
 
     // Bar
@@ -246,7 +250,9 @@ export function videoSkin(): Skin {
     setIcon(parts.big, st.status === 'ended' ? 'replay' : 'play');
 
     // Up next, and Skip
-    up.update(st);
+    // Between programmes the countdown and the Coming up card say it; no second Up next.
+    up.update(st.between ? { ...st, upNext: null } : st);
+    air.update(st);
     skip.update(st);
 
     // Bar

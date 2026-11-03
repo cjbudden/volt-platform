@@ -21,7 +21,7 @@
 //  by hand). For the content type the entry is "@type".
 // ============================================================================
 import { query, one } from '../../db';
-import type { SchemaField } from '../metadataValidator';
+import { dateAllowsYear, type SchemaField } from '../metadataValidator';
 import { parseFilename, episodeTitleFrom, type FilenameParse } from './filenameParse';
 import { classify, BUILTIN_RULES, KIND_FIELD, STANDARD_LABEL, type ClassRule, type Classification } from './classify';
 import { contentFields, relationOf, autoLink, linkValue, type Candidate } from '../contentLinks';
@@ -84,15 +84,32 @@ export interface FieldValue { field: string; label: string; value: any; token: s
 
 const TITLE_KEYS = ['title', 'headline', 'name'];
 const DATE_KEYS = ['recordedAt', 'released', 'releaseDate', 'airDate', 'date'];
+const RELEASE_KEYS = ['releaseDate', 'released'];
+const YEAR_KEYS = ['year', 'releaseYear'];
 
 export function titleFor(p: FilenameParse, typeKey: string | null, template: string): string | null {
   const ep = episodeTitleFrom(p, template);
+  let t: string | null;
   if (p.season != null || p.episode != null) {
     // A promo for an episode is titled with the programme: "Show: Episode 3 (S1)".
-    if (typeKey === 'trailer') return [p.series, p.episodeTitle ?? ep].filter(Boolean).join(': ') || p.title;
-    return p.episodeTitle ?? ep ?? p.title;
-  }
-  return p.title;
+    if (typeKey === 'trailer') t = [p.series, p.episodeTitle ?? ep].filter(Boolean).join(': ') || p.title;
+    else t = p.episodeTitle ?? ep ?? p.title;
+  } else t = p.title;
+  return withPromoWord(t, p.promo);
+}
+
+/**
+ * A TRAILER OR TEASER SAYS SO IN ITS TITLE (Christian, 3 Nov 2026): "Movie Title
+ * Trailer", "Movie Title Teaser 2", so a search for the film's name tells the
+ * trailer from the film. The marker is taken off the name when it is read, so it
+ * is put back here as a plain word, with its number when it had one. Other promo
+ * kinds (Promo, Featurette, Clip) keep the title as it was.
+ */
+export function withPromoWord(title: string | null, promo: FilenameParse['promo']): string | null {
+  if (!title || !promo || (promo.kind !== 'Trailer' && promo.kind !== 'Teaser')) return title;
+  if (new RegExp(`\\b${promo.kind}\\b`, 'i').test(title)) return title;
+  const n = /(\d{1,2})\s*$/.exec(promo.token)?.[1];
+  return `${title} ${promo.kind}${n ? ` ${Number(n)}` : ''}`;
 }
 
 export function fieldValues(p: FilenameParse, typeKey: string | null, fields: SchemaField[], settings: FilenameSettings): FieldValue[] {
@@ -114,13 +131,27 @@ export function fieldValues(p: FilenameParse, typeKey: string | null, fields: Sc
   };
   num('season', p.season, 'season');
   num('episodeNumber', p.episode, 'episode');
-  num('year', p.year, 'year');
+  // A Year field takes the year in the name, or the year of a full date in it.
+  const yearOf = p.year ?? (p.date ? Number(p.date.slice(0, 4)) : null);
+  for (const k of YEAR_KEYS) {
+    const f = has(k);
+    if (!f || f.type !== 'number' || yearOf == null) continue;
+    const s = sigTok(p.year != null ? 'year' : 'date');
+    out.push({ field: k, label: f.label ?? k, value: yearOf, token: s?.token ?? null,
+      reason: p.year != null ? s?.reason ?? '' : `The year of the date ${p.date} in the name.` });
+  }
   const lang = has('language');
   if (lang && p.language && lang.type === 'string') { const s = sigTok('language'); out.push({ field: 'language', label: lang.label ?? 'Language', value: p.language, token: s?.token ?? null, reason: s?.reason ?? '' }); }
   if (p.date) {
     const df = DATE_KEYS.map(has).find((f) => f && f.type === 'date');
     const s = sigTok('date');
     if (df) out.push({ field: df.key, label: df.label ?? df.key, value: p.date, token: s?.token ?? null, reason: s?.reason ?? '' });
+  } else if (p.year != null) {
+    // Only a year in the name ("Film (1987) Trailer"): it is the release year, so a
+    // release date that takes a year on its own gets it (a Year field is filled above too).
+    const rf = RELEASE_KEYS.map(has).find((f) => f && dateAllowsYear(f));
+    const s = sigTok('year');
+    if (rf) out.push({ field: rf.key, label: rf.label ?? rf.key, value: String(p.year), token: s?.token ?? null, reason: s?.reason || `The year ${p.year} in the name, taken as the release year.` });
   }
   const kindKey = typeKey ? KIND_FIELD[typeKey] : undefined;
   const kf = kindKey ? has(kindKey) : undefined;

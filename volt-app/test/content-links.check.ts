@@ -72,7 +72,7 @@ const yes = (m: string, c: unknown, d = '') => { if (c) { console.log('PASS ' + 
     console.log('== ingest: classification, fields, title, one clear link ==');
     const t1 = await ingest(me, 'Movie_Title_2025_Official_Trailer.mp4');
     check('the type is Trailer / promo', t1.row.schema_id, me.types.trailer);
-    check('title, kind and the link copy in metadata', [t1.row.title, t1.row.metadata.title, t1.row.metadata.trailerType, t1.row.metadata.trailerFor], ['Movie Title', 'Movie Title', 'Trailer', { id: m25, name: 'Movie Title (2025)' }]);
+    check('title, kind and the link copy in metadata', [t1.row.title, t1.row.metadata.title, t1.row.metadata.trailerType, t1.row.metadata.trailerFor], ['Movie Title Trailer', 'Movie Title Trailer', 'Trailer', { id: m25, name: 'Movie Title (2025)' }]);
     check('not held at the metadata gate', t1.out.status, 'ingested');
     check('the link row: confirmed by the matcher, by id', [t1.link?.to_asset_id, t1.link?.source, t1.link?.relation], [m25, 'auto', 'trailer_for']);
     yes('the link says why', (t1.link?.reasons ?? []).some((r: any) => /exactly/.test(r.text)) && (t1.link?.reasons ?? []).some((r: any) => /Same year/.test(r.text)));
@@ -129,7 +129,7 @@ const yes = (m: string, c: unknown, d = '') => { if (c) { console.log('PASS ' + 
     await call('POST', '/api/vod/from-filename', { ids: [t1.id] });
     check('the bulk re-run leaves the typed title', (await one<any>(`SELECT title, metadata->>'title' AS mt FROM vod_assets WHERE id = $1`, [t1.id])), { title: 'My Own Title', mt: 'My Own Title' });
     const ap = await call('POST', `/api/vod/${t1.id}/from-filename`, { title: true, fields: [], overwrite: ['title'] });
-    check('a person can still choose to replace it', [ap.s, ap.j.applied, ap.j.titleChanged, (await one<any>(`SELECT title FROM vod_assets WHERE id = $1`, [t1.id]))!.title], [200, ['title'], true, 'Movie Title']);
+    check('a person can still choose to replace it', [ap.s, ap.j.applied, ap.j.titleChanged, (await one<any>(`SELECT title FROM vod_assets WHERE id = $1`, [t1.id]))!.title], [200, ['title'], true, 'Movie Title Trailer']);
     const typed = await call('PUT', `/api/vod/${t6.id}`, { schemaId: me.types.movie, metadata: { title: 'Show Five' } });
     check('a type a person chose', [typed.s, (await one<any>(`SELECT metadata_provenance FROM vod_assets WHERE id = $1`, [t6.id]))!.metadata_provenance['@type'] ?? null], [200, null]);
     const pv6 = await call('GET', `/api/vod/${t6.id}/from-filename`);
@@ -141,7 +141,7 @@ const yes = (m: string, c: unknown, d = '') => { if (c) { console.log('PASS ' + 
     await query(`UPDATE vod_assets SET original_filename = 'Carry_Film_Official_Trailer.mp4' WHERE id = $1`, [carried]);
     const ct = await call('POST', `/api/vod/${carried}/from-filename`, { type: true, title: true });
     const crow = (await one<any>(`SELECT schema_id, metadata FROM vod_assets WHERE id = $1`, [carried]))!;
-    check('a type change: the old type\'s fields go, carried keys stay', [ct.s, crow.schema_id, crow.metadata.headline ?? null, crow.metadata.icyRaw, crow.metadata.title], [200, me.types.trailer, null, 'StreamTitle=x', 'Carry Film']);
+    check('a type change: the old type\'s fields go, carried keys stay', [ct.s, crow.schema_id, crow.metadata.headline ?? null, crow.metadata.icyRaw, crow.metadata.title], [200, me.types.trailer, null, 'StreamTitle=x', 'Carry Film Trailer']);
 
     console.log('== the link routes ==');
     const lk = await call('GET', `/api/vod/${t3.id}/links`);

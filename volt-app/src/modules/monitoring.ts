@@ -36,7 +36,9 @@ import { cached } from '../scale/cache';
 import { liveDirFor } from '../services/liveOrigin';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { channelPlaylistUrl } from '../services/fast/media';
 import type { PipelineHealth } from '../services/pipelineHealth';
+import { QC_FAILED_WHERE } from '../services/review';
 
 export const monitoringRouter = Router();
 monitoringRouter.use(requireAuth);
@@ -238,6 +240,18 @@ export async function liveRowsFor(
     for (const r of rs) recov.set(r.id, r);
   }
 
+  // FAST CHANNELS have no encoder: a playout writes their playlists under
+  // /origin/<id>/fast/ (or the bucket), and its heartbeat (fast_playouts) is
+  // their sign of life. Read as an encoder channel they pointed the wall at
+  // /origin/<id>/live/master.m3u8, which does not exist: "no signal".
+  const fastIds = streams.filter((r) => r.origin === 'playlist').map((r) => r.id);
+  const fastBeat = new Map<string, any>();
+  if (fastIds.length) {
+    for (const r of await query<any>(`SELECT channel_id, status, started_at, last_seen_at FROM fast_playouts WHERE channel_id = ANY($1)`, [fastIds]).catch(() => [] as any[]))
+      fastBeat.set(String(r.channel_id), r);
+  }
+  const FAST_FRESH_MS = 30_000;
+
   const build = async (row: any, kind: OwnerKind): Promise<LiveRow> => {
     const rc = recov.get(row.id) ?? {};
     const health = await loadChannelHealthLite(
@@ -264,6 +278,11 @@ export async function liveRowsFor(
     const reporting = reportAgeMs != null && reportAgeMs < REPORT_DEAD_MS;
     const stillBooting = runAgeMs != null && runAgeMs < BOOT_GRACE_MS;
     const serverUp = launched != null && (reporting || stillBooting);
+    const fast = row.origin === 'playlist';
+    const fb = fast ? fastBeat.get(String(row.id)) : null;
+    const fastSeen = fb?.last_seen_at ? now - new Date(fb.last_seen_at).getTime() : null;
+    const fastUp = fast && fb?.status !== 'stopped' && fastSeen != null && fastSeen < FAST_FRESH_MS;
+    const fastUrl = fast ? channelPlaylistUrl(row.id, 'master.m3u8') : null;
     return {
       id: row.id,
       kind,
@@ -274,7 +293,7 @@ export async function liveRowsFor(
       overall: health.overall,
       gates: health.gates,
       primaryError: health.primaryError,
-      uptimeMs: serverUp ? runAgeMs : null,
+      uptimeMs: fast ? (fastUp && fb?.started_at ? now - new Date(fb.started_at).getTime() : null) : serverUp ? runAgeMs : null,
       /** The instance row survives a crash. When it disagrees with the gates,
        *  something is still recorded as provisioned that is not running. */
       orphanedInstance: !serverUp && launched != null,
@@ -282,7 +301,7 @@ export async function liveRowsFor(
       activeSource: st?.active_source ?? null,
       fallbackInUse: !!st?.fallback_in_use,
       fillerInUse: !!st?.filler_in_use,
-      reportAgeMs,
+      reportAgeMs: fast ? fastSeen : reportAgeMs,
       // Only while something is actually up. The row is cleared on start, so a
       // stale entry is not expected -- but reporting a dropped output for a
       // stream that is not running would describe a run that has ended, which
@@ -295,11 +314,11 @@ export async function liveRowsFor(
         : kind === 'event' ? `/events/${row.id}`
         : row.origin === 'playlist' ? `/fast/${row.id}`
         : `/channels/${row.id}`,
-      previewUrl: `/origin/${row.id}/live/master.m3u8`,
-      deliveredUrl: deliveredManifest(row.id, kind),
+      previewUrl: fastUrl ?? `/origin/${row.id}/live/master.m3u8`,
+      deliveredUrl: fastUrl ?? deliveredManifest(row.id, kind),
       audioOnly: kind === 'radio',
       sources: serverUp ? sourceStates(st?.sources) : {},
-      outputAvailable: serverUp && st ? !!st.output_available : null,
+      outputAvailable: fast ? (fb ? fastUp : null) : serverUp && st ? !!st.output_available : null,
       noSource: serverUp && health.gates.some((g) => g.gate === 'input' && g.badge === 'AWAITING SOURCE'),
       timingFault: (() => {
         const g = health.gates.find((x) => x.gate === 'output');
@@ -591,7 +610,7 @@ monitoringRouter.get(
          LEFT JOIN channels c ON c.id = v.channel_id
          LEFT JOIN events   e ON e.id = v.event_id
          LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
-        WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.qc_state = 'failed'`,
+        WHERE COALESCE(g.account_id, v.account_id) = $1 AND ${QC_FAILED_WHERE}`,
       [acct]
     );
     if ((qcFailed?.n ?? 0) > 0) {
@@ -599,7 +618,7 @@ monitoringRouter.get(
         id: 'qc:failed', severity: 'serious', source: 'qc',
         title: `${qcFailed.n} asset${qcFailed.n === 1 ? '' : 's'} failed QC`,
         detail: 'Automated quality control found errors. These cannot publish without an override.',
-        href: '/review', at: null,
+        href: '/review#failed-qc', at: null,
       });
     }
     const awaiting = await one<any>(

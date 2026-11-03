@@ -270,6 +270,15 @@ export interface PlayerState {
    * player draws no graphics of its own and offers no Up next.
    */
   adBreak: { id: string; endsAt: number | null } | null;
+  /**
+   * BETWEEN PROGRAMMES on a live channel, from the stream's own programme
+   * markers: 'filler' while the channel's loop or slate plays (the programme's
+   * content has ended, the next has not started), 'break' during an ad break.
+   * resumesAt is when the next programme starts (filler) or the break ends,
+   * epoch ms, when the stream says. Graphics and overlays are hidden; skins
+   * show a small countdown. null while a programme is on.
+   */
+  between: { kind: 'filler' | 'break'; resumesAt: number | null; next: Programme | null } | null;
   /** An on-demand ad on screen now (sdk/ads.ts): which of the break's ads, time left, whether it has a page to open. */
   ad: import('./ads').AdState | null;
   /** On-demand ad breaks for a scrubber, in this player's time: where, how long, watched or not. Empty without ads. */

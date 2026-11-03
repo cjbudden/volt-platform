@@ -44,7 +44,7 @@ export function initialState(): PlayerState {
     programme: null, nextProgramme: null, schedule: [], canStartOver: false,
     volume: 1, muted: false, rate: 1,
     qualities: [], quality: 'auto', activeQuality: null, textTracks: [], textTrack: null, audioTracks: [], audioTrack: null,
-    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, ad: null, adMarkers: [],
+    items: [], index: -1, item: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, between: null, ad: null, adMarkers: [],
     nowPlaying: null, history: [], nextTrack: null,
     cast: { available: false, state: 'none', device: null },
     airplay: { available: false, active: false },
@@ -108,6 +108,24 @@ export class VoltPlayer {
   private url = '';
   private ownsMedia: boolean;
   private destroyed = false;
+  /**
+   * LIVE RECOVERY. A live channel must never need a refresh. The viewer wants
+   * playback (wantPlay: from the first 'playing' until they press pause); if
+   * the picture stops moving anyway, the watchdog steps in: first back to the
+   * live edge, then a fresh load of the stream. Safari's own HLS can declare a
+   * live stream 'ended' when its playlist stops growing for a while (a gap at a
+   * programme join did exactly that); that is a reload too, never the end.
+   */
+  private wantPlay = false;
+  /** Full screen drawn by the player itself (iPhone): the root fills the viewport. */
+  private pseudoFs = false;
+  private setPseudoFs(on: boolean) {
+    this.pseudoFs = on;
+    this.root.classList.toggle('vp-pseudo-fs', on);
+    document.documentElement.classList.toggle('vp-noscroll', on);
+    this.set({ fullscreen: on });
+  }
+  private stuck = { at: 0, ct: -1, step: 0, reloads: 0, lastReload: 0 };
   /** Playback stats (sdk/stats.ts): the panel is built the first time it opens. */
   private statsPanel: StatsPanel | null = null;
   private mprobe: ReturnType<typeof mediaProbe>;
@@ -197,6 +215,8 @@ export class VoltPlayer {
 
   async destroy(): Promise<void> {
     this.destroyed = true;
+    if (this.pseudoFs) document.documentElement.classList.remove('vp-noscroll');
+    this.barRo?.disconnect();
     this.attempt?.close();
     this.attempt = null;
     this.engine.attempt = null;
@@ -353,6 +373,25 @@ export class VoltPlayer {
     } catch (e) { console.error('[volt-player] skin failed to mount', e); }
     // A skin that never placed the stage still shows the picture.
     if (!this.stage.isConnected) this.skinRoot.prepend(this.stage);
+    this.watchBar();
+  }
+
+  /**
+   * THE CONTROL BAR'S HEIGHT, as --vp-bar-h on the root. Everything the player
+   * draws at the bottom of the picture (programme card, Up next, Skip, the
+   * corner logo, subtitles, bottom HTML graphics) sits above the bar while it
+   * is shown and drops back when it hides (kit.ts --vp-lift). Measured, not
+   * assumed: the bar wraps on a narrow screen and grows in full screen.
+   */
+  private barRo: ResizeObserver | null = null;
+  private watchBar() {
+    this.barRo?.disconnect();
+    const bar = this.root.querySelector<HTMLElement>('.vpv-bar');
+    if (!bar || typeof ResizeObserver === 'undefined') { this.root.style.removeProperty('--vp-bar-h'); return; }
+    const set = () => this.root.style.setProperty('--vp-bar-h', `${Math.ceil(bar.offsetHeight)}px`);
+    this.barRo = new ResizeObserver(set);
+    this.barRo.observe(bar);
+    set();
   }
 
   // -------------------------------------------------------------------- state
@@ -410,6 +449,7 @@ export class VoltPlayer {
     const casting = this.caster?.connected;
     const e = this.engine.snapshot();
     const currentTime = casting ? this.caster!.remote.currentTime : m.currentTime;
+    if (!casting) this.watchLive(e.live, currentTime);
     const behindLive = e.live && e.seekable ? Math.max(0, e.seekable.end - currentTime) : 0;
     const wallClock = e.presentationStart != null ? e.presentationStart + currentTime * 1000 : (e.live ? Date.now() - behindLive * 1000 : null);
     const sched = this.s.schedule;
@@ -419,7 +459,10 @@ export class VoltPlayer {
     // AD BREAK: while the stream says a break is on, nothing of ours is drawn
     // over it (no Up next, no programme cards, no bugs), only the break itself.
     const adBreak = adBreakAt(this.streamGraphics.values(), currentTime);
-    const graphics = !graphicsOn ? [] : adBreak ? [adBreak] : activeAt(this.streamGraphics.values(), currentTime);
+    const fillerNow = !adBreak && this.fillerAt(e.live, wallClock);
+    const graphics = !graphicsOn ? [] : adBreak ? [adBreak]
+      : fillerNow ? activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic === 'up-next')
+      : activeAt(this.streamGraphics.values(), currentTime);
     // No guide loaded: the stream's own programme marker names what is on.
     // Read whether or not graphics are drawn: now / next is data, not a graphic.
     const inband = !sched.length && e.presentationStart != null ? activeAt(this.streamGraphics.values(), currentTime).find((g) => g.graphic === 'programme') : undefined;
@@ -476,7 +519,9 @@ export class VoltPlayer {
     if (this.overlay) {
       const at = wallClock ?? (e.live ? Date.now() : null);
       const snap = at != null ? snapshotAt(this.gfxSnaps, at) : null;
-      const on = this.overlay.apply(snap?.state ?? null, graphicsOn && !adBreak && m.videoWidth > 0);
+      const on = this.overlay.apply(snap?.state ?? null, graphicsOn && !adBreak && !fillerNow && m.videoWidth > 0);
+      // A lower third or ticker on screen: the programme card goes to the top instead of covering it.
+      this.root.classList.toggle('vp-gfx-bottom', this.overlay.bottomOn());
       const fresh = cameOn(this.gfxOn, on);
       this.gfxOn = on;
       overlays = this.gfxDefs.filter((d) => on.has(d.id)).map((d) => ({ id: d.id, name: d.name, kind: d.kind }));
@@ -494,7 +539,15 @@ export class VoltPlayer {
     // The playback reports count a break's time as the ad's (sdk/cmcd.ts adBreak; only a change is reported).
     // An on-demand break (sdk/ads.ts) is one too, so the stream's own break and ours never undo each other.
     if (!casting) this.attempt?.adBreak(adBreak ? (adBreak.data.break || adBreak.id) : this.s.ad ? vodBreakId(this.s.ad) : null);
+    // BETWEEN PROGRAMMES: the loop or slate (the programme's own content is over), or a break.
+    const breakEnds = adBreak && adBreak.end != null && e.presentationStart != null ? e.presentationStart + adBreak.end * 1000 : null;
+    const fillerProg = fillerNow ? this.fillerAt(e.live, wallClock) : null;
+    const between: PlayerState['between'] = adBreak ? { kind: 'break', resumesAt: breakEnds, next: programme }
+      : fillerProg ? { kind: 'filler', resumesAt: (nextProgramme ?? fillerProg.next)?.startsAt ?? fillerProg.endsAt, next: nextProgramme ?? fillerProg.next } : null;
+    this.root.classList.toggle('vp-between', !!between);
+    this.root.classList.toggle('vp-in-break', !!adBreak);
     this.set({
+      between,
       currentTime, behindLive, atLiveEdge: !e.live || behindLive < 8, wallClock: e.live ? wallClock : null,
       programme, nextProgramme, upNext, skip, graphics, overlays,
       adBreak: adBreak ? { id: adBreak.data.break || adBreak.id, endsAt: adBreak.end != null && e.presentationStart != null ? e.presentationStart + adBreak.end * 1000 : null } : null,
@@ -610,7 +663,7 @@ export class VoltPlayer {
     // step and code (QOE_REPORTING.md principle 2).
     const attempt = this.openAttempt(item, autoplay);
     this.startGraphicsFeed(item.assetId ?? null);
-    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, ad: null, adMarkers: [], hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
+    this.set({ index, item, status: 'loading', error: null, errorCode: null, upNext: null, skip: null, graphics: [], overlays: [], adBreak: null, between: null, ad: null, adMarkers: [], hasPicture: false, audioOnly: false, qualities: [], textTracks: [], audioTracks: [],
       access: { mode: null, message: null, products: [] } });
     this.emit('itemchange', { index, item });
     try {
@@ -765,7 +818,7 @@ export class VoltPlayer {
   private wireMedia() {
     const m = this.media;
     const on = (ev: string, fn: () => void) => { m.addEventListener(ev, fn); this.offs.push(() => m.removeEventListener(ev, fn)); };
-    on('playing', () => { this.attemptPlaying(); this.set({ status: 'playing', playing: true, buffering: false, error: null }); this.emit('play'); });
+    on('playing', () => { this.wantPlay = true; this.attemptPlaying(); this.set({ status: 'playing', playing: true, buffering: false, error: null }); this.emit('play'); });
     on('play', () => this.set({ playing: true }));
     on('pause', () => { if (this.caster?.connected) return; if (!m.ended) this.attempt?.paused(); this.set({ status: m.ended ? 'ended' : 'paused', playing: false }); this.emit('pause'); });
     on('waiting', () => { this.attempt?.waiting(); this.set({ status: 'buffering', buffering: true }); });
@@ -790,7 +843,7 @@ export class VoltPlayer {
     on('error', () => { if (this.engine.mode && this.engine.mode !== 'shaka' && this.s.status !== 'loading') this.fail(this.t('stopped'), m.error?.code ?? null); });
     on('enterpictureinpicture', () => this.set({ pip: { ...this.s.pip, active: true } }));
     on('leavepictureinpicture', () => this.set({ pip: { ...this.s.pip, active: false } }));
-    const fs = () => this.set({ fullscreen: document.fullscreenElement === this.root || (document as any).webkitFullscreenElement === this.root });
+    const fs = () => this.set({ fullscreen: this.pseudoFs || document.fullscreenElement === this.root || (document as any).webkitFullscreenElement === this.root });
     document.addEventListener('fullscreenchange', fs);
     document.addEventListener('webkitfullscreenchange', fs);
     this.offs.push(() => document.removeEventListener('fullscreenchange', fs), () => document.removeEventListener('webkitfullscreenchange', fs));
@@ -799,6 +852,7 @@ export class VoltPlayer {
   }
 
   private onEnded() {
+    if (this.s.live && this.wantPlay && !this.caster?.connected) { this.recoverLive('ended'); return; }
     this.attempt?.ended();
     this.beacons?.end();
     this.set({ status: 'ended', playing: false });
@@ -822,6 +876,7 @@ export class VoltPlayer {
         case 'ArrowDown': c.setVolume(this.media.volume - 0.1); break;
         case 'm': c.toggleMute(); break;
         case 'f': c.toggleFullscreen(); break;
+        case 'Escape': if (!this.pseudoFs) return; this.setPseudoFs(false); break;
         case 'c': if (this.s.textTracks.length) c.setTextTrack(this.s.textTrack ? null : this.s.textTracks[0].id); break;
         default: return;
       }
@@ -879,6 +934,49 @@ export class VoltPlayer {
     }, this.stage, { t: (k, v) => this.t(k, v), onMarkers: (adMarkers) => this.set({ adMarkers }) });
   }
 
+  /**
+   * Is the channel's loop or slate on at this wall clock? The programme marker
+   * says how long the programme's content runs (X-DURATION, `duration`) inside
+   * its guide slot; past that, until the next programme, the playout fills the
+   * gap. Also when no programme is on and one is announced.
+   */
+  private fillerAt(live: boolean, clock: number | null): { endsAt: number; next: Programme | null } | null {
+    if (!live || clock == null) return null;
+    const p = this.s.programme, n = this.s.nextProgramme;
+    if (!p) return n && clock < n.startsAt ? { endsAt: n.startsAt, next: n } : null;
+    const dur = Number(p.meta?.duration);
+    if (!Number.isFinite(dur) || dur <= 0) return null;
+    const contentEnd = p.startsAt + dur * 1000;
+    return clock >= contentEnd + 500 && clock < p.endsAt ? { endsAt: p.endsAt, next: n } : null;
+  }
+
+  /** Twice a second: is a live stream the viewer wants playing actually moving? */
+  private watchLive(live: boolean, ct: number) {
+    const st = this.stuck, now = Date.now();
+    const busy = this.s.status === 'loading' || this.s.status === 'locked' || this.s.status === 'offline' || this.media.seeking;
+    if (!live || !this.wantPlay || busy || document.visibilityState === 'hidden') { st.at = 0; st.ct = ct; st.step = 0; return; }
+    if (Math.abs(ct - st.ct) > 0.05) { st.ct = ct; st.at = now; st.step = 0; if (now - st.lastReload > 120_000) st.reloads = 0; return; }
+    if (!st.at) { st.at = now; return; }
+    const still = now - st.at;
+    if (still > 6000 && st.step === 0) { st.step = 1; this.recoverLive('edge'); }
+    else if (still > 14000 && st.step === 1) { st.step = 2; this.recoverLive('reload'); }
+  }
+
+  /** Get a live stream moving again: to the live edge, or a fresh load (backing off). */
+  private recoverLive(why: 'edge' | 'reload' | 'ended') {
+    const st = this.stuck;
+    if (why === 'edge') {
+      try { this.engine.goLive(); void this.media.play()?.catch?.(() => {}); } catch { /* the reload step follows */ }
+      return;
+    }
+    const wait = Math.min(60_000, 2000 * 2 ** st.reloads);
+    if (Date.now() - st.lastReload < wait) return;
+    st.reloads++; st.lastReload = Date.now(); st.at = Date.now(); st.step = 1;
+    console.info(`[volt-player] live playback stopped (${why}); reloading the stream`);
+    this.set({ status: 'buffering', buffering: true });
+    void this.load(Math.max(0, this.s.index), true);
+  }
+
   // ---------------------------------------------------------------- commands
   private t(k: string, v?: Record<string, string | number>) { return format(this.o.strings?.[k] ?? STRINGS[k] ?? k, v); }
 
@@ -887,6 +985,8 @@ export class VoltPlayer {
       if (this.o.demo) { this.set({ playing: true, status: 'playing' }); return; }
       if (this.caster?.connected) { if (!this.caster.remote.playing) this.caster.playPause(); return; }
       if (this.s.status === 'offline' || (this.s.status === 'error' && this.s.item)) { void this.load(Math.max(0, this.s.index), true); return; }
+      // A live stream is never over: 'ended' on one (Safari, after a playlist stall) reloads it.
+      if (this.s.live && (this.s.status === 'ended' || this.media.ended)) { this.wantPlay = true; void this.load(Math.max(0, this.s.index), true); return; }
       if (this.s.live && this.s.status === 'paused' && this.s.seekable && this.media.currentTime < this.s.seekable.start) this.engine.goLive();
       this.attempt?.playRequested();
       const p = this.media.play();
@@ -899,7 +999,7 @@ export class VoltPlayer {
         } else if (e?.name !== 'AbortError') this.fail(readableError(e), e?.name ?? null);
       });
     },
-    pause: () => { if (this.o.demo) { this.set({ playing: false, status: 'paused' }); return; } if (this.caster?.connected) { if (this.caster.remote.playing) this.caster.playPause(); return; } this.media.pause(); },
+    pause: () => { this.wantPlay = false; if (this.o.demo) { this.set({ playing: false, status: 'paused' }); return; } if (this.caster?.connected) { if (this.caster.remote.playing) this.caster.playPause(); return; } this.media.pause(); },
     toggle: () => (this.s.playing ? this.cmd.pause() : this.cmd.play()),
     seek: (t) => {
       const r = this.s.seekable;
@@ -958,11 +1058,14 @@ export class VoltPlayer {
     toggleFullscreen: () => {
       const d = document as any;
       const el = this.root as any;
+      if (this.pseudoFs) { this.setPseudoFs(false); return; }
       if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen ?? d.webkitExitFullscreen)?.call(d); return; }
-      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => this.setPseudoFs(true));
       else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-      // iPhone: only the video element can go full screen.
-      else (this.media as any).webkitEnterFullscreen?.();
+      // iPhone: only the VIDEO element can go full screen natively, and then
+      // nothing of ours is drawn (graphics, programme card, countdown, controls).
+      // So the player fills the screen itself instead; rotate for landscape.
+      else this.setPseudoFs(true);
     },
     togglePip: () => {
       const d = document as any;

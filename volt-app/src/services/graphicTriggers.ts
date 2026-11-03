@@ -82,7 +82,7 @@ export function keyMetadata(pm: Record<string, any> | null | undefined, am: Reco
     SEASON: pick(p.season, p.seasonNumber, a.season, a.seasonNumber),
     EPISODE: pick(p.episode, p.episodeNumber, a.episode, a.episodeNumber),
     RATING: pick(p.rating, a.rating, a.contentRating),
-    YEAR: pick(p.year, a.year, a.releaseYear, typeof a.datePublished === 'string' ? a.datePublished.slice(0, 4) : null),
+    YEAR: pick(p.year, a.year, a.releaseYear, ...[a.datePublished, a.releaseDate, a.released].map((d) => (typeof d === 'string' && /^\d{4}/.test(d) ? d.slice(0, 4) : null))),
     ARTIST: pick(p.artist, a.artist, a.byArtist, a.performer),
     ALBUM: pick(p.album, a.album, a.inAlbum),
     LANGUAGE: pick(p.language, a.language, a.inLanguage),
@@ -383,7 +383,8 @@ async function loadBlock(kind: 'channel' | 'event', id: string, blockStart: numb
         [id, from.toISOString(), to.toISOString()]);
       const owner = await one<any>(`SELECT graphics${kind === 'channel' ? `, COALESCE(fast_media, 'video') AS fast_media` : ''} FROM ${kind === 'channel' ? 'channels' : 'events'} WHERE id = $1`, [id]).catch(() => null);
       const { config } = await import('../config');
-      const cdn = String(config.aws.cdnBaseUrl ?? '').replace(/\/$/, '');
+      const { mediaBaseUrl } = await import('../config');
+      const cdn = mediaBaseUrl();
       const audio = owner?.fast_media === 'audio';
       // Ad breaks (migration 0064). A database without the table yet has none.
       const brk = await query<any>(

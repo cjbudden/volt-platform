@@ -192,9 +192,7 @@ export async function publishGate(assetId: string): Promise<PublishGate> {
 }
 
 /** The review queue: what is waiting for somebody, oldest first. */
-export async function queue(accountId: string, limit = 100) {
-  return query<any>(
-    `SELECT v.id, v.title, v.kind, v.review_state, v.qc_state, v.created_at,
+const QUEUE_COLS = `v.id, v.title, v.kind, v.review_state, v.qc_state, v.created_at, v.recording_id,
             v.duration_ms, v.start_epoch_ms, v.end_epoch_ms,
             v.source_block_count, v.source_coverage_pct,
             COALESCE(c.name, e.name) AS source_name,
@@ -205,9 +203,30 @@ export async function queue(accountId: string, limit = 100) {
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
-       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)`;
+
+export async function queue(accountId: string, limit = 100) {
+  return query<any>(
+    `SELECT ${QUEUE_COLS}
       WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.review_state IN ('in_review', 'changes_requested')
       ORDER BY v.created_at
+      LIMIT $2`,
+    [accountId, limit]
+  );
+}
+
+/**
+ * FAILED QC, NOT YET DECIDED: what the dashboard's "assets failed QC" alert
+ * counts and the Review page lists beside the queue. Not the ones already in
+ * the queue (they show there), nor the ones somebody has decided: approved
+ * over the failure (recorded as an override) or rejected.
+ */
+export const QC_FAILED_WHERE = `v.qc_state = 'failed' AND v.review_state NOT IN ('in_review', 'changes_requested', 'approved', 'rejected')`;
+export async function qcFailedQueue(accountId: string, limit = 100) {
+  return query<any>(
+    `SELECT ${QUEUE_COLS}
+      WHERE COALESCE(g.account_id, v.account_id) = $1 AND ${QC_FAILED_WHERE}
+      ORDER BY v.created_at DESC
       LIMIT $2`,
     [accountId, limit]
   );

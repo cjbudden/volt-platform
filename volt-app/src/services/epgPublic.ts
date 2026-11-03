@@ -29,7 +29,7 @@
 import { query, one } from '../db';
 import { cached } from '../scale/cache';
 import { scaleConfig } from '../scale/config';
-import { config } from '../config';
+import { config, mediaBaseUrl } from '../config';
 
 export const MINUTE = 60_000;
 export const HOUR = 3_600_000;
@@ -130,7 +130,7 @@ export function absoluteUrl(ref: unknown, resolve?: (r: string) => string | null
 }
 
 const cdnUrl = (key: string | null | undefined): string | null =>
-  key ? `${config.aws.cdnBaseUrl.replace(/\/$/, '')}/${String(key).replace(/^\//, '')}` : null;
+  key ? `${mediaBaseUrl()}/${String(key).replace(/^\//, '')}` : null;
 
 export interface ProgrammeRowIn {
   id: string;

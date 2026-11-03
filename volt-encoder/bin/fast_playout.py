@@ -53,6 +53,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 EPS = 0.02
+LIVE_EDGE_SEC = 10.0
 
 # ---------------------------------------------------------------------- parsing
 
@@ -252,6 +253,12 @@ def expand_parts(items, assets, seg_sec):
                 brk_parts.append({"key": f"{it['id']}:f{k}", "kind": "fill", "asset": f["assetId"], "in": 0.0, "out": dur, "sched": t})
                 t += dur
         if not brk_parts:
+            # Nothing playable for this gap (no loop or slate packaged). Keep a
+            # marker so schedule() knows the time it would have filled is a
+            # HOLE in the guide, not drift, and closes it up rather than leaving
+            # dead air (a playlist that stops growing stalls every player).
+            parts.append({"key": f"{it['id']}:hole", "kind": "hole", "asset": None, "in": 0.0, "out": float(it.get("durationSec") or 0),
+                          "sched": start})
             continue
         if it["kind"] == "break":
             brk_parts[0]["break_open"] = it
@@ -278,6 +285,7 @@ class Playout:
         self.ast = st.get("ast")          # DASH availabilityStartTime, fixed for the channel's life
         self.anchor = st.get("anchor")    # {"key", "start"}: wall-clock start of the part on air
         self.periods = {}                 # part key -> {start, dur, asset, vidx0, p}
+        self.holes = []                   # [(guide time, seconds closed up)], for the heartbeat
 
     def state(self):
         return {"tracks": {n: {"msn": v["msn"], "d": v["d"], "last": v["last"]} for n, v in self.t.items()},
@@ -301,15 +309,33 @@ class Playout:
             # a guide edit removed the part on air: carry on from our edge, not from the guide's clock
             t_anchor = edge if lead_last else (parts[start_i]["sched"] if start_i < len(parts) else now)
         entries = {n: [] for n in self.tracks}
+        after_hole = False
+        self.holes = []
         for i in range(start_i, len(parts)):
             p = parts[i]
+            if p.get("kind") == "hole":
+                after_hole = True
+                continue
             a = assets[p["asset"]]
             vt = a.track(lead) if lead != "audio" else a.audio
             vsegs = vt.cut(p["in"], p["out"]) if vt else []
             if not vsegs:
                 continue
             if i > start_i and abs(t_anchor - p["sched"]) > max(self.seg, 1.0) and p["sched"] > t_anchor and not p.get("elastic"):
-                t_anchor = p["sched"]  # drifted behind the guide (a gap): re-anchor at the scheduled start
+                # "At the live edge": the junction is ahead of us, or so recently
+                # behind that the first segment after it (up to a long segment
+                # plus a tick) is not listed yet. Further back than that is a
+                # restart after downtime, which re-anchors to the guide as before.
+                if after_hole and t_anchor >= now - LIVE_EDGE_SEC:
+                    # An unfilled gap at the live edge: jumping to the guide would
+                    # leave nothing to list for the whole gap and every player
+                    # rebuffers (iOS stops for good). Close it up instead: the
+                    # channel runs early by the gap until a loop or slate (which
+                    # is elastic, and takes up to the next fixed start) absorbs it.
+                    self.holes.append((p["sched"], p["sched"] - t_anchor))
+                else:
+                    t_anchor = p["sched"]  # drifted behind the guide (a restart, a guide edit): re-anchor at the scheduled start
+            after_hole = False
             if p.get("elastic"):
                 # take slate up to the next fixed start in the guide (the content after the break)
                 nxt = next((q["sched"] for q in parts[i + 1:] if not q.get("elastic")), None)
@@ -824,6 +850,9 @@ def main():
                     pass  # keep the last good list
                 trig_at = now
             play.tick(now)
+            if play.holes and now - getattr(play, "_hole_warned", 0) > 300:
+                play._hole_warned = now
+                print(f"[fast] {len(play.holes)} gap(s) in the guide have no loop or slate packaged; closed up (first at {iso(play.holes[0][0])}, {play.holes[0][1]:.1f}s). Set a loop or slate for this channel.", file=sys.stderr)
             for n in play.tracks:
                 txt = play.hls(n, trig)
                 if txt:
@@ -841,6 +870,8 @@ def main():
                         "state": play.state(), "lastPdt": iso(last["pdt"] + last["dur"]) if last else None,
                         "mediaSequence": lead["msn"], "tracks": play.tracks, "unreadable": sorted(unreadable),
                         "stopping": stopping["now"],
+                        # gaps in the guide with no loop or slate to fill them, closed up (the channel runs early)
+                        "unfilledGaps": [{"at": iso(t), "sec": round(d, 3)} for t, d in play.holes[:20]],
                     })
                 except Exception as e:
                     print(f"[fast] heartbeat failed: {e}", file=sys.stderr)

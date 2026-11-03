@@ -453,6 +453,53 @@ else
   echo "          with the reason, rather than failing to start."
 fi
 
+# ---------------------------------------------------------------------------
+#  REMOTE TESTING (phone / away from the desk):  REMOTE=1 bash run-on-mac.sh
+#
+#  Publishes the app over Tailscale (private to your own tailnet devices) at
+#  https://<this-mac>.<tailnet>.ts.net, which fronts the Vite server on :5173.
+#  Vite already proxies /api, /origin, /player, /live, /img ... to :8080, so ONE
+#  https origin serves everything. PUBLIC_BASE_URL is pointed at it so share
+#  links, player snippets, image URLs and callbacks work off this Mac.
+#  Also keeps the Mac awake (caffeinate) for as long as this script runs.
+#  Override the URL with REMOTE_URL=https://... (e.g. a different tunnel).
+# ---------------------------------------------------------------------------
+TS_BIN=""
+if [ "${REMOTE:-0}" = "1" ] || [ -n "${REMOTE_URL:-}" ]; then
+  echo "==> Remote access..."
+  if have tailscale; then TS_BIN=tailscale
+  elif [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then TS_BIN=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  fi
+  if [ -z "${REMOTE_URL:-}" ]; then
+    if [ -z "$TS_BIN" ]; then
+      echo "    !! REMOTE=1 needs Tailscale. Install it (Mac App Store or https://tailscale.com/download),"
+      echo "       sign in, install the Tailscale app on your phone with the same account, then re-run."
+      exit 1
+    fi
+    if ! "$TS_BIN" status >/dev/null 2>&1; then
+      echo "    !! Tailscale is installed but not connected. Open it from the menu bar, log in, re-run."
+      exit 1
+    fi
+    TS_DNS=$("$TS_BIN" status --json 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null || true)
+    if [ -z "$TS_DNS" ]; then echo "    !! could not read this Mac's Tailscale name ('$TS_BIN status')."; exit 1; fi
+    echo "    publishing :5173 to your tailnet (first time: Tailscale prints a link to approve Serve, open it)..."
+    if ! { "$TS_BIN" serve --bg 5173 2>&1 | tee /tmp/volt-ts-serve.log | sed 's/^/      /'; [ "${PIPESTATUS[0]}" -eq 0 ]; }; then
+      echo "    !! 'tailscale serve' failed. Usually HTTPS certificates are not enabled for your tailnet:"
+      echo "       https://login.tailscale.com/admin/dns  ->  enable MagicDNS and HTTPS Certificates, then re-run."
+      sed 's/^/       /' /tmp/volt-ts-serve.log | head -6
+      exit 1
+    fi
+    REMOTE_URL="https://$TS_DNS"
+    TS_IP=$("$TS_BIN" ip -4 2>/dev/null | head -1)
+  fi
+  REMOTE_URL="${REMOTE_URL%/}"
+  export PUBLIC_BASE_URL="$REMOTE_URL" CONSOLE_BASE_URL="$REMOTE_URL" REMOTE_URL
+  # Keep the Mac awake while this script runs (display may sleep; needs power for lid-closed use).
+  if have caffeinate; then caffeinate -imsu -w $$ & fi
+  echo "    phone URL: $REMOTE_URL   (Tailscale must be ON on the phone)"
+  [ -n "${TS_IP:-}" ] && echo "    fallback:  http://$TS_IP:5173"
+fi
+
 export DATABASE_URL="$DBURL" JWT_ACCESS_SECRET=dev-access-secret JWT_REFRESH_SECRET=dev-refresh-secret \
        INGEST_TOKEN=dev-ingest PORT=8080 ORCH_LAUNCHER="$ENCODER_MODE" CORS_ORIGIN='*' \
        ENCODER_BIN="$ROOT/volt-encoder/bin" ORIGIN_DIR="$ROOT/volt-app/origin" \
@@ -644,6 +691,7 @@ cleanup() {
   pkill -f "$ROOT/volt-app/origin" 2>/dev/null || true
   pkill -f "$ROOT/docs-site/node_modules" 2>/dev/null || true   # docs server (serve or live reload)
   docker ps -q --filter "name=volt-enc-" 2>/dev/null | xargs -r docker rm -f >/dev/null 2>&1 || true
+  [ -n "$TS_BIN" ] && "$TS_BIN" serve --https=443 off >/dev/null 2>&1 || true   # stop publishing to the tailnet
 }
 trap cleanup EXIT INT TERM
 
@@ -654,6 +702,7 @@ echo
 echo "======================================================================"
 echo "  Opening http://localhost:5173   —  sign in: admin@rtm.example / volt1234"
 [ "$DOCS" = "1" ] && echo "  Docs:   http://localhost:$DOCS_PORT  (or the ? button in the app)"
+[ -n "${REMOTE_URL:-}" ] && echo "  Phone:  $REMOTE_URL   (Tailscale on, same account)"
 echo "  (Ctrl-C here stops the app, the API and the docs.)"
 echo "======================================================================"
 echo

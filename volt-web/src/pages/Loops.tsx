@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, thumbUrl, ApiError, type FillerAsset, type FillerElsewhere, type FillerUser } from '../api'
+import { api, thumbUrl, derivedThumb, ApiError, type FillerAsset, type FillerElsewhere, type FillerUser } from '../api'
 import { navigate, useRoute } from '../router'
 import LoopDetail from './LoopDetail'
+import { SpriteHover } from '../SpriteHover'
 import {
   cancel, dismiss, initBackground, listResumable,
   resumeWithFile, startUpload, subscribe, type UploadItem,
@@ -410,7 +411,19 @@ function LoopsList() {
                   <a href={`/loops/${a.id}`} title={`Open ${a.name}`} aria-label={`Open details for ${a.name}`}
                     style={{ display: 'block', width: 112, height: 63, cursor: 'pointer' }}
                     onClick={e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>
-                  {a.status === 'ready' && a.source_key ? (
+                  {/* THE THUMBNAIL (migration 0120), not the whole file. A loop's hover preview steps
+                      through its sprite sheets (SpriteHover.tsx): the same in every browser, whatever the
+                      source format. Until thumbnails exist, the old way. */}
+                  {a.status === 'ready' && a.source_key && derivedThumb(a.poster_key, 224, 126) && a.kind === 'slate' ? (
+                    <img src={derivedThumb(a.poster_key, 224, 126)!} alt="" loading="lazy"
+                      style={{ width: 112, height: 63, objectFit: 'cover', borderRadius: 4, background: '#000' }} />
+                  ) : a.status === 'ready' && a.source_key && derivedThumb(a.poster_key, 224, 126) ? (
+                    a.sprite?.sheets?.length
+                      ? <SpriteHover id={a.id} poster={derivedThumb(a.poster_key, 224, 126)} width={112} height={63}
+                          loadVtt={() => api.fillerThumbnailsVtt(a.id)} />
+                      : <img src={derivedThumb(a.poster_key, 224, 126)!} alt="" loading="lazy"
+                          style={{ width: 112, height: 63, objectFit: 'cover', borderRadius: 4, background: '#000' }} />
+                  ) : a.status === 'ready' && a.source_key ? (
                     a.kind === 'slate'
                       ? <img src={`/${a.source_key}`} alt=""
                           style={{ width: 112, height: 63, objectFit: 'cover', borderRadius: 4, background: '#000' }} />

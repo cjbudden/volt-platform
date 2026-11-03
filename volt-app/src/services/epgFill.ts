@@ -33,7 +33,7 @@
 // ============================================================================
 import { query, one } from '../db';
 import type { SchemaField } from './metadataValidator';
-import { validateMetadata } from './metadataValidator';
+import { validateMetadata, dateAllowsYear } from './metadataValidator';
 import { isFilled, targetFields } from './vodLibrary';
 import { writeAudit } from './audit';
 
@@ -218,7 +218,8 @@ function coerce(field: SchemaField, raw: unknown): unknown {
     }
     case 'url': { const u = arr[0]; return /^https?:\/\//i.test(u) ? u : undefined; }
     case 'image': { const u = arr[0]; return /^https?:\/\//i.test(u) || /^\/library\//.test(u) ? u : undefined; }
-    case 'date': { const d = arr[0]; return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : /^\d{4}$/.test(d) ? `${d}-01-01` : undefined; }
+    // A guide that gives only a year keeps it as a year where the field allows that (a release date).
+    case 'date': { const d = arr[0]; return /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : /^\d{4}$/.test(d) ? (dateAllowsYear(field) ? d : `${d}-01-01`) : undefined; }
     case 'boolean': return undefined;
     case 'reference': return { id: arr[0], name: arr[0] };
     // A guide gives a name, never a library record: it stays unresolved until linked.

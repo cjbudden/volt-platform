@@ -9,7 +9,7 @@
 //  Usage: npx tsx test/content-types.check.ts
 // ============================================================================
 import { STANDARD_TYPES, DEFAULT_TYPE_KEY, EPG_SLOT_RX, programmeFieldsFrom } from '../src/services/contentTypes';
-import { validateSchemaFields, mergeFields, validateMetadata } from '../src/services/metadataValidator';
+import { validateSchemaFields, mergeFields, validateMetadata, dateAllowsYear } from '../src/services/metadataValidator';
 
 let pass = 0, fail = 0;
 const ok = (m: string) => { console.log('PASS ' + m); pass++; };
@@ -17,6 +17,29 @@ const bad = (m: string, d: string) => { console.log(`FAIL ${m} -- ${d}`); fail++
 const check = (m: string, got: unknown, want: unknown) =>
   got === want ? ok(m) : bad(m, `expected [${String(want)}] got [${String(got)}]`);
 const truthy = (m: string, v: unknown, d = '') => (v ? ok(m) : bad(m, d || `expected truthy, got [${String(v)}]`));
+
+console.log('== release dates: a full date or a year ==');
+{
+  const trailer = STANDARD_TYPES.find((t) => t.key === 'trailer')!;
+  const rel = trailer.fields.find((f) => f.key === 'releaseDate')!;
+  truthy('trailer release date allows a year on its own', dateAllowsYear(rel));
+  check('a full date is kept', validateMetadata([rel], { releaseDate: '2024-06-14' }).releaseDate, '2024-06-14');
+  check('a year is kept as a year', validateMetadata([rel], { releaseDate: '1987' }).releaseDate, '1987');
+  check('a year given as a number is kept as a year', validateMetadata([rel], { releaseDate: 1987 }).releaseDate, '1987');
+  let threw = ''; try { validateMetadata([rel], { releaseDate: '87' }); } catch (e: any) { threw = e.message; }
+  truthy('a short year is refused', /ISO date or a year/.test(threw), threw);
+  // Accounts seeded before allowYear existed: a datePublished field allows it by default.
+  truthy('an older release date (datePublished, no flag) allows a year', dateAllowsYear({ type: 'date', schemaOrg: 'datePublished' }));
+  const recorded = { key: 'recordedAt', type: 'date', schemaOrg: 'dateCreated' } as const;
+  threw = ''; try { validateMetadata([recorded as any], { recordedAt: '2024' }); } catch (e: any) { threw = e.message; }
+  truthy('any other date still needs a full date', /must be an ISO date$/.test(threw), threw);
+  threw = ''; try { validateMetadata([{ ...rel, allowYear: false }], { releaseDate: '1987' }); } catch (e: any) { threw = e.message; }
+  truthy('a release date switched to full date only refuses a year', !!threw);
+  threw = ''; try { validateSchemaFields([{ key: 'x', type: 'string', allowYear: true }]); } catch (e: any) { threw = e.message; }
+  truthy('allowYear is refused on a non-date field', /only a date field/.test(threw), threw);
+  for (const t of STANDARD_TYPES) for (const f of t.fields)
+    if (f.schemaOrg === 'datePublished') truthy(`${t.key}.${f.key}: release date allows a year`, dateAllowsYear(f));
+}
 
 console.log('== the standard table ==');
 const keys = STANDARD_TYPES.map((t) => t.key);
