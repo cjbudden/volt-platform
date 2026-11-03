@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.30.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- added · Recordings: Step through a recording frame by frame: while paused the arrow keys move one frame and show that exact frame with its timecode, In and Out are set on it, and small pictures under the marks show the clip's exact first and last frames.
+- added · Media Library: The video preview shows the timecode and frame number, and while paused the arrow keys step one frame at a time, showing the exact frame.
+
+### Internal
+
+- added · Docs: The docs seed adds a recording and a library asset with real media for the frame stepping screenshots; the screenshot script can press keys, and styles a shot hides or removes no longer carry into later shots.
+
 ## 0.29.0 (2026-11-03)
 
 ### Product (in customer release notes)
