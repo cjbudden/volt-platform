@@ -14,7 +14,7 @@
  * Sign-in afterwards: admin@example.com / volt1234
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { query, pool } from '../src/db';
 import { writeAudit } from '../src/services/audit';
@@ -157,10 +157,77 @@ async function main() {
 
   await seedAccountSections();
   await seedFast();
+  await seedFrames();
   await seedG8Sections();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
+}
+
+// EXACT FRAMES (build queue 3.2-3). The Recordings and Media Library guides
+// show frame stepping, which needs real media: a minute of test card with the
+// frame number burnt in (so a screenshot shows the frame it names), as a
+// capture run of the first live channel two hours ago with its recording, and
+// as a packaged library asset. Made with ffmpeg only when missing.
+const DOCS_FRAMES = {
+  recording: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e40',
+  asset: '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e41',
+} as const;
+
+async function seedFrames() {
+  const ffmpeg = process.env.FFMPEG_BIN || 'ffmpeg';
+  if (spawnSync(ffmpeg, ['-version'], { stdio: 'ignore' }).status !== 0) {
+    console.warn('[seed-docs] ffmpeg not found: no frame stepping media (the exact frame screenshots need it)');
+    return;
+  }
+  const ff = (args: string[]) => {
+    const r = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'inherit' });
+    if (r.status !== 0) throw new Error('ffmpeg failed: ' + args.join(' '));
+  };
+  const src = join(config.clips.dir, 'vod-src', `${DOCS_FRAMES.asset}.mp4`);
+  if (!existsSync(src)) {
+    mkdirSync(dirname(src), { recursive: true });
+    // The frame number in the picture where drawtext exists (it needs a font
+    // library some ffmpeg builds leave out); the plain test card otherwise.
+    const hasText = /drawtext/.test(spawnSync(ffmpeg, ['-hide_banner', '-filters'], { encoding: 'utf8' }).stdout || '');
+    const vf = hasText ? ",drawtext=text='frame %{n}':fontsize=96:fontcolor=white:box=1:boxcolor=black@0.7:x=(w-tw)/2:y=h-160" : '';
+    ff(['-f', 'lavfi', '-i', `testsrc2=size=1280x720:rate=25:duration=60${vf}`,
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-g', '50', '-keyint_min', '50', '-sc_threshold', '0', '-bf', '2', '-b:v', '2500k', src]);
+  }
+  // The capture run, laid out as the origin writes it (segment i finished at T0 + 2(i+1) s).
+  const ch = await query<{ id: string }>(
+    `SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id
+      WHERE g.account_id = $1 AND COALESCE(c.origin, '') <> 'playlist' ORDER BY c.name LIMIT 1`, [ACCOUNT]);
+  if (!ch[0]) throw new Error('docs seed: no channel for the frame stepping recording');
+  const T0 = Math.floor((Date.now() - 2 * 3600_000) / 1000) * 1000;
+  const runId = new Date(T0).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const runDir = join(config.testStream.originDir, ch[0].id, 'runs', runId, '720p');
+  mkdirSync(runDir, { recursive: true });
+  ff(['-i', src, '-c', 'copy', '-f', 'hls', '-hls_time', '2', '-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4',
+    '-hls_segment_filename', join(runDir, 'seg_%d.m4s'), join(runDir, 'index.m3u8')]);
+  for (const f of readdirSync(runDir).filter((x) => /^seg_\d+\.m4s$/.test(x))) {
+    const t = (T0 + (Number(/\d+/.exec(f)![0]) + 1) * 2000) / 1000;
+    utimesSync(join(runDir, f), t, t);
+  }
+  await query(
+    `INSERT INTO recordings(id, kind, channel_id, title, status, start_epoch_ms, end_epoch_ms, duration_ms, day_utc)
+     VALUES ($1,'channel_day',$2,'Morning news',$3,$4,$5,60000,$6)
+     ON CONFLICT (id) DO UPDATE SET channel_id=EXCLUDED.channel_id, start_epoch_ms=EXCLUDED.start_epoch_ms,
+       end_epoch_ms=EXCLUDED.end_epoch_ms, day_utc=EXCLUDED.day_utc`,
+    [DOCS_FRAMES.recording, ch[0].id, 'complete', T0, T0 + 60000, new Date(T0).toISOString().slice(0, 10)]);
+  // The library asset, packaged as vod.encode leaves it (master -> v720/index.m3u8).
+  const dir = join(config.clips.dir, 'vod', DOCS_FRAMES.asset);
+  if (!existsSync(join(dir, 'master.m3u8'))) {
+    mkdirSync(join(dir, 'v720'), { recursive: true });
+    ff(['-i', src, '-c', 'copy', '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod', '-hls_segment_type', 'fmp4',
+      '-hls_fmp4_init_filename', 'init.mp4', '-hls_segment_filename', join(dir, 'v720', 'seg_%03d.m4s'), join(dir, 'v720', 'index.m3u8')]);
+    writeFileSync(join(dir, 'master.m3u8'), ['#EXTM3U', '#EXT-X-STREAM-INF:BANDWIDTH=2600000,RESOLUTION=1280x720,CODECS="avc1.64001f"', 'v720/index.m3u8', ''].join('\n'));
+  }
+  await query(
+    `INSERT INTO vod_assets(id, account_id, source_kind, kind, title, master_key, start_epoch_ms, end_epoch_ms, duration_ms, created_at)
+     VALUES ($1,$2,'upload','clip','Studio test card',$3,0,60000,60000, now() - interval '1 day')
+     ON CONFLICT (id) DO UPDATE SET master_key=EXCLUDED.master_key, title=EXCLUDED.title`,
+    [DOCS_FRAMES.asset, ACCOUNT, `/clips/vod/${DOCS_FRAMES.asset}/master.m3u8`]);
 }
 
 // FAST (build queue 1.14-G5c). The FAST library offers only titles that can

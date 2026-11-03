@@ -78,7 +78,12 @@ Files dropped in a watch folder arrive the same way, without the upload band ([W
 
 ### Watch it and choose its image (Preview)
 
-1. **Preview** plays the asset. Audio plays with an audio player.
+1. **Preview** plays the asset. Audio plays with an audio player. Under a video, the timecode (HH:MM:SS:FF) and the frame number show where you are.
+   - **To step frame by frame,** pause, click the preview (or the timecode under it), then press the left and right arrows. Each press moves one frame, and **Exact frame** over the picture shows that exact frame, with its number and timecode, as Volt decodes it. Playing again, or moving the playhead another way, goes back to the player's own picture. While the video plays, the arrows jump 10 seconds.
+   - A new asset needs a few seconds before its timecode appears, while Volt indexes its frames. At 29.97 and 59.94 frames per second the timecode is drop-frame (HH:MM:SS;FF).
+
+   ![The Media Library preview paused on exact frame 5, with its frame number and timecode over the picture](/img/screens/media-library-exact-frame.png)
+
 2. **Facts** lists its kind, length, how it was built, how much of the source it covers, and its **Review** and **QC** state. For an uploaded file it also shows the **Source file**, the **Ladder** it was encoded with and the **Formats** made. Beside **Review**, **Send for review** puts a draft or rejected clip into the [Review](review.md) queue (**Send back for review** for an approved one), and **Open in Review** opens a clip that is already waiting.
 3. **HLS manifest** opens the streaming address. The **Download** buttons (for example **Download MP4**) appear if your role includes downloads.
 4. Under **Image**, Volt picks a picture for the asset by itself: the best frame, a programme image, station artwork or an album cover, and says why. To change it, click one of the **Frames considered, best first**, or choose **Choose from library**. **Pick again** (or **Pick automatically**, after you chose one by hand) lets Volt choose again.
@@ -230,6 +235,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | Its publishing rule for this item |
 | `POST /api/vod/{id}/publish`, `POST /api/vod/{id}/withdraw` | Publish, and remove access |
 | `GET /api/vod/{id}/markers`, `PUT /api/vod/{id}/markers/{kind}` | Skip markers (`intro`, `recap`, `credits`) |
+| `GET /api/vod/{id}/frame-index`, `GET /api/vod/{id}/frame` | The asset's frame rate and frame count, and one exact frame as an image (by `n`, `tc` or `ms`) |
 | `GET /api/vod/{id}/image`, `PUT /api/vod/{id}/image`, `POST /api/vod/{id}/image/auto` | Its image |
 | `POST /api/vod/{id}/qc` | Runs QC again |
 | `GET /api/downloads/vod/{id}`, `POST /api/downloads/vod/{id}/link` | The downloadable files, and a short-lived link to one |

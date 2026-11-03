@@ -27,6 +27,8 @@ import { getToken } from './api'
 import { parseThumbVtt, ThumbScrubStrip } from './storyboard'
 import { Notice } from './notices'
 import VoltPlayerView from './VoltPlayerView'
+import { FrameStill } from './FrameStill'
+import { frameAtMs, frameMs, getVodFrame, getVodFrameIndex, msOfFrame, timecode, type ExactFrame, type Rate } from './frames'
 
 export interface PreviewSources {
   /** HLS master/index manifest path. */
@@ -98,8 +100,12 @@ const fmt = (s: number) => {
   return h ? `${h}:${String(m % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`
 }
 
-export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster }: {
+export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster, assetId }: {
   sources: PreviewSources
+  /** The library asset being previewed: turns on frame stepping and timecode
+   *  from its frame index (build queue 3.2-3). Without it the preview is a
+   *  plain player, as for a loop's media. */
+  assetId?: string | null
   /** The asset's image, shown in the player until it plays (a signed image-service URL). */
   poster?: string | null
   audioOnly: boolean
@@ -113,12 +119,13 @@ export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt,
   if (!hasAny) return null
   return audioOnly
     ? <AudioPreview sources={sources} title={title} err={err} setErr={setErr} />
-    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} />
+    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} assetId={assetId} />
 }
 
 /** Video: the Volt player SDK with the admin skin (the same player customers embed). */
-function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null }) {
+function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null; assetId?: string | null }) {
   const ref = useRef<HTMLVideoElement | null>(null)
+  const frames = useFrameStepping(ref, assetId ?? null)
   // THE ASSET'S IMAGE AS THE POSTER, on the video element itself: shown until it plays, and
   // put back if loading a new source clears it. A newly chosen image is a new URL (versioned).
   useEffect(() => {
@@ -144,10 +151,24 @@ function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster }: { sources
     return () => { v.removeEventListener('timeupdate', onT); v.removeEventListener('durationchange', onD); v.removeEventListener('loadedmetadata', onM) }
   }, [])
   return (
-    <div>
-      <VoltPlayerView src={src} mediaRef={ref} skin="admin" autoplay={false}
-        onError={m => setErr(m ? 'Playback failed: ' + m : '')}
-        style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)', ['--vp-admin-max' as any]: '380px' }} />
+    // tabIndex -1: a click anywhere in the preview (the readout included) gives
+    // it the keys, so the arrows step frames here and not elsewhere on the page.
+    <div className="frame-preview" onKeyDownCapture={frames.onKey} tabIndex={-1} style={{ outline: 'none' }}>
+      <div className="frame-host">
+        <VoltPlayerView src={src} mediaRef={ref} skin="admin" autoplay={false}
+          onError={m => setErr(m ? 'Playback failed: ' + m : '')}
+          style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)', ['--vp-admin-max' as any]: '380px' }} />
+        <FrameStill still={frames.still} busy={frames.busy} />
+      </div>
+      {frames.rate && !noPicture && (
+        <div className="frame-readout">
+          <span className="tc">{frames.still ? frames.still.timecode : timecode(frames.rate, frameAtMs(frames.rate, t * 1000))}</span>
+          <span>frame {frames.still ? frames.still.frame : frameAtMs(frames.rate, t * 1000)}{frames.total ? ` of ${frames.total}` : ''}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>Paused: ← → step one frame</span>
+        </div>
+      )}
+      {frames.err && <div style={{ marginTop: 6 }}><Notice kind="error" variant="compact" message={frames.err} /></div>}
       {!noPicture && cues.length > 0 && (
         <ThumbScrubStrip cues={cues} duration={Number.isFinite(dur) ? dur : cues[cues.length - 1].end} current={t}
           onSeek={(sec) => { const v = ref.current; if (v) v.currentTime = sec }} />
@@ -204,4 +225,77 @@ function AudioPreview({ sources, title, err, setErr }: { sources: PreviewSources
       {err && <div style={{ marginTop: 8 }}><Notice kind="error" variant="compact" message={err} /></div>}
     </div>
   )
+}
+
+/**
+ * FRAME STEPPING for a library asset (build queue 3.2-3). While the player is
+ * paused, the left and right arrows step one frame and the server's exact
+ * still of that frame is shown over the player; playing again, or seeking any
+ * other way, puts the player's own picture back. While playing the arrows keep
+ * the player's 10 second jumps. Needs the asset's frame index (its rate and
+ * frame count); until that is made the player behaves as before.
+ */
+function useFrameStepping(ref: { current: HTMLVideoElement | null }, assetId: string | null) {
+  const [rate, setRate] = useState<Rate | null>(null)
+  const [total, setTotal] = useState(0)
+  const [still, setStill] = useState<ExactFrame | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const seq = useRef(0)
+  const ourSeek = useRef(false)
+  const current = useRef<number | null>(null)
+  useEffect(() => {
+    setRate(null); setTotal(0); setStill(null); current.current = null
+    if (!assetId) return
+    let gone = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // The first ask queues the index when an asset has none yet (a few seconds
+    // for a film), so ask again until it is ready, for up to two minutes.
+    const ask = (tries: number) => getVodFrameIndex(assetId).then(i => {
+      if (gone) return
+      if (i.rate) { setRate(i.rate); setTotal(i.totalFrames ?? 0); return }
+      if ((i.state === 'queued' || i.state === 'indexing') && tries < 24) timer = setTimeout(() => ask(tries + 1), 5000)
+    }).catch(() => { /* no index: plain player */ })
+    void ask(0)
+    return () => { gone = true; if (timer) clearTimeout(timer) }
+  }, [assetId])
+  // Any seek or play we did not make puts the player's own picture back.
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    const drop = () => { if (ourSeek.current) { ourSeek.current = false; return } seq.current++; setStill(null); setBusy(false); current.current = null }
+    const onPlay = () => { seq.current++; setStill(null); setBusy(false); current.current = null }
+    v.addEventListener('seeking', drop); v.addEventListener('play', onPlay)
+    return () => { v.removeEventListener('seeking', drop); v.removeEventListener('play', onPlay) }
+  }, [ref.current])
+  async function step(dir: 1 | -1) {
+    const v = ref.current
+    if (!v || !rate || !assetId) return
+    const base = current.current ?? frameAtMs(rate, v.currentTime * 1000)
+    const last = total > 0 ? total - 1 : Number.MAX_SAFE_INTEGER
+    const n = Math.min(last, Math.max(0, base + dir))
+    current.current = n
+    // The player is moved to the MIDDLE of the frame, so its own picture is
+    // the right one too wherever the browser can manage it.
+    ourSeek.current = true
+    v.currentTime = (msOfFrame(rate, n) + frameMs(rate) / 2) / 1000
+    const my = ++seq.current
+    setBusy(true); setErr('')
+    try {
+      const f = await getVodFrame(assetId, n)
+      if (my === seq.current) setStill(f)
+    } catch (e: any) {
+      if (my === seq.current) setErr("Couldn't show the exact frame: " + (e?.message || e))
+    } finally { if (my === seq.current) setBusy(false) }
+  }
+  function onKey(e: React.KeyboardEvent) {
+    const v = ref.current
+    if (!v || !rate || !v.paused) return
+    if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    // Before the player's own handler, which would jump 10 seconds.
+    e.preventDefault(); e.stopPropagation()
+    void step(e.key === 'ArrowRight' ? 1 : -1)
+  }
+  return { rate, total, still, busy, err, onKey }
 }

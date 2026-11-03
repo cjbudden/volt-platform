@@ -257,7 +257,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
           <div>
             {playable ? (
-              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt}
+              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} assetId={d.id}
                 poster={d.poster_key ? signImage(`1280x720,${d.poster_shape === 'square' ? 'contain,bg=000000' : 'cover'}${posterVersion(d.poster_picked_at) ? `,v=${posterVersion(d.poster_picked_at)}` : ''}`, String(d.poster_key)) ?? thumbUrl(`/${String(d.poster_key).replace(/^\/+/, '')}`, 1280, 720, 'cover') : null} />
             ) : (
               <div style={{

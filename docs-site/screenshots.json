@@ -165,11 +165,70 @@
       "alt": "The Media Library page: the upload band at the top, the search, sort and filter chips, then the list of assets with their review, QC and availability"
     },
     {
+      "name": "media-library-exact-frame",
+      "guide": "guides/media-library.md",
+      "path": "/vod",
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1500,
+      "click": [
+        "tr:has-text(\"Studio test card\") button:has-text(\"Open\")",
+        ".frame-readout"
+      ],
+      "keys": [
+        "ArrowRight",
+        "ArrowRight",
+        "ArrowRight",
+        "ArrowRight",
+        "ArrowRight"
+      ],
+      "waitAfter": ".frame-still img",
+      "clip": ".frame-preview",
+      "hide": [
+        ".topbar"
+      ],
+      "remove": [
+        ".notice-error"
+      ],
+      "alt": "The Media Library preview paused on exact frame 5, with its frame number and timecode over the picture"
+    },
+    {
       "name": "recordings",
       "guide": "guides/recordings.md",
       "path": "/recordings",
       "waitFor": "h1",
       "alt": "The Recordings page: filter chips for channels, radio, events and what is recording now, then one row per source with its recordings, available range, content held and status"
+    },
+    {
+      "name": "recordings-exact-frame",
+      "guide": "guides/recordings.md",
+      "path": "/recordings/5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e40",
+      "waitFor": ".frame-host",
+      "settleMs": 2500,
+      "keys": [
+        ">",
+        ">",
+        ">",
+        "i",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        ">",
+        "o"
+      ],
+      "waitAfter": ".mark-frame + .mark-frame img",
+      "alt": "A recording paused on an exact frame: the frame number and timecode over the picture, TC beside Position, and the exact first and last frames of the In and Out marks under the controls",
+      "remove": [
+        ".notice-error"
+      ]
     },
     {
       "name": "image-library",

@@ -52,12 +52,16 @@ Events have no timeline on this page: use **Jump to a date and time** or open a 
 ### Cut a clip
 
 1. Open a recording. The player loads the most recent material, with the in and out marks on the last five minutes.
-2. Play and scrub. With the page focused (not a text field), **space** plays and pauses, the left and right arrows move 10 seconds, `<` and `>` step one frame, **I** sets the in point and **O** sets the out point at the playhead. **Position**, **In** and **Out** show where you are.
-3. Use the clipping timeline under the player to find the range. Drag on it to set the marks. Zoom with **1m**, **5m**, **15m**, **1h**, **4h** and **1d**, **−** and **+**, and pan with **◀** and **▶**. **Zoom on** chooses what the zoom keeps in view: **Playhead**, **In**, **Out** or **Middle**. **Fit all** shows the whole recording (**Last day** on recordings longer than a day), and **Zoom to marks** zooms to the range you marked.
-4. To clip exactly one programme or song, click it in the metadata lane. The marks snap to it and its title fills in **Clip title**.
-5. To fine-tune, type a time (hh:mm:ss) in the **In** and **Out** fields. **Load marks** loads just the marked range into the player.
-6. Enter a **Clip title** and choose an **Output**: **Streaming (HLS/DASH)**, **Downloadable MP4** (**Downloadable MP3** for radio), or both (**Streaming + MP4** or **Streaming + MP3**).
-7. Choose **Create clip**. **Clip created. Listed below and in the Media Library.** confirms it. The clip appears in the table under the clip controls and in the [Media Library](media-library.md), where it is published.
+2. Play and scrub. With the page focused (not a text field), **space** plays and pauses, the left and right arrows move 10 seconds while playing, **I** sets the in point and **O** sets the out point at the playhead. **Position**, **TC** (timecode from the start of the recording), **In** and **Out** show where you are.
+3. To mark an exact frame, pause and step: while paused the left and right arrows step one frame, and `<` and `>` pause and step. **Exact frame** over the picture shows that exact frame, with its number and timecode, as Volt decodes it from the recording. **I** then starts the clip on that frame and **O** ends it on that frame. Under the marks, small pictures show the exact first and last frame of the clip with their timecodes. Playing again goes back to the player's own picture.
+
+   ![A recording paused on an exact frame: the frame number and timecode over the picture, TC beside Position, and the exact first and last frames of the In and Out marks under the controls](/img/screens/recordings-exact-frame.png)
+
+4. Use the clipping timeline under the player to find the range. Drag on it to set the marks. Zoom with **1m**, **5m**, **15m**, **1h**, **4h** and **1d**, **−** and **+**, and pan with **◀** and **▶**. **Zoom on** chooses what the zoom keeps in view: **Playhead**, **In**, **Out** or **Middle**. **Fit all** shows the whole recording (**Last day** on recordings longer than a day), and **Zoom to marks** zooms to the range you marked.
+5. To clip exactly one programme or song, click it in the metadata lane. The marks snap to it and its title fills in **Clip title**.
+6. To fine-tune, type a time (hh:mm:ss) in the **In** and **Out** fields. **Load marks** loads just the marked range into the player.
+7. Enter a **Clip title** and choose an **Output**: **Streaming (HLS/DASH)**, **Downloadable MP4** (**Downloadable MP3** for radio), or both (**Streaming + MP4** or **Streaming + MP3**).
+8. Choose **Create clip**. **Clip created. Listed below and in the Media Library.** confirms it. The clip appears in the table under the clip controls and in the [Media Library](media-library.md), where it is published.
 
 A clip starts on the exact frame you marked as In and ends on the exact frame you marked as Out. Only the first and last few seconds are re-encoded; the middle is copied as recorded, so a long clip is ready about as fast as a short one and keeps the recording's own quality.
 
@@ -142,6 +146,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/recordings/{id}/timeline` | What is on disk, with its gaps |
 | `GET /api/recordings/{id}/programmes` | The programmes and now-playing items for a span |
 | `GET /api/recordings/{id}/transcript` | Transcript lines for a span, or matches for `q` |
+| `GET /api/recordings/{id}/frame` | One exact frame as an image, by wall clock (`at`), time from the start (`ms`) or frame number (`n`) |
 | `POST /api/recordings/{id}/clip` | Cuts a clip (`title`, `startMs`, `endMs`, `outputKind`, optional `acceptGapsMs`) |
 | `POST /api/recordings/{id}/publish` | Publishes the whole recording as VOD |
 | `GET /api/recordings/{id}/download` | Starts or fetches the file export |

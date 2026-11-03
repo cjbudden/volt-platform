@@ -14,6 +14,7 @@
 //   (volt-app)  PORT=8080 npx tsx src/index.ts
 //   (volt-web)  npx vite --port 5173
 //   (docs-site) node scripts/screenshots.mjs [name ...]
+// A shot may also press `keys` after its clicks and wait for `waitAfter`.
 // A shot may also `hide` elements (kept in place, left blank) or `remove` them
 // (taken out of the layout).
 //
@@ -76,6 +77,9 @@ for (const s of shots) {
     console.log(`SKIP  ${s.name.padEnd(22)} needs the customer's view; this login sees the server's setup (start the API with VOLT_DEPLOYMENT=saas)`);
     continue;
   }
+  // Styles a shot injects (hide, remove) are taken out again after it: the
+  // page is never reloaded, so they used to carry into every later shot.
+  const injected = [];
   // The session lives in memory, so move inside the app instead of reloading.
   await page.evaluate((u) => { history.pushState(null, '', u); dispatchEvent(new PopStateEvent('popstate')); }, s.path);
   try {
@@ -83,13 +87,17 @@ for (const s of shots) {
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(s.settleMs ?? 1200);
     for (const c of s.click || []) { await page.click(c); await page.waitForTimeout(600); }
+    // `keys` are pressed after the clicks (frame stepping, build queue 3.2-3),
+    // then `waitAfter` is waited for: a key's result can arrive from the server.
+    for (const k of s.keys || []) { await page.keyboard.press(k); await page.waitForTimeout(250); }
+    if (s.waitAfter) { await page.waitForSelector(s.waitAfter, { timeout: 15000 }); await page.waitForTimeout(800); }
     if (s.hide?.length) {
-      await page.addStyleTag({ content: s.hide.map((h) => `${h}{visibility:hidden!important}`).join('\n') });
+      injected.push(await page.addStyleTag({ content: s.hide.map((h) => `${h}{visibility:hidden!important}`).join('\n') }));
     }
     // `remove` takes the element out of the layout as well, for a note that
     // would otherwise leave a blank band across the top of the picture.
     if (s.remove?.length) {
-      await page.addStyleTag({ content: s.remove.map((h) => `${h}{display:none!important}`).join('\n') });
+      injected.push(await page.addStyleTag({ content: s.remove.map((h) => `${h}{display:none!important}`).join('\n') }));
     }
     const text = await page.evaluate(() => {
       const bits = [document.body.innerText];
@@ -110,6 +118,8 @@ for (const s of shots) {
   } catch (e) {
     failed++;
     console.log(`FAIL  ${s.name.padEnd(22)} ${String(e.message || e).split('\n')[0]}`);
+  } finally {
+    for (const h of injected) await h.evaluate((el) => el.remove()).catch(() => {});
   }
 }
 await browser.close();

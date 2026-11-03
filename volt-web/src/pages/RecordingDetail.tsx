@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api, recordingRangeUrl, type RecordingRow, type RecordingTimeline, type VodAssetRow, type RecordingProgramme, type TranscriptSearch } from '../api'
 import AudioVisualizer from '../AudioVisualizer'
 import VoltPlayerView from '../VoltPlayerView'
+import { FrameStill, MarkFrame } from '../FrameStill'
+import { frameAtMs, frameMs, getRecordingFrame, timecode, type ExactFrame, type Rate } from '../frames'
 import ClipTimeline, { gapsInRange, GAP_REASON } from '../ClipTimeline'
 import { ClipProvenancePanel } from '../ClipProvenance'
 import type { Waveform } from '../api'
@@ -117,6 +119,20 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
   const part = (k: LoadPart, info: LoadInfo) => setLoadParts(p => ({ ...p, [k]: info }))
   const [playerErr, setPlayerErr] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  // EXACT FRAMES (build queue 3.2-3): the server's still of the frame stepped
+  // to while paused, shown over the player; In and Out are taken from it. The
+  // capture's rate comes with the first frame asked for.
+  const [still, setStill] = useState<ExactFrame | null>(null)
+  const [stillBusy, setStillBusy] = useState(false)
+  const [rate, setRate] = useState<Rate | null>(null)
+  const stillSeq = useRef(0)
+  const ourSeek = useRef(false)
+  // The MIDDLE of the frame last stepped to (wall ms), set at once on every
+  // key press so presses faster than the server answers still count one frame
+  // each; cleared when the player moves any other way.
+  const stepMid = useRef<number | null>(null)
+  const [inStill, setInStill] = useState<ExactFrame | null>(null)
+  const [outStill, setOutStill] = useState<ExactFrame | null>(null)
   // transcript side panel: cues for the LOADED range (live-follows the playhead)
   // or, when a search term is set, matches across the whole recording
   const [tsLangs, setTsLangs] = useState<string[]>([])
@@ -367,9 +383,38 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
     const v = videoRef.current
     if (!v || !loaded) return
     const onTime = () => setPlayheadMs(loaded.from + v.currentTime * 1000)
-    v.addEventListener('timeupdate', onTime)
-    return () => v.removeEventListener('timeupdate', onTime)
+    // Any seek or play the frame stepping did not make puts the player's own picture back.
+    const drop = () => { if (ourSeek.current) { ourSeek.current = false; return } stillSeq.current++; stepMid.current = null; setStill(null); setStillBusy(false) }
+    const onPlay = () => { stillSeq.current++; stepMid.current = null; setStill(null); setStillBusy(false) }
+    v.addEventListener('timeupdate', onTime); v.addEventListener('seeking', drop); v.addEventListener('play', onPlay)
+    return () => { v.removeEventListener('timeupdate', onTime); v.removeEventListener('seeking', drop); v.removeEventListener('play', onPlay) }
   }, [loaded])
+
+  /** One frame on or back from the frame shown, as the server decodes it. */
+  async function stepFrame(dir: 1 | -1) {
+    const v = videoRef.current
+    if (!v || !loaded || tl?.audioOnly) return
+    v.pause()
+    const len = rate ? frameMs(rate) : FRAME * 1000
+    // Ask for the MIDDLE of the next frame, so a time a hair early or late
+    // still names the frame meant.
+    const base = stepMid.current ?? (loaded.from + v.currentTime * 1000)
+    const at = Math.min(loaded.to - len / 2, Math.max(loaded.from + len / 2, base + dir * len))
+    stepMid.current = at
+    ourSeek.current = true
+    v.currentTime = Math.max(0, (at - loaded.from) / 1000)
+    const my = ++stillSeq.current
+    setStillBusy(true)
+    try {
+      const f = await getRecordingFrame(id, at)
+      if (my !== stillSeq.current) return
+      setStill(f); setRate(f.rate)
+      // Re-centred on the frame the server found, at its own rate.
+      if (f.wallMs != null) stepMid.current = f.wallMs + frameMs(f.rate) / 2
+    } catch (e: any) {
+      if (my === stillSeq.current) setPlayerErr("Couldn't show the exact frame: " + (e?.message || e))
+    } finally { if (my === stillSeq.current) setStillBusy(false) }
+  }
 
   // DEEP LINK LANDS ON ITS MOMENT (24 Oct 2026). The range loads with some
   // context before the song or programme, so the player used to start at the
@@ -402,33 +447,64 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
       switch (e.key) {
         case ' ':
           e.preventDefault(); if (v.paused) v.play().catch(() => {}); else v.pause(); break
+        // Paused, the arrows step one frame (the exact frame, from the server);
+        // playing, they jump 10 seconds. < and > always pause and step.
         case 'ArrowRight':
-          e.preventDefault(); v.currentTime = Math.min(v.duration || 1e9, v.currentTime + 10); break
+          e.preventDefault()
+          if (v.paused && !tl?.audioOnly) void stepFrame(1); else v.currentTime = Math.min(v.duration || 1e9, v.currentTime + 10)
+          break
         case 'ArrowLeft':
-          e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); break
+          e.preventDefault()
+          if (v.paused && !tl?.audioOnly) void stepFrame(-1); else v.currentTime = Math.max(0, v.currentTime - 10)
+          break
         case '.': case '>':
-          e.preventDefault(); v.pause(); v.currentTime = Math.min(v.duration || 1e9, v.currentTime + FRAME); break
+          e.preventDefault()
+          if (tl?.audioOnly) { v.pause(); v.currentTime = Math.min(v.duration || 1e9, v.currentTime + FRAME) } else void stepFrame(1)
+          break
         case ',': case '<':
-          e.preventDefault(); v.pause(); v.currentTime = Math.max(0, v.currentTime - FRAME); break
+          e.preventDefault()
+          if (tl?.audioOnly) { v.pause(); v.currentTime = Math.max(0, v.currentTime - FRAME) } else void stepFrame(-1)
+          break
         case 'i': case 'I': {
           e.preventDefault()
-          const w = wall()
+          // On the frame stepped to, when there is one: In is where it starts.
+          const len = rate ? frameMs(rate) : FRAME * 1000
+          const w = stepMid.current != null ? stepMid.current - len / 2 : wall()
           setSelFrom(w)
           setSelTo(prev => (prev == null || prev <= w) ? loaded.to : prev)
           break
         }
         case 'o': case 'O': {
           e.preventDefault()
-          const w = wall()
+          // Out is where the frame shown ENDS, so that frame is the clip's last.
+          const len = rate ? frameMs(rate) : FRAME * 1000
+          const w = stepMid.current != null ? stepMid.current + len / 2 : wall()
           setSelTo(w)
           setSelFrom(prev => (prev == null || prev >= w) ? loaded.from : prev)
           break
         }
+        default: return
       }
+      // Handled here, so the player's own keys (space, 10 s arrows) do not act a second time.
+      e.stopPropagation()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [loaded])
+    // CAPTURE, ahead of the player's own key handler (volt-player wireRoot).
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [loaded, rate, tl?.audioOnly])
+
+  // THE EXACT FIRST AND LAST FRAME of the marks, as small stills beside them.
+  // Waits for the marks to settle (dragging them changes them many times).
+  useEffect(() => {
+    if (tl?.audioOnly || !selOkNow(selFrom, selTo)) { setInStill(null); setOutStill(null); return }
+    const len = rate ? frameMs(rate) : FRAME * 1000
+    let gone = false
+    const t = setTimeout(() => {
+      getRecordingFrame(id, selFrom! + len / 2, 320).then(f => { if (!gone) { setInStill(f); setRate(r => r ?? f.rate) } }).catch(() => { if (!gone) setInStill(null) })
+      getRecordingFrame(id, selTo! - len / 2, 320).then(f => { if (!gone) setOutStill(f) }).catch(() => { if (!gone) setOutStill(null) })
+    }, 450)
+    return () => { gone = true; clearTimeout(t) }
+  }, [id, selFrom, selTo, rate, tl?.audioOnly])
 
   const selOk = selFrom != null && selTo != null && selTo > selFrom
   const coveredMs = useMemo(() => {
@@ -573,9 +649,12 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
                   the live audio visualiser (level + spectrum), so a muted review still
                   shows whether there is signal. The <video> element still drives
                   playback/seek; it is just not the visible surface. */}
-              <VoltPlayerView src={playUrl} mediaRef={videoRef} skin="admin"
-                onError={m => setPlayerErr(m ? 'Playback failed: ' + m : '')}
-                style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }} />
+              <div className="frame-host">
+                <VoltPlayerView src={playUrl} mediaRef={videoRef} skin="admin"
+                  onError={m => setPlayerErr(m ? 'Playback failed: ' + m : '')}
+                  style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }} />
+                <FrameStill still={still} busy={stillBusy} />
+              </div>
               {tl?.audioOnly && (
                 <div style={{ marginTop: 10 }}>
                   <AudioVisualizer media={videoRef.current} height={330} idleText="Load a range and press play" />
@@ -621,6 +700,11 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-body)' }}>
               <span style={{ color: 'var(--faint)' }}>Position </span>{playheadMs != null ? fmtClock(playheadMs) : '—'}
             </span>
+            {rate && rec && (still || playheadMs != null) && (
+              <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-body)' }} title="Timecode from the start of the recording">
+                <span style={{ color: 'var(--faint)' }}>TC </span>{still ? still.timecode : timecode(rate, frameAtMs(rate, playheadMs! - Number(rec.start_epoch_ms)))}
+              </span>
+            )}
             <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 'var(--fs-body)' }}>
               <span style={{ color: 'var(--faint)' }}>In </span>{selFrom != null ? fmtClock(selFrom) : '—'}
               <span style={{ color: 'var(--faint)' }}> Out </span>{selTo != null ? fmtClock(selTo) : '—'}
@@ -628,9 +712,15 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
             </span>
             <span style={{ flex: 1 }} />
             <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>
-              <Kbd>space</Kbd> play/pause · <Kbd>←</Kbd><Kbd>→</Kbd> 10s · <Kbd>&lt;</Kbd><Kbd>&gt;</Kbd> frame · <Kbd>I</Kbd> in · <Kbd>O</Kbd> out
+              <Kbd>space</Kbd> play/pause · <Kbd>←</Kbd><Kbd>→</Kbd> 10s, paused: one frame · <Kbd>&lt;</Kbd><Kbd>&gt;</Kbd> frame · <Kbd>I</Kbd> in · <Kbd>O</Kbd> out
             </span>
           </div>
+          {(inStill || outStill) && (
+            <div className="mark-frames">
+              <MarkFrame label="In" still={inStill} />
+              <MarkFrame label="Out" still={outStill} />
+            </div>
+          )}
 
           {/* ------- ZOOMABLE clipping timeline: waveform + metadata + scrub -------
               A 24x7 channel can hold days of retained material, so the view is a
@@ -808,6 +898,8 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
 
 /** Breadcrumb, matching Channels/Events/Radio — the platform navigates by
  *  breadcrumb, never by a floating back arrow. */
+const selOkNow = (f: number | null, t: number | null) => f != null && t != null && t > f
+
 function BackRow({ onBack, name }: { onBack: () => void; name?: string }) {
   return (
     <div className="crumb" style={{ marginBottom: 8 }}>
