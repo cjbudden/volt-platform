@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.29.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- improved · Recordings: Clips are cut faster: only the first and last few seconds are re-encoded and the middle is copied as recorded, so a long clip is ready about as fast as a short one at the recording's own quality.
+- fixed · Recordings: On some sources a clip could repeat its first frame or lose its last. Clips now start and end on exactly the frames you mark.
+
+### Internal
+
+- added · Recordings: New check suite smart-render-frames: six clips decoded picture by picture against the source (25, 50 and 29.97 fps, B-frames, video only and with audio muxed in), the smart render matching the full render frame for frame.
+
 ## 0.28.0 (2026-11-02)
 
 ### Product (in customer release notes)
