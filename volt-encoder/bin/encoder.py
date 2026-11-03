@@ -1559,7 +1559,7 @@ def _playout_pass(out_dir, src_lines, seg_dur):
     """One playout pass: feed every packager media playlist named in the master (video
     variants AND audio renditions) to the splicer, write the delivered `<name>_cc.m3u8`
     for each, and return {packager name: delivered name} for the master rewrite."""
-    names, lead = [], None
+    names, lead, variants = [], None, []
     expect_uri = False
     for line in src_lines:
         if line.startswith("#EXT-X-STREAM-INF"):
@@ -1567,6 +1567,7 @@ def _playout_pass(out_dir, src_lines, seg_dur):
             continue
         if expect_uri and line and not line.startswith("#"):
             names.append(line)
+            variants.append(line)
             lead = lead or line
             expect_uri = False
         elif line.startswith("#EXT-X-MEDIA:") and "TYPE=AUDIO" in line:
@@ -1600,6 +1601,30 @@ def _playout_pass(out_dir, src_lines, seg_dur):
         base = n[:-len(".m3u8")] if n.endswith(".m3u8") else n
         _atomic_write(os.path.join(out_dir, f"{base}_cc.m3u8"), _with_triggers(txt))
         out[n] = f"{base}_cc.m3u8"
+    # I-FRAME PLAYLISTS THAT FOLLOW THE SPLICE (build queue 3.2b-7). The packager's
+    # I-frame playlists index only its own segments, so under a break or slate a
+    # scrubbing viewer would see the programme the break replaced. With trick-play
+    # on (the packager's master names its I-frame playlists), each video variant
+    # gets a delivered one built from what that variant actually delivers, loop
+    # slots included: byte ranges into the same files, nothing new written but the
+    # playlist. Mapped like the media playlists: packager name -> delivered name.
+    ifr = set(re.findall(r'#EXT-X-I-FRAME-STREAM-INF:[^\n]*?URI="([^"]+)"', "\n".join(src_lines)))
+    if ifr:
+        kf = _keyframe_lookup(out_dir)
+        for n in variants:
+            t = _PLAYOUT.tracks.get(n)
+            if t is None or not t.live_init:
+                continue
+            want = iframe_playlist_name(t.label)
+            if want not in ifr:
+                continue
+            txt = _PLAYOUT.render_iframes(n, _iso, kf)
+            if txt is None:
+                continue
+            dn = want[:-len(".m3u8")] + "_cc.m3u8"
+            _atomic_write(os.path.join(out_dir, dn), txt)
+            out[want] = dn
+        _keyframe_prune()
     # DASH: the same delivered timeline as a multi-Period MPD (live / loop / live)
     try:
         mpd = _PLAYOUT.render_mpd(_iso, _mpd_reps(out_dir), seg_dur, time.time())
@@ -1608,6 +1633,44 @@ def _playout_pass(out_dir, src_lines, seg_dur):
     except Exception as e:  # noqa: BLE001
         log(f"playout: DASH manifest not written this pass ({e})")
     return out
+
+
+_KF_RANGES = {}
+
+
+def _keyframe_lookup(out_dir):
+    """uri -> (offset, length) of a delivered segment's opening keyframe (see
+    fast_playout.keyframe_range, the rule every Volt I-frame list uses), read
+    once per segment from its head and remembered. None while the file is not
+    there; a segment that opens on no keyframe is remembered as None."""
+    from fast_playout import keyframe_range
+
+    def kf(uri):
+        if uri in _KF_RANGES:
+            return _KF_RANGES[uri]
+        try:
+            with open(os.path.join(out_dir, uri), "rb") as fh:
+                head = fh.read(16384)
+                r = keyframe_range(head)
+                if isinstance(r, tuple) and r and r[0] == "more" and r[1] <= (4 << 20):
+                    fh.seek(0)
+                    r = keyframe_range(fh.read(r[1]))
+        except OSError:
+            return None
+        if not (isinstance(r, tuple) and len(r) == 2 and all(isinstance(x, int) for x in r)):
+            r = None
+        _KF_RANGES[uri] = r
+        return r
+    return kf
+
+
+def _keyframe_prune():
+    """Forget segments no delivered playlist lists any more."""
+    if _PLAYOUT is None:
+        return
+    live = {e.uri for t in _PLAYOUT.tracks.values() for e in t.entries}
+    for u in [u for u in _KF_RANGES if u not in live]:
+        del _KF_RANGES[u]
 
 
 _MPD_INFO = {"mtime": None, "by_init": {}}
@@ -1707,12 +1770,17 @@ def _write_companion(out_dir, langs, default_lang, seg_dur):
             return
     out, inserted, expect_uri = [], False, False
     for line in src:
-        # PLAYOUT SPLICES WHAT THE I-FRAME PLAYLISTS DO NOT SEE (build queue
-        # 3.2b-3). The packager's I-frame playlists index its own segments; with
-        # playout on, viewers get ad breaks and slates spliced in instead, so a
-        # scrubbing player would show the programme under a break. Left out of
-        # the delivered master while playout runs.
+        # PLAYOUT SPLICES WHAT THE PACKAGER'S I-FRAME PLAYLISTS DO NOT SEE. They
+        # index its own segments; with playout on, viewers get breaks and slates
+        # spliced in instead, so a scrubbing player would show the programme under
+        # a break. While playout runs the master names the delivered I-frame
+        # playlists that follow the splice (_playout_pass, build queue 3.2b-7),
+        # and leaves a line out until its delivered playlist exists (3.2b-3 left
+        # them all out).
         if spliced is not None and line.startswith("#EXT-X-I-FRAME-STREAM-INF"):
+            mo = re.search(r'URI="([^"]+)"', line)
+            if mo and mo.group(1) in spliced:
+                out.append(line.replace(f'URI="{mo.group(1)}"', f'URI="{spliced[mo.group(1)]}"'))
             continue
         if spliced is not None and line.startswith("#EXT-X-MEDIA:") and "TYPE=AUDIO" in line:
             mo = re.search(r'URI="([^"]+)"', line)

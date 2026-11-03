@@ -301,6 +301,16 @@ function segsOf(text: string) {
     check('...asked for by name in AU\'s window: refused, never the programme\'s pictures', [x.status, x.j?.reason, x.text.includes('seg_39')], [503, 'variant_unavailable', false]);
     x = await get(`/channel/${ch}/v/${kAU}/720p.iframes.m3u8`, { 'CloudFront-Viewer-Country': 'AU' });
     check('...the same through the CDN-shaped path', [x.status, x.text.includes('seg_39')], [503, false]);
+    // 3.2b-7: with playout splicing, the I-frame playlist viewers get is the
+    // delivered one (<label>.iframes_cc.m3u8, loop slots under a slate). It
+    // still indexes the programme outside the slate, so a variant refuses it too.
+    writeFileSync(join(run, '720p.iframes_cc.m3u8'), ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:4', '#EXT-X-MEDIA-SEQUENCE:0',
+      '#EXT-X-DISCONTINUITY-SEQUENCE:0', '#EXT-X-I-FRAMES-ONLY', '#EXT-X-MAP:URI="720p/init.mp4"', `#EXT-X-PROGRAM-DATE-TIME:${iso(now - 10)}`,
+      '#EXTINF:4.000,', '#EXT-X-BYTERANGE:40000@1024', '720p/seg_39.m4s', '#EXT-X-DISCONTINUITY', '#EXT-X-MAP:URI="filler/720p/init.mp4"',
+      `#EXT-X-PROGRAM-DATE-TIME:${iso(now - 6)}`, '#EXTINF:4.000,', '#EXT-X-BYTERANGE:30000@900', 'filler/720p/s_1.m4s', ''].join('\n'));
+    x = await get(`/live/${ch}/v/${kAU}/720p.iframes_cc.m3u8?as=AU`);
+    check('...the delivered I-frame playlist that follows the splice, by name in AU\'s window: refused too', [x.status, x.j?.reason, x.text.includes('seg_39')], [503, 'variant_unavailable', false]);
+    unlinkSync(join(run, '720p.iframes_cc.m3u8'));
     x = await get(`/live/${ch}/master.m3u8?as=MY`);
     check('...MY is sent to the normal master, which lists it', [x.status, x.loc, readFileSync(join(run, 'master_cc.m3u8'), 'utf8').includes('URI="720p.iframes.m3u8"')], [302, `/origin/${ch}/live/master_cc.m3u8`, true]);
     unlinkSync(join(run, '720p.iframes.m3u8'));

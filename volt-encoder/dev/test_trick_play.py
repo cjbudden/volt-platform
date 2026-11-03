@@ -9,9 +9,10 @@ WHAT THIS GUARDS:
   * A rendition label from a package-only input cannot put a path or a quote into
     the packager's descriptor.
   * The delivered master (master_cc.m3u8) keeps the packager's I-frame lines, and
-    drops them while playout splices breaks and slates in: the I-frame playlists
-    index the packager's own segments, so a scrubbing viewer would see the
-    programme under a break.
+    while playout splices breaks and slates in never names the packager's (they
+    index its own segments, so a scrubbing viewer would see the programme under a
+    break); the delivered ones that follow the splice (3.2b-7) are checked in
+    test_splice_trick_play.py.
 
   * DASH trick-mode (3.2b-4, cfg trick_play_dash): one keyframe-only stream,
     cut from one small rendition, DASH only; off, nothing changes. The spliced
@@ -139,7 +140,7 @@ encoder._PLAYOUT = object()
 encoder._playout_pass = lambda od, src, seg: {"stream_0.m3u8": "stream_0_cc.m3u8", "stream_1.m3u8": "stream_1_cc.m3u8", "stream_2.m3u8": "stream_2_cc.m3u8"}
 encoder._write_companion(d, [], None, 4)
 cc = open(os.path.join(d, "master_cc.m3u8")).read()
-ok("I-FRAME" not in cc, "with playout splicing, the delivered master lists no I-frame playlist")
+ok("I-FRAME" not in cc, "with playout splicing and no delivered I-frame playlist yet, the master lists none (3.2b-7 lists the delivered ones: test_splice_trick_play.py)")
 ok("stream_0_cc.m3u8" in cc and "stream_2_cc.m3u8" in cc, "(its spliced variants and audio are still listed)")
 encoder._PLAYOUT = None
 

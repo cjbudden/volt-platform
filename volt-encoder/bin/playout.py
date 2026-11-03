@@ -214,6 +214,51 @@ class Track:
             out.append(e.uri)
         return "\n".join(out) + "\n"
 
+    def render_iframes(self, iso, kf):
+        """The I-frame playlist of this (video) track over exactly what it delivers:
+        live segments and loop slots alike, so a scrubbing viewer sees the slate or
+        loop under a break and never the programme it replaced (build queue 3.2b-7;
+        before, the packager's I-frame playlists were left out of the master while
+        playout ran, because they index only its own segments).
+
+        kf(uri) -> (offset, length) of the segment's opening keyframe, or None while
+        it is not known. One entry per delivered segment, numbered like the media
+        playlist (media sequence and discontinuity sequence line up, so a player can
+        pair the two); a segment that cannot be listed cannot be skipped without
+        breaking that numbering, so the list starts after the last such one. None
+        when nothing can be listed. Nothing is encoded or copied: byte ranges into
+        the files the media playlist already names."""
+        ents = self.entries
+        start = 0
+        for k, e in enumerate(ents):
+            if kf(e.uri) is None:
+                start = k + 1
+        if start >= len(ents):
+            return None
+        # discontinuities before the first listed entry have scrolled out of THIS
+        # list (as Track.trim counts them: the first entry's own tag included)
+        dseq = self.disc_seq + sum(1 for e in ents[:start + 1] if e.disc)
+        pub = ents[start:]
+        td = max(1, int(math.ceil(max(e.dur for e in pub))))
+        out = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{td}",
+               f"#EXT-X-MEDIA-SEQUENCE:{self.media_seq + start}",
+               f"#EXT-X-DISCONTINUITY-SEQUENCE:{dseq}", "#EXT-X-I-FRAMES-ONLY"]
+        cur_init = None
+        for k, e in enumerate(pub):
+            disc = k > 0 and e.disc
+            if disc:
+                out.append("#EXT-X-DISCONTINUITY")
+            if e.init and (e.init != cur_init or disc):
+                out.append(f'#EXT-X-MAP:URI="{e.init}"')
+                cur_init = e.init
+            if e.pdt is not None:
+                out.append(f"#EXT-X-PROGRAM-DATE-TIME:{iso(e.pdt)}")
+            off, ln = kf(e.uri)
+            out.append(f"#EXTINF:{e.dur:.3f},")
+            out.append(f"#EXT-X-BYTERANGE:{ln}@{off}")
+            out.append(e.uri)
+        return "\n".join(out) + "\n"
+
 
 class Playout:
     """The channel-wide splice decision over a set of tracks."""
@@ -353,6 +398,10 @@ class Playout:
     def render(self, name, iso):
         t = self.tracks.get(name)
         return t.render(iso) if t else None
+
+    def render_iframes(self, name, iso, kf):
+        t = self.tracks.get(name)
+        return t.render_iframes(iso, kf) if t else None
 
     # -- DASH ---------------------------------------------------------------
     def periods(self):
