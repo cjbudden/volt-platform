@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.34.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- fixed · Trick-play: Encodes with several video renditions listed the same keyframe list for every rendition in HLS, so Apple players could show the wrong size of picture while scrubbing. Each rendition now has its own.
+- added · Trick-play: With trick-play on, on-demand media now also offers a DASH trick-mode track, so smart TVs and other DASH players show pictures while fast-forwarding and scrubbing. It is made from the files Volt already has, with nothing re-encoded or stored, and encrypted media keeps its protection.
+
+### Internal
+
+- added · Tests: trickplay-dash check suite (trick segments decoded and decrypted against the source, MPD, switch, ladders) and a Shaka-in-Chromium check of DASH trick-mode.
+
 ## 0.33.0 (2026-11-03)
 
 ### Product (in customer release notes)
