@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.35.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- added · Trick-play: Live channels and events now get I-frame playlists in their HLS when their output profile has trick-play on, from their next start, so Apple devices and smart TVs show pictures while scrubbing back through the live window. Nothing is re-encoded. Viewers in a rights blackout get the stream without trick-play, never pictures of the programme they may not see.
+
+### Internal
+
+- added · Tests: test_trick_play.py (packager command and delivered master), trickplay-live check, and trick-play cases in edge-variant-manifests.
+
 ## 0.34.0 (2026-11-03)
 
 ### Product (in customer release notes)
