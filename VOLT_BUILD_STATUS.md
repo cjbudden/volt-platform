@@ -2008,7 +2008,7 @@ What: live channels and events with trick-play on get I-frame playlists in their
 - **Checked**: typechecks clean on the device (volt-app, volt-web). `dev/test_trick_play.py` 12/12 (2 fail and then errors on HEAD); new `trickplay-live.check.ts` 8/8; `edge-variant-manifests` 66/66 with four new trick-play cases (the by-name refusal fails on HEAD: 200 with a loop-rewritten I-frame list); edge-variants 62/62, edge-rights 38/38, live-scte35 43/43, captions-plan 19/19, orchestrator ok, stream-load 31/31, rights-preview 50/50, trickplay 54/54, channel-admin 43/43; encoder test_companion_pdt 38/38, test_playout 64/64, test_ladder_args 14/14, test_timed_events 65/65, test_fast_playout 31/31, test_id3_emsg 51/51. Docs scrub and coverage clean.
 - **Not run here**: Shaka Packager is in neither the container nor the device shell (the Docker image downloads it), so the packager's own I-frame output for a live stream has not been seen. Christian to start a channel on the Mac with trick-play on its profile and check that `master_cc.m3u8` lists `720p.iframes.m3u8` (and so on) and that Safari scrubs the live window with pictures.
 
-## 2026-11-03 - DASH trick-mode on live channels and events (build queue 3.2b-4 (a); vRELVER)
+## 2026-11-03 - DASH trick-mode on live channels and events (build queue 3.2b-4 (a); v0.36.0)
 
 What: live channels and events with trick-play on, packaging DASH, get a trick-mode track in their MPD from their next start. FAST, playout-spliced streams, trick-play inside rights variants and Christian's Mac checks are split to 3.2b-5.
 
