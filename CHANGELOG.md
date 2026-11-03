@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.38.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- fixed · FAST: A FAST channel airing titles whose DASH names its files by rendition id pointed DASH players at files that do not exist; those names are now resolved for each title.
+- added · Trick-play: FAST channels with trick-play on now also offer a DASH trick-mode track, so DASH smart TVs show pictures while fast-forwarding. It is the keyframes of one smaller size of each title, made once per title and shared by every channel that airs it.
+
+### Internal
+
+- added · Tests: trickplay-fast-dash check (trick segments decoded against the media, playout MPD, Shaka in Chromium) and trick-play cases in fast-ladder.
+
 ## 0.37.0 (2026-11-03)
 
 ### Product (in customer release notes)
