@@ -59,6 +59,8 @@ Events have no timeline on this page: use **Jump to a date and time** or open a 
 6. Enter a **Clip title** and choose an **Output**: **Streaming (HLS/DASH)**, **Downloadable MP4** (**Downloadable MP3** for radio), or both (**Streaming + MP4** or **Streaming + MP3**).
 7. Choose **Create clip**. **Clip created. Listed below and in the Media Library.** confirms it. The clip appears in the table under the clip controls and in the [Media Library](media-library.md), where it is published.
 
+A clip starts on the exact frame you marked as In and ends on the exact frame you marked as Out. Only the first and last few seconds are re-encoded; the middle is copied as recorded, so a long clip is ready about as fast as a short one and keeps the recording's own quality.
+
 If the recording has transcripts, a panel beside the player lists what was said in the loaded range. Type in **Search subtitles… (all words, any order)** to search the whole recording, and click a line to jump there.
 
 ### Clip across a gap

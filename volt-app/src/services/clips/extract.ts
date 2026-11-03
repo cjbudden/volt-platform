@@ -49,7 +49,8 @@
 //
 //  Validated frame-for-frame AGAINST the full render in
 //  `test/clip-smart-render.check.ts`, not against a stopwatch: same frame count,
-//  same PTS sequence, same duration.
+//  same PTS sequence, same duration; and picture for picture against the source
+//  in `test/smart-render-frames.check.ts`, which is why it is now the default.
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -69,7 +70,8 @@ export interface ExtractRequest {
   ffmpegBin?: string;
   ffprobeBin?: string;
   /**
-   * OPT IN TO SMART RENDER. Default off, and no caller turns it on yet.
+   * SMART RENDER IS THE DEFAULT (build queue 3.2-2, 3 Nov 2026); pass `false`
+   * to force the full render.
    *
    * The path works: the gate holds, the Annex-B join carries each part's own
    * parameter sets, and it is roughly 2x faster on the fixture with the saving
@@ -86,7 +88,14 @@ export interface ExtractRequest {
    * `test/clip-smart-render.check.ts` now passes frame for frame at 25fps and
    * at 50fps with B-frames.
    *
-   * Still off by default: turning it on for real clips is Christian's call.
+   * ON BY DEFAULT since 3 Nov 2026, on Christian's rule: only if every frame
+   * matches. `test/smart-render-frames.check.ts` decodes every picture of six
+   * clips (25, 50 and 29.97 fps, B-frames, video-only as the recorder writes
+   * it and with audio muxed in) and finds each one is exactly the source frame
+   * it should be, In and Out included, and the same picture as the full render.
+   * Getting there fixed the full render too: it repeated the In frame and lost
+   * the Out frame on some sources (see frameCutMs). The full render stays the
+   * fallback for every refusal or failure, and the result says which ran.
    */
   smartRender?: boolean;
 }
@@ -266,6 +275,12 @@ interface Probe {
   sampleRate: number | null;
   channels: number | null;
   audioBitrate: number | null;
+  /** How far the first picture starts after the file's start, in ms. ffmpeg
+   *  measures -ss and -to from the FILE's start, which is the earliest stream:
+   *  with audio muxed in ahead of the picture (23 ms on a typical encode) a cut
+   *  at the asked time lands a frame early. Zero for the recorder's video-only
+   *  renditions. */
+  videoOffsetMs: number;
 }
 
 function runCapture(bin: string, args: string[]): Promise<string> {
@@ -296,6 +311,9 @@ export async function probeSource(path: string, ffprobeBin = 'ffprobe'): Promise
     const a = streams.find((s) => s.codec_type === 'audio');
     if (!v.length) return null;
     const v0 = v[0];
+    const starts = streams.map((s) => Number(s.start_time)).filter((n) => Number.isFinite(n));
+    const vStart = Number(v0.start_time);
+    const videoOffsetMs = Number.isFinite(vStart) && starts.length ? Math.max(0, (vStart - Math.min(...starts)) * 1000) : 0;
     return {
       videoStreams: v.length,
       videoCodec: String(v0.codec_name ?? ''),
@@ -309,6 +327,7 @@ export async function probeSource(path: string, ffprobeBin = 'ffprobe'): Promise
       sampleRate: a?.sample_rate ? Number(a.sample_rate) : null,
       channels: a?.channels ? Number(a.channels) : null,
       audioBitrate: a?.bit_rate ? Number(a.bit_rate) : null,
+      videoOffsetMs,
     };
   } catch { return null; }
 }
@@ -320,6 +339,36 @@ function frameMs(p: Probe): number {
   const num = Number(m[1]), den = Number(m[2]);
   if (!num || !den) return 40;
   return (den / num) * 1000;
+}
+
+/**
+ * HALF A FRAME: the margin both trims cut with, so a cut lands on the frame an
+ * editor marked and not on its neighbour.
+ *
+ * A clip is asked for in whole milliseconds, but at 29.97 fps a frame starts at
+ * a fraction of one (frame 431 at 14,381.03 ms), and a source's first picture
+ * sits a fraction off the grid as well (a B-frame delay of 66 ms against two
+ * frames of 66.73 ms). Cutting AT the asked times let the frame after Out in
+ * (382 frames for an In-to-Out of 381), and ffmpeg's -to judges a frame by
+ * where it ENDS, so cutting at the asked end dropped the Out frame at 25 and
+ * 50 fps. Both measured by test/smart-render-frames.check.ts. So:
+ *   - the START is cut half a frame early: the first frame taken is the one
+ *     starting nearest the asked time;
+ *   - the END is COUNTED: -frames:v with the number of frames the range holds,
+ *     and -to half a frame late only so it never cuts first.
+ * Exact at 25, 50 and 29.97 fps. Only applied where the cut is inside the
+ * media, never at the start or end of a run, where it would move a frame that
+ * belongs in the clip.
+ */
+/** The frame a time falls to: the one starting nearest it, the earlier one on a
+ *  tie, which is exactly the frame the half-frame-early start cut takes. Used
+ *  to count the frames between two cuts so both renders count them alike. */
+function frameAt(ms: number, frameMsValue: number): number {
+  return Math.max(0, Math.ceil(ms / frameMsValue - 0.5 - 1e-9));
+}
+
+function frameCutMs(p: Probe | null): number {
+  return p ? frameMs(p) / 2 : 0;
 }
 
 /** Video encoder arguments that reproduce the source's parameters. */
@@ -408,7 +457,10 @@ async function smartRenderBlock(opts: {
     // means: ffmpeg measures it from the stream's start_time, not from zero.
     // Adding the probed start_time here double-counts it -- measured, after
     // doing exactly that and watching the tail grow to a full segment.
-    const inPoint = Math.max(0, fromMs - segs[0].startMs) / 1000;
+    // HALF A FRAME EARLY, so the In frame is taken even when its start falls a
+    // fraction of a millisecond after the asked time (see frameCutMs).
+    // The run's own probe holds for the head: the run starts with this segment.
+    const inPoint = Math.max(0, fromMs - segs[0].startMs + probe.videoOffsetMs - frameCutMs(probe)) / 1000;
     const dest = tag('head.ts');
     await opts.report('re-encoding the head segment');
     await runFfmpeg(ffmpeg, [
@@ -449,12 +501,17 @@ async function smartRenderBlock(opts: {
     const src = tag('tail-src.mp4');
     concatSegments(block.initPath, [last], src);
     // Same rule as the head: -to is relative to the stream's start_time.
-    const outPoint = Math.max(0, Math.min(toMs, last.endMs) - last.startMs) / 1000;
+    // The END IS COUNTED IN FRAMES, not cut at a time (see frameCutMs).
+    const tailMs = Math.max(0, Math.min(toMs, last.endMs) - last.startMs);
+    // -to is only a bound here and -frames:v makes the cut, so it is set a frame
+    // and 100 ms late rather than probing this segment's own audio offset.
+    const outPoint = (tailMs + frameMs(probe) + 100) / 1000;
+    const tailFrames = Math.max(1, frameAt(tailMs, frameMs(probe)));
     const dest = tag('tail.ts');
     await opts.report('re-encoding the tail segment');
     await runFfmpeg(ffmpeg, [
       '-hide_banner', '-loglevel', 'error', '-nostdin',
-      '-i', src, '-to', outPoint.toFixed(3),
+      '-i', src, '-to', outPoint.toFixed(3), '-frames:v', String(tailFrames),
       ...matchedVideoArgs(probe), ...matchedAudioArgs(probe),
       '-af', 'apad', '-shortest',
       '-bsf:v', bsf, '-muxdelay', '0', '-muxpreload', '0', '-f', 'mpegts', '-y', dest,
@@ -480,8 +537,12 @@ async function smartRenderBlock(opts: {
     // late. Resampling audio to a first_pts of 0 puts the correction where it
     // belongs -- in the stream that has the priming -- and leaves the copied
     // video timestamps exactly as the source wrote them.
-    '-af', 'aresample=async=1:first_pts=0',
-    // AAC also pads its LAST frame, so audio outruns the picture at the end.
+    // apad: THE PICTURE DECIDES WHERE THE CLIP ENDS. Usually the AAC outruns
+    // the picture (it pads its last frame) and -shortest trims it; but where the
+    // picture starts after the audio (muxed sources, 23 ms) the audio ran out
+    // first and -shortest cut the Out frame and the one before it
+    // (smart-render-frames.check.ts). Padded, the audio can never be shorter.
+    '-af', 'aresample=async=1:first_pts=0,apad',
     '-shortest',
     '-movflags', '+faststart',
     '-y', dest,
@@ -702,17 +763,29 @@ export async function extract(req: ExtractRequest): Promise<ExtractResult> {
     const smartRenderSkipped: string[] = [];
     for (const [i, rf] of runFiles.entries()) {
       if (cancelled()) throw new Error('cancelled');
-      const inPoint = Math.max(0, from - rf.startMs) / 1000;
-      const outPoint = Math.max(0, Math.min(to, rf.endMs) - rf.startMs) / 1000;
       const partPath = join(work, `part-${i}.mp4`);
       const block = r.blocks[i];
+      // One probe per run, shared by both paths: the smart render's gate and
+      // encode settings, and the frame time both paths cut half a frame early by.
+      const probe = await probeSource(rf.path, ffprobe);
+      const half = frameCutMs(probe);
+      // Only where a cut is inside this run (frameCutMs): the start half a frame
+      // early, the end counted in frames with -to half a frame late.
+      const endInside = to < rf.endMs && !!probe;
+      // Measured from the picture, not from the file's start (Probe.videoOffsetMs).
+      const vOff = probe?.videoOffsetMs ?? 0;
+      const inPoint = Math.max(0, from - rf.startMs + (from > rf.startMs ? vOff - half : 0)) / 1000;
+      const outPoint = Math.max(0, Math.min(to, rf.endMs) - rf.startMs + (endInside ? vOff + half : 0)) / 1000;
+      const keepFrames = endInside
+        ? Math.max(1, frameAt(Math.min(to, rf.endMs) - rf.startMs, frameMs(probe!))
+            - frameAt(Math.max(from, rf.startMs) - rf.startMs, frameMs(probe!)))
+        : 0;
 
       // ---- SMART RENDER FIRST, full render as the fallback -----------------
       // The order matters: this is an optimisation over a path that is already
       // correct, so it may only ever be tried, never depended on. Any refusal or
       // failure falls through to the code below, unchanged.
-      if (p.strategy === 'smart-render' && req.smartRender === true) {
-        const probe = await probeSource(rf.path, ffprobe);
+      if (p.strategy === 'smart-render' && req.smartRender !== false) {
         const gate = smartEligible(block, probe);
         if (!gate.ok) {
           smartRenderSkipped.push(`block ${i + 1}: ${gate.why}`);
@@ -738,8 +811,13 @@ export async function extract(req: ExtractRequest): Promise<ExtractResult> {
         '-hide_banner', '-loglevel', 'error', '-nostdin',
         '-i', rf.path,
         '-ss', inPoint.toFixed(3), '-to', outPoint.toFixed(3),
+        ...(keepFrames ? ['-frames:v', String(keepFrames)] : []),
         '-avoid_negative_ts', 'make_zero',
         '-map', '0',
+        // Never drop or repeat a picture to hit a rate: measured on a source
+        // whose picture starts after its audio, the default repeated the In
+        // frame and lost the Out frame (smart-render-frames.check.ts).
+        '-fps_mode', 'passthrough',
         '-movflags', '+faststart',
         '-progress', 'pipe:2',
         '-y', partPath,
