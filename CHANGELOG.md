@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.32.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- changed · Radio: An MP3 stream for hardware receivers and older apps is available only where it has been turned on for your account; it is then made from the station's HLS when someone listens.
+- changed · Radio: Stations now deliver HLS and DASH only; the Icecast relay that carried MP3 is gone. Icecast and SHOUTcast mounts still work as station sources, with their now-playing titles.
+
+### Internal
+
+- removed · Radio: Removed the relay tier (fleet/relays.ts, /api/platform/relays), the Icecast listener-auth callback, the ICECAST_* settings, the relay probe and MP3 push in radio.py, and the relay in run-on-mac.sh, compose and Terraform coverage. New accounts.mp3_feed_enabled (platform PATCH mp3FeedEnabled) and check suite mp3-feed; radio-container rewritten without a relay.
+
 ## 0.31.0 (2026-11-03)
 
 ### Product (in customer release notes)
