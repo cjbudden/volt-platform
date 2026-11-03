@@ -1,0 +1,15 @@
+-- ============================================================================
+--  DASH trick-mode for on-demand assets (build queue 3.2b-2).
+--
+--  vod_iframe_playlists.dash   what the rendition's DASH trick-mode track needs:
+--                              its init segment (to find its Representation in
+--                              the MPD), timescale, track, IV size when it is
+--                              encrypted, and each keyframe's source byte range
+--                              and time. The trick segments themselves are made
+--                              from those ranges when a player asks; nothing is
+--                              stored. NULL: built before 3.2b-2, rebuilt on
+--                              the next MPD asked for. {"none": "<why>"}: this
+--                              rendition cannot have one (its HLS I-frames are
+--                              unaffected).
+-- ============================================================================
+ALTER TABLE vod_iframe_playlists ADD COLUMN IF NOT EXISTS dash jsonb;

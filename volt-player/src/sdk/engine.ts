@@ -277,8 +277,9 @@ export class Engine {
       },
       abr: { enabled: true },
       // disableIFrames: an asset with trick-play on (build queue 3.2b) lists
-      // I-frame playlists for Apple and smart-TV players; the web player scrubs
-      // with sprites, so it never loads them or a keyframe from them.
+      // I-frame playlists for Apple and smart-TV players, and its MPD a DASH
+      // trick-mode set (3.2b-2); Shaka's one setting turns off both. The web
+      // player scrubs with sprites, so it never loads them or a keyframe.
       manifest: { disableIFrames: true, retryParameters: { maxAttempts: 4, baseDelay: 800, backoffFactor: 2, timeout: 15000 } },
     });
     const drm = this.o.drm;

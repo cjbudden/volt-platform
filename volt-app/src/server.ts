@@ -164,9 +164,9 @@ export function createServer() {
     import('./services/companions/serve').then((m) => m.serveSubs(req, res, next), () => next());
   });
   // I-frame playlists (trick-play, build queue 3.2b, services/trickplay/):
-  // <variant>/iframes.m3u8 beside a media playlist, made from its segments'
+  // <variant>.iframes.m3u8 beside a media playlist, made from its segments'
   // box headers and served only while the asset's switch is on.
-  app.get(/^\/clips\/.+\/iframes\.m3u8$/, async (req, res, next) => {
+  app.get(/^\/clips\/.+\.iframes\.m3u8$/, async (req, res, next) => {
     try {
       const rel = decodeURIComponent(req.path.slice('/clips'.length));
       const { assetIdFromClipsPath } = await import('./services/vodMarkers');
@@ -178,6 +178,25 @@ export function createServer() {
       res.setHeader('Cache-Control', 'public, max-age=60');
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.end(text);
+    } catch { next(); }
+  });
+  // DASH trick-mode segments (build queue 3.2b-2): trick/<key>/<n>.m4s beside
+  // the asset's MPD, each a keyframe re-wrapped as a fragment of its own when
+  // asked for (services/trickplay/iframes.ts keyframeFragment). Nothing stored.
+  app.get(/^\/clips\/.+\/trick\/[0-9a-f]{8}\/\d+\.m4s$/, async (req, res, next) => {
+    try {
+      const rel = decodeURIComponent(req.path.slice('/clips'.length));
+      const { assetIdFromClipsPath } = await import('./services/vodMarkers');
+      const id = assetIdFromClipsPath(rel);
+      if (!id) return next();
+      const m = /\/trick\/([0-9a-f]{8})\/(\d+)\.m4s$/.exec(rel)!;
+      const seg = await (await import('./services/trickplay/store')).trickSegment(id, rel, m[1], Number(m[2]));
+      if (!seg) { res.status(404).end(); return; }
+      res.setHeader('Content-Type', 'video/mp4');
+      // Short: the segment stops existing when the switch is turned off.
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.end(seg);
     } catch { next(); }
   });
   app.get(/^\/clips\/.+\.(m3u8|mpd)$/, async (req, res, next) => {
@@ -205,8 +224,10 @@ export function createServer() {
       res.setHeader('Access-Control-Allow-Origin', '*');
       // The asset's caption files as subtitle tracks (masters and MPDs only; fails open).
       const tracked = id ? await (await import('./services/companions/serve')).withTracks(out, id, isMpd) : out;
-      // Its I-frame streams when the asset has trick-play on (masters only; fails open).
-      res.end(id && !isMpd ? await (await import('./services/trickplay/store')).withTrickPlay(tracked, id) : tracked);
+      // Its I-frame streams (HLS) or trick-mode sets (DASH) when the asset has
+      // trick-play on (its own master and MPD only; fails open).
+      const tp = id ? await import('./services/trickplay/store') : null;
+      res.end(!tp ? tracked : isMpd ? await tp.withDashTrickPlay(tracked, id!, rel) : await tp.withTrickPlay(tracked, id!, rel));
     } catch { next(); }
   });
   // Generated clips and their renditions, served like origin. Segments are

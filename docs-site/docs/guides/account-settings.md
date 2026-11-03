@@ -65,14 +65,14 @@ The rule applies in the app play gate, on the public live address (HLS, DASH and
 
 ### Turn on trick-play for Apple and smart-TV players
 
-Apple devices (iPhone, iPad, Apple TV), Safari and many smart TVs show pictures while a viewer scrubs or fast-forwards by reading a list of keyframes, called an I-frame playlist. Volt can list one for your on-demand media. It is off by default, and set per output profile.
+Apple devices (iPhone, iPad, Apple TV), Safari and many smart TVs show pictures while a viewer scrubs or fast-forwards by reading a list of keyframes: an I-frame playlist in HLS, a trick-mode track in DASH. Volt can offer both for your on-demand media. It is off by default, and set per output profile.
 
 1. Under **Trick-play for Apple and smart-TV players**, turn on the switch beside an output profile. The page confirms **Trick-play is on for ...**.
-2. Media made with that profile gets its keyframe lists within a few minutes. They are read from the files Volt already has: nothing is re-encoded and no new video is stored.
+2. Media made with that profile gets its keyframe lists within a few minutes, in its HLS and its DASH manifest. They are read from the files Volt already has: nothing is re-encoded and no new video is stored. Encrypted media keeps its protection: the keyframes play with the same keys.
 3. To stop, turn the switch off. Within a minute the lists are no longer offered to players. What was made is kept, so turning it on again takes effect at once.
 4. **New output profiles start with it on** sets what a profile you create from now on starts with. Profiles that exist keep their own setting.
 
-Which profile applies: a clip or a full recording follows the output profile of its channel's or event's group; an uploaded or watch-folder file follows the live profile its encoding ladder mirrors (see [Encoding Profiles](encoding-profiles.md)), and otherwise the account default. The Volt web player scrubs with its own preview images either way, so web viewers are unaffected. Live channels and FAST channels are not covered yet.
+Which profile applies: a clip or a full recording follows the output profile of its channel's or event's group; an uploaded or watch-folder file follows the live profile its encoding ladder mirrors (see [Encoding Profiles](encoding-profiles.md)), and otherwise the account default. The Volt web player scrubs with its own preview images either way, so web viewers are unaffected. Apps built with the Volt iOS player get trick-play from Apple's own player, with nothing to set up. Live channels and FAST channels are not covered yet.
 
 ![The Trick-play for Apple and smart-TV players card: the account default for new output profiles, then a switch for each output profile](/img/screens/account-settings-trick-play.png)
 

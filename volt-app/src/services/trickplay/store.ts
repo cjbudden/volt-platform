@@ -1,7 +1,7 @@
 // ============================================================================
-//  TRICK-PLAY FOR ON-DEMAND ASSETS (build queue 3.2b): which assets have it,
-//  making their I-frame playlists, and serving them. iframes.ts is the pure
-//  part.
+//  TRICK-PLAY FOR ON-DEMAND ASSETS (build queue 3.2b, DASH 3.2b-2): which
+//  assets have it, making their I-frame playlists and DASH trick-mode facts,
+//  and serving them. iframes.ts is the pure part.
 //
 //  WHICH SWITCH APPLIES. The switch is on the output profile. An asset follows
 //  the output profile it was made with: a clip or full recording, the profile
@@ -16,11 +16,14 @@
 //  With the switch off nothing is made, and anything made before is not
 //  listed or served (it is kept, so turning it on again costs nothing).
 // ============================================================================
-import { posix } from 'node:path';
+import { createHash } from 'node:crypto';
+import { open as openFile } from 'node:fs/promises';
+import { join, posix, resolve, sep } from 'node:path';
+import { config } from '../../config';
 import { one, query } from '../../db';
 import { clipsPathOfMaster, readClipsFile } from '../companions/serve';
 import { readInit } from '../frames/fmp4';
-import { buildIframePlaylist, iframeUriFor, keyframeRanges, mediaSegments, videoVariants, withIframeStreams, type IframeStream } from './iframes';
+import { buildIframePlaylist, dashEntries, iframeUriFor, initIvSize, keyframeFragment, keyframeRanges, mediaSegments, videoVariants, withDashTrickMode, withIframeStreams, type DashTrick, type IframeStream } from './iframes';
 
 const SWITCH_SQL = `
   SELECT COALESCE(
@@ -75,7 +78,8 @@ export async function buildAssetTrickPlay(assetId: string, opts: { force?: boole
     const mapUri = segs[0]?.map ? /URI="([^"]+)"/.exec(segs[0].map)?.[1] : null;
     if (!mapUri) { notes.push(`${v.uri}: not CMAF`); continue; }
     const dir = posix.dirname(plRel);
-    const init = readInit((await readClipsFile(posix.join(dir, mapUri))) ?? Buffer.alloc(0));
+    const initBuf = (await readClipsFile(posix.join(dir, mapUri))) ?? Buffer.alloc(0);
+    const init = readInit(initBuf);
     if (!init || !init.isVideo) { notes.push(`${v.uri}: no video track`); continue; }
     const withKeys = [];
     for (const s of segs) {
@@ -85,13 +89,15 @@ export async function buildAssetTrickPlay(assetId: string, opts: { force?: boole
     }
     const pl = buildIframePlaylist(withKeys, init.timescale);
     if (!pl) { notes.push(`${v.uri}: no keyframes found`); continue; }
+    const dash = await dashTrickFor(v.uri, plRel, masterRel, mapUri, initBuf, init, withKeys);
+    if ('none' in dash) notes.push(`${v.uri}: no DASH trick-mode (${dash.none})`);
     await query(
-      `INSERT INTO vod_iframe_playlists (vod_asset_id, variant_uri, playlist, bandwidth, average_bandwidth, resolution, codecs, entries, source, built_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
+      `INSERT INTO vod_iframe_playlists (vod_asset_id, variant_uri, playlist, bandwidth, average_bandwidth, resolution, codecs, entries, source, dash, built_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
        ON CONFLICT (vod_asset_id, variant_uri) DO UPDATE SET playlist = EXCLUDED.playlist, bandwidth = EXCLUDED.bandwidth,
          average_bandwidth = EXCLUDED.average_bandwidth, resolution = EXCLUDED.resolution, codecs = EXCLUDED.codecs,
-         entries = EXCLUDED.entries, source = EXCLUDED.source, built_at = EXCLUDED.built_at`,
-      [assetId, v.uri, pl.text, pl.bandwidth, pl.averageBandwidth, v.resolution, v.codecs, pl.entries, a.master_key]);
+         entries = EXCLUDED.entries, source = EXCLUDED.source, dash = EXCLUDED.dash, built_at = EXCLUDED.built_at`,
+      [assetId, v.uri, pl.text, pl.bandwidth, pl.averageBandwidth, v.resolution, v.codecs, pl.entries, a.master_key, JSON.stringify(dash)]);
     made++;
   }
   // Renditions the master no longer lists (a re-encode with another ladder).
@@ -101,14 +107,16 @@ export async function buildAssetTrickPlay(assetId: string, opts: { force?: boole
 }
 
 /** The stored I-frame streams of an asset made from its current master. */
-async function storedStreams(assetId: string): Promise<{ streams: IframeStream[]; stale: boolean }> {
+async function storedStreams(assetId: string): Promise<{ streams: IframeStream[]; stale: boolean; dash: { trick: DashTrick; bandwidth: number }[] }> {
   const rows = await query<any>(
-    `SELECT p.variant_uri, p.bandwidth, p.average_bandwidth, p.resolution, p.codecs, p.source IS NOT DISTINCT FROM v.master_key AS current
+    `SELECT p.variant_uri, p.bandwidth, p.average_bandwidth, p.resolution, p.codecs, p.dash, p.source IS NOT DISTINCT FROM v.master_key AS current
        FROM vod_iframe_playlists p JOIN vod_assets v ON v.id = p.vod_asset_id WHERE p.vod_asset_id = $1 ORDER BY p.bandwidth`, [assetId]);
   const current = rows.filter((r) => r.current);
   return {
     streams: current.map((r) => ({ variantUri: r.variant_uri, bandwidth: r.bandwidth, averageBandwidth: r.average_bandwidth, resolution: r.resolution, codecs: r.codecs })),
-    stale: rows.length > current.length || !rows.length,
+    // A row made before DASH trick-mode existed (dash NULL) is rebuilt too.
+    stale: rows.length > current.length || !rows.length || current.some((r) => r.dash == null),
+    dash: current.filter((r) => r.dash && !('none' in r.dash)).map((r) => ({ trick: r.dash as DashTrick, bandwidth: Number(r.bandwidth) })),
   };
 }
 
@@ -126,10 +134,13 @@ export async function queueTrickPlay(assetId: string): Promise<void> {
  * FAILS OPEN: any problem here leaves the master as it was. A master with the
  * switch on and nothing made yet queues the build and is served without them.
  */
-export async function withTrickPlay(master: string, assetId: string): Promise<string> {
+export async function withTrickPlay(master: string, assetId: string, rel?: string): Promise<string> {
   try {
     if (!/#EXT-X-STREAM-INF/.test(master)) return master;
     if (!(await trickPlayOnCached(assetId))) return master;
+    // Only the asset's own master: a FAST ladder's master under the same asset
+    // (ladders/...) has other renditions, and these URIs would not resolve.
+    if (rel != null && !(await isBesideMaster(assetId, rel))) return master;
     const { streams, stale } = await storedStreams(assetId);
     if (stale) void queueTrickPlay(assetId);
     return withIframeStreams(master, streams);
@@ -139,8 +150,107 @@ export async function withTrickPlay(master: string, assetId: string): Promise<st
   }
 }
 
+/** Is this path under /clips in the folder of the asset's own master? */
+async function isBesideMaster(assetId: string, rel: string): Promise<boolean> {
+  const a = await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [assetId]);
+  const masterRel = clipsPathOfMaster(a?.master_key);
+  return !!masterRel && posix.dirname(posix.normalize(rel)) === posix.dirname(masterRel);
+}
+
 /**
- * The I-frame playlist at a path under /clips (<variant dir>/iframes.m3u8
+ * The DASH trick-mode facts of one rendition (see iframes.ts). The MPD names
+ * the init segment by its path from the master's folder, so that is what is
+ * stored. Checked by making the first trick segment: a layout the rewrite does
+ * not know is found here, not by a player.
+ */
+async function dashTrickFor(variantUri: string, plRel: string, masterRel: string, mapUri: string, initBuf: Buffer, init: { trackId: number; timescale: number },
+  segs: { uri: string; durSec: number; keyframes: import('./iframes').Keyframe[] }[]): Promise<DashTrick | { none: string }> {
+  const fromMaster = (u: string) => posix.relative(posix.dirname(masterRel), posix.join(posix.dirname(plRel), u));
+  const ivSize = initIvSize(initBuf);
+  if (ivSize === -1) return { none: 'encrypted, IV size not readable' };
+  const entries = dashEntries(segs.map((s) => ({ ...s, uri: fromMaster(s.uri) })), init.timescale);
+  if (!entries.length) return { none: 'no keyframes' };
+  const e0 = entries[0];
+  const range = await readClipsRange(posix.join(posix.dirname(masterRel), e0.uri), e0.start, e0.end);
+  if (!range || !keyframeFragment(range, init.trackId, e0.dur, ivSize)) return { none: 'fragment layout not supported (sample groups or no senc)' };
+  return {
+    init: fromMaster(mapUri), timescale: init.timescale, trackId: init.trackId, ivSize,
+    key: createHash('sha1').update(variantUri).digest('hex').slice(0, 8), entries,
+  };
+}
+
+/**
+ * Bytes [start, end) of a file under /clips: from this task's disk, else a
+ * ranged read of the bucket copy (a trick segment needs about a tenth of its
+ * media segment, so the rest is not fetched).
+ */
+export async function readClipsRange(rel: string, start: number, end: number): Promise<Buffer | null> {
+  if (!(end > start) || start < 0) return null;
+  const n = posix.normalize(`/${String(rel).replace(/^\/+/, '')}`);
+  const root = resolve(config.clips.dir);
+  const file = resolve(join(root, n));
+  if (!file.startsWith(root + sep)) return null;
+  const fh = await openFile(file, 'r').catch(() => null);
+  if (fh) {
+    try {
+      const b = Buffer.alloc(end - start);
+      const { bytesRead } = await fh.read(b, 0, b.length, start);
+      return bytesRead === b.length ? b : null;
+    } finally { await fh.close(); }
+  }
+  const { readThroughKey, openObject } = await import('../media/clipsStore');
+  const key = await readThroughKey(n);
+  const o = key ? await openObject(key, `bytes=${start}-${end - 1}`) : null;
+  if (!o) return null;
+  const chunks: Buffer[] = [];
+  for await (const c of o.body) chunks.push(Buffer.from(c));
+  const b = Buffer.concat(chunks);
+  return b.length === end - start ? b : null;
+}
+
+/**
+ * An MPD as served: with a trick-mode AdaptationSet per video set when the
+ * asset's switch is on and its renditions are built. FAILS OPEN like the
+ * master. `rel` is the MPD's path under /clips: only the asset's own MPD
+ * (beside its master) gets them.
+ */
+export async function withDashTrickPlay(mpd: string, assetId: string, rel: string): Promise<string> {
+  try {
+    if (!(await trickPlayOnCached(assetId))) return mpd;
+    if (!(await isBesideMaster(assetId, rel))) return mpd;
+    const { dash, stale } = await storedStreams(assetId);
+    if (stale) void queueTrickPlay(assetId);
+    const bw = new Map(dash.map((d) => [d.trick.key, d.bandwidth]));
+    return withDashTrickMode(mpd, dash.map((d) => d.trick), (t) => bw.get(t.key) ?? 1);
+  } catch (e) {
+    console.warn(`[trickplay] ${assetId}: MPD served without trick-mode`, e);
+    return mpd;
+  }
+}
+
+/**
+ * Trick segment n (from 1) of the rendition with this key, at
+ * <master folder>/trick/<key>/<n>.m4s, or null (switch off, not built, a
+ * re-encode's older build, no such entry): the route answers 404.
+ */
+export async function trickSegment(assetId: string, rel: string, key: string, n: number): Promise<Buffer | null> {
+  if (!(await trickPlayOnCached(assetId))) return null;
+  const a = await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [assetId]);
+  const masterRel = clipsPathOfMaster(a?.master_key);
+  if (!masterRel) return null;
+  if (posix.normalize(rel) !== posix.join(posix.dirname(masterRel), 'trick', key, `${n}.m4s`)) return null;
+  const row = await one<any>(
+    `SELECT p.dash FROM vod_iframe_playlists p JOIN vod_assets v ON v.id = p.vod_asset_id
+      WHERE p.vod_asset_id = $1 AND p.source IS NOT DISTINCT FROM v.master_key AND p.dash->>'key' = $2`, [assetId, key]);
+  const t = row?.dash as DashTrick | undefined;
+  const e = t?.entries?.[n - 1];
+  if (!t || !e) return null;
+  const range = await readClipsRange(posix.join(posix.dirname(masterRel), e.uri), e.start, e.end);
+  return range ? keyframeFragment(range, t.trackId, e.dur, t.ivSize) : null;
+}
+
+/**
+ * The I-frame playlist at a path under /clips (<variant>.iframes.m3u8
  * beside an asset's media playlist), or null (switch off, not made, or no such
  * rendition): the route answers 404.
  */

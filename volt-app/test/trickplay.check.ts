@@ -187,7 +187,12 @@ async function main() {
   const master = readFileSync(join(process.env.CLIPS_DIR!, 'vod', UPL, 'master.m3u8'), 'utf8');
   ok('video variants: the two video renditions, not the audio one', JSON.stringify(videoVariants(master).map((v) => v.uri)) === JSON.stringify(['v720/index.m3u8', 'v180/index.m3u8']));
   const withI = withIframeStreams(master, [{ variantUri: 'v720/index.m3u8', bandwidth: 300000, averageBandwidth: 90000, resolution: '640x360', codecs: 'avc1.64001e,mp4a.40.2' }]);
-  ok('the I-frame stream line names video codecs only and its URI', /#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=300000,AVERAGE-BANDWIDTH=90000,CODECS="avc1.64001e",RESOLUTION=640x360,URI="v720\/iframes.m3u8"/.test(withI), withI);
+  ok('the I-frame stream line names video codecs only and its URI', /#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=300000,AVERAGE-BANDWIDTH=90000,CODECS="avc1.64001e",RESOLUTION=640x360,URI="v720\/index.iframes.m3u8"/.test(withI), withI);
+  // Shaka Packager writes the media playlists beside the master
+  // (stream_0.m3u8, stream_1.m3u8): each rendition still gets its own address
+  // (3.2b gave them all iframes.m3u8 in the master's folder).
+  const { iframeUriFor } = await import('../src/services/trickplay/iframes');
+  ok('renditions beside the master get distinct I-frame playlists', iframeUriFor('stream_0.m3u8') === 'stream_0.iframes.m3u8' && iframeUriFor('stream_1.m3u8') === 'stream_1.iframes.m3u8');
   const stitched = rewriteMaster(withI, 'https://cdn.example/clips/vod/x/master.m3u8', () => 'https://api.example/s/1.m3u8');
   ok('a stitched (ad) master leaves the I-frame streams out', !/I-FRAME/.test(stitched));
 
@@ -195,7 +200,7 @@ async function main() {
   const iframeLines = async (id: string) => (await (await get(`/clips/vod/${id}/master.m3u8`)).text()).split('\n').filter((l) => l.startsWith('#EXT-X-I-FRAME-STREAM-INF'));
   ok('a new profile has trick-play off', (await one<any>(`SELECT trick_play FROM output_profiles WHERE id = $1`, [P]))?.trick_play === false);
   ok('the clip\'s master lists no I-frame streams', (await iframeLines(CLIP)).length === 0);
-  ok('its I-frame playlist answers 404', (await get(`/clips/vod/${CLIP}/v720/iframes.m3u8`)).status === 404);
+  ok('its I-frame playlist answers 404', (await get(`/clips/vod/${CLIP}/v720/index.iframes.m3u8`)).status === 404);
   const offBuild = await store.buildAssetTrickPlay(CLIP);
   ok('a build with the switch off makes nothing', offBuild.state === 'off');
   ok('nothing is written', Number((await one<any>(`SELECT count(*)::int AS n FROM vod_iframe_playlists WHERE vod_asset_id = ANY($1::uuid[])`, [[CLIP, UPL, LONE]]))?.n) === 0);
@@ -219,13 +224,13 @@ async function main() {
   invalidateAll();
   const lines = await iframeLines(CLIP);
   ok(`the master now lists two I-frame streams (got ${lines.length})`, lines.length === 2, lines);
-  ok('one for 720p and one for 180p, none for the audio rendition', lines.some((l) => /URI="v720\/iframes.m3u8"/.test(l)) && lines.some((l) => /URI="v180\/iframes.m3u8"/.test(l)) && !lines.some((l) => /URI="a\//.test(l)));
-  const r720 = await get(`/clips/vod/${CLIP}/v720/iframes.m3u8`);
+  ok('one for 720p and one for 180p, none for the audio rendition', lines.some((l) => /URI="v720\/index.iframes.m3u8"/.test(l)) && lines.some((l) => /URI="v180\/index.iframes.m3u8"/.test(l)) && !lines.some((l) => /URI="a\//.test(l)));
+  const r720 = await get(`/clips/vod/${CLIP}/v720/index.iframes.m3u8`);
   const t720 = await r720.text();
   ok('the 720p I-frame playlist is served', r720.status === 200 && /#EXT-X-I-FRAMES-ONLY/.test(t720) && (r720.headers.get('content-type') ?? '').includes('mpegurl'));
   ok('10 entries for 10 keyframes', (t720.match(/#EXT-X-BYTERANGE/g) ?? []).length === 10);
   ok('its key is carried over, before the first entry', /#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd:\/\/k1"/.test(t720) && t720.indexOf('#EXT-X-KEY') < t720.indexOf('#EXTINF'));
-  ok('the 180p one has no key (it is clear)', !/#EXT-X-KEY/.test(await (await get(`/clips/vod/${CLIP}/v180/iframes.m3u8`)).text()));
+  ok('the 180p one has no key (it is clear)', !/#EXT-X-KEY/.test(await (await get(`/clips/vod/${CLIP}/v180/index.iframes.m3u8`)).text()));
   // Every served range: a moof at its start in the file it names, with a keyframe first.
   let rangesOk = true, n = 0;
   for (const m of t720.matchAll(/#EXT-X-BYTERANGE:(\d+)@(\d+)\n(\S+)/g)) {
@@ -236,7 +241,7 @@ async function main() {
     n++;
   }
   ok(`every served entry (${n}) is a moof plus exactly a keyframe in its segment`, rangesOk && n === 10);
-  ok('a path that is not a rendition answers 404', (await get(`/clips/vod/${CLIP}/a/iframes.m3u8`)).status === 404);
+  ok('a path that is not a rendition answers 404', (await get(`/clips/vod/${CLIP}/a/index.iframes.m3u8`)).status === 404);
 
   console.log('\n== which switch applies ==');
   ok('the upload follows the profile its ladder mirrors (off)', !(await store.trickPlayOn(UPL)));
@@ -252,7 +257,7 @@ async function main() {
   ok('turned off', (await patch(`/api/output-profiles/${P}`, { trickPlay: false })).status === 200);
   invalidateAll();
   ok('the master lists no I-frame streams', (await iframeLines(CLIP)).length === 0);
-  ok('the I-frame playlist answers 404', (await get(`/clips/vod/${CLIP}/v720/iframes.m3u8`)).status === 404);
+  ok('the I-frame playlist answers 404', (await get(`/clips/vod/${CLIP}/v720/index.iframes.m3u8`)).status === 404);
   ok('what was made is kept for turning it on again', Number((await one<any>(`SELECT count(*)::int AS n FROM vod_iframe_playlists WHERE vod_asset_id = $1`, [CLIP]))?.n) === 2);
   await patch(`/api/output-profiles/${P}`, { trickPlay: true });
   invalidateAll();
@@ -263,7 +268,7 @@ async function main() {
   await query(`UPDATE vod_iframe_playlists SET source = 'old' WHERE vod_asset_id = $1`, [CLIP]);
   invalidateAll();
   ok('playlists of an older build are not listed', (await iframeLines(CLIP)).length === 0);
-  ok('and are not served', (await get(`/clips/vod/${CLIP}/v720/iframes.m3u8`)).status === 404);
+  ok('and are not served', (await get(`/clips/vod/${CLIP}/v720/index.iframes.m3u8`)).status === 404);
 
   srv.close();
   await query(`DELETE FROM accounts WHERE id = ANY($1::uuid[])`, [[A, A2]]);
