@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.31.0 (2026-11-03)
+
+### Product (in customer release notes)
+
+- added · API: PATCH /api/output-profiles/{id} turns trick-play on or off (trickPlay); PATCH /api/account-settings takes trickPlayDefault, what new output profiles start with.
+- added · Account settings: Trick-play for Apple and smart-TV players: an optional switch per output profile (off by default) that lists I-frame playlists for on-demand media, so Apple devices, Safari and many smart TVs show pictures while scrubbing and fast-forwarding. Made from the segments Volt already has, with no re-encode.
+
+### Internal
+
+- added · Player: The web player's Shaka engine ignores I-frame playlists (manifest.disableIFrames), so web viewers keep scrubbing with sprites and never load keyframe lists. New check suite trickplay.
+
 ## 0.30.0 (2026-11-03)
 
 ### Product (in customer release notes)
