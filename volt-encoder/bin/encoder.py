@@ -2162,7 +2162,8 @@ def prepare_loop_trick(fillers, out_dir):
     track from (`<label>_trick/` exists), each loop segment's opening keyframe is
     re-wrapped ONCE, now, as a fragment of its own (mp4util.keyframe_fragment, the
     same rule as services/trickplay/ladder.ts for FAST assets): filler/<label>/
-    trick/k_<i>.m4s. Each loop Period slot is then that keyframe re-timed into the
+    trick/k_<i>.m4s. Each keeps its segment's decode time and lasts the segment, so a
+    rights variant's loop Periods list them as they are (build queue 3.2b-10). Each loop Period slot is then that keyframe re-timed into the
     slot (Playout.on_trick). Nothing is decoded or encoded; a loop this cannot be
     done for (no keyframe at a segment start) gets no trick set, as before.
     Adds fillers[label]["trick"] = {"segments": [{"uri", "d"}], "bandwidth"}."""
@@ -2178,7 +2179,11 @@ def prepare_loop_trick(fillers, out_dir):
         for i, s in enumerate(f.get("segments") or []):
             d = int(s.get("d") or round(float(s["dur"]) * ts))
             try:
-                frag = mp4util.keyframe_fragment(open(os.path.join(out_dir, s["uri"]), "rb").read(), d, 0)
+                # at the loop segment's own decode time (3.2b-10), not 0: a rights
+                # variant lists k_<i> as it is in each loop Period, where every pass
+                # starts at loop time 0 (variantManifest.ts); playout re-times its
+                # own slots from it either way (write_trick_slot)
+                frag = mp4util.keyframe_fragment(open(os.path.join(out_dir, s["uri"]), "rb").read(), d)
             except OSError:
                 frag = None
             if frag is None or not ts or d <= 0:

@@ -56,6 +56,8 @@ export interface LoopTrack { kind?: string; init: string; segments: { uri: strin
 /** The pre-built loop (filler_build.py's filler.json) and where its files are served. */
 export interface Loop {
   segmentSeconds: number; base: string; tracks: Record<string, LoopTrack>;
+  /** filler.json's hash: a new loop copied into the same folder is a new loop. */
+  hash?: string;
   /** Reads one of the loop's files by its URI in filler.json (trick-play inside a window, 3.2b-9). */
   read?: (uri: string) => Promise<Buffer | null>;
 }
@@ -350,15 +352,43 @@ interface Period { open: string; body: string; id: string; start: number; end: n
  */
 /** An AdaptationSet marked as a DASH trick-mode track (dashif trickmode). */
 const TRICK_SET_RE = /<AdaptationSet\b[^>]*>(?:(?!<\/AdaptationSet>)[\s\S])*?dashif\.org\/guidelines\/trickmode[\s\S]*?<\/AdaptationSet>\s*/g;
+const isTrickSet = (set: string) => /dashif\.org\/guidelines\/trickmode/.test(set);
+/**
+ * The loop rendition a trick-mode set is cut from: the packager's
+ * `<label>_trick/` set, or playout's loop-Period set (`filler/<label>/...`).
+ */
+export function trickLabel(set: string): string {
+  const tpl = set.match(TPL_RE)?.[0] ?? '';
+  return rendOf(attr(tpl, 'initialization') ?? '').replace(/_trick$/, '');
+}
+/** The loop renditions named by the trick-mode sets of a delivered MPD. */
+export const trickLabelsOf = (mpd: string) => [...new Set([...mpd.matchAll(TRICK_SET_RE)].map((m) => trickLabel(m[0])))];
+/** Where prepare_loop_trick (encoder.py, 3.2b-8) leaves a loop rendition's keyframes, by loop index (1-based). */
+const loopTrickDir = (lt: LoopTrack) => (lt.init.includes('/') ? lt.init.slice(0, lt.init.lastIndexOf('/') + 1) : '') + 'trick/';
 
-export function renderVariantMpd(text: string, o: { timeline: Timeline; loop: Loop | null; base: string; key: string; shiftSec?: number }): string {
+export function renderVariantMpd(text: string, o: {
+  timeline: Timeline; loop: Loop | null; base: string; key: string; shiftSec?: number;
+  /**
+   * Loop renditions whose keyframes are ready as fragments of their own with
+   * the loop's own times (loopTrickLabels, 3.2b-10): `filler/<label>/trick/k_<i>.m4s`.
+   */
+  loopTrick?: Set<string>;
+}): string {
   if (/<BaseURL/.test(text)) throw new VariantError('BaseURL in the MPD is not supported');
-  // DASH trick-mode sets (3.2b-4) go, as I-frame playlists do from a variant
-  // master: their keyframes are the programme's, and the loop has no
-  // keyframe-only track to put inside a window (3.2b-5 builds that). Left in, a
-  // fast-forwarding viewer would see the programme the window hides, and the
-  // loop Periods would have no rendition to fill the set with.
-  text = text.replace(TRICK_SET_RE, '');
+  // TRICK-PLAY INSIDE A VARIANT, DASH (3.2b-10). The delivered trick-mode sets
+  // (the packager's, and playout's under a splice, 3.2b-4 and 3.2b-8) stay
+  // when the loop has a keyframe of its own for every slot: live Periods are cut
+  // at the window edges like every other set, so outside a window it is the
+  // stream's own trick set, and each loop Period gets a trick set of the loop's
+  // keyframes (the same grid as its video). When the loop has none (a loop
+  // prepared without trick-play, or one still being prepared), every trick set
+  // goes, as before: left in, a fast-forwarding viewer inside a window would see
+  // the programme the window hides. Decided by the loop alone, never by where
+  // the windows fall, so a Period never gains or loses its set between reloads.
+  // A variant with no window at all keeps the sets as delivered.
+  const labels = trickLabelsOf(text);
+  const keepTrick = labels.length > 0 && (!o.timeline.length || labels.every((l) => !!l && !!o.loopTrick?.has(l)));
+  if (!keepTrick) text = text.replace(TRICK_SET_RE, '');
   const mpdOpen = text.match(/<MPD\b[^>]*>/)?.[0];
   if (!mpdOpen) throw new VariantError('not an MPD');
   const ast = Date.parse(attr(mpdOpen, 'availabilityStartTime') ?? '') / 1000;
@@ -374,7 +404,9 @@ export function renderVariantMpd(text: string, o: { timeline: Timeline; loop: Lo
     const open = m[0].match(/^<Period\b[^>]*>/)![0];
     const start = ast + (isoDur(attr(open, 'start')) ?? 0);
     const dur = isoDur(attr(open, 'duration'));
-    const leadSet = m[0].match(/<AdaptationSet\b[^>]*(?:contentType="video"|mimeType="video\/)[\s\S]*?<\/AdaptationSet>/)?.[0] ?? m[0];
+    // the first video set that is not a trick-mode set
+    const leadSet = [...m[0].matchAll(/<AdaptationSet\b[^>]*>[\s\S]*?<\/AdaptationSet>/g)].map((x) => x[0])
+      .find((a) => /^<AdaptationSet\b[^>]*(?:contentType="video"|mimeType="video\/)/.test(a) && !isTrickSet(a)) ?? m[0];
     const leadTpl = leadSet.match(TPL_RE)?.[0];
     if (!leadTpl) throw new VariantError('only Representation SegmentTemplates are supported');
     return { open, body: m[0].slice(open.length), id: attr(open, 'id') ?? `p${i}`, start, end: dur != null ? start + dur : Infinity, leadTpl };
@@ -404,7 +436,7 @@ export function renderVariantMpd(text: string, o: { timeline: Timeline; loop: Lo
         if (keep.length) open = setAttr(open, 'startNumber', String(keep[0].n));
         for (const n of ['initialization', 'media']) { const v = attr(open, n); if (v) open = setAttr(open, n, abs(v)); }
         return `${open}${timelineXml(keep)}</SegmentTemplate>`;
-      });
+      }).replace(TRICK_SET_RE, (set) => (/<SegmentTimeline><\/SegmentTimeline>/.test(set) ? '' : set));   // a trick set with nothing in this piece goes
       if (!leadHas) continue;
       let open = p.open;
       if (a > p.start) { open = setAttr(open, 'id', `${p.id}-${Math.round(a * 1000)}`); open = setAttr(open, 'start', pt(a - ast)); }
@@ -420,6 +452,20 @@ export function renderVariantMpd(text: string, o: { timeline: Timeline; loop: Lo
     const { D, N } = loopGrid(o.loop!);
     const L = N * D;
     const tmpl = periods.find((p) => p.start <= edge) ?? periods[0];
+    // the trick set the loop Periods copy (3.2b-10): the template Period's, else any Period's
+    const trickSrc = keepTrick ? (tmpl.body.match(TRICK_SET_RE)?.[0] ?? text.match(TRICK_SET_RE)?.[0] ?? null) : null;
+    // one pass of the loop over [ps, pe): the slots of track lt already available
+    const slots = (lt: LoopTrack, ps: number, pe: number) => {
+      const segs: { t: number; d: number }[] = [];
+      let c = 0;
+      for (let k = 0; k < N && ps + c < pe - 1e-6; k++) {
+        const d = lt.segments[Math.min(k, lt.segments.length - 1)].dur;
+        if (ps + c + d > edge + 1e-3) break;        // not available yet
+        segs.push({ t: Math.round(c * 1000), d: Math.round(d * 1000) });
+        c += d;
+      }
+      return segs;
+    };
     for (const [f, t] of wins) {
       for (let j = 0; f + j * L < Math.min(t, edge); j++) {
         const ps = f + j * L, pe = Math.min(f + (j + 1) * L, t);
@@ -427,24 +473,37 @@ export function renderVariantMpd(text: string, o: { timeline: Timeline; loop: Lo
         let leadHas = false;
         // every AdaptationSet the loop can fill; text tracks and event streams stay out
         const sets = [...tmpl.body.matchAll(/<AdaptationSet\b[^>]*>[\s\S]*?<\/AdaptationSet>/g)].map((m) => m[0])
-          .filter((a) => !/contentType="text"|mimeType="(text|application)\//.test(a));
-        const body = sets.map((set) => set.replace(TPL_RE, (tpl) => {
+          .filter((a) => !/contentType="text"|mimeType="(text|application)\//.test(a) && !isTrickSet(a));
+        let body = sets.map((set) => set.replace(TPL_RE, (tpl) => {
           const lt = loopTrackFor(o.loop!, attr(tpl, 'initialization') ?? '');
           const mm = /^(.*?)(\d+)(\.m4s)$/.exec(lt.segments[0].uri);
           if (!mm) throw new VariantError(`loop segment names are not numbered: ${lt.segments[0].uri}`);
-          const segs: { t: number; d: number }[] = [];
-          let c = 0;
-          for (let k = 0; k < N && ps + c < pe - 1e-6; k++) {
-            const d = lt.segments[Math.min(k, lt.segments.length - 1)].dur;
-            if (ps + c + d > edge + 1e-3) break;        // not available yet
-            segs.push({ t: Math.round(c * 1000), d: Math.round(d * 1000) });
-            c += d;
-          }
+          const segs = slots(lt, ps, pe);
           if (tpl === tmpl.leadTpl && segs.length) leadHas = true;
           const open = `<SegmentTemplate timescale="1000" presentationTimeOffset="0" initialization="${absolute(o.loop!.base, lt.init)}" media="${absolute(o.loop!.base, mm[1] + '$Number$' + mm[3])}" startNumber="${Number(mm[2])}">`;
           return `${open}${timelineXml(segs)}</SegmentTemplate>`;
         })).join('');
         if (!leadHas) continue;
+        if (trickSrc) {
+          // The loop's keyframes, slot for slot with its video: k_<i> is the
+          // opening keyframe of loop segment i lasting the whole segment, at the
+          // loop's own decode time, so one template serves every pass. The set
+          // names the loop Period's video set of the same rendition.
+          const label = trickLabel(trickSrc);
+          const lt = o.loop!.tracks[label];
+          const vid = sets.find((s) => (s.match(TPL_RE) ?? []).some((tp) => rendOf(attr(tp, 'initialization') ?? '') === label));
+          const vidId = vid ? attr(vid.match(/^<AdaptationSet\b[^>]*>/)![0], 'id') : null;
+          if (!lt || vidId == null) throw new VariantError(`the loop has no video set for the trick-mode rendition ${label}`);
+          const segs = slots(lt, ps, pe);
+          if (segs.length) {
+            const tpl = `<SegmentTemplate timescale="1000" presentationTimeOffset="0" initialization="${absolute(o.loop!.base, lt.init)}" media="${absolute(o.loop!.base, loopTrickDir(lt) + 'k_$Number$.m4s')}" startNumber="1">${timelineXml(segs)}</SegmentTemplate>`;
+            const codecs = attr(vid!.match(/<Representation\b[^>]*>/)?.[0] ?? '', 'codecs');
+            body += trickSrc.trim()
+              .replace(TPL_RE, tpl)
+              .replace(/(<EssentialProperty\b[^>]*trickmode"[^>]*?\svalue=")[^"]*"/, `$1${vidId}"`)
+              .replace(/<Representation\b[^>]*>/g, (r) => (codecs ? setAttr(r, 'codecs', codecs) : r));
+          }
+        }
         const done = pe <= edge;
         out.push({ start: ps, xml: `<Period id="${o.key}-${Math.round(ps * 1000)}" start="${pt(ps - ast)}"${done ? ` duration="${pt(pe - ps)}"` : ''}>${body}</Period>` });
       }
@@ -527,7 +586,7 @@ export async function loadLoop(kind: 'channel' | 'event', id: string): Promise<L
     try {
       const j = JSON.parse(s);
       if (!j?.tracks || !Object.keys(j.tracks).length) return null;
-      return { segmentSeconds: Number(j.segment_seconds), base, tracks: j.tracks };
+      return { segmentSeconds: Number(j.segment_seconds), base, tracks: j.tracks, hash: typeof j.hash === 'string' ? j.hash : undefined };
     } catch { return null; }
   };
   const safe = (u: string) => !u.includes('..') && !u.startsWith('/') && !/^[a-z]+:/i.test(u);
@@ -564,7 +623,8 @@ export async function renderVariant(inp: {
   const base = segmentBase(inp.kind, inp.id);
   if (inp.file.endsWith('.mpd')) {
     const loop = inp.timeline.length ? await loadLoop(inp.kind, inp.id) : null;
-    return { body: renderVariantMpd(text, { timeline: inp.timeline, loop, base, key: inp.key, shiftSec: inp.shiftSec }), type: 'application/dash+xml' };
+    const loopTrick = loop ? await loopTrickLabels(loop, trickLabelsOf(text)) : undefined;
+    return { body: renderVariantMpd(text, { timeline: inp.timeline, loop, base, key: inp.key, shiftSec: inp.shiftSec, loopTrick }), type: 'application/dash+xml' };
   }
   if (isMaster(text)) return { body: renderVariantMaster(text, inp.carry ?? ''), type: 'application/vnd.apple.mpegurl' };
   // An I-frame playlist (trick-play, 3.2b-3) indexes the live segments by byte
@@ -629,6 +689,52 @@ export async function loopKeyframes(loop: Loop): Promise<Map<string, [number, nu
   return out;
 }
 const loopInitCache = new Map<string, Promise<ReturnType<typeof import('./frames/fmp4').readInit> | null>>();
+
+/**
+ * Which of `labels` have the loop's keyframes ready for a DASH trick set
+ * inside a variant (3.2b-10): every segment's `trick/k_<i>.m4s` beside the
+ * rendition is one keyframe, lasting the segment, at the segment's own decode
+ * time (so it lands where the loop Period lists it). A loop prepared before
+ * 3.2b-10 has them all at time 0 and does not count: its viewers keep the
+ * variant without trick-play rather than pictures at the wrong time.
+ * A ready rendition is kept for good (a loop's files never change: a new
+ * loop has a new hash); one not ready is looked at again after a minute
+ * (the encoder makes them a few seconds after the loop lands).
+ */
+const loopTrickCache = new Map<string, { at: number; p: Promise<boolean> }>();
+export async function loopTrickLabels(loop: Loop, labels: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!loop.read) return out;
+  const { readInit, readFragments } = await import('./frames/fmp4');
+  await Promise.all(labels.map(async (label) => {
+    const lt = loop.tracks[label];
+    if (!lt || lt.kind === 'audio' || !lt.segments?.length) return;
+    const ck = `${loop.base}|${loop.hash ?? ''}|${label}`;
+    const hit = loopTrickCache.get(ck);
+    let p = hit && (Date.now() - hit.at < 60_000) ? hit.p : null;
+    if (!p) {
+      p = (async () => {
+        const ib = await loop.read!(lt.init);
+        const init = ib ? readInit(ib) : null;
+        if (!init?.isVideo) return false;
+        const dir = loopTrickDir(lt);
+        const each = await Promise.all(lt.segments.map(async (sg, i) => {
+          const [kb, sb] = await Promise.all([loop.read!(`${dir}k_${i + 1}.m4s`), loop.read!(sg.uri)]);
+          if (!kb || !sb) return false;
+          const k = readFragments(kb, init), s = readFragments(sb, init);
+          if (!k || !s || k.durations.length !== 1 || !k.startsWithSync) return false;
+          const total = s.durations.reduce((a, b) => a + b, 0);
+          return k.baseDecodeTime === s.baseDecodeTime && Math.abs(k.durations[0] - total) <= 1;
+        }));
+        return each.every(Boolean);
+      })().catch(() => false);
+      loopTrickCache.set(ck, { at: Date.now(), p });
+      if (loopTrickCache.size > 5000) loopTrickCache.clear();
+    }
+    if (await p) { out.add(label); loopTrickCache.set(ck, { at: Infinity, p }); }
+  }));
+  return out;
+}
 
 /** An empty WebVTT document: what a subtitle track shows inside a window. */
 export const EMPTY_VTT = 'WEBVTT\n\n';

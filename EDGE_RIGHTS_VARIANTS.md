@@ -137,4 +137,16 @@ Christian, 22 Oct: this has to be testable on the Mac before the AWS setup.
   `loopKeyframes`). An unknown loop keyframe refuses the playlist (503), never
   the programme's entry. The packager's own `<label>.iframes.m3u8` (no times)
   is never offered and is refused by name.
-- DASH: trick-mode sets are still dropped from a variant MPD (3.2b-10).
+- DASH (3.2b-10): the delivered trick-mode sets stay in a variant MPD when the
+  loop has a keyframe of its own for every segment: `filler/<label>/trick/k_<i>.m4s`,
+  made once by the encoder's `prepare_loop_trick` at the loop segment's own
+  decode time and lasting the segment (`loopTrickLabels` checks each once and
+  keeps the answer per loop hash). Live Periods cut their trick set at the window
+  edges like every other set; each loop Period gets a trick set of the loop's
+  keyframes on the same grid as its video, naming that video set. When the loop
+  has none (a loop prepared before 3.2b-10, a stream whose playout does not run,
+  or one still being prepared, looked at again after a minute) every trick set
+  goes, as before. Decided by the loop alone, never by where the windows fall,
+  so a Period never gains or loses its set between reloads. No window at all:
+  the MPD as delivered, trick set kept. Nothing new is stored on the delivery
+  side; the CDN serves the loop's keyframes like its segments.
