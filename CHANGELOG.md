@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.44.0 (2026-11-04)
+
+### Internal
+
+- added: Migration safety check: a migration the previous release could not run on (dropping, renaming or retyping a column or table, NOT NULL without a default, a blocking index) is refused before commit, release and deploy. Removals take two releases and a `-- volt:contract` line; concurrent indexes go in a `-- volt:no-transaction` migration, which the runner now supports. Shipped migrations are baselined in release/migrations-baseline.json and may not be edited.
+
 ## 0.43.0 (2026-11-04)
 
 ### Internal
