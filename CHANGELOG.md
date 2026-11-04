@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.43.0 (2026-11-04)
+
+### Internal
+
+- added · Deploy: Deploy and rollback script (scripts/deploy/deploy.mjs, build queue D1): release checks, images tagged v<version>-<sha> (never latest), migrations once as a one-off task before services move, rolling service moves with steady-state wait, a smoke test (ready, play gate, manifest) with automatic rollback, explicit --rollback, new encoder revisions for new streams only, and release/deployments.json as the record. Terraform image tags must name a release and services no longer have their revision moved by apply. The staging compose file takes the image tag from VOLT_IMAGE_TAG, mailpit is a service again (it sat inside depends_on, so compose refused the file), and IMAGE_SIGNING_SECRET is passed (the API would not start without it).
+- added · Control plane: Migrate-only entry (dist/migrateOnly.js): applies the migrations and boot schema top-ups under the boot lock and exits, for the deploy's one-off migration task. The top-ups moved unchanged from index.ts to services/bootSchema.ts.
+
 ## 0.42.0 (2026-11-04)
 
 ### Product (in customer release notes)
