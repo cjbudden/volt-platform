@@ -190,10 +190,42 @@ best effort, so the vendor can stop spending.
   demand), event log, Cancel or Run again.
 - **Add-ons and triggers.** Service cards with Test (signed ping), Edit, New
   secret, Delete (two presses), on/off, and the trigger list.
+- **Report** (build queue W1). See "The report" below.
 
 The page polls every 4 seconds while the tab is visible. Moving it onto the
 existing SSE stream (the hub already publishes an `addon` event on every run
 change) is a small follow-up shared with the Monitoring page.
+
+### The report
+
+`/workflows/report`, from `GET /api/workflows/report?range=24h|7d|30d`.
+Per stage: runs, succeeded, failed, cancelled, success and error rate,
+retries, p50 and p95 time and wait, top five error codes; add-on runs per
+add-on and hook; job types no stage claims; runs and failures per lane per
+hour (24h) or day.
+
+- **Never a live scan of `jobs`.** `services/workflows/rollup.ts` runs on the
+  leader once a minute and reads only what finished since its cursor (less
+  five minutes for late commits), through the indexes in migration 0126. It
+  recomputes whole minutes into `wf_minutes` and rebuilds each touched UTC day
+  in `wf_days`, both in the analytics database (`qoe/analyticsDb.ts`), so a
+  pass is idempotent and two tasks cannot double count. Minutes are kept 14
+  days, days indefinitely. Percentiles are DDSketches, merged exactly from
+  minutes into days. The first pass backfills 30 days, one day per pass.
+- **Where a stage's numbers come from.** `JOB_STAGES` in `map.ts` maps job
+  types to stages (a type not listed shows under other work; `addon.dispatch`
+  is skipped because add-on runs are counted from `addon_runs`). Stages with
+  no job types count their completion hooks: `stream.stopped` (a `fault`
+  stop is a failure, code `stream_fault`), `recording.completed` (its
+  `durationMs` is the time), `review.decided`. Source, Package, Deliver and
+  Ingest rules have neither and say so.
+- **Error codes.** The worker now stores a code with every failure
+  (`services/jobs/errorCode.ts`: the error's own code, else a few message
+  shapes such as `timeout`, `source_missing`, `tool_exit`, `http_503`, else
+  `error`). Older rows and add-on errors are coded from their message the same
+  way; a timed out add-on run is `timed_out`.
+- **Rebuilding.** Delete `wf_rollup_to` from `qoe_meta` and the next passes
+  backfill 30 days again.
 
 ## 6. Example: send recordings to an AI agent
 
@@ -224,6 +256,7 @@ labelled sample result.
 | `POST /api/workflows/runs/:id/retry` | operator | New run, same add-on, subject and options |
 | `GET /api/workflows/trace` | any | `?subjectType&subjectId`. Includes the recording's assets, or the asset's recording |
 | `GET /api/workflows/events` | any | Recent hook events |
+| `GET /api/workflows/report` | any | `?range=` 24h, 7d or 30d (default 7d). From the rollups, see 5 |
 | `GET /api/addons` | any (read) | Never returns secrets |
 | `POST /api/addons` | admin | Returns `signingSecret` once |
 | `PATCH`, `DELETE /api/addons/:id` | admin | Deleting removes its runs and triggers |

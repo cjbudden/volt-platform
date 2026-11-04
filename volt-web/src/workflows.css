@@ -121,3 +121,28 @@
 .wf-menuitem{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;cursor:pointer}
 .wf-menuitem:hover{background:var(--panel-2)}
 .wf-swatch.planned{background:none;border:1px dashed var(--border-2)}
+
+/* ---------------------------------------------------------------- the report (build queue W1) */
+.wf-rephead{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.wf-repnode{cursor:pointer;justify-content:flex-start;gap:2px}
+.wf-repnode .wf-nodelabel{line-height:1.35;flex:none}
+.wf-repnode:hover{border-color:rgba(63,123,255,.45)}
+.wf-repnode.sel{border-color:var(--brand);background:var(--brand-dim);box-shadow:0 0 0 3px rgba(63,123,255,.18)}
+.wf-repline{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);margin-top:4px;font-variant-numeric:tabular-nums}
+.wf-repline b{font-weight:700}
+.wf-repline .wf-mini{margin-left:auto}
+.wf-repdetail{padding:14px 16px;margin-bottom:14px}
+.wf-repgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:12px;font-variant-numeric:tabular-nums}
+.wf-repdetail .lbl{font-size:var(--fs-label);letter-spacing:var(--ls-label);text-transform:uppercase;color:var(--faint);font-weight:700;margin-bottom:3px}
+.wf-codes{display:flex;flex-wrap:wrap;gap:14px;font-size:var(--fs-sm)}
+.wf-series{position:relative;padding:12px 16px}
+.wf-series svg{display:block}
+.wf-axis{fill:var(--faint);font-size:11px}
+.wf-axis.strong{fill:var(--muted);font-weight:600}
+.wf-repnode .wf-nodesub{overflow:hidden;text-overflow:ellipsis}
+.wf-gridline{stroke:var(--border);stroke-width:1}
+.wf-sbar{fill:rgba(63,123,255,.55)}
+.wf-sbar.bad{fill:var(--down)}
+.wf-tip{position:absolute;width:220px;padding:6px 9px;border-radius:8px;background:var(--panel-3);border:1px solid var(--border-2);font-size:var(--fs-xs);pointer-events:none;z-index:2}
+.wf-reptable td{padding:10px 14px;font-size:var(--fs-sm);border-top:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap}
+.wf-reptable tr:first-child td{border-top:none}

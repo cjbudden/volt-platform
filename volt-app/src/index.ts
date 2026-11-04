@@ -109,7 +109,10 @@ boot().then(async () => {
       void import('./services/jobs/handlers/fillerThumbs').then((m) => m.startFillerThumbsSweep()).catch((e) => console.warn('[filler.thumbs] sweep not started', e));
       // Uploads held for metadata before the gate stopped holding the media: encode them once.
       void import('./services/ingest/pipeline').then((m) => m.encodeHeldUploads()).catch((e) => console.warn('[ingest] held uploads not checked', e));
-      return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); };
+      // The workflow report's minute and day rollups (services/workflows/rollup.ts, build queue W1).
+      let stopWfRollup = () => {};
+      void import('./services/workflows/rollup').then((m) => { stopWfRollup = m.startWorkflowRollup(); }).catch((e) => console.warn('[workflows] report rollup not started', e));
+      return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); stopWfRollup(); };
     });
     setLeaderCheck(() => !!leadership?.isLeader());
   }

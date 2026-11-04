@@ -1,5 +1,9 @@
 {
   "_comment": "Hand-written wording for the API reference, layered over the generated spec (scripts/openapi.mjs). Key: \"METHOD /path\" exactly as in api-routes.json. Fields: summary, description (shown above the generated text), tag. A key for a route that no longer exists fails npm run docs:openapi -- --check.",
+  "GET /api/workflows/report": {
+    "summary": "Workflow report",
+    "description": "Per stage of the base workflow (the stages and lanes of `GET /api/workflows/map`): runs, succeeded, failed, cancelled, success and error rate (percent), retries, p50 and p95 time and time waiting to start (ms), and the top five error codes. Also add-on runs per add-on and hook, job types that belong to no stage (`otherJobs`), and runs and failures per lane per hour (`range=24h`) or per day (`range=7d` or `30d`, the default 7d). `fedBy` says where a stage's numbers come from: `jobs` (its job types), `events` (the hook that marks its work done; a stream stopped for a fault counts as a failure), or `none`. The figures are rolled up once a minute; `rollup.through` is the end of the last minute included."
+  },
   "POST /api/public/cmcd": {
     "summary": "Send CMCD v2 event reports (QoE)",
     "description": "Event mode of CMCD v2 (CTA-5004): one report per line, `Content-Type: application/cmcd` (`text/cmcd` also accepted), with the app's publishable key as `?appKey=`. Every report must carry `v=2`, `ts`, `e` and `sid`; the Volt player SDK also sends `sn` and does this for you. A play attempt is reported from the moment the viewer presses play, before the play gate answers, so a refused entitlement or a failed licence is still counted. Answers: 204 received; 400 nothing valid; 410 stop reporting (unknown key); 413 more than 200 reports; 415 wrong content type; 429 slow down (Retry-After). Reports are kept exactly as sent."
@@ -391,7 +395,7 @@
     },
     "Workflows": {
       "displayName": "Workflows",
-      "description": "Workflows show how work moves through Volt and which add-ons run at each stage, with a record of every run.\n\n**Use it to:**\n- See the stages, hooks and attached add-ons with `GET /api/workflows/map`\n- List and open runs with `GET /api/workflows/runs` and `GET /api/workflows/runs/{id}`\n- Run an add-on by hand, cancel or retry with `POST /api/workflows/runs` and the `cancel` and `retry` requests\n- Trace what happened to one item with `GET /api/workflows/trace`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: operate` to run, cancel or retry.\n\n**Good to know:** a retry creates a new run with the same add-on, subject and options."
+      "description": "Workflows show how work moves through Volt and which add-ons run at each stage, with a record of every run.\n\n**Use it to:**\n- See the stages, hooks and attached add-ons with `GET /api/workflows/map`\n- List and open runs with `GET /api/workflows/runs` and `GET /api/workflows/runs/{id}`\n- Run an add-on by hand, cancel or retry with `POST /api/workflows/runs` and the `cancel` and `retry` requests\n- Trace what happened to one item with `GET /api/workflows/trace`\n- Report each stage's runs, error rate, retries, p50 and p95 time and top error codes with `GET /api/workflows/report`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: operate` to run, cancel or retry.\n\n**Good to know:** a retry creates a new run with the same add-on, subject and options."
     },
     "XMLTV": {
       "displayName": "XMLTV partner feeds",

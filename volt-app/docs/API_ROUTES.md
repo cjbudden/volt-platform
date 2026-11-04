@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**842 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 668 · Platform API: 32 · Machine-to-machine: 12 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**843 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 669 · Platform API: 32 · Machine-to-machine: 12 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1200,6 +1200,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 |---|---|---|---|---|
 | GET | `/api/workflows/events` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/workflows/map` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/workflows/report` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/workflows/runs` | admin session (Bearer) or account secret key | settings: view |  |
 | POST | `/api/workflows/runs` | admin session (Bearer) or account secret key | settings: operate |  |
 | GET | `/api/workflows/runs/:id` | admin session (Bearer) or account secret key | settings: view |  |

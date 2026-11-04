@@ -10,6 +10,7 @@
 // ============================================================================
 import { randomUUID } from 'node:crypto';
 import { claim, fail, heartbeat, reapExpiredLeases, succeed, type JobRow } from './queue';
+import { errorCodeOf } from './errorCode';
 
 export interface JobContext {
   job: JobRow;
@@ -80,10 +81,9 @@ export function startWorker(opts: {
       await succeed(job.id, result ?? {});
     } catch (e) {
       const permanent = e instanceof PermanentError;
-      await fail(job.id, e, {
-        code: permanent ? (e as PermanentError).code : undefined,
-        permanent,
-      });
+      // Every failure carries a short code, so the workflow report can count
+      // failures per stage by cause (errorCode.ts, build queue W1).
+      await fail(job.id, e, { code: errorCodeOf(e), permanent });
     }
   }
 

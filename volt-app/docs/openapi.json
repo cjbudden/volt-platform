@@ -383,7 +383,7 @@
   {
    "name": "Workflows",
    "x-displayName": "Workflows",
-   "description": "Workflows show how work moves through Volt and which add-ons run at each stage, with a record of every run.\n\n**Use it to:**\n- See the stages, hooks and attached add-ons with `GET /api/workflows/map`\n- List and open runs with `GET /api/workflows/runs` and `GET /api/workflows/runs/{id}`\n- Run an add-on by hand, cancel or retry with `POST /api/workflows/runs` and the `cancel` and `retry` requests\n- Trace what happened to one item with `GET /api/workflows/trace`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: operate` to run, cancel or retry.\n\n**Good to know:** a retry creates a new run with the same add-on, subject and options."
+   "description": "Workflows show how work moves through Volt and which add-ons run at each stage, with a record of every run.\n\n**Use it to:**\n- See the stages, hooks and attached add-ons with `GET /api/workflows/map`\n- List and open runs with `GET /api/workflows/runs` and `GET /api/workflows/runs/{id}`\n- Run an add-on by hand, cancel or retry with `POST /api/workflows/runs` and the `cancel` and `retry` requests\n- Trace what happened to one item with `GET /api/workflows/trace`\n- Report each stage's runs, error rate, retries, p50 and p95 time and top error codes with `GET /api/workflows/report`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: operate` to run, cancel or retry.\n\n**Good to know:** a retry creates a new run with the same add-on, subject and options."
   },
   {
    "name": "XMLTV",
@@ -39097,6 +39097,32 @@
      "Workflows"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/workflows/report": {
+   "get": {
+    "operationId": "getWorkflowsReport",
+    "summary": "Workflow report",
+    "tags": [
+     "Workflows"
+    ],
+    "description": "Per stage of the base workflow (the stages and lanes of `GET /api/workflows/map`): runs, succeeded, failed, cancelled, success and error rate (percent), retries, p50 and p95 time and time waiting to start (ms), and the top five error codes. Also add-on runs per add-on and hook, job types that belong to no stage (`otherJobs`), and runs and failures per lane per hour (`range=24h`) or per day (`range=7d` or `30d`, the default 7d). `fedBy` says where a stage's numbers come from: `jobs` (its job types), `events` (the hook that marks its work done; a stream stopped for a fault counts as a failure), or `none`. The figures are rolled up once a minute; `rollup.through` is the end of the last minute included.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
     "security": [
      {
       "adminBearer": []

@@ -1612,6 +1612,7 @@ export const api = {
   workflowTrace: (subjectType: string, subjectId: string): Promise<WorkflowTrace> =>
     req(`/workflows/trace?subjectType=${encodeURIComponent(subjectType)}&subjectId=${encodeURIComponent(subjectId)}`),
   workflowEvents: (limit = 40): Promise<{ events: WorkflowEvent[] }> => req(`/workflows/events?limit=${limit}`),
+  workflowReport: (range: WorkflowReportRange): Promise<WorkflowReport> => req(`/workflows/report?range=${range}`),
   addons: (): Promise<{ addons: AddonService[] }> => req('/addons'),
   createAddon: (b: AddonInput): Promise<AddonService & { signingSecret: string }> => req('/addons', { method: 'POST', body: JSON.stringify(b) }),
   updateAddon: (id: string, b: Partial<AddonInput>): Promise<AddonService> => req(`/addons/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
@@ -3428,6 +3429,24 @@ export interface AddonRunEvent { id: number; ts: string; type: string; state: st
 export interface AddonRunDetail extends AddonRun { result: any; options: any; events: AddonRunEvent[] }
 export interface WorkflowEvent { id: number; hook: string; subject_type: string; subject_id: string; title: string | null; channel_id?: string | null; event_id?: string | null; data: any; created_at: string }
 export interface WorkflowTrace { subject: { type: string; id: string; title: string }; events: WorkflowEvent[]; runs: AddonRun[] }
+/** GET /api/workflows/report (build queue W1): figures per stage, from the rollups. */
+export type WorkflowReportRange = '24h' | '7d' | '30d'
+export interface WorkflowFigures {
+  runs: number; succeeded: number; failed: number; cancelled: number; retries: number
+  successRate: number | null; errorRate: number | null
+  p50Ms: number | null; p95Ms: number | null; waitP50Ms: number | null; waitP95Ms: number | null
+  topCodes: { code: string; count: number }[]
+}
+export interface WorkflowReport {
+  range: WorkflowReportRange; bucket: 'hour' | 'day'; since: string; until: string
+  lanes: WorkflowLane[]
+  totals: { runs: number; failed: number; retries: number; errorRate: number | null }
+  stages: (WorkflowStage & WorkflowFigures & { fedBy: 'jobs' | 'events' | 'none' })[]
+  otherJobs: (WorkflowFigures & { type: string })[]
+  addons: (WorkflowFigures & { addonId: string; name: string | null; category: AddonCategory | null; hook: string })[]
+  series: { t: string; lane: string; runs: number; failed: number; errorRate: number | null }[]
+  rollup: { through: string | null }
+}
 export interface AddonService {
   id: string; name: string; description: string | null; category: AddonCategory; kind: 'webhook' | 'demo'
   endpoint_url: string | null; accepts: string[]; steps: string[]; timeout_sec: number; max_attempts: number; enabled: boolean

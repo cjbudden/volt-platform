@@ -536,6 +536,51 @@ async function seedG8Sections() {
     }
   }
 
+  // Workflow report (build queue W1): a week of finished work across the
+  // stages, so the Report tab shows runs, error rates, times and codes. Made
+  // from fixed patterns, not random numbers, so the screenshot is the same
+  // every time. Finished only, never queued: the API's worker would pick a
+  // waiting job up. The file Encode stage is shown through vod.ladder jobs,
+  // so the Encoding Queue guide keeps its two encodes. Re-running the seed
+  // replaces it. The API's rollup turns
+  // it into the report a minute or so after it starts.
+  await query(`DELETE FROM jobs WHERE payload->>'seed' = 'docs-report'`);
+  await query(`DELETE FROM workflow_events WHERE account_id = $1 AND data->>'seed' = 'docs-report'`, [ACCOUNT]);
+  await query(`DELETE FROM addon_runs WHERE account_id = $1 AND created_by = 'seed:docs-report'`, [ACCOUNT]);
+  const REPORT_ASSET = '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e32';
+  for (const [type, perDay, failEvery, secs] of [
+    ['vod.ladder', 6, 19, 260], ['qc.run', 14, 13, 7], ['clip.extract', 10, 29, 24], ['vod.image', 12, 61, 2], ['social.publish', 3, 9, 4], ['ingest.remote', 2, 11, 45],
+  ] as const) {
+    await query(
+      `INSERT INTO jobs (type, state, payload, attempts, max_attempts, error_code, last_error, created_at, started_at, finished_at, run_after)
+       SELECT $1, (CASE WHEN i % $3 = $3 - 1 THEN 'failed' WHEN i % 41 = 40 THEN 'cancelled' ELSE 'succeeded' END)::job_state,
+              jsonb_build_object('vodAssetId', $5::text, 'seed', 'docs-report'),
+              CASE WHEN i % 9 = 0 THEN 2 ELSE 1 END, 3,
+              CASE WHEN i % $3 = $3 - 1 THEN (ARRAY['source_missing','timeout','tool_exit','http_503'])[1 + (i / $3) % 4] END,
+              CASE WHEN i % $3 = $3 - 1 THEN 'Seeded failure for the workflow report' END,
+              t - make_interval(secs => 4 + i % 11), t, t + make_interval(secs => $4 * (0.7 + (i % 7) * 0.1)), t
+         FROM generate_series(0, $2 * 7 - 1) i,
+              LATERAL (SELECT now() - interval '10 minutes' - make_interval(secs => i * (86400.0 / $2))) x(t)`,
+      [type, perDay, failEvery, secs, REPORT_ASSET]);
+  }
+  const reportChannel = (await query<any>(`SELECT c.id FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1 ORDER BY c.name LIMIT 1`, [ACCOUNT]))[0]?.id;
+  if (reportChannel) {
+    await query(
+      `INSERT INTO workflow_events (account_id, hook, subject_type, subject_id, channel_id, title, data, created_at)
+       SELECT $1, h.hook, h.subject, $2, $2, 'Docs seed',
+              CASE h.hook WHEN 'stream.stopped' THEN jsonb_build_object('intent', CASE WHEN i % 17 = 16 THEN 'fault' ELSE 'schedule' END, 'seed', 'docs-report')
+                          WHEN 'recording.completed' THEN jsonb_build_object('durationMs', (1800 + (i % 5) * 900) * 1000, 'seed', 'docs-report')
+                          ELSE jsonb_build_object('to', 'approved', 'seed', 'docs-report') END,
+              now() - interval '12 minutes' - make_interval(secs => i * (86400.0 / h.per_day))
+         FROM (VALUES ('stream.stopped', 'channel', 4), ('recording.completed', 'recording', 4), ('review.decided', 'vod_asset', 5)) h(hook, subject, per_day),
+              generate_series(0, h.per_day * 7 - 1) i`, [ACCOUNT, reportChannel]);
+    await query(
+      `INSERT INTO addon_runs (account_id, addon_id, hook, subject_type, subject_id, subject_title, state, error, created_by, callback_hash, created_at, dispatched_at, finished_at, deadline_at)
+       SELECT $1, $2, 'recording.completed', 'recording', $3, 'Docs seed', CASE WHEN i % 12 = 11 THEN 'timed_out' ELSE 'succeeded' END,
+              NULL, 'seed:docs-report', 'docs-seed', t, t + interval '1 second', t + make_interval(secs => 40 + (i % 6) * 15), t + interval '10 minutes'
+         FROM generate_series(0, 27) i, LATERAL (SELECT now() - interval '14 minutes' - make_interval(secs => i * 21600)) x(t)`, [ACCOUNT, '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e20' /* the Summary agent above */, reportChannel]);
+  }
+
   // Single sign-on (build queue 1.14-G8): an OpenID Connect provider with the
   // account's domain added but not yet verified, as it is just after Add a
   // provider, so the guide shows the DNS record to add. Not verified, so the

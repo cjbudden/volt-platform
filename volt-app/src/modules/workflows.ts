@@ -10,6 +10,7 @@
 //    POST /runs/:id/retry           a NEW run with the same add-on, subject and options
 //    GET  /trace                    ?subjectType&subjectId  hooks fired + runs, for the map
 //    GET  /events                   recent hook events across the account
+//    GET  /report                   ?range=24h|7d|30d  per stage figures from the rollups (W1)
 //
 //  /api/addons           admins: services and triggers (reads open to operators,
 //                        so the "Send to" menu can list them; secrets never returned)
@@ -59,6 +60,16 @@ workflowsRouter.get('/map', asyncHandler(async (req, res) => {
     })),
     manualRuns24h: Object.fromEntries(runCounts.filter((c) => c.hook === 'manual').map((c) => [c.state, c.n])),
   });
+}));
+
+// THE REPORT (build queue W1): per stage runs, success and error rates,
+// retries, p50 and p95 time and top error codes, add-on runs, and error rate
+// per lane over time. Read from the rollups in the analytics database
+// (services/workflows/rollup.ts), never from jobs.
+workflowsRouter.get('/report', asyncHandler(async (req, res) => {
+  const range = z.enum(['24h', '7d', '30d']).default('7d').parse(req.query.range ?? undefined);
+  const { workflowReport } = await import('../services/workflows/rollup');
+  res.json(await workflowReport(accountId(req), range));
 }));
 
 const RUN_COLS = `r.id, r.addon_id, a.name AS addon_name, a.category, a.kind AS addon_kind, r.trigger_id, r.hook,

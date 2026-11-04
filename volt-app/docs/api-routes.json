@@ -7237,6 +7237,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/workflows/report",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/workflows"
+ },
+ {
+  "method": "GET",
   "path": "/api/workflows/runs",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

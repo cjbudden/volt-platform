@@ -300,7 +300,16 @@
       "path": "/workflows",
       "waitFor": "h1",
       "settleMs": 1500,
-      "alt": "The Workflows page: the counts of runs, the Map, Runs and Add-ons and triggers tabs, and the pipeline map with its three lanes, stages and hooks"
+      "alt": "The Workflows page: the counts of runs, the Map, Runs and Add-ons and triggers and Report tabs, and the pipeline map with its three lanes, stages and hooks"
+    },
+    {
+      "name": "workflows-report",
+      "guide": "guides/workflows.md",
+      "path": "/workflows/report",
+      "waitFor": ".wf-repnode",
+      "click": [".wf-repnode[data-stage=\"qc\"]"],
+      "settleMs": 1500,
+      "alt": "The Workflows Report tab: the 24 hours, 7 days and 30 days choice, totals for the last 7 days, and the pipeline map with each stage's runs, error rate, p50 and p95 time, retries and most common error code, with QC selected"
     },
     {
       "name": "content-types",

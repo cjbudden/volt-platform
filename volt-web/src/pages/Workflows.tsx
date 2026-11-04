@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
   api, type WorkflowMap, type WorkflowStage, type WorkflowHook, type AddonRun, type AddonRunDetail,
   type AddonService, type AddonTrigger, type WorkflowEvent, type WorkflowTrace, type AddonCategory, type AddonRunState,
-  type Channel,
+  type Channel, type WorkflowReport, type WorkflowReportRange, type WorkflowFigures,
 } from '../api'
 import { PageHead } from '../scaffold'
 import { navigate, useRoute } from '../router'
@@ -25,8 +25,12 @@ import '../workflows.css'
               the step tracker, event log and result.
      Add-ons  the external services (AI agents, transcription, QC vendors) and
               the triggers that attach them to hooks. Admin only for changes.
+     Report   how each stage has done over 24 hours, 7 or 30 days: runs, error
+              rate, retries, p50 and p95 time and the top error codes, drawn
+              on the same map, with add-on runs and error rate per lane over
+              time (build queue W1; figures from the rollups, never live).
 
-   URLs: /workflows, /workflows/runs, /workflows/addons,
+   URLs: /workflows, /workflows/runs, /workflows/addons, /workflows/report,
          /workflows/run/<id>, /workflows/trace/<recording|vod_asset>/<id>
    ========================================================================== */
 
@@ -94,12 +98,12 @@ function usePoll(fn: () => void, ms: number, deps: unknown[]) {
 }
 
 // ===================================================================== page
-type Tab = 'map' | 'runs' | 'addons'
+type Tab = 'map' | 'runs' | 'addons' | 'report'
 
 export default function WorkflowsPage({ canManage }: { canManage: boolean }) {
   const route = useRoute()
   const parts = route.path.replace(/^\/+|\/+$/g, '').split('/')
-  const tab: Tab = parts[1] === 'runs' ? 'runs' : parts[1] === 'addons' ? 'addons' : 'map'
+  const tab: Tab = parts[1] === 'runs' ? 'runs' : parts[1] === 'addons' ? 'addons' : parts[1] === 'report' ? 'report' : 'map'
   const runParam = parts[1] === 'run' ? parts[2] : null
   const traceParam = parts[1] === 'trace' && parts[2] && parts[3] ? { type: parts[2], id: parts[3] } : null
 
@@ -161,7 +165,7 @@ export default function WorkflowsPage({ canManage }: { canManage: boolean }) {
       </div>
 
       <div className="pill-row" style={{ marginBottom: 14 }}>
-        {([['map', 'Map'], ['runs', 'Runs'], ['addons', 'Add-ons and triggers']] as const).map(([k, l]) => (
+        {([['map', 'Map'], ['runs', 'Runs'], ['addons', 'Add-ons and triggers'], ['report', 'Report']] as const).map(([k, l]) => (
           <button key={k} className={`chip ${tab === k ? 'active' : ''}`} onClick={() => go(k)}>
             {l}{k === 'runs' && counts.open > 0 && <span className="ct">{counts.open}</span>}
           </button>
@@ -241,6 +245,8 @@ export default function WorkflowsPage({ canManage }: { canManage: boolean }) {
 
       {tab === 'runs' && <RunsView runs={runs} onOpen={setOpenRun} onTrace={traceRun} />}
       {tab === 'addons' && <AddonsView canManage={canManage} map={map} onChanged={() => api.workflowMap().then(setMap)} />}
+      {tab === 'report' && map && <ReportView map={map} />}
+      {tab === 'report' && !map && <div className="loading">Loading the workflow…</div>}
 
       {openRun && <RunDrawer id={openRun} onClose={() => { setOpenRun(null); if (runParam) navigate('/workflows/runs', { replace: true }) }}
         onTrace={r => { setOpenRun(null); traceRun(r) }} />}
@@ -269,7 +275,7 @@ interface Placed { stage: WorkflowStage; x: number; y: number; hooks: WorkflowHo
 
 /** Column width follows the card, within limits: wide screens get roomy nodes,
  *  narrow ones scroll sideways rather than squashing labels. */
-function layout(map: WorkflowMap, avail: number) {
+function layout(map: WorkflowMap, avail: number, nodeH = NODE_H) {
   const cols = Math.max(...map.stages.map(s => s.col)) + 1
   const COL_W = Math.round(Math.min(178, Math.max(136, (avail - MAP_X * 2) / cols)))
   const NODE_W = COL_W - 18
@@ -278,10 +284,10 @@ function layout(map: WorkflowMap, avail: number) {
   let y = 0
   for (const lane of map.lanes) {
     const stages = map.stages.filter(s => s.lane === lane.id)
-    let tallest = NODE_H
+    let tallest = nodeH
     for (const s of stages) {
       const hooks = map.hooks.filter(h => h.stage === s.id)
-      const h = NODE_H + 8 + hooks.reduce((n, hk) => n + PORT_H + 4 + hk.triggers.length * (CHIP_H + 4), 0)
+      const h = nodeH + 8 + hooks.reduce((n, hk) => n + PORT_H + 4 + hk.triggers.length * (CHIP_H + 4), 0)
       tallest = Math.max(tallest, h)
     }
     laneY[lane.id] = y
@@ -993,6 +999,258 @@ export function SendToAddon({ subjectType, subjectId }: { subjectType: 'recordin
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ================================================================ the report
+/* How each stage has done (build queue W1). The figures come from GET
+   /api/workflows/report, which reads minute and day rollups in the analytics
+   database, so opening this page never scans the job table. Drawn on the same
+   lanes and stages as the map, so a stage's numbers sit where its work does. */
+const REPORT_NODE_H = 92
+const RANGE_LABEL: Record<WorkflowReportRange, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days' }
+const fmtDur = (ms: number | null) => {
+  if (ms == null) return '-'
+  if (ms < 1000) return `${ms} ms`
+  const s = ms / 1000
+  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)} s`
+  const m = s / 60
+  if (m < 60) return `${m < 10 ? m.toFixed(1) : Math.round(m)} min`
+  return `${(m / 60).toFixed(1)} h`
+}
+const fmtPct = (p: number | null) => (p == null ? '-' : `${p < 10 && p > 0 ? p.toFixed(1) : Math.round(p)}%`)
+/** Tone for an error rate: none is healthy, under 5 % worth a look, above that a problem. */
+const rateTone = (f: { runs: number; errorRate: number | null }) => !f.runs ? 'idle' : !f.errorRate ? 'live' : f.errorRate < 5 ? 'warn' : 'down'
+const FED_BY: Record<string, string> = {
+  jobs: 'Counted from the jobs that do this stage\'s work.',
+  events: 'Counted from the event that marks this stage\'s work done. A stream that stopped for a fault counts as a failure.',
+  none: 'Nothing records this stage\'s work as runs yet, so it has no figures.',
+}
+
+function ReportView({ map }: { map: WorkflowMap }) {
+  const [range, setRange] = useState<WorkflowReportRange>('7d')
+  const [rep, setRep] = useState<WorkflowReport | null>(null)
+  const [err, setErr] = useState('')
+  const [sel, setSel] = useState<string | null>(null)
+  // The rollups move once a minute, so polling faster would show nothing new.
+  usePoll(() => { api.workflowReport(range).then(r => { setRep(r); setErr('') }).catch(e => setErr(e.message)) }, 60_000, [range])
+  usePageNotice('report', err ? { kind: 'error', title: "Couldn't load the workflow report.", message: err } : null)
+
+  if (!rep) return <div className="loading">Loading the report…</div>
+  const stage = sel ? rep.stages.find(s => s.id === sel) ?? null : null
+  return (
+    <>
+      <div className="wf-rephead">
+        <div className="pill-row">
+          {(Object.keys(RANGE_LABEL) as WorkflowReportRange[]).map(r => (
+            <button key={r} className={`chip ${range === r ? 'active' : ''}`} onClick={() => setRange(r)}>{RANGE_LABEL[r]}</button>
+          ))}
+        </div>
+        <span className="hintxt">{rep.rollup.through ? `Figures up to ${fmtWhen(rep.rollup.through)}, updated every minute.` : 'The first figures appear within a few minutes of the server starting.'}</span>
+      </div>
+
+      <div className="stats wf-stats">
+        <Stat label={`Stage runs, ${RANGE_LABEL[range]}`} value={rep.totals.runs} />
+        <Stat label="Failed" value={rep.totals.failed} tone={rep.totals.failed ? 'down' : undefined} />
+        <div className="card stat"><div className="lbl">Error rate</div><div className="val" style={rep.totals.failed ? { color: 'var(--down)' } : undefined}>{fmtPct(rep.totals.errorRate)}</div></div>
+        <Stat label="Retries" value={rep.totals.retries} tone={rep.totals.retries ? 'warn' : undefined} />
+      </div>
+
+      <ReportMap map={map} rep={rep} sel={sel} onSel={id => setSel(sel === id ? null : id)} />
+      {stage && <StageDetail stage={stage} onClose={() => setSel(null)} />}
+
+      <div className="sec-label">Runs and error rate per lane, per {rep.bucket}</div>
+      <LaneSeries rep={rep} />
+
+      <div className="sec-label">Add-on runs</div>
+      {rep.addons.length === 0
+        ? <div className="card wf-quiet">No add-on runs finished in the last {RANGE_LABEL[range]}.</div>
+        : <FigureTable rows={rep.addons.map(a => ({ key: `${a.addonId}|${a.hook}`, name: a.name ?? 'Removed add-on', sub: a.hook === 'manual' ? 'Sent by hand' : `On ${a.hook}`, f: a }))} first="Add-on" />}
+
+      {rep.otherJobs.length > 0 && <>
+        <div className="sec-label">Other background work</div>
+        <FigureTable rows={rep.otherJobs.map(j => ({ key: j.type, name: j.type, sub: 'Not part of a stage on the map', f: j }))} first="Job type" />
+      </>}
+    </>
+  )
+}
+
+function ReportMap({ map, rep, sel, onSel }: { map: WorkflowMap; rep: WorkflowReport; sel: string | null; onSel: (id: string) => void }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [avail, setAvail] = useState(1400)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setAvail(el.clientWidth))
+    ro.observe(el); setAvail(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+  // The map's own layout, without the hooks: the report puts figures where the hooks were.
+  const L = useMemo(() => layout({ ...map, hooks: [] }, avail, REPORT_NODE_H), [map, avail])
+  const H = REPORT_NODE_H
+  const edgePath = (a: Placed, b: Placed) => {
+    const x1 = a.x + L.NODE_W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2
+    const dx = Math.max(24, (x2 - x1) / 2)
+    if (a.stage.lane === b.stage.lane && b.stage.col - a.stage.col > 1) {
+      const dip = H * 0.75
+      return `M${x1},${y1} C${x1 + 30},${y1 + dip} ${x2 - 30},${y2 + dip} ${x2},${y2}`
+    }
+    return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`
+  }
+  return (
+    <div className="card wf-mapcard">
+      <div className="wf-mapscroll" ref={scrollRef}>
+        <div className="wf-map" style={{ width: L.width, height: L.height + 24 }}>
+          {map.lanes.map((lane, i) => (
+            <div key={lane.id} className="wf-lane" style={{ top: L.laneY[lane.id], height: L.laneH[lane.id] + (i === map.lanes.length - 1 ? 24 : 0), background: i % 2 ? 'rgba(255,255,255,.012)' : 'transparent' }}>
+              <div className="wf-lanelabel" title={lane.description}>{lane.label}</div>
+            </div>
+          ))}
+          <svg className="wf-edges" width={L.width} height={L.height}>
+            <defs>
+              <marker id="wf-arrow-r" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
+              </marker>
+            </defs>
+            {map.edges.map(([a, b]) => <path key={a + b} d={edgePath(L.placed[a], L.placed[b])} className="wf-edge" markerEnd="url(#wf-arrow-r)" />)}
+          </svg>
+          {Object.values(L.placed).map(p => {
+            const f = rep.stages.find(s => s.id === p.stage.id)
+            if (!f) return null
+            const tone = rateTone(f)
+            return (
+              <div key={p.stage.id} className={`wf-node wf-repnode ${sel === p.stage.id ? 'sel' : ''} ${f.fedBy === 'none' ? 'dim' : ''}`}
+                style={{ left: p.x, top: p.y, width: L.NODE_W, height: H }} title={p.stage.description}
+                {...pressable(() => onSel(p.stage.id))} data-a11y-click="" data-stage={p.stage.id}>
+                <div className="wf-nodelabel">{p.stage.label}</div>
+                {f.fedBy === 'none' ? <div className="wf-nodesub">No figures</div> : <>
+                  <div className="wf-repline"><b>{f.runs}</b> run{f.runs === 1 ? '' : 's'}<span className={`wf-mini ${tone}`}>{fmtPct(f.errorRate)}</span></div>
+                  <div className="wf-nodesub">{f.p50Ms == null ? 'no times recorded' : `p50 ${fmtDur(f.p50Ms)} · p95 ${fmtDur(f.p95Ms)}`}</div>
+                  <div className="wf-nodesub">{f.retries ? `${f.retries} ${f.retries === 1 ? 'retry' : 'retries'}` : 'no retries'}{f.topCodes[0] ? ` · ${f.topCodes[0].code}` : ''}</div>
+                </>}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <div className="wf-legend">
+        <span><span className="wf-mini live">0%</span> no failures</span>
+        <span><span className="wf-mini warn">2%</span> under 5% failed</span>
+        <span><span className="wf-mini down">12%</span> 5% or more failed</span>
+        <span>Times are from the work starting to it finishing. Click a stage for its error codes and waiting time.</span>
+      </div>
+    </div>
+  )
+}
+
+function StageDetail({ stage, onClose }: { stage: WorkflowReport['stages'][number]; onClose: () => void }) {
+  return (
+    <div className="card wf-repdetail">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 650 }}>{stage.label}</div>
+          <div className="hintxt">{stage.description} {FED_BY[stage.fedBy]}</div>
+        </div>
+        <button className="btn ghost" onClick={onClose}>Close</button>
+      </div>
+      {stage.fedBy !== 'none' && <div className="wf-repgrid">
+        <div><div className="lbl">Runs</div><div>{stage.runs}</div></div>
+        <div><div className="lbl">Succeeded</div><div>{stage.succeeded} ({fmtPct(stage.successRate)})</div></div>
+        <div><div className="lbl">Failed</div><div style={stage.failed ? { color: 'var(--down)' } : undefined}>{stage.failed} ({fmtPct(stage.errorRate)})</div></div>
+        <div><div className="lbl">Cancelled</div><div>{stage.cancelled}</div></div>
+        <div><div className="lbl">Retries</div><div>{stage.retries}</div></div>
+        <div><div className="lbl">Time p50 / p95</div><div>{fmtDur(stage.p50Ms)} / {fmtDur(stage.p95Ms)}</div></div>
+        <div><div className="lbl">Waited p50 / p95</div><div>{fmtDur(stage.waitP50Ms)} / {fmtDur(stage.waitP95Ms)}</div></div>
+      </div>}
+      {stage.topCodes.length > 0 && <>
+        <div className="lbl" style={{ marginTop: 12 }}>Top error codes</div>
+        <div className="wf-codes">{stage.topCodes.map(c => <span key={c.code}><span className="wf-code">{c.code}</span> {c.count}</span>)}</div>
+      </>}
+    </div>
+  )
+}
+
+/** Runs per bucket as bars for each lane (each lane on its own scale, so a quiet lane still reads), the failed part in red, the error rate beside the lane and on hover. */
+function LaneSeries({ rep }: { rep: WorkflowReport }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [w, setW] = useState(800)
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // The card's padding is 16 px a side: the drawing gets the width inside it.
+    const ro = new ResizeObserver(() => setW(el.clientWidth - 32))
+    ro.observe(el); setW(el.clientWidth - 32)
+    return () => ro.disconnect()
+  }, [])
+  // Every bucket in the range, so a quiet day shows as a gap, not as nothing.
+  const step = rep.bucket === 'hour' ? 3600_000 : 86_400_000
+  const start = new Date(rep.since).getTime(), end = new Date(rep.until).getTime()
+  const buckets: number[] = []
+  for (let t = Math.floor(start / step) * step; t <= end; t += step) buckets.push(t)
+  const laneMax = (lane: string) => Math.max(1, ...rep.series.filter(s => s.lane === lane).map(s => s.runs))
+  const laneRate = (lane: string) => { const r = rep.series.filter(s => s.lane === lane); const n = r.reduce((a, s) => a + s.runs, 0); return n ? Math.round(r.reduce((a, s) => a + s.failed, 0) / n * 1000) / 10 : null }
+  const ROW = 64, LABEL = 120, PAD = 8
+  const plotW = Math.max(60, w - LABEL - PAD * 2)
+  const bw = plotW / buckets.length
+  const fmtT = (t: number) => rep.bucket === 'hour' ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' })
+  return (
+    <div className="card wf-series" ref={ref}>
+      {rep.series.length === 0 ? <div className="wf-quiet">No stage finished any work in this range.</div> :
+        <svg width="100%" viewBox={`0 0 ${w} ${rep.lanes.length * ROW + 22}`} onMouseLeave={() => setTip(null)}>
+          {rep.lanes.map((lane, li) => {
+            const y0 = li * ROW
+            const max = laneMax(lane.id), rate = laneRate(lane.id)
+            return (
+              <g key={lane.id}>
+                <text x={0} y={y0 + ROW - 26} className="wf-axis strong">{lane.label}</text>
+                <text x={0} y={y0 + ROW - 10} className="wf-axis">{rate == null ? 'no runs' : `${fmtPct(rate)} failed`}</text>
+                <line x1={LABEL} x2={LABEL + plotW} y1={y0 + ROW - 6} y2={y0 + ROW - 6} className="wf-gridline" />
+                {buckets.map((t, i) => {
+                  const s = rep.series.find(x => x.lane === lane.id && new Date(x.t).getTime() === t)
+                  if (!s || !s.runs) return null
+                  const h = Math.max(2, (s.runs / max) * (ROW - 16))
+                  const fh = (s.failed / s.runs) * h
+                  const x = LABEL + i * bw + 1, bwid = Math.max(1, bw - 2), base = y0 + ROW - 6
+                  return (
+                    <g key={t} onMouseEnter={() => setTip({ x: x + bwid / 2, y: base - h, text: `${lane.label}, ${fmtT(t)}: ${s.runs} runs, ${s.failed} failed (${fmtPct(s.errorRate)})` })}>
+                      <rect x={x} y={base - h} width={bwid} height={h - fh} className="wf-sbar" />
+                      {fh > 0 && <rect x={x} y={base - fh} width={bwid} height={fh} className="wf-sbar bad" />}
+                    </g>
+                  )
+                })}
+              </g>
+            )
+          })}
+          <text x={LABEL} y={rep.lanes.length * ROW + 14} className="wf-axis">{fmtT(buckets[0])}</text>
+          <text x={LABEL + plotW} y={rep.lanes.length * ROW + 14} className="wf-axis" textAnchor="end">{fmtT(buckets[buckets.length - 1])}</text>
+        </svg>}
+      {tip && <div className="wf-tip" style={{ left: Math.min(Math.max(8, tip.x - 110), w - 228), top: tip.y - 40 }}>{tip.text}</div>}
+    </div>
+  )
+}
+
+function FigureTable({ rows, first }: { rows: { key: string; name: string; sub: string; f: WorkflowFigures }[]; first: string }) {
+  return (
+    <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+      <table className="wf-reptable">
+        <thead><tr><th>{first}</th><th>Runs</th><th>Failed</th><th>Error rate</th><th>Retries</th><th>p50</th><th>p95</th><th>Top error</th></tr></thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.key}>
+              <td><div style={{ fontWeight: 600 }}>{r.name}</div><div className="hintxt">{r.sub}</div></td>
+              <td>{r.f.runs}</td>
+              <td>{r.f.failed}</td>
+              <td><span className={`wf-mini ${rateTone(r.f)}`}>{fmtPct(r.f.errorRate)}</span></td>
+              <td>{r.f.retries}</td>
+              <td>{fmtDur(r.f.p50Ms)}</td>
+              <td>{fmtDur(r.f.p95Ms)}</td>
+              <td>{r.f.topCodes[0] ? <><span className="wf-code">{r.f.topCodes[0].code}</span> {r.f.topCodes[0].count}</> : '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -9,7 +9,7 @@ guide: section
 
 Workflows shows the path every channel, recording and uploaded file follows through Volt, the **hooks** along that path where outside services can join in, and where each piece of work is right now. Most people come here to connect an **add-on service**, such as an AI agent that summarises recordings, a transcription house or a QC vendor, so that it runs on its own when, for example, a recording completes.
 
-![The Workflows page: the counts of runs, the Map, Runs and Add-ons and triggers tabs, and the pipeline map with its three lanes, stages and hooks](/img/screens/workflows.png)
+![The Workflows page: the counts of runs, the Map, Runs and Add-ons and triggers and Report tabs, and the pipeline map with its three lanes, stages and hooks](/img/screens/workflows.png)
 
 ## What it is for
 
@@ -30,6 +30,7 @@ Workflows shows the path every channel, recording and uploaded file follows thro
 - **Add-on services and triggers.** An add-on is an outside platform Volt sends work to. A trigger attaches it to a hook, for every channel and event or only some.
 - **Runs.** Every piece of work sent to an add-on, with its progress, steps, result and log, whether a hook started it or someone sent it by hand.
 - **Tracing.** Pick a recording and the map lights up the stages it has passed and outlines the one it is at.
+- **The report.** How each stage has done over the last 24 hours, 7 or 30 days: how much work it finished, how much failed and why, how often work was retried, and how long it took.
 
 Administrators set up add-ons and triggers; operators and producers follow runs and trace recordings.
 
@@ -46,6 +47,21 @@ Administrators set up add-ons and triggers; operators and producers follow runs 
 2. Along the top: **Running now**, **Completed, 24h**, **Failed or timed out, 24h** and **Hooks fired, 24h**.
 3. The **Map** tab shows the pipeline. Under each stage are its hooks, by a short name (under **Record**, **Completed** is **Recording completed**); a lit dot means the hook fired in the last 24 hours. Under each hook are the add-ons attached to it, with a count of runs going and runs failed. Click an add-on to open its latest run.
 4. Below the map: **In flight** (runs going now, with progress), **Recently finished** and **Stage activity** (each hook as it fires).
+
+### Read the report
+
+The **Report** tab shows how each stage has done, on the same map.
+
+![The Workflows Report tab: the 24 hours, 7 days and 30 days choice, totals for the last 7 days, and the pipeline map with each stage's runs, error rate, p50 and p95 time, retries and most common error code, with QC selected](/img/screens/workflows-report.png)
+
+1. Open the **Report** tab and pick **24 hours**, **7 days** or **30 days**.
+2. Along the top: **Stage runs**, **Failed**, **Error rate** and **Retries** for that range.
+3. Each stage on the map shows how many runs it finished, its error rate (green when nothing failed, amber under 5%, red at 5% or more), how long half of the runs took (**p50**) and how long all but the slowest 5% took (**p95**), its retries and its most common error code. A stage that shows **No figures** has nothing that records its work as runs yet.
+4. Click a stage for the detail: runs succeeded, failed and cancelled, retries, time taken, how long work waited before it started, and its top error codes.
+5. Under the map, **Runs and error rate per lane** draws each lane's runs per day (per hour for 24 hours) with the failed part in red; hover over a bar for its numbers.
+6. **Add-on runs** lists each add-on by the hook that started it (**Sent by hand** for runs started from a recording or asset), with the same figures. **Other background work** lists work Volt does that belongs to no stage on the map, such as frame indexes.
+
+Where the numbers come from: Thumbnails, Clip, QC, Publish, Upload and the file Encode count the work Volt queues for them, and a retry counts as one run with a retry, not as a second run. Encode in the Live lane counts each stream run when it stops, and a stop for a fault is a failure. Record counts recordings as they complete, with their length as the time. Review counts decisions. The figures are brought up to date once a minute, so a run that has just finished appears within about two minutes; the line beside the range buttons says how fresh they are.
 
 ### Add an add-on service
 
@@ -117,7 +133,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 
 | Task | Access needed |
 |---|---|
-| See the map, runs, add-ons and triggers; trace a recording | Account settings: View |
+| See the map, runs, add-ons and triggers and the report; trace a recording | Account settings: View |
 | Cancel a run, run it again | Account settings: Operate |
 | Send a recording to an add-on by hand | Recordings: Operate, or Account settings: Operate |
 | Send a clip to an add-on by hand (through the API) | Media library & publishing: Operate, or Account settings: Operate |
@@ -140,6 +156,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Failed** with a reason under it | The service reported an error | Read the **Event log**, fix it on the service side, then **Run again** |
 | **The recording no longer exists** after **Run again** | The recording was deleted | Nothing to rerun |
 | **Couldn't load the workflow map.** | The page could not reach Volt | It clears itself when Volt answers again; reload if it stays |
+| **Couldn't load the workflow report.** | The report could not be read | It is tried again every minute; reload if it stays |
+| **The first figures appear within a few minutes of the server starting.** on the Report tab | Volt has just started and has not brought the figures up to date yet | Wait a minute or two; the first time, Volt fills in the last 30 days |
+| A stage shows **No figures** | Nothing records that stage's work as runs yet (Source, Package, Deliver, Ingest rules) | Nothing to do; its work is counted in the stages around it |
 
 ## Through the API
 
@@ -152,6 +171,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `POST /api/workflows/runs/{id}/cancel`, `POST /api/workflows/runs/{id}/retry` | Cancels a run, or starts it again |
 | `GET /api/workflows/trace?subjectType=recording&subjectId=...` | Hooks fired and runs for one recording or asset |
 | `GET /api/workflows/events` | Recent hook events across the account |
+| `GET /api/workflows/report?range=7d` | The report: per stage runs, error rate, retries, p50 and p95 time and top error codes, add-on runs, and runs per lane per hour or day (`range` is `24h`, `7d` or `30d`) |
 | `GET /api/addons`, `POST /api/addons`, `PATCH /api/addons/{id}`, `DELETE /api/addons/{id}` | Add-on services |
 | `POST /api/addons/{id}/rotate-secret`, `POST /api/addons/{id}/test` | A new signing secret; a signed test ping |
 | `GET /api/addons/triggers`, `POST /api/addons/triggers`, `PATCH /api/addons/triggers/{id}`, `DELETE /api/addons/triggers/{id}` | Triggers that attach add-ons to hooks |

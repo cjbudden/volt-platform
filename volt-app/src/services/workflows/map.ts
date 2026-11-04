@@ -79,5 +79,26 @@ export const HOOKS: HookDef[] = [
 
 export const HOOK_IDS = new Set(HOOKS.map((h) => h.id));
 
+/**
+ * Which stage each job type is the work of, for the workflow report
+ * (services/workflows/rollup.ts). A job type not listed here still counts,
+ * under "other jobs" by its type, so a new handler shows up in the report
+ * before anyone decides where it belongs. `addon.dispatch` is left out on
+ * purpose: add-on runs are reported from addon_runs, and counting their
+ * delivery jobs as well would count each run twice.
+ */
+export const JOB_STAGES: Record<string, string> = {
+  'ingest.remote': 'upload',
+  'vod.encode': 'vodenc',
+  'vod.ladder': 'vodenc',
+  'vod.image': 'thumbs',
+  'filler.thumbs': 'thumbs',
+  'clip.extract': 'clip',
+  'qc.run': 'qc',
+  'social.publish': 'publish',
+};
+/** Job types the report never counts (see JOB_STAGES). */
+export const REPORT_SKIPS_JOBS = new Set(['addon.dispatch']);
+
 /** Subject types that can be sent to an add-on by hand. */
 export const MANUAL_SUBJECTS: SubjectType[] = ['recording', 'vod_asset'];
