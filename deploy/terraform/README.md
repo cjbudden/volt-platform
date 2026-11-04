@@ -58,53 +58,58 @@ terraform output           # control_plane_url, cdn_domain, ecr_repositories,
 The control plane comes up **before** its image exists in ECR, so its ECS
 service will sit at 0 healthy tasks until step 3. That's expected.
 
-## 3. Build & push the images
+## 3. Deploy a release: images, migrations, services
+One command does it, from the repository root, with the release checked out:
 ```bash
-ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-REGION=$(aws configure get region || echo us-east-1)
-aws ecr get-login-password --region $REGION \
-  | docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
-
-# control plane
-docker build -t volt-control-plane ../../volt-app
-docker tag volt-control-plane $(terraform output -json ecr_repositories | jq -r '."volt-control-plane"'):latest
-docker push $(terraform output -json ecr_repositories | jq -r '."volt-control-plane"'):latest
-
-# encoder (also serves as the thumbnailer image build target)
-docker build -t volt-encoder ../../volt-encoder
-docker tag volt-encoder $(terraform output -json ecr_repositories | jq -r '."volt-encoder"'):latest
-docker push $(terraform output -json ecr_repositories | jq -r '."volt-encoder"'):latest
-docker tag volt-encoder $(terraform output -json ecr_repositories | jq -r '."volt-thumbnailer"'):latest
-docker push $(terraform output -json ecr_repositories | jq -r '."volt-thumbnailer"'):latest
-
-# FAST playout (one small task per FAST channel; writes its playlists to the bucket)
-docker build -t volt-fast -f ../../volt-encoder/Dockerfile.fast ../../volt-encoder
-docker tag volt-fast $(terraform output -json ecr_repositories | jq -r '."volt-fast"'):latest
-docker push $(terraform output -json ecr_repositories | jq -r '."volt-fast"'):latest
-
-# radio (one small task per station; ffmpeg alone)
-docker build -t volt-radio -f ../../volt-encoder/Dockerfile.radio ../../volt-encoder
-docker tag volt-radio $(terraform output -json ecr_repositories | jq -r '."volt-radio"'):latest
-docker push $(terraform output -json ecr_repositories | jq -r '."volt-radio"'):latest
-
-# live captions add-on (Whisper + NLLB on the GPU pool; large, only if accounts use Whisper)
-docker build -t volt-captions -f ../../volt-encoder/Dockerfile.captions ../../volt-encoder
-docker tag volt-captions $(terraform output -json ecr_repositories | jq -r '."volt-captions"'):latest
-docker push $(terraform output -json ecr_repositories | jq -r '."volt-captions"'):latest
-
-# roll the control-plane service onto the new image
-aws ecs update-service --cluster $(terraform output -raw ecs_cluster) \
-  --service $(terraform output -raw ecs_cluster)-* --force-new-deployment 2>/dev/null || true
+node scripts/deploy/deploy.mjs <env>                    # the version in VERSION
+node scripts/deploy/deploy.mjs <env> --dry-run          # every change printed, none made
+node scripts/deploy/deploy.mjs <env> --version v0.43.0  # a given release
+node scripts/deploy/deploy.mjs <env> --rollback         # back to what ran before
 ```
-(Encoder, thumbnailer, FAST playout, radio and captions task defs point at `:latest`; the orchestrator picks
-them up on the next RunTask — no service to roll.)
+`<env>` is an entry in `deploy/environments.json` with `driver: "ecs"` and the
+same `project`, `env` and `region` as `terraform.tfvars` (copy `_aws-example`).
+It needs the AWS CLI v2 and Docker, with your own AWS credentials. In order it:
+
+1. runs the release checks and finds the release's git tag and commit;
+2. builds and pushes every image as `v<version>-<sha>` (and `v<version>`):
+   `volt-control-plane`, `volt-encoder` (also as `volt-thumbnailer`), `volt-fast`,
+   `volt-radio`, and `volt-captions` only if the environment lists `captions`.
+   Never `latest`. Images already in ECR for that tag are not rebuilt;
+3. registers each service's new task definition revision from the newest one
+   Terraform wrote (only the image changes) and runs the migrations **once** as
+   a one-off Fargate task of the new image (`node dist/migrateOnly.js`), before
+   any service moves;
+4. moves the services (control plane, and api-public, scheduler and worker with
+   the role split) and waits for steady state;
+5. smoke test: `/health/ready`, a play gate call, a manifest fetch (set
+   `smoke.appKey` and `smoke.assetId` for a channel or title that always plays);
+6. if a service never settles or the smoke test fails, puts back the exact
+   revisions that ran before and exits 1. Otherwise registers the new encoder,
+   thumbnailer, FAST, radio and captions revisions: **new streams take the new
+   version, running streams keep theirs until they stop** (nothing is restarted);
+7. records what runs where in `release/deployments.json`. Commit it.
+
+Terraform no longer moves the services' revision (`ignore_changes =
+[task_definition]`): the deploy script does, so an apply can never undo a
+rollback. Image tags must name a release: apply with the one that runs,
+```bash
+terraform apply -var control_plane_image_tag=$(node ../../scripts/deploy/deploy.mjs <env> --current)
+```
+so the task definitions Terraform registers stay on the running images. A
+settings-only apply writes new revisions; the next deploy (the same version
+again is fine) rolls them out.
+
+**The first deploy** after the first apply: the services sit at 0 healthy tasks
+(their tag is not in ECR yet), and the deploy has nothing to roll back to.
 
 ## 4. The database
-Nothing to run. The roles that own the schema (`all`, `api-admin`, `scheduler`)
-apply every migration in `volt-app/migrations` on boot, under a lock, before they
-serve (`volt-app/src/scale/boot.ts`); the other roles wait for them. Applying
-only `0001_init.sql` by hand, as this step used to say, would leave the schema
-far behind the code.
+The deploy runs the migrations as a one-off task before the services move
+(step 3 above). The roles that own the schema (`all`, `api-admin`,
+`scheduler`) still apply every migration in `volt-app/migrations` on boot,
+under a lock (`volt-app/src/scale/boot.ts`), and find nothing left to do; the
+other roles wait for them. Because old and new tasks run side by side during a
+rolling deploy, and a rollback does not undo migrations, a release may only
+add to the schema (see `RELEASING.md`, "Deploying").
 
 ## 5. Populate integration secrets
 ```bash

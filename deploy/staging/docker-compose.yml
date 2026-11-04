@@ -31,6 +31,9 @@ x-volt-env: &volt-env
   JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
   JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
   PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET:-}
+  # Signs image URLs; the API refuses to start in production without one
+  # (services/images/signing.ts). Found missing by the D1 staging run.
+  IMAGE_SIGNING_SECRET: ${IMAGE_SIGNING_SECRET:?set IMAGE_SIGNING_SECRET in .env (openssl rand -hex 32)}
   VIEWER_JWT_SECRET: ${VIEWER_JWT_SECRET:-}
   # Sign-in security (ACCESS_CONTROL.md section 12). Email codes go to the
   # mailpit catcher below unless SMTP_URL points at a real server.
@@ -60,6 +63,9 @@ x-volt-env: &volt-env
   # docker = real encoder containers; needs the socket mounted below and the
   # encoder image built (see volt-encoder/README).
   ORCH_LAUNCHER: ${ORCH_LAUNCHER:-mock}
+  # The image new encoder containers start from (docker launcher). A deploy that
+  # builds the encoder sets VOLT_ENCODER_TAG; running encoders keep theirs.
+  ENCODER_IMAGE: volt-encoder:${VOLT_ENCODER_TAG:-local}
   RADIO_MODE: container
   PREWARM_MODE: log
 
@@ -67,22 +73,16 @@ x-volt-app: &volt-app
   build:
     context: ../..
     dockerfile: volt-app/Dockerfile
-  image: volt-control-plane:staging
+  # The tag is the release: scripts/deploy/deploy.mjs staging sets VOLT_IMAGE_TAG
+  # to v<version>-<sha> (build queue D1). A plain `up --build` builds :staging.
+  image: volt-control-plane:${VOLT_IMAGE_TAG:-staging}
   restart: unless-stopped
   volumes:
     - voltdata:/data
   depends_on:
     db:
       condition: service_healthy
-    # Catches every email the API sends (sign-in codes, email changes, alerts)
-  # so staging can be tested without a real mail server: http://<host>:8025
-  mailpit:
-    image: axllent/mailpit:v1.21
-    restart: unless-stopped
-    ports:
-      - "${MAILPIT_PORT:-8025}:8025"
-
-  valkey:
+    valkey:
       condition: service_healthy
   healthcheck:
     # Liveness only: a database outage must not make every container restart.
@@ -119,6 +119,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  # Catches every email the API sends (sign-in codes, email changes, alerts)
+  # so staging can be tested without a real mail server: http://<host>:8025
+  # (It sat inside the app's depends_on, which compose refused; moved here by D1.)
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"
 
   # Owns the schema (migrates on boot) and serves the console + admin API.
   api-admin:

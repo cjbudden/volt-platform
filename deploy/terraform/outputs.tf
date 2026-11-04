@@ -40,3 +40,11 @@ output "integrations_secret_arn" {
   value       = aws_secretsmanager_secret.integrations.arn
   description = "Populate with Axinom DRM key + social OAuth tokens after apply."
 }
+
+output "image_tags" {
+  value = {
+    control_plane = var.control_plane_image_tag
+    encoders      = local.encoder_image_tag
+  }
+  description = "Release tags the task definitions Terraform writes use. scripts/deploy/deploy.mjs moves services and per-stream families itself and records them in release/deployments.json."
+}

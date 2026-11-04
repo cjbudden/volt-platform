@@ -115,8 +115,9 @@ resource "aws_ecs_service" "api_public" {
   deployment_maximum_percent         = 200
   health_check_grace_period_seconds  = 120
 
+  # Revision moved by scripts/deploy/deploy.mjs (see ecs_services.tf).
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [desired_count, task_definition]
   }
 
   depends_on = [aws_lb_listener_rule.public]
@@ -142,6 +143,11 @@ resource "aws_ecs_service" "scheduler" {
   # Keep a leader during deploys: start the new tasks before stopping the old.
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
+
+  # Revision moved by scripts/deploy/deploy.mjs (see ecs_services.tf).
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 }
 
 resource "aws_ecs_service" "worker" {
@@ -162,8 +168,9 @@ resource "aws_ecs_service" "worker" {
     rollback = true
   }
 
+  # Revision moved by scripts/deploy/deploy.mjs (see ecs_services.tf).
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [desired_count, task_definition]
   }
 }
 

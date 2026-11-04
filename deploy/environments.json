@@ -1,0 +1,23 @@
+{
+  "_comment": "Where scripts/deploy/deploy.mjs can deploy (build queue D1). driver compose = the Docker staging stack in deploy/staging; driver ecs = an AWS environment built by deploy/terraform (project and env as in its terraform.tfvars). baseUrl is what the smoke test calls. smoke.appKey and smoke.assetId (a publishable key and a channel or VOD id that should always play) make the smoke test ask the play gate for a real asset and fetch its manifest; without them it checks the gate refuses a made-up key and skips the manifest. Keys starting with _ are ignored: copy _aws-example to a real name to use it.",
+
+  "staging": {
+    "driver": "compose",
+    "composeFile": "deploy/staging/docker-compose.yml",
+    "project": "staging",
+    "baseUrl": "http://localhost",
+    "services": ["api-admin", "api-public", "scheduler", "worker"],
+    "images": ["control-plane"],
+    "smoke": { "appKey": "", "assetId": "", "origin": "" }
+  },
+
+  "_aws-example": {
+    "driver": "ecs",
+    "project": "volt",
+    "env": "staging",
+    "region": "us-east-1",
+    "baseUrl": "http://<control_plane_url from terraform output>",
+    "images": ["control-plane", "encoder", "thumbnailer", "fast", "radio"],
+    "smoke": { "appKey": "pk_live_...", "assetId": "<a channel or VOD id that always plays>", "origin": "https://<a site the app allows>" }
+  }
+}

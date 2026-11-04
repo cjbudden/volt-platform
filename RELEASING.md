@@ -80,7 +80,9 @@ git push && git push origin vX.Y.Z
 
 Then, in this order:
 
-1. **Deploy the app** (control plane, web, encoder images) as usual.
+1. **Deploy the app** (control plane, web, encoder images):
+   `node scripts/deploy/deploy.mjs staging`, then each AWS environment
+   (`deploy.mjs <env>`). See "Deploying" below.
 2. **Publish the docs:** `scripts/docs/publish-docs.sh --from-terraform`
    (docs-site/MAINTAINING.md). After the app, so the reference never
    describes routes that are not live yet.
@@ -90,8 +92,33 @@ Then, in this order:
 `changed` or `removed` note). A release with no core notes still gets a version
 and a one-line "maintenance" post.
 
+## Deploying
+
+`scripts/deploy/deploy.mjs <env> [--version vX.Y.Z] [--rollback] [--dry-run]`
+deploys a release to an environment in `deploy/environments.json` (`staging` is
+the Docker staging stack in `deploy/staging`; AWS environments use the
+Terraform in `deploy/terraform`). It runs the release checks, builds and pushes
+the images tagged `v<version>-<sha>` (never `latest`), runs the migrations once
+as a one-off task, moves the services and waits for them, smoke-tests
+(`/health/ready`, a play gate call, a manifest) and puts the previous version
+back if anything fails. New streams take the new encoder images; running
+streams keep theirs until they stop. Every attempt and what runs where is in
+`release/deployments.json`: commit it after a deploy.
+
+- **Roll back:** `deploy.mjs <env> --rollback` puts back the state recorded
+  before the current one (services and encoder images; no build, no
+  migrations). Run it again to go back further.
+- **Schema:** old and new tasks run side by side during a rolling deploy and a
+  rollback does not undo migrations, so a release only adds: new tables,
+  nullable columns or columns with defaults, indexes built concurrently.
+  Dropping, renaming or retyping waits for a release after the code stopped
+  using it (the migration safety check, build queue D2, will enforce this).
+- **Terraform:** apply with the tag that runs:
+  `-var control_plane_image_tag=$(node scripts/deploy/deploy.mjs <env> --current)`.
+
 ## If something goes wrong
 
+- **A bad deploy got through the smoke test:** `node scripts/deploy/deploy.mjs <env> --rollback`.
 - **Wrong release notes:** edit `docs-site/release-notes/<date>-vX.Y.Z.md` and republish the docs. The change notes are kept in `changes/released/` as the record.
 - **Bad docs publish:** check out the previous tag's `docs-site` and `volt-app/docs/openapi.json` and publish again. The docs bucket is versioned for emergencies.
 - **A hook complains about the wrong files:** fix the path rules in `release/scopes.json`.

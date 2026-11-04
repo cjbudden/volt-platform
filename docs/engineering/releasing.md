@@ -79,6 +79,7 @@ release until the tree is clean of other people's work.
 ## After a release
 
 Christian pushes and deploys, in this order: the app (control plane, console
-and encoder images), then the docs (`scripts/docs/publish-docs.sh --from-terraform`),
+and encoder images, with `node scripts/deploy/deploy.mjs <env>`; staging first,
+`deploy.mjs staging`), then the docs (`scripts/docs/publish-docs.sh --from-terraform`),
 so the API reference never describes routes that are not live. See
 [The docs site](docs-site.md) and [Deploying to AWS](deploying-to-aws.md).

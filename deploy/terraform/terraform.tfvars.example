@@ -17,7 +17,10 @@ db_instance_class = "db.t4g.medium"
 db_multi_az       = false   # true for prod
 
 control_plane_desired   = 2
-control_plane_image_tag = "latest"
+# A release, never latest (D1). After the first deploy, use the one running:
+#   node ../../scripts/deploy/deploy.mjs <env> --current
+control_plane_image_tag = "v0.43.0"
+encoder_image_tag       = ""   # empty: same as control_plane_image_tag
 
 # ---- Scaling (SCALING.md) -------------------------------------------------------
 # Staging: the defaults below are fine. For a 1M-viewer event use the

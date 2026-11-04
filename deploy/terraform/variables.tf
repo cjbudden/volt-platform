@@ -123,10 +123,28 @@ variable "control_plane_desired" {
   default = 2
 }
 
+# Image tags name a release, never `latest` (build queue D1): v<version>-<sha>
+# as scripts/deploy/deploy.mjs pushes it, or v<version>. The deploy script
+# moves services and task families itself; apply with the tag that runs now
+# so Terraform never registers revisions on an older image:
+#   terraform apply -var control_plane_image_tag=$(node ../../scripts/deploy/deploy.mjs <env> --current)
 variable "control_plane_image_tag" {
   type        = string
-  default     = "latest"
-  description = "Tag pushed to the volt-control-plane ECR repo."
+  description = "Release tag of the control-plane image (v0.43.0-1a2b3c4 or v0.43.0). Never latest."
+  validation {
+    condition     = can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9a-f]{7,40})?$", var.control_plane_image_tag))
+    error_message = "control_plane_image_tag must name a release (v0.43.0-1a2b3c4 or v0.43.0), not latest. scripts/deploy/deploy.mjs <env> --current prints the one running."
+  }
+}
+
+variable "encoder_image_tag" {
+  type        = string
+  default     = ""
+  description = "Release tag of the encoder, thumbnailer, FAST, radio and captions images. Empty: the same as control_plane_image_tag."
+  validation {
+    condition     = var.encoder_image_tag == "" || can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9a-f]{7,40})?$", var.encoder_image_tag))
+    error_message = "encoder_image_tag must be empty or name a release (v0.43.0-1a2b3c4 or v0.43.0), not latest."
+  }
 }
 
 # ---- Data ------------------------------------------------------------------

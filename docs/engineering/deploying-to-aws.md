@@ -74,7 +74,12 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    `deploy/terraform/versions.tf` first.
 2. **Apply.** About 40 resources, 15 to 20 minutes. The control plane service
    sits at zero healthy tasks until its image exists.
-3. **Build and push the images** to the repositories the stack created: the
+3. **Deploy the release** with `node scripts/deploy/deploy.mjs <env>` (build
+   queue D1; `deploy/terraform/README.md` section 3): images tagged
+   `v<version>-<sha>`, migrations once as a one-off task, services moved and
+   smoke-tested, rolled back on failure, `release/deployments.json` written.
+   `--rollback` goes back to the previous recorded state; `--dry-run` prints
+   every change. Images, to the repositories the stack created: the
    control plane (`volt-app`), the encoder (`volt-encoder`, also tagged as the
    thumbnailer), FAST playout (`volt-encoder/Dockerfile.fast`), radio
    (`volt-encoder/Dockerfile.radio`) and, if accounts use Whisper captions,
@@ -88,9 +93,11 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    the task disk".
    Radio needs no relay: stations deliver HLS and DASH (2.1c-2). MP3, where
    an account has it switched on, is made on demand by the control plane.
-4. **Migrations.** The control plane applies every migration in
-   `volt-app/migrations` on boot, under a lock, in the `api-admin` role. A
-   one-off run uses the same runner (`npm run migrate` in `volt-app`).
+4. **Migrations.** The deploy runs them once as a one-off task of the new
+   image (`node dist/migrateOnly.js`: the same runner, lock and top-ups as a
+   boot) before any service moves. The control plane still applies them on
+   boot in the `api-admin` role and finds nothing left. From a checkout:
+   `npx tsx src/migrateOnly.ts` in `volt-app`.
 5. **Secrets.** Put the integration secrets (DRM, social apps) into the
    Secrets Manager entry the stack created. The app stores only references;
    raw values never reach the database or the images. Operator settings that

@@ -83,8 +83,12 @@ from the repository root), `volt-encoder` (also pushed as `volt-thumbnailer`),
 `volt-fast` (`volt-encoder/Dockerfile.fast`), `volt-radio`
 (`volt-encoder/Dockerfile.radio`) and `volt-captions`
 (`volt-encoder/Dockerfile.captions`, several GB with its models; push it only
-if an account will use Whisper captions). The commands are section 3 of
-`README.md`. Then force a new deployment of the control-plane service(s).
+if an account will use Whisper captions). `scripts/deploy/deploy.mjs <env>`
+builds and pushes them tagged `v<version>-<sha>`, runs the migrations once,
+moves the services, smoke-tests and rolls back on failure (section 3 of
+`README.md`). Add the environment to `deploy/environments.json` first (copy
+`_aws-example`), and set `control_plane_image_tag` in `terraform.tfvars` to a
+release (`latest` is refused).
 
 Whisper captions run on a GPU pool (`ecs_capacity_gpu.tf`, g4dn.xlarge by
 default) that starts at zero servers and costs nothing until a captions task

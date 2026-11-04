@@ -30,6 +30,11 @@ mock_provider "aws" {
 }
 mock_provider "random" {}
 
+# Image tags must name a release (build queue D1); any release does here.
+variables {
+  control_plane_image_tag = "v0.43.0-1a2b3c4"
+}
+
 run "off_by_default" {
   command = plan
   assert {

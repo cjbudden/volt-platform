@@ -89,12 +89,22 @@ resource "aws_ecs_service" "control_plane" {
   deployment_maximum_percent         = 200
   health_check_grace_period_seconds  = 120
 
-  # Autoscaling owns the running count (scaling_services.tf).
+  # Autoscaling owns the running count (scaling_services.tf). The deploy
+  # script (scripts/deploy/deploy.mjs) owns which revision runs: it registers
+  # each release's revision from the newest one Terraform wrote and moves the
+  # service, after the migrations and before its smoke test, and rolls back on
+  # failure. Terraform moving it too would undo a rollback on the next apply.
   lifecycle {
-    ignore_changes = [desired_count]
+    ignore_changes = [desired_count, task_definition]
   }
 
   depends_on = [aws_lb_listener.http]
+}
+
+# Per-stream images run the release the deploy script last moved them to; see
+# encoder_image_tag in variables.tf.
+locals {
+  encoder_image_tag = var.encoder_image_tag != "" ? var.encoder_image_tag : var.control_plane_image_tag
 }
 
 # ---- Encoder/packager task definition (launched on demand by the orchestrator)
@@ -111,7 +121,7 @@ resource "aws_ecs_task_definition" "encoder" {
 
   container_definitions = jsonencode([{
     name      = "encoder"
-    image     = "${aws_ecr_repository.repo["volt-encoder"].repository_url}:latest"
+    image     = "${aws_ecr_repository.repo["volt-encoder"].repository_url}:${local.encoder_image_tag}"
     essential = true
     environment = [
       { name = "AWS_DEFAULT_REGION", value = var.region },
@@ -155,7 +165,7 @@ resource "aws_ecs_task_definition" "thumbnailer" {
 
   container_definitions = jsonencode([{
     name      = "thumbnailer"
-    image     = "${aws_ecr_repository.repo["volt-thumbnailer"].repository_url}:latest"
+    image     = "${aws_ecr_repository.repo["volt-thumbnailer"].repository_url}:${local.encoder_image_tag}"
     essential = true
     environment = [
       { name = "AWS_DEFAULT_REGION", value = var.region },
@@ -188,7 +198,7 @@ resource "aws_ecs_task_definition" "fast" {
 
   container_definitions = jsonencode([{
     name      = "fast"
-    image     = "${aws_ecr_repository.repo["volt-fast"].repository_url}:latest"
+    image     = "${aws_ecr_repository.repo["volt-fast"].repository_url}:${local.encoder_image_tag}"
     essential = true
     # SIGTERM: final heartbeat with its state, then exit (fast_playout.py)
     stopTimeout = 10
@@ -224,7 +234,7 @@ resource "aws_ecs_task_definition" "radio" {
 
   container_definitions = jsonencode([{
     name        = "radio"
-    image       = "${aws_ecr_repository.repo["volt-radio"].repository_url}:latest"
+    image       = "${aws_ecr_repository.repo["volt-radio"].repository_url}:${local.encoder_image_tag}"
     essential   = true
     stopTimeout = 30
     environment = [
@@ -259,7 +269,7 @@ resource "aws_ecs_task_definition" "captions" {
 
   container_definitions = jsonencode([{
     name                 = "captions"
-    image                = "${aws_ecr_repository.repo["volt-captions"].repository_url}:latest"
+    image                = "${aws_ecr_repository.repo["volt-captions"].repository_url}:${local.encoder_image_tag}"
     essential            = true
     resourceRequirements = [{ type = "GPU", value = "1" }]
     stopTimeout          = 30
@@ -297,7 +307,7 @@ resource "aws_ecs_task_definition" "captions_shared" {
 
   container_definitions = jsonencode([{
     name        = "captions"
-    image       = "${aws_ecr_repository.repo["volt-captions"].repository_url}:latest"
+    image       = "${aws_ecr_repository.repo["volt-captions"].repository_url}:${local.encoder_image_tag}"
     essential   = true
     stopTimeout = 30
     environment = [
