@@ -126,3 +126,15 @@ Christian, 22 Oct: this has to be testable on the Mac before the AWS setup.
 - No rules for a stream, or an unreadable store: fail open, as today, with the
   play gate still enforcing.
 - Account and channel geo blocks: still a 451 at the edge.
+
+## Trick-play inside a variant (build queue 3.2b-9, 4 Nov 2026)
+
+- HLS: the variant master keeps the delivered I-frame playlists
+  (`<label>.iframes_cc.m3u8`, written while playout runs, a time on every
+  entry) and the service renders them like media playlists: entries outside a
+  window as delivered, inside it the loop's opening keyframe for the same slot
+  (`renderVariantMedia` with `loopKeyframe`; ranges read once per loop file by
+  `loopKeyframes`). An unknown loop keyframe refuses the playlist (503), never
+  the programme's entry. The packager's own `<label>.iframes.m3u8` (no times)
+  is never offered and is refused by name.
+- DASH: trick-mode sets are still dropped from a variant MPD (3.2b-10).

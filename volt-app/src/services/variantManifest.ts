@@ -54,7 +54,11 @@ import type { Timeline } from './edgeRights';
 
 export interface LoopTrack { kind?: string; init: string; segments: { uri: string; dur: number }[] }
 /** The pre-built loop (filler_build.py's filler.json) and where its files are served. */
-export interface Loop { segmentSeconds: number; base: string; tracks: Record<string, LoopTrack> }
+export interface Loop {
+  segmentSeconds: number; base: string; tracks: Record<string, LoopTrack>;
+  /** Reads one of the loop's files by its URI in filler.json (trick-play inside a window, 3.2b-9). */
+  read?: (uri: string) => Promise<Buffer | null>;
+}
 
 export class VariantError extends Error {}
 
@@ -134,7 +138,7 @@ function loopTrackFor(loop: Loop, initUri: string): LoopTrack {
 // ---------------------------------------------------------------------------
 //  HLS
 // ---------------------------------------------------------------------------
-const HEADER_TAGS = /^#(EXTM3U|EXT-X-VERSION|EXT-X-TARGETDURATION|EXT-X-MEDIA-SEQUENCE|EXT-X-DISCONTINUITY-SEQUENCE|EXT-X-PLAYLIST-TYPE|EXT-X-INDEPENDENT-SEGMENTS|EXT-X-START|EXT-X-ALLOW-CACHE)\b/;
+const HEADER_TAGS = /^#(EXTM3U|EXT-X-VERSION|EXT-X-TARGETDURATION|EXT-X-MEDIA-SEQUENCE|EXT-X-DISCONTINUITY-SEQUENCE|EXT-X-PLAYLIST-TYPE|EXT-X-INDEPENDENT-SEGMENTS|EXT-X-START|EXT-X-ALLOW-CACHE|EXT-X-I-FRAMES-ONLY)\b/;
 // Low-latency parts are dropped: a variant is served as plain HLS, so a
 // player never meets a live part inside a window.
 const LL_TAGS = /^#EXT-X-(PART|PART-INF|PRELOAD-HINT|RENDITION-REPORT|SERVER-CONTROL|SKIP)\b/;
@@ -153,7 +157,15 @@ export function renderVariantMaster(text: string, carry = ''): string {
   const add = (u: string) => (carry && !ABS.test(u) ? u + (u.includes('?') ? '&' + carry.slice(1) : carry) : u);
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trimEnd();
-    if (/^#EXT-X-I-FRAME-STREAM-INF/.test(line)) continue;
+    if (/^#EXT-X-I-FRAME-STREAM-INF/.test(line)) {
+      // TRICK-PLAY INSIDE A VARIANT (3.2b-9): the delivered I-frame playlists
+      // (<label>.iframes_cc.m3u8, written while playout runs) carry a time on
+      // every entry, so this service can swap the loop's keyframes in inside
+      // each window, as it does the loop's segments. The packager's own
+      // (<label>.iframes.m3u8) are not offered here.
+      if (/URI="[^"]*\.iframes_cc\.m3u8"/.test(line)) out.push(uriAttr(line, add));
+      continue;
+    }
     if (/^#EXT-X-MEDIA:/.test(line)) { out.push(uriAttr(line, add)); continue; }
     if (line && !line.startsWith('#')) { out.push(add(line)); continue; }
     out.push(line);
@@ -169,7 +181,11 @@ interface Seg { tags: string[]; disc: boolean; map: string | null; key: string |
  *   emptyVtt URI of an empty WebVTT document, for subtitle playlists
  *   shiftSec development `&at=`: the windows are tested at t + shift
  */
-export function renderVariantMedia(text: string, o: { timeline: Timeline; loop: Loop | null; base: string; emptyVtt: string; shiftSec?: number }): string {
+export function renderVariantMedia(text: string, o: {
+  timeline: Timeline; loop: Loop | null; base: string; emptyVtt: string; shiftSec?: number;
+  /** An I-frame playlist: the byte range of a loop segment's opening keyframe, by its filler.json URI (3.2b-9). */
+  loopKeyframe?: (uri: string) => [number, number] | null;
+}): string {
   const lines = text.split(/\r?\n/).map((l) => l.trimEnd());
   const header: string[] = [];
   const segs: Seg[] = [];
@@ -207,6 +223,7 @@ export function renderVariantMedia(text: string, o: { timeline: Timeline; loop: 
 
   const tl = o.timeline;
   const shift = o.shiftSec ?? 0;
+  const iframesOnly = header.some((h) => h === '#EXT-X-I-FRAMES-ONLY');
   const subtitles = !segs.some((s) => s.map) && segs.every((s) => /\.(vtt|webvtt)(\?|$)/i.test(s.uri));
   if (!subtitles && !segs.every((s) => s.map)) throw new VariantError('only CMAF (fMP4) playlists can carry the loop');
   const anyReplaced = tl.length > 0 && segs.some((s) => regionAt(s.pdt! + shift, tl.map((w) => [w[0], w[1]] as [number, number]), 1, 1).r !== 'L');
@@ -257,7 +274,16 @@ export function renderVariantMedia(text: string, o: { timeline: Timeline; loop: 
     const lt = loopTrackFor(o.loop!, s.map!.match(/URI="([^"]*)"/)?.[1] ?? '');
     const initLine = `#EXT-X-MAP:URI="${absolute(o.loop!.base, lt.init)}"`;
     if (initLine !== curMap || cut) { out.push(initLine); curMap = initLine; }
-    out.push(s.inf, absolute(o.loop!.base, lt.segments[Math.min(idx, lt.segments.length - 1)].uri));
+    const loopUri = lt.segments[Math.min(idx, lt.segments.length - 1)].uri;
+    if (iframesOnly) {
+      // The loop's keyframe in the slot, never the live entry's range: an
+      // unknown one refuses the whole playlist rather than show the programme.
+      const r = o.loopKeyframe ? o.loopKeyframe(loopUri) : null;
+      if (!r) throw new VariantError(`the loop's keyframe in ${loopUri} is not known`);
+      out.push(s.inf, `#EXT-X-BYTERANGE:${r[1]}@${r[0]}`, absolute(o.loop!.base, loopUri));
+      continue;
+    }
+    out.push(s.inf, absolute(o.loop!.base, loopUri));
   }
   out.push(...trailer);
   return out.join('\n') + '\n';
@@ -441,6 +467,17 @@ const sourceCache = new Map<string, { at: number; p: Promise<string | null> }>()
 export const variantSourceStats = { reads: 0 };
 
 let s3: any = null;
+async function s3GetBytes(key: string): Promise<Buffer | null> {
+  const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+  if (!s3) s3 = new S3Client({ region: config.aws.region, endpoint: process.env.AWS_ENDPOINT_URL || undefined, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === '1' });
+  try {
+    const r = await s3.send(new GetObjectCommand({ Bucket: config.aws.s3Bucket, Key: key }));
+    return Buffer.from(await (r.Body as any).transformToByteArray());
+  } catch (e: any) {
+    if (e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404) return null;
+    throw e;
+  }
+}
 async function s3Get(key: string): Promise<string | null> {
   const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
   if (!s3) s3 = new S3Client({ region: config.aws.region, endpoint: process.env.AWS_ENDPOINT_URL || undefined, forcePathStyle: process.env.S3_FORCE_PATH_STYLE === '1' });
@@ -493,11 +530,22 @@ export async function loadLoop(kind: 'channel' | 'event', id: string): Promise<L
       return { segmentSeconds: Number(j.segment_seconds), base, tracks: j.tracks };
     } catch { return null; }
   };
+  const safe = (u: string) => !u.includes('..') && !u.startsWith('/') && !/^[a-z]+:/i.test(u);
   const run = parse(await readDelivered(kind, id, 'filler/filler.json'), segmentBase(kind, id) + 'filler/');
-  if (run) return run;
+  if (run) {
+    run.read = async (u) => {
+      if (!safe(u)) return null;
+      if (localOutput(id)) return readFile(join(liveDirFor(id), 'filler', u)).catch(() => null);
+      if (config.env === 'production' && config.aws?.s3Bucket) return s3GetBytes(`${kind}/${id}/filler/${u}`);
+      return null;
+    };
+    return run;
+  }
   if (!localOutput(id)) return null;
   const pre = join(originBaseFor(id), 'filler', 'prebuilt', 'filler.json');
-  return parse(await readFile(pre, 'utf8').catch(() => null), `/origin/${id}/filler/prebuilt/`);
+  const pl = parse(await readFile(pre, 'utf8').catch(() => null), `/origin/${id}/filler/prebuilt/`);
+  if (pl) pl.read = async (u) => (safe(u) ? readFile(join(originBaseFor(id), 'filler', 'prebuilt', u)).catch(() => null) : null);
+  return pl;
 }
 
 /** The delivered file behind a public name: the encoder's delivered copies when it writes them. */
@@ -523,13 +571,64 @@ export async function renderVariant(inp: {
   // range, so the loop cannot be swapped into it: a variant master never lists
   // one, and one asked for by name is refused rather than served with the
   // programme's pictures inside a window.
-  if (/#EXT-X-I-FRAMES-ONLY/.test(text)) throw new VariantError('trick-play (I-frame) playlists are not offered in a rights variant');
+  if (/#EXT-X-I-FRAMES-ONLY/.test(text)) {
+    // Only an I-frame playlist with a time on every entry can have windows
+    // placed in it (the delivered <label>.iframes_cc.m3u8); the packager's own
+    // has none, and is refused as before.
+    if (!/#EXT-X-PROGRAM-DATE-TIME:/.test(text)) throw new VariantError('trick-play (I-frame) playlists without times are not offered in a rights variant');
+    const loop = inp.timeline.length ? await loadLoop(inp.kind, inp.id) : null;
+    const ranges = loop ? await loopKeyframes(loop) : new Map<string, [number, number]>();
+    return {
+      body: renderVariantMedia(text, { timeline: inp.timeline, loop, base, emptyVtt: 'empty.vtt', shiftSec: inp.shiftSec, loopKeyframe: (u) => ranges.get(u) ?? null }),
+      type: 'application/vnd.apple.mpegurl',
+    };
+  }
   const loop = inp.timeline.length ? await loadLoop(inp.kind, inp.id) : null;
   return {
     body: renderVariantMedia(text, { timeline: inp.timeline, loop, base, emptyVtt: 'empty.vtt', shiftSec: inp.shiftSec }),
     type: 'application/vnd.apple.mpegurl',
   };
 }
+
+/**
+ * The opening keyframe of every video segment of a loop, by its filler.json
+ * URI. Read once per loop file and kept (a loop's files never change: a new
+ * loop has a new name), so a variant's I-frame playlist costs no reads after
+ * the first.
+ */
+const loopKeyframeCache = new Map<string, Promise<[number, number] | null>>();
+export async function loopKeyframes(loop: Loop): Promise<Map<string, [number, number]>> {
+  const { readInit } = await import('./frames/fmp4');
+  const { keyframeRanges } = await import('./trickplay/iframes');
+  const out = new Map<string, [number, number]>();
+  if (!loop.read) return out;
+  for (const t of Object.values(loop.tracks)) {
+    if (t.kind === 'audio' || !t.segments?.length) continue;
+    const ik = `${loop.base}${t.init}`;
+    let initP = loopInitCache.get(ik);
+    if (!initP) { initP = loop.read(t.init).then((b) => (b ? readInit(b) : null)).catch(() => null); loopInitCache.set(ik, initP); }
+    const init = await initP;
+    if (!init || !init.isVideo) continue;
+    await Promise.all(t.segments.map(async (sg) => {
+      const k = `${loop.base}${sg.uri}`;
+      let p = loopKeyframeCache.get(k);
+      if (!p) {
+        p = loop.read!(sg.uri).then((b) => {
+          const r = b ? keyframeRanges(b, init)[0] : null;
+          return r && r.start === b!.indexOf(Buffer.from('moof')) - 4 ? [r.start, r.end - r.start] as [number, number] : null;
+        }).catch(() => null);
+        loopKeyframeCache.set(k, p);
+        // a failed read is tried again next time
+        p.then((v) => { if (!v) loopKeyframeCache.delete(k); });
+      }
+      const v = await p;
+      if (v) out.set(sg.uri, v);
+    }));
+  }
+  if (loopKeyframeCache.size > 20000) loopKeyframeCache.clear();
+  return out;
+}
+const loopInitCache = new Map<string, Promise<ReturnType<typeof import('./frames/fmp4').readInit> | null>>();
 
 /** An empty WebVTT document: what a subtitle track shows inside a window. */
 export const EMPTY_VTT = 'WEBVTT\n\n';

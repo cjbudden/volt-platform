@@ -216,7 +216,13 @@ async function main() {
 
   console.log('\n== switched on later: no re-encode ==');
   ok('the first master asked for is served as it was', (await iframeLines(CLIP)).length === 0);
-  ok('and queues the build', Number((await one<any>(`SELECT count(*)::int AS n FROM jobs WHERE type = 'trickplay.build' AND payload->>'vodAssetId' = $1`, [CLIP]))?.n) === 1);
+  // queued without holding up the answer: wait for it a little (it raced once in 3.2b-9's run)
+  let queuedN = 0;
+  for (let i = 0; i < 40 && queuedN !== 1; i++) {
+    queuedN = Number((await one<any>(`SELECT count(*)::int AS n FROM jobs WHERE type = 'trickplay.build' AND payload->>'vodAssetId' = $1`, [CLIP]))?.n);
+    if (queuedN !== 1) await new Promise((r) => setTimeout(r, 50));
+  }
+  ok('and queues the build', queuedN === 1);
   const segBefore = readFileSync(join(process.env.CLIPS_DIR!, 'vod', CLIP, 'v720', 'seg_003.m4s'));
   const b1 = await store.buildAssetTrickPlay(CLIP);
   ok(`the build makes one per video rendition (got ${b1.renditions})`, b1.state === 'ready' && b1.renditions === 2, b1);
