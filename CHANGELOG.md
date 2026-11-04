@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.42.0 (2026-11-04)
+
+### Product (in customer release notes)
+
+- added · Trick-play: Viewers in a rights blackout keep trick-play in DASH too: fast-forwarding inside their blackout shows the replacement loop's pictures, never the programme they may not see. Applies from a stream's next start.
+
+### Internal
+
+- added · Tests: trickplay-variants-dash check (variant MPD trick sets decoded against real loop media, optional Shaka fast-forward run); loop keyframes for DASH trick-mode now keep the loop's own decode time.
+
 ## 0.41.0 (2026-11-04)
 
 ### Product (in customer release notes)
