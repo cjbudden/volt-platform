@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.40.0 (2026-11-04)
+
+### Product (in customer release notes)
+
+- improved · Live channels: Live streams that put their slate or loop on air now keep their DASH trick-mode track: fast-forwarding or scrubbing over the slate or loop shows the slate or loop, never the programme it covered.
+
+### Internal
+
+- added · Encoder: test_splice_trick_dash.py (32 checks) and splice_trick_dash_shaka.mjs (Shaka Player over the spliced MPD) guard the DASH trick-mode set under a playout splice.
+
 ## 0.39.0 (2026-11-03)
 
 ### Product (in customer release notes)
