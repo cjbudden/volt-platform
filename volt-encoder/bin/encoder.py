@@ -27,6 +27,7 @@ The job config schema is documented in ../job.example.json.
 
 import glob
 import json
+import math
 import os
 import re
 import shlex
@@ -1627,7 +1628,8 @@ def _playout_pass(out_dir, src_lines, seg_dur):
         _keyframe_prune()
     # DASH: the same delivered timeline as a multi-Period MPD (live / loop / live)
     try:
-        mpd = _PLAYOUT.render_mpd(_iso, _mpd_reps(out_dir), seg_dur, time.time())
+        reps = _mpd_reps(out_dir)
+        mpd = _PLAYOUT.render_mpd(_iso, reps, seg_dur, time.time(), trick=_mpd_trick(out_dir, seg_dur))
         if mpd:
             _atomic_write(os.path.join(out_dir, "manifest_cc.mpd"), _with_trigger_events(mpd))
     except Exception as e:  # noqa: BLE001
@@ -1673,7 +1675,62 @@ def _keyframe_prune():
         del _KF_RANGES[u]
 
 
-_MPD_INFO = {"mtime": None, "by_init": {}}
+_MPD_INFO = {"mtime": None, "by_init": {}, "trick": None}
+
+
+def _mpd_timeline(tpl):
+    """[(number, t, d)] of a SegmentTemplate's SegmentTimeline, [] without one."""
+    tln = tpl.find("SegmentTimeline")
+    if tln is None:
+        return []
+    out, n, t = [], int(tpl.get("startNumber") or 1), None
+    for s_ in tln.findall("S"):
+        if s_.get("t") is not None:
+            t = int(s_.get("t"))
+        d = int(s_.get("d"))
+        for _ in range(int(s_.get("r") or 0) + 1):
+            if t is None:
+                return out
+            out.append((n, t, d))
+            n += 1
+            t += d
+    return out
+
+
+_TRICK_SEEN = {}
+
+
+def _mpd_trick(out_dir, seg_dur=4.0):
+    """The packager's DASH trick-mode Representation (build queue 3.2b-4), as playout
+    lists it under a splice (3.2b-8): which delivered video track it was cut from
+    (`<label>_trick/` beside `<label>/`), its segments and attributes. None when the
+    switch is off, the packager has not listed it yet, or no track matches.
+
+    WHY REMEMBERED. The packager's MPD names only its own time-shift window, but the
+    delivered window holds the same duration of DELIVERED media: after a break, its
+    oldest live segments are older than anything the packager still names. So every
+    trick segment the packager has named is remembered (number -> time, length) while
+    its file is still there, the newest few windows' worth at most."""
+    tr = _MPD_INFO.get("trick")
+    if not tr or _PLAYOUT is None:
+        _TRICK_SEEN.clear()
+        return None
+    tdir = tr["init"].rsplit("/", 1)[0]
+    name = next((n for n, t in _PLAYOUT.tracks.items()
+                 if t.live_init and f"{_safe_label(t.label)}_trick" == tdir), None)
+    if name is None:
+        return None
+    seen = _TRICK_SEEN.setdefault(tr["media"], {})
+    for n, t, d in tr["segs"]:
+        seen[n] = (t, d)
+    cap = 3 * int(_PLAYOUT.window_sec / max(0.5, float(seg_dur))) + 10
+    for n in sorted(seen)[:-cap]:
+        del seen[n]
+    named = {n for n, _t, _d in tr["segs"]}
+    for n in [n for n in seen if n not in named
+              and not os.path.exists(os.path.join(out_dir, tr["media"].replace("$Number$", str(n))))]:
+        del seen[n]
+    return dict(tr, track=name, segs=[(n, *seen[n]) for n in sorted(seen)])
 
 
 def _mpd_reps(out_dir):
@@ -1693,9 +1750,21 @@ def _mpd_reps(out_dir):
             for el in root.iter():
                 if "}" in el.tag:
                     el.tag = el.tag.split("}", 1)[1]
-            by = {}
+            by, trick = {}, None
             for aset in root.iter("AdaptationSet"):
                 set_attrs = {k: v for k, v in aset.attrib.items() if k != "id"}
+                if any(c.tag == "EssentialProperty" and "trickmode" in (c.get("schemeIdUri") or "") for c in aset):
+                    # the keyframe-only set (3.2b-4): not a playout track (it has no HLS
+                    # playlist), kept for render_mpd to list beside its video set
+                    r = aset.find("Representation")
+                    tpl = r.find("SegmentTemplate") if r is not None else None
+                    if tpl is not None and tpl.get("initialization") and tpl.get("media"):
+                        trick = {"init": tpl.get("initialization"), "media": tpl.get("media"),
+                                 "ts": int(tpl.get("timescale") or 1), "segs": _mpd_timeline(tpl),
+                                 "set_attrs": set_attrs, "attrs": dict(r.attrib),
+                                 "set_children": [ET.tostring(c, encoding="unicode") for c in aset
+                                                  if c.tag in ("Role", "Accessibility", "ContentProtection")]}
+                    continue
                 kids = [ET.tostring(c, encoding="unicode") for c in aset
                         if c.tag in ("Role", "Accessibility", "ContentProtection")]
                 for r in aset.iter("Representation"):
@@ -1706,7 +1775,7 @@ def _mpd_reps(out_dir):
                     by[tpl.get("initialization")] = {
                         "set": aset.get("id") or set_attrs.get("contentType"), "set_attrs": set_attrs,
                         "set_children": kids, "attrs": dict(r.attrib), "children": rk}
-            _MPD_INFO.update(mtime=mt, by_init=by)
+            _MPD_INFO.update(mtime=mt, by_init=by, trick=trick)
         except Exception:  # noqa: BLE001
             pass
     by = _MPD_INFO["by_init"]
@@ -2085,6 +2154,68 @@ def _filler_matches(meta, spec):
     return True
 
 
+def prepare_loop_trick(fillers, out_dir):
+    """DASH TRICK-MODE FOR THE LOOP (build queue 3.2b-8). Under a splice the MPD's
+    loop Periods need a keyframe-only set too, or a viewer scrubbing over a break
+    sees nothing (or, worse, a player falls back to the programme the break
+    replaced). For the loop rendition whose live twin the packager cuts its trick
+    track from (`<label>_trick/` exists), each loop segment's opening keyframe is
+    re-wrapped ONCE, now, as a fragment of its own (mp4util.keyframe_fragment, the
+    same rule as services/trickplay/ladder.ts for FAST assets): filler/<label>/
+    trick/k_<i>.m4s. Each loop Period slot is then that keyframe re-timed into the
+    slot (Playout.on_trick). Nothing is decoded or encoded; a loop this cannot be
+    done for (no keyframe at a segment start) gets no trick set, as before.
+    Adds fillers[label]["trick"] = {"segments": [{"uri", "d"}], "bandwidth"}."""
+    import mp4util
+    done = []
+    for label, f in fillers.items():
+        if label.startswith("audio") or not os.path.isdir(os.path.join(out_dir, f"{_safe_label(label)}_trick")):
+            continue
+        ts = int(f.get("timescale") or 0)
+        segs, peak = [], 0
+        tdir = f["init"].rsplit("/", 1)[0] + "/trick"
+        os.makedirs(os.path.join(out_dir, tdir), exist_ok=True)
+        for i, s in enumerate(f.get("segments") or []):
+            d = int(s.get("d") or round(float(s["dur"]) * ts))
+            try:
+                frag = mp4util.keyframe_fragment(open(os.path.join(out_dir, s["uri"]), "rb").read(), d, 0)
+            except OSError:
+                frag = None
+            if frag is None or not ts or d <= 0:
+                segs = []
+                break
+            uri = f"{tdir}/k_{i + 1}.m4s"
+            with open(os.path.join(out_dir, uri), "wb") as fh:
+                fh.write(frag)
+            segs.append({"uri": uri, "d": d})
+            peak = max(peak, len(frag) * 8 * ts / d)
+        if not segs:
+            log(f"playout: the {label} loop has no keyframe at a segment start; no trick set under the loop")
+            continue
+        f["trick"] = {"segments": segs, "bandwidth": int(math.ceil(peak))}
+        done.append(label)
+    if done:
+        log(f"playout: loop keyframes ready for DASH trick-mode ({', '.join(done)})")
+    return done
+
+
+def write_trick_slot(out_dir, src, dst, t, d):
+    """A loop keyframe (prepare_loop_trick) re-timed into its slot of a loop Period:
+    decode time t, lasting d. Playout.on_trick."""
+    import mp4util
+    try:
+        frag = mp4util.keyframe_fragment(open(os.path.join(out_dir, src), "rb").read(), d, t)
+        if frag is None:
+            raise ValueError("no keyframe")
+        p = os.path.join(out_dir, dst)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p + ".tmp", "wb") as fh:
+            fh.write(frag)
+        os.replace(p + ".tmp", p)
+    except Exception as e:  # noqa: BLE001
+        log(f"playout: could not write trick slot {dst} ({e})")
+
+
 def start_playout(cfg):
     """Create the splicer now (so the delivered playlists exist from the first segment)
     and get its loop ready in the background: reuse the control plane's pre-build or an
@@ -2185,6 +2316,7 @@ def start_playout(cfg):
 
     _PLAYOUT.media_of, _PLAYOUT.on_slot, _PLAYOUT.on_drop = media_of, on_slot, on_drop
     _PLAYOUT.on_link, _PLAYOUT.on_cut = on_link, on_cut
+    _PLAYOUT.on_trick = lambda src, dst, t, d: write_trick_slot(OUT_DIR, src, dst, t, d)
     start_companion_refresher(OUT_DIR, [], "en", seg, seg)
 
     def prepare():
@@ -2249,6 +2381,14 @@ def start_playout(cfg):
                              "d": mp4util.frag_duration(os.path.join(OUT_DIR, rel), init_abs)})
             fillers[label] = {"init": init_rel, "timescale": mp4util.timescale(init_abs), "segments": segs}
         _FILLER_META = meta
+        if cfg.get("trick_play_dash"):
+            # the packager writes <label>_trick/ beside the rendition it cuts the
+            # trick track from; give it a moment if the first segments beat it
+            for _ in range(15):
+                if any(os.path.isdir(os.path.join(OUT_DIR, f"{_safe_label(l)}_trick")) for l in fillers):
+                    break
+                time.sleep(2)
+            prepare_loop_trick(fillers, OUT_DIR)
         _PLAYOUT.set_fillers(fillers)
         log(f"playout: loop ready ({meta.get('loop_seconds')}s, {len(fillers)} track(s)); splice armed")
         if _events:

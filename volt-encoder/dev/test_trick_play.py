@@ -163,8 +163,11 @@ ok("dashif.org/guidelines/trickmode" in cc_mpd and "360p_trick/seg_$Number$.m4s"
 
 # With playout on, manifest_cc.mpd is the spliced MPD playout builds from the HLS
 # media playlists (one track each). The trick stream is dash_only, so it has no
-# playlist, so no track: driven here exactly as the encoder drives it, with the
-# packager's MPD above (trick set included) as the source of every attribute.
+# playlist and is listed from the packager's MPD instead (build queue 3.2b-8, see
+# test_splice_trick_dash.py). Driven here exactly as the encoder drives it, with
+# the packager's MPD above as the source of every attribute: it names no trick
+# SEGMENTS (no SegmentTimeline) and the loop's keyframes are not prepared, so
+# nothing may be listed for it: never a guessed segment.
 import playout as P  # noqa: E402
 SEGD = 4.0
 
@@ -202,11 +205,12 @@ for sec in range(100):
         po.update(now, {"stream_0.m3u8": hls("720p", first, last), "stream_1.m3u8": hls("360p", first, last),
                         "stream_2.m3u8": hls("audio", first, last)}, "stream_0.m3u8")
 encoder._MPD_INFO.update(mtime=None, by_init={})
-spliced = po.render_mpd(lambda t: f"T{t:.3f}", encoder._mpd_reps(d), SEGD, now)
+encoder._PLAYOUT = po
+spliced = po.render_mpd(lambda t: f"T{t:.3f}", encoder._mpd_reps(d), SEGD, now, trick=encoder._mpd_trick(d, SEGD))
 kinds = [k for _, k, _, _ in po.periods()]
 ok(spliced and "filler" in kinds, "(the spliced MPD has a loop Period: %s)" % kinds)
 ok(spliced and "trickmode" not in spliced and "_trick/" not in spliced,
-   "with playout splicing, the delivered MPD lists no trick-mode set in any Period")
+   "with playout splicing and no trick segments named or loop keyframes made, no trick-mode set is listed in any Period")
 ok(spliced and "720p/seg_$Number$.m4s" in spliced and 'height="360"' in spliced,
    "(its main video, read from the same packager MPD, is still there)")
 

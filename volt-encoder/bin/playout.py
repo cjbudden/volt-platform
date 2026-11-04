@@ -288,6 +288,9 @@ class Playout:
         # one is cut to the Period (see render_mpd)
         self.on_link = lambda src, dst: None
         self.on_cut = lambda src, dst, keep, init: keep
+        # DASH trick-mode in loop Periods (build queue 3.2b-8): write dst, the loop
+        # keyframe fragment src re-timed to decode time t and lasting d
+        self.on_trick = lambda src, dst, t, d: None
         self.ast = None                     # DASH availabilityStartTime (wall clock)
         # ONE Period counter for the whole channel, bumped at every switch to or from
         # the loop (and when the source's own timestamps jump). Every segment of every
@@ -454,12 +457,19 @@ class Playout:
             have["files"].append(dst)
         return f"{ddir}/seg_$Number$.m4s", have["d_last"]
 
-    def _loop_slots(self, t, run, pstart, pend, lead):
+    def _loop_slots(self, t, run, pstart, pend, lead, trick=False):
         """Track t's loop content for loop Period `run`, from `pstart` until it covers
         the Period (closed) or as far as the lead has delivered the loop (open).
-        Returns (timescale, init, base, startNumber, [[t, d, r]]) or None."""
+        Returns (timescale, init, base, startNumber, [[t, d, r]]) or None.
+
+        trick=True: the same slots as the loop's keyframes only (build queue 3.2b-8),
+        from the keyframe fragments made once when the loop was prepared
+        (filler["trick"]), each re-timed into its slot: one picture lasting the slot,
+        the last one cut to end with the Period. Same timescale and init as the loop."""
         f = t.filler
         if not f or not f.get("segments") or not f.get("timescale"):
+            return None
+        if trick and not ((f.get("trick") or {}).get("segments")):
             return None
         ts = int(f["timescale"])
         if pend is None:
@@ -470,9 +480,10 @@ class Playout:
         else:
             cover = pend
         need = cover - pstart
-        segs = f["segments"]
-        base = f["init"].rsplit("/", 1)[0]
-        made = self._dash_made.setdefault((t.name, run), [])
+        segs = f["trick"]["segments"] if trick else f["segments"]
+        base = (segs[0]["uri"] if trick else f["init"]).rsplit("/", 1)[0]
+        name = f"{t.name}#trick" if trick else t.name
+        made = self._dash_made.setdefault((name, run), [])
         tl, cur, tt, k = [], None, 0, 0
         while tt / ts < need - 1e-3:
             s = segs[k % len(segs)]
@@ -481,14 +492,27 @@ class Playout:
                 break                        # open: never past the lead (see render_mpd)
             k += 1
             last_one = pend is not None and (tt + d) / ts > need + 0.02
-            if k > len(made):
+            if trick:
+                # one picture per slot, so the Period's end is met exactly: the last
+                # slot is (re)written once with the cut length when the Period closes
+                uri = f"{base}/p{run}_{k}.m4s"
+                if last_one:
+                    d = int(round(need * ts)) - tt
+                ck = (name, run, k)
+                if k > len(made) or (last_one and self._dash_cutlen.get(ck) != d):
+                    self.on_trick(s["uri"], uri, tt, d)
+                    if last_one:
+                        self._dash_cutlen[ck] = d
+                    if k > len(made):
+                        made.append(uri)
+            elif k > len(made):
                 uri = f"{base}/p{run}_{k}.m4s"
                 self.on_slot(s["uri"], uri, tt)
                 if last_one:                 # the Period ends inside it: cut it there
                     got = self.on_cut(uri, uri, int(round(need * ts)) - tt, f["init"])
                     self._dash_cutlen[(t.name, run, k)] = int(got) if got else d
                 made.append(uri)
-            if last_one:
+            if last_one and not trick:
                 d = self._dash_cutlen.get((t.name, run, k), d)
             if cur and cur[1] == d and cur[0] + cur[1] * (cur[2] + 1) == tt:
                 cur[2] += 1
@@ -500,7 +524,54 @@ class Playout:
             return None
         return ts, f["init"], base, 1, tl
 
-    def render_mpd(self, iso, reps, seg_dur, now, avail_lag=None):
+    def _trick_set(self, trick, kind, run, pstart, pend, lead, span, set_keys):
+        """The trick-mode AdaptationSet of one Period (see render_mpd), or None."""
+        key, pto, ts, t0, t1, t, info = span
+        if key not in set_keys:
+            return None
+        main_id = set_keys.index(key)
+        attrs = dict(trick.get("attrs") or {})
+        if kind == "filler":
+            sl = self._loop_slots(t, run, pstart, pend, lead, trick=True)
+            if not sl:
+                return None
+            tts, init, base, first_num, tl = sl
+            tpto = 0
+            media = f"{base}/p{run}_$Number$.m4s"
+            # the loop's own codecs (as its video set says) and keyframe bitrate
+            if (info.get("attrs") or {}).get("codecs"):
+                attrs["codecs"] = info["attrs"]["codecs"]
+            bw = (t.filler.get("trick") or {}).get("bandwidth")
+            if bw:
+                attrs["bandwidth"] = str(int(bw))
+        else:
+            tts = int(trick.get("ts") or 0)
+            if not tts or not ts:
+                return None
+            conv = tts / float(ts)
+            lo, hi, eps = t0 * conv, t1 * conv, 0.01 * tts
+            segs = [x for x in (trick.get("segs") or []) if lo - eps <= x[1] < hi - eps]
+            keep = segs[:1]
+            for x in segs[1:]:
+                if x[0] != keep[-1][0] + 1:
+                    break                    # one Representation needs consecutive $Number$s
+                keep.append(x)
+            if not keep:
+                return None
+            init, media, first_num = trick["init"], trick["media"], keep[0][0]
+            tpto = int(round(pto * conv))
+            tl = self._timeline([(x[1], x[2]) for x in keep])
+        stimes = "".join(f'<S t="{a}" d="{b}"' + (f' r="{r}"' if r else "") + "/>" for a, b, r in tl)
+        rep = (f"<Representation {' '.join(f'{k}={chr(34)}{v}{chr(34)}' for k, v in attrs.items())}>"
+               + f'<SegmentTemplate timescale="{tts}" presentationTimeOffset="{tpto}" '
+                 f'initialization="{init}" media="{media}" startNumber="{first_num}">'
+               f"<SegmentTimeline>{stimes}</SegmentTimeline></SegmentTemplate></Representation>")
+        sattrs = " ".join(f'{a}="{v}"' for a, v in (trick.get("set_attrs") or {}).items())
+        return (f'<AdaptationSet id="{len(set_keys)}" {sattrs}>'
+                f'<EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="{main_id}"/>'
+                + "".join(trick.get("set_children") or []) + rep + "</AdaptationSet>")
+
+    def render_mpd(self, iso, reps, seg_dur, now, avail_lag=None, trick=None):
         """A multi-Period dynamic MPD over the same delivered content as the HLS.
 
         reps(kind, track) -> {"set": adaptation-set key, "set_attrs": {...},
@@ -521,7 +592,20 @@ class Playout:
             slot, until it covers the Period (DASH-only copies, p<run>_<k>.m4s), so no
             track is ever short.
         Every boundary is fixed the first time it can be computed, so a Period never
-        moves between MPD updates."""
+        moves between MPD updates.
+
+        DASH TRICK-MODE UNDER A SPLICE (build queue 3.2b-8). `trick` (from the encoder,
+        None when the switch is off) is the packager's keyframe-only Representation:
+        {"track": the video playlist it was cut from, "init", "media", "ts",
+         "segs": [(number, t, d)], "set_attrs", "set_children", "attrs"}. It has no HLS
+        playlist, so it is not a track here; each Period gets it as its own
+        AdaptationSet with the dashif trickmode property naming that Period's video set:
+          * a live Period lists the packager's trick segments over the same media time
+            as the video track it was cut from (same clock, same offset);
+          * a loop Period lists the loop's keyframes, slot for slot (see _loop_slots).
+        A scrubbing viewer then sees the loop under a break, never the programme it
+        replaced. A Period first published without a trick set keeps none (an
+        AdaptationSet must not appear in a Period after the fact)."""
         pers = self.periods()
         if not pers or self.ast is None:
             return None
@@ -530,6 +614,8 @@ class Playout:
             self._dash_made = {}             # (track name, run) -> [slot uris]
             self._dash_cutlen = {}           # (track name, run, k) -> cut slot duration
             self._dash_cuts = {}             # (track name, run) -> d<run>/ links + cut
+        if not hasattr(self, "_dash_trick_on"):
+            self._dash_trick_on = {}         # Period id -> published with a trick set?
         tracks = [t for t in self.tracks.values() if t.entries]
 
         if not hasattr(self, "_dash_splits"):
@@ -630,6 +716,8 @@ class Playout:
                 for u in c["files"]:
                     self.on_drop(u)
                 del self._dash_cuts[(name, pid)]
+        for pid in [x for x in self._dash_trick_on if x not in alive]:
+            del self._dash_trick_on[pid]
         if live_runs:
             for run in [r for r in self._dash_bounds if r < min(live_runs)]:
                 del self._dash_bounds[run]
@@ -649,6 +737,7 @@ class Playout:
                 ends = [es[-1].pdt + es[-1].dur for es in (live_in(t, pstart, None) for t in tracks) if es]
                 open_cap = min(ends) if ends else None
             sets = {}
+            span = None                      # the trick source track's (set, pto, ts, t0, t1) here
             for t in self.tracks.values():
                 info = reps(kind, t)
                 if not info:
@@ -704,6 +793,9 @@ class Playout:
                         if cut:
                             media, d_last = cut
                             tl = self._timeline([(e.t, e.d) for e in keep[:-1]] + [(last.t, d_last)])
+                if trick and t.name == trick.get("track") and tl:
+                    a, b, r = tl[-1]
+                    span = (info["set"], pto, ts, tl[0][0], a + b * (r + 1), t, info)
                 stimes = "".join(f'<S t="{a}" d="{b}"' + (f' r="{r}"' if r else "") + "/>" for a, b, r in tl)
                 attrs = " ".join(f'{k}="{v}"' for k, v in info["attrs"].items())
                 rep_xml = (f"<Representation {attrs}>" + "".join(info.get("children", []))
@@ -723,6 +815,12 @@ class Playout:
             for k, (key, st) in enumerate(sets.items()):
                 attrs = " ".join(f'{a}="{v}"' for a, v in st["attrs"].items())
                 ad.append(f'<AdaptationSet id="{k}" {attrs}>' + "".join(st["children"]) + "".join(st["reps"]) + "</AdaptationSet>")
+            tx = self._trick_set(trick, kind, run, pstart, pend, lead, span, list(sets)) if span else None
+            on = self._dash_trick_on.get(pid)
+            if on is None and ad:
+                on = self._dash_trick_on[pid] = tx is not None
+            if on and tx:
+                ad.append(tx)
             if not ad:
                 continue
             # a closed Period says how long it is, so a client that walks Periods in

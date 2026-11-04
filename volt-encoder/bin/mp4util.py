@@ -5,6 +5,7 @@
 * frag_duration(seg, init) a fragment's exact duration in timescale units (trun/tfhd/trex)
 * rebase(src, dst, t)      copy a fragment with its tfdt rewritten to `t`
 * codecs(init)             the RFC 6381 codecs string (avc1.PPCCLL / mp4a.40.N)
+* keyframe_fragment(d, n) a fragment's opening keyframe as a fragment of its own (DASH trick-mode)
 
 Why rebase: the pre-built loop has a handful of segments that repeat for as long as an
 outage lasts. Within one DASH Period the timeline has to keep increasing, so every slot
@@ -283,3 +284,97 @@ def truncate(src, dst, keep, init_path=None):
     import os
     os.replace(tmp, dst)
     return kept_total
+
+
+def _box(typ, *parts):
+    body = b"".join(parts)
+    return struct.pack(">I4s", 8 + len(body), typ) + body
+
+
+def keyframe_fragment(data, dur, new_tfdt=None):
+    """One DASH trick-mode segment: the keyframe that opens fragment `data` (its
+    first moof's first sample) as a fragment of its own, one sample lasting `dur`
+    timescale units, decode time `new_tfdt` (the fragment's own when None).
+
+    The Python twin of keyframeFragment in volt-app services/trickplay/iframes.ts,
+    for the playout loop (build queue 3.2b-8): same track id, so it plays with the
+    rendition's own init. Clear tracks only (the loop is never encrypted); None for
+    an encrypted fragment, sample groups, no moof, or a first sample that is not a
+    sync sample. Nothing is decoded or encoded: the keyframe's bytes are copied."""
+    moof = next(((ps, pe, hs) for t, ps, pe, hs in _boxes(data) if t == b"moof"), None)
+    if moof is None:
+        return None
+    mps, mpe, mhs = moof
+    traf = next(((ps, pe) for t, ps, pe, _h in _boxes(data, mps, mpe) if t == b"traf"), None)
+    if traf is None:
+        return None
+    kids = {}
+    for t, ps, pe, _h in _boxes(data, traf[0], traf[1]):
+        kids.setdefault(t, (ps, pe))
+    if b"senc" in kids or b"sbgp" in kids or b"tfhd" not in kids or b"trun" not in kids:
+        return None
+    ps, _pe = kids[b"tfhd"]
+    tf = int.from_bytes(data[ps + 1:ps + 4], "big")
+    track_id = struct.unpack(">I", data[ps + 4:ps + 8])[0]
+    q = ps + 8
+    base = mhs                                  # default-base-is-moof, and the first traf's rule
+    if tf & 0x01:
+        base = struct.unpack(">Q", data[q:q + 8])[0]
+        q += 8
+    if tf & 0x02:
+        q += 4
+    if tf & 0x08:
+        q += 4
+    def_size = def_flags = None
+    if tf & 0x10:
+        def_size = struct.unpack(">I", data[q:q + 4])[0]
+        q += 4
+    if tf & 0x20:
+        def_flags = struct.unpack(">I", data[q:q + 4])[0]
+    decode = 0
+    if b"tfdt" in kids:
+        ps, _pe = kids[b"tfdt"]
+        decode = struct.unpack(">Q", data[ps + 4:ps + 12])[0] if data[ps] == 1 else struct.unpack(">I", data[ps + 4:ps + 8])[0]
+    ps, _pe = kids[b"trun"]
+    ver = data[ps]
+    fl = int.from_bytes(data[ps + 1:ps + 4], "big")
+    if struct.unpack(">I", data[ps + 4:ps + 8])[0] < 1:
+        return None
+    o = ps + 8
+    doff = 0
+    if fl & 0x001:
+        doff = struct.unpack(">i", data[o:o + 4])[0]
+        o += 4
+    first_flags = None
+    if fl & 0x004:
+        first_flags = struct.unpack(">I", data[o:o + 4])[0]
+        o += 4
+    size, cto, sflags = def_size, 0, None
+    if fl & 0x100:
+        o += 4
+    if fl & 0x200:
+        size = struct.unpack(">I", data[o:o + 4])[0]
+        o += 4
+    if fl & 0x400:
+        sflags = struct.unpack(">I", data[o:o + 4])[0]
+        o += 4
+    if fl & 0x800:
+        cto = struct.unpack(">i" if ver == 1 else ">I", data[o:o + 4])[0]
+    flags = first_flags if first_flags is not None else sflags if sflags is not None else def_flags
+    if not size or (flags is not None and flags & 0x00010000):
+        return None                             # no size, or not a sync sample
+    start = base + doff
+    if start < mpe or start + size > len(data):
+        return None
+    sample = data[start:start + size]
+    tfdt = decode if new_tfdt is None else int(new_tfdt)
+
+    def build(data_offset):
+        trun = _box(b"trun", struct.pack(">I", (1 << 24) | 0x000f01), struct.pack(">I", 1),
+                    struct.pack(">i", data_offset), struct.pack(">I", max(1, int(round(dur)))),
+                    struct.pack(">I", size), struct.pack(">I", 0x02000000), struct.pack(">i", cto))
+        traf_n = _box(b"traf", _box(b"tfhd", struct.pack(">I", 0x020000), struct.pack(">I", track_id)),
+                      _box(b"tfdt", struct.pack(">I", 1 << 24), struct.pack(">Q", tfdt)), trun)
+        return _box(b"moof", _box(b"mfhd", struct.pack(">I", 0), struct.pack(">I", 1)), traf_n)
+    probe = build(0)                            # sizes do not depend on the offset
+    return build(len(probe) + 8) + _box(b"mdat", sample)
