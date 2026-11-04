@@ -47,6 +47,12 @@ release. Written 22 Oct 2026 from what worked in practice.
   dashes in anything written for Christian or customers; UI uses the existing
   tokens and classes in `volt-web/src/index.css`, icons alongside text, no
   thick accent border on one edge of an element.
+- Migrations only add (new tables, nullable columns or columns with a
+  default, concurrent indexes in a `-- volt:no-transaction` file): old and
+  new tasks share the database during a rolling deploy. Removing a column
+  or table takes two releases and a `-- volt:contract <what> after vX.Y.Z`
+  line; `check.mjs` refuses anything else (RELEASING.md, "Schema: add only").
+  Never edit a shipped migration; add a new one.
 - API routes: account-scoped through `groups.account_id`, list routes use
   `util/listQuery`, new client-facing routes get an overlay entry in
   `volt-app/docs/openapi-overlay.json` and `npm run docs:routes` +

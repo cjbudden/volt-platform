@@ -97,7 +97,11 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    image (`node dist/migrateOnly.js`: the same runner, lock and top-ups as a
    boot) before any service moves. The control plane still applies them on
    boot in the `api-admin` role and finds nothing left. From a checkout:
-   `npx tsx src/migrateOnly.ts` in `volt-app`.
+   `npx tsx src/migrateOnly.ts` in `volt-app`. Old tasks keep running on the
+   new schema until they are replaced, and a rollback keeps it, so the
+   release checks refuse a migration that takes anything away
+   (`scripts/release/check-migrations.mjs`; the rule and the two-release way
+   to remove a column are in `RELEASING.md`, "Schema: add only").
 5. **Secrets.** Put the integration secrets (DRM, social apps) into the
    Secrets Manager entry the stack created. The app stores only references;
    raw values never reach the database or the images. Operator settings that

@@ -109,12 +109,66 @@ streams keep theirs until they stop. Every attempt and what runs where is in
   before the current one (services and encoder images; no build, no
   migrations). Run it again to go back further.
 - **Schema:** old and new tasks run side by side during a rolling deploy and a
-  rollback does not undo migrations, so a release only adds: new tables,
-  nullable columns or columns with defaults, indexes built concurrently.
-  Dropping, renaming or retyping waits for a release after the code stopped
-  using it (the migration safety check, build queue D2, will enforce this).
+  rollback does not undo migrations, so a release only adds. See "Schema: add
+  only" below; the release checks (and so the deploy) refuse anything else.
 - **Terraform:** apply with the tag that runs:
   `-var control_plane_image_tag=$(node scripts/deploy/deploy.mjs <env> --current)`.
+
+## Schema: add only
+
+Old and new tasks run side by side during a rolling deploy, and a rollback
+does not undo migrations, so every migration must leave a schema the
+previous release can still run on. A release may only add:
+
+- new tables (anything goes on a table no shipped release knows yet);
+- nullable columns, or columns with a default (serial and generated columns
+  count);
+- indexes built concurrently.
+
+Refused: dropping or renaming a table or column, changing a column's type,
+adding a NOT NULL column without a default, `SET NOT NULL`, and a plain
+`CREATE INDEX` on an existing table (it blocks writes while it builds).
+
+**Removing something takes two releases.** Release N stops using the column
+(or table). A later release removes it, with a line in the migration naming
+release N, which must already be out:
+
+```sql
+-- volt:contract channels.legacy_flag after v0.44.0
+ALTER TABLE channels DROP COLUMN IF EXISTS legacy_flag;
+```
+
+`<table>` for a table, `<table>.<column>` for a column. The check cannot see
+whether the code really stopped using it: the line is you saying so, where a
+reviewer sees it.
+
+**A concurrent index** goes in a migration of its own with the line
+`-- volt:no-transaction`; the runner then runs each statement on its own
+instead of in one transaction (Postgres refuses `CONCURRENTLY` in one). Such a
+file holds only `CREATE INDEX CONCURRENTLY` and `DROP INDEX CONCURRENTLY`, and
+is written to run again after a failure:
+
+```sql
+-- volt:no-transaction
+DROP INDEX CONCURRENTLY IF EXISTS vod_assets_title_idx;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS vod_assets_title_idx ON vod_assets(title);
+```
+
+**Where it runs.** `scripts/release/check-migrations.mjs`, called from
+`check.mjs`, so in the pre-commit hook, before `release.mjs` writes anything,
+and in step 1 of `deploy.mjs`. It judges each migration not shipped yet and
+any new statement in the boot top-ups (`volt-app/src/services/bootSchema.ts`,
+which run on every task and so may only add). Shipped migrations are listed
+with their hash in `release/migrations-baseline.json` (`release.mjs` adds each
+release's files): they are not judged again, but editing or removing one is
+refused, since databases that ran it never see the edit.
+`check-migrations.mjs --all` judges every file as if the rule had always
+applied (on 4 Nov 2026: 79 findings in 43 of the 111 files, nearly all
+blocking indexes, plus four column type changes in 0027 and 0080).
+
+The check reads SQL lexically: comments and strings are ignored and DO blocks
+are looked into, but SQL built in a string (`EXECUTE format(...)`) is not
+seen. Keep removals out of dynamic SQL.
 
 ## If something goes wrong
 

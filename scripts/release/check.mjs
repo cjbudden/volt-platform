@@ -10,7 +10,24 @@
 // ("refactor, no visible change"). That is the point: the decision is made by
 // the person who made the change, at the time, not reconstructed at release.
 // Bypass once with `git commit --no-verify` (and say why in the commit).
-import { git, scopeOf, relToRoot, unreleasedNotes, state } from './lib.mjs';
+//
+// It also runs the migration safety check (check-migrations.mjs, D2).
+import { git, scopeOf, relToRoot, unreleasedNotes, state, ROOT } from './lib.mjs';
+import { checkRepo } from './migrations.mjs';
+
+// The migration safety check (build queue D2) runs here too, so the
+// pre-commit hook, release.mjs and deploy.mjs all refuse a migration the
+// previous release could not run on. Details: migrations.mjs, RELEASING.md.
+{
+  const r = checkRepo(ROOT, { trackedOnly: process.argv.includes('--staged') });
+  if (r.problems.length) {
+    console.error(`migration safety: ${r.problems.length} problem(s):`);
+    for (const p of r.problems) console.error(`  ${p.file}:${p.line}  ${p.message}`);
+    console.error('\nThe rule, and how to remove something in two releases: RELEASING.md, "Schema".');
+    process.exit(1);
+  }
+  console.log(`migration safety: ok (${r.checked} unshipped migration(s) checked, ${r.baselined} shipped)`);
+}
 
 const staged = process.argv.includes('--staged');
 let notes;

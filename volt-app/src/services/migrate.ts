@@ -21,6 +21,18 @@
 //    * Postgres cannot ALTER TYPE … ADD VALUE inside a transaction block, so a
 //      migration that adds an enum value must instead CREATE a new type. There
 //      is a guard below that catches this at run time rather than in production.
+//    * It must leave a schema the PREVIOUS release can run on: rolling deploys
+//      run old and new tasks side by side and a rollback keeps the schema. So
+//      add only (new tables, nullable columns or columns with a default,
+//      indexes built concurrently); remove in a later release with a
+//      `-- volt:contract` line. scripts/release/check-migrations.mjs enforces
+//      it (build queue D2); RELEASING.md, "Schema", has the how.
+//    * CREATE INDEX CONCURRENTLY cannot run in a transaction. A file with a
+//      line `-- volt:no-transaction` holds only concurrent
+//      index statements; each runs on its own and the file is recorded once
+//      they all succeed. Write them to be re-run safely
+//      (`DROP INDEX CONCURRENTLY IF EXISTS` first, then `CREATE ... IF NOT
+//      EXISTS`): a failed concurrent build leaves an invalid index behind.
 // ============================================================================
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,6 +40,65 @@ import { pool } from '../db';
 
 const MIGRATIONS_DIR = join(process.cwd(), 'migrations');
 const FILE_RE = /^(\d{4})_[a-z0-9_]+\.sql$/;
+/** The marker for a file that runs outside a transaction (concurrent indexes). */
+const NO_TX_RE = /^[ \t]*--[ \t]*volt:no-transaction\b/m;
+
+/**
+ * Split a migration into statements on `;`, outside comments, quoted strings
+ * and dollar-quoted bodies. Only used for no-transaction files, which hold
+ * plain index statements, but it copes with the rest so it never cuts a
+ * statement in the middle.
+ */
+export function splitSql(sql: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i], d = sql[i + 1];
+    if (c === '-' && d === '-') {
+      const e = sql.indexOf('\n', i);
+      i = e < 0 ? sql.length : e;
+      continue;
+    }
+    if (c === '/' && d === '*') {
+      const e = sql.indexOf('*/', i + 2);
+      i = e < 0 ? sql.length : e + 2;
+      cur += ' ';
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < sql.length) {
+        if (sql[j] === c && sql[j + 1] === c) { j += 2; continue; }
+        if (sql[j] === c) break;
+        j++;
+      }
+      cur += sql.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (c === '$' && !/[A-Za-z0-9_$]/.test(cur.slice(-1))) {
+      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i, i + 64));
+      if (m) {
+        const e = sql.indexOf(m[0], i + m[0].length);
+        const end = e < 0 ? sql.length : e + m[0].length;
+        cur += sql.slice(i, end);
+        i = end;
+        continue;
+      }
+    }
+    if (c === ';') {
+      if (cur.trim()) out.push(cur.trim());
+      cur = '';
+      i++;
+      continue;
+    }
+    cur += c;
+    i++;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
 
 export interface MigrationResult {
   applied: string[];
@@ -120,6 +191,30 @@ export async function migrate(): Promise<MigrationResult> {
       }
       const started = Date.now();
       console.log(`[migrate] applying ${f.id}`);
+      if (NO_TX_RE.test(f.sql)) {
+        // No transaction: each statement on its own (Postgres runs a
+        // multi-statement string as one implicit transaction, which
+        // CONCURRENTLY refuses). Recorded only when every statement worked,
+        // so a failure is retried from the top on the next run.
+        const stmts = splitSql(f.sql);
+        for (const [n, stmt] of stmts.entries()) {
+          try {
+            await client.query(stmt);
+          } catch (e) {
+            throw new Error(
+              `[migrate] ${f.id} (no transaction) failed at statement ${n + 1} of ${stmts.length}: ` +
+              `${(e as Error).message}. Statements before it stayed applied; the file runs again from the top next time`
+            );
+          }
+        }
+        await client.query(
+          `INSERT INTO schema_migrations(id, duration_ms, checksum) VALUES ($1,$2,$3)`,
+          [f.id, Date.now() - started, checksum(f.sql)]
+        );
+        applied.push(f.id);
+        console.log(`[migrate] applied  ${f.id} in ${Date.now() - started}ms (no transaction, ${stmts.length} statement(s))`);
+        continue;
+      }
       try {
         await client.query('BEGIN');
         await client.query(f.sql);

@@ -16,6 +16,8 @@
  *   5. moves the notes to changes/released/v<ver>/ (the record of what shipped)
  *   6. regenerates the API reference so it carries the new version
  *   7. records the release in release/state.json (the baseline for check.mjs)
+ *   8. records this release's migrations as shipped in
+ *      release/migrations-baseline.json (D2: refused first if one is unsafe)
  *
  * Publishing is separate and comes after: deploy the app, then publish the docs
  * (scripts/docs/publish-docs.sh). See RELEASING.md.
@@ -24,6 +26,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from '
 import { join, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { ROOT, UNRELEASED, TYPES, TYPE_HEADING, unreleasedNotes, git, state } from './lib.mjs';
+import { checkRepo, updateBaseline } from './migrations.mjs';
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry-run');
@@ -44,6 +47,17 @@ const date = dateArg ?? new Date().toLocaleDateString('en-CA') /* local date, YY
 let notes;
 try { notes = unreleasedNotes(); } catch (e) { console.error(e.message); process.exit(1); }
 if (!notes.length) { console.error('No change notes in changes/unreleased/. Nothing to release (add notes with change.mjs).'); process.exit(1); }
+
+// A migration the previous release cannot run on stops the release here,
+// before anything is written (build queue D2, RELEASING.md "Schema").
+{
+  const r = checkRepo(ROOT);
+  if (r.problems.length) {
+    console.error(`migration safety: ${r.problems.length} problem(s), no release cut:`);
+    for (const p of r.problems) console.error(`  ${p.file}:${p.line}  ${p.message}`);
+    process.exit(1);
+  }
+}
 
 const byScope = (s) => notes.filter((n) => n.scope === s);
 const core = byScope('core');
@@ -125,9 +139,12 @@ execFileSync('node', [join(ROOT, 'volt-app', 'scripts', 'openapi.mjs')], { stdio
 
 const head = (() => { try { return git('rev-parse', 'HEAD'); } catch { return null; } })();
 writeFileSync(join(ROOT, 'release', 'state.json'), JSON.stringify({ version, date, commit: head, previous: state() }, null, 2) + '\n');
+// From now on these migrations have shipped: not judged again, never edited.
+const shipped = updateBaseline(ROOT, { release: version });
+console.log(`  migrations recorded as shipped: ${shipped.length ? shipped.join(', ') : 'none new'}`);
 
 if (commit) {
-  const paths = ['VERSION', 'CHANGELOG.md', 'release/state.json', 'changes', 'volt-app/docs/openapi.json', customerFile.slice(ROOT.length + 1)];
+  const paths = ['VERSION', 'CHANGELOG.md', 'release/state.json', 'release/migrations-baseline.json', 'changes', 'volt-app/docs/openapi.json', customerFile.slice(ROOT.length + 1)];
   git('add', '-A', '--', ...paths);
   execFileSync('git', ['commit', '--no-verify', '-m', `Release v${version}`], { cwd: ROOT, stdio: 'inherit' });
   git('tag', '-a', `v${version}`, '-m', `Volt ${version}`);

@@ -12,8 +12,8 @@
  * staging stack (deploy/staging), `ecs` an AWS environment built by
  * deploy/terraform. In order, a deploy:
  *
- *   1. runs the release checks (change notes; the migration safety check once
- *      it exists, D2) and resolves the version to its git tag and commit
+ *   1. runs the release checks (change notes and the migration safety check,
+ *      D2, both in check.mjs) and resolves the version to its git tag and commit
  *   2. builds and pushes every image tagged v<version>-<sha> (and v<version>),
  *      unless the images for that tag already exist. Never `latest`.
  *   3. registers the new service task definitions and runs the migrations ONCE,
@@ -33,7 +33,6 @@
  */
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { existsSync } from 'node:fs';
 import {
   ROOT, RECORD, parseArgs, environment, loadRecord, saveRecord, recordAttempt, rollbackTarget,
   resolveVersion, smokeTest,
@@ -66,8 +65,6 @@ async function main() {
   step(1, 'release checks');
   const git = (...a) => runner.run('git', a, { mutates: false, quiet: true, allowFail: true });
   runner.run('node', [join(ROOT, 'scripts/release/check.mjs')], { mutates: false });
-  const migCheck = join(ROOT, 'scripts/release/check-migrations.mjs');
-  if (existsSync(migCheck)) runner.run('node', [migCheck], { mutates: false });
   const head = git('rev-parse', 'HEAD').stdout.trim();
   const clean = git('status', '--porcelain', '--untracked-files=no').stdout.trim() === '';
   const rel = await resolveVersion({
