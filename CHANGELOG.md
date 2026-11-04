@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.46.0 (2026-11-04)
+
+### Product (in customer release notes)
+
+- added · Sites: Hybrid Sites add-on: Admin, Sites lists your own locations running the Volt site agent, with each site's health, its servers (cores, memory, graphics cards and their encode sessions, free disk, versions, last contact) and a one-time enrolment token to add a server, which then waits for Approve or Reject. Offered only to accounts with the add-on.
+- added · API: Sites API: GET and POST /api/sites, GET and PATCH /api/sites/{id}, enrolment tokens, and approve, reject and rotate-credential for a site's hosts. Without the Hybrid Sites add-on these answer 403 with the code licence_required.
+
+### Internal
+
+- added: Licensed add-ons: accounts.licences (empty by default), set by the system admin through PATCH /api/platform/accounts/:id. Site agent routes /api/site-agent/enrol, heartbeat and config with a narrow host credential; volt-agent 0.2.0 adds site enrol and site run. Suite sites.check.ts.
+
 ## 0.45.0 (2026-11-04)
 
 ### Product (in customer release notes)
