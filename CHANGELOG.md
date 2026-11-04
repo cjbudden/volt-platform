@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.41.0 (2026-11-04)
+
+### Product (in customer release notes)
+
+- added · Trick-play: Viewers in a rights blackout keep trick-play in HLS on streams that put a slate or loop on air: scrubbing inside their blackout shows the replacement loop, never the programme they may not see.
+
+### Internal
+
+- added · Tests: trickplay-variants check (variant I-frame playlists decoded against real loop media); a race in trickplay's queue assertion waited out.
+
 ## 0.40.0 (2026-11-04)
 
 ### Product (in customer release notes)
