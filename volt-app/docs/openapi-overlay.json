@@ -325,6 +325,10 @@
       "displayName": "Share links",
       "description": "Share links give someone outside your account a private link to one asset, optionally protected by a PIN or emailed code.\n\n**Use it to:**\n- Create a link with `POST /api/share-links`\n- List links and see their views with `GET /api/share-links` and `GET /api/share-links/{id}`\n- End a link at once with `POST /api/share-links/{id}/revoke`\n\n**Credential:** admin session (Bearer) or account secret key, with `sharing: view` to read and `sharing: manage` to change.\n\n**Good to know:** the link URL is returned once, at creation. Each link reaches exactly one asset."
     },
+    "Sites": {
+      "displayName": "Sites",
+      "description": "Sites are your own locations running the Volt site agent, with the Hybrid Sites add-on: their servers (hosts), enrolment and health.\n\n**Use it to:**\n- Create and edit sites with `POST /api/sites` and `PATCH /api/sites/{id}`\n- Add a server with `POST /api/sites/{id}/enrolment-tokens`, then approve or reject it with `POST /api/sites/{id}/hosts/{hostId}/approve` or `.../reject`\n- Watch health and versions with `GET /api/sites` and `GET /api/sites/{id}`\n- Give a server a new credential with `POST /api/sites/{id}/hosts/{hostId}/rotate-credential`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Hybrid Sites add-on on the account.\n\n**Good to know:** a server waiting for approval takes no work and does not count towards a site's health."
+    },
     "Social": {
       "displayName": "Social publishing",
       "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Publish an Image Library picture as an Instagram feed post or a Threads post with `POST /api/social/publish-image/{fileId}`, after checking the account's 24 hour publishing limit with `GET /api/social/accounts/{id}/publishing-limit`\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts (and likes and follower counts, where the platform gives them) with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
@@ -764,5 +768,41 @@
     "tag": "Recordings",
     "summary": "Get one exact frame of a recording",
     "description": "Name the moment with `n` (frames from the recording's start), `ms` (time from the start) or `at` (wall clock, epoch ms). Answers the frame on screen at that moment: its number and timecode from the start, its wall-clock time, the capture segment that holds it and a signed image URL `w` pixels wide (default 640). `redirect=true` answers 302 to the image. 404 outside the recording or in a gap in the capture."
+  },
+  "GET /api/sites": {
+    "summary": "List sites",
+    "description": "The account's sites, each with its `health` (healthy, degraded, offline, no_hosts or disabled, from its approved hosts only), host counts, the agent and encoder versions its hosts run and when one was last heard from. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "POST /api/sites": {
+    "summary": "Create a site",
+    "description": "A location of yours that will run the Volt site agent: `name` (unique in the account, ignoring case) and an optional `description`. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "GET /api/sites/:id": {
+    "summary": "Get a site",
+    "description": "The site with `hostList` (each host's standing, health and the facts it last reported), its unused enrolment tokens by prefix (never in clear) and the heartbeat timings. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "PATCH /api/sites/:id": {
+    "summary": "Update a site",
+    "description": "Rename, describe, or set `status` to `disabled` (its agents are refused) or `active`. Send the `version` you read to refuse a change made by someone else in between. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "POST /api/sites/:id/enrolment-tokens": {
+    "summary": "Make an enrolment token",
+    "description": "A one-time token for the site agent (`volt-agent site enrol <server> <token>`), valid for `expiresInHours` (default 24, at most 168). The token is in this answer only. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "DELETE /api/sites/:id/enrolment-tokens/:tokenId": {
+    "summary": "Withdraw an enrolment token",
+    "description": "An unused token stops working. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "POST /api/sites/:id/hosts/:hostId/approve": {
+    "summary": "Approve a host",
+    "description": "The host may take work at this site. It learns of it on its next heartbeat. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "POST /api/sites/:id/hosts/:hostId/reject": {
+    "summary": "Reject a host",
+    "description": "The host is refused and its credential stops working at once. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "POST /api/sites/:id/hosts/:hostId/rotate-credential": {
+    "summary": "Rotate a host's credential",
+    "description": "A new credential for the host, handed to its agent on the next heartbeat; the old one stops working the first time the new one is used. The new secret is never returned here. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
   }
 }

@@ -163,7 +163,7 @@ export const CATALOGUE: FeatureDef[] = [
   { key: 'settings', label: 'Account settings', area: 'admin',
     prefixes: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/metadata-lists', '/api/notification-templates',
       '/api/publish-targets', '/api/engines', '/api/addons', '/api/workflows',
-      '/api/ingest', '/api/publishing-rules'],
+      '/api/ingest', '/api/publishing-rules', '/api/sites'],
     // The channel, event and station forms read these to fill their pickers.
     readOpen: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/metadata-lists', '/api/engines', '/api/addons'],
     operate: [/^\/api\/workflows\/runs(\/[^/]+\/(cancel|retry))?$/], operateMeans: 'Start, cancel and retry workflow runs' },

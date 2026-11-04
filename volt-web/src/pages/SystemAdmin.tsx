@@ -195,6 +195,8 @@ function AccountDrawer({ account, onClose, onDone }: {
   const [plan, setPlan] = useState<'standard' | 'pro' | 'enterprise'>((account?.plan_tier as any) || 'standard')
   const [maxCh, setMaxCh] = useState(String(account?.max_channels ?? 5))
   const [maxSrc, setMaxSrc] = useState(String(account?.max_concurrent_sources ?? 3))
+  // Licensed add-ons (build queue H1): each is off until it is ticked here.
+  const [licences, setLicences] = useState<string[]>(account?.licences ?? [])
   const [ownerEmail, setOwnerEmail] = useState('')
   const [ownerPassword, setOwnerPassword] = useState(genPassword())
   const [busy, setBusy] = useState(false)
@@ -210,6 +212,7 @@ function AccountDrawer({ account, onClose, onDone }: {
         await api.platformPatchAccount(account!.id, {
           name: name.trim(), planTier: plan,
           maxChannels: Number(maxCh) || undefined, maxConcurrentSources: Number(maxSrc) || undefined,
+          licences,
         })
         onDone()
       } else {
@@ -277,6 +280,21 @@ function AccountDrawer({ account, onClose, onDone }: {
                 <div className="hintxt">Shown once after creation so you can hand it to the client.</div>
               </div>
               <div className="hintxt">The account also gets a Default group and an HD output profile so the client can create channels immediately.</div>
+            </>
+          )}
+
+          {isEdit && (
+            <>
+              <div className="sec-label">Add-ons</div>
+              <div className="toggle-row">
+                <div>
+                  <div className="tt">Hybrid Sites</div>
+                  <div className="td">The client's own servers at their own locations, enrolled with Volt (Admin, Sites). Saved with the account.</div>
+                </div>
+                <button type="button" role="switch" aria-checked={licences.includes('hybrid_sites')} aria-label="Hybrid Sites add-on"
+                  className={`sw ${licences.includes('hybrid_sites') ? '' : 'off'}`} style={{ border: 0 }}
+                  onClick={() => setLicences(l => l.includes('hybrid_sites') ? l.filter(x => x !== 'hybrid_sites') : [...l, 'hybrid_sites'])}><i /></button>
+              </div>
             </>
           )}
 

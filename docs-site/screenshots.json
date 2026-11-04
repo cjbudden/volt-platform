@@ -295,6 +295,16 @@
       "alt": "The Storage page: what this service can do at the top, the retention ladder, event data retention, the dry run, and the list of media with its state, tier and size"
     },
     {
+      "name": "sites",
+      "guide": "guides/hybrid-sites.md",
+      "path": "/sites",
+      "waitFor": "[data-site]",
+      "click": ["[data-site] button[aria-expanded]"],
+      "waitAfter": "[data-host]",
+      "settleMs": 1000,
+      "alt": "The Sites page: a site with its health, its hosts with what each server has and when it last reported, one approved and one waiting for approval, and the Add a host section"
+    },
+    {
       "name": "workflows",
       "guide": "guides/workflows.md",
       "path": "/workflows",

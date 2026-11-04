@@ -593,6 +593,27 @@ async function seedG8Sections() {
   await query(
     `INSERT INTO sso_domains(domain, connection_id, account_id, verify_token) VALUES ('example.com',$1,$2,'docs-example-token')
      ON CONFLICT (domain) DO NOTHING`, [SSO, ACCOUNT]);
+
+  // Hybrid Sites (build queue H1): the docs account holds the licence and has
+  // one site with an approved GPU host reporting now and a second host
+  // waiting for approval, so the guide shows both standings.
+  await query(`UPDATE accounts SET licences = ARRAY(SELECT DISTINCT unnest(licences || '{hybrid_sites}'::text[])) WHERE id = $1`, [ACCOUNT]);
+  const SITE = '8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c51';
+  await query(
+    `INSERT INTO sites(id, account_id, name, description, created_by, updated_by) VALUES ($1,$2,'Main broadcast centre','Machine room, rack 4',$3,$3)
+     ON CONFLICT (id) DO NOTHING`, [SITE, ACCOUNT, ADMIN]);
+  const hostRows: [string, string, string, number, number, string, any[], number, number, string | null][] = [
+    ['8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c52', 'encoder-01', 'approved', 32, 128, 'x64', [{ name: 'NVIDIA L4', vendor: 'nvidia', memoryBytes: 24 * 2 ** 30, encodeSessions: 8 }], 1.6e12, 4e12, '12 seconds'],
+    ['8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c53', 'encoder-02', 'pending', 16, 64, 'x64', [], 0.9e12, 2e12, '25 seconds'],
+  ];
+  for (const [id, hostname, status, cores, memGb, arch, gpus, free, total, ago] of hostRows) {
+    await query(
+      `INSERT INTO site_hosts(id, site_id, account_id, hostname, status, cpu_cores, memory_bytes, gpus, disk_free_bytes, disk_total_bytes, os, arch,
+                              agent_version, encoder_version, last_heartbeat_at, decided_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,'Linux 6.8',$11,'0.2.0','1.4.0', now() - $12::interval, CASE WHEN $5 = 'approved' THEN now() - interval '2 days' END)
+       ON CONFLICT (id) DO UPDATE SET last_heartbeat_at = EXCLUDED.last_heartbeat_at`,
+      [id, SITE, ACCOUNT, hostname, status, cores, memGb * 2 ** 30, JSON.stringify(gpus), free, total, arch, ago]);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

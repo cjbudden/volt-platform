@@ -55,6 +55,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | [**Encoding Profiles**](../guides/encoding-profiles.md) | The ladders that uploaded and watch-folder files are encoded to |
 | [**Watchfolders**](../guides/watchfolders.md) | Folders Volt watches for new files to ingest |
 | [**Storage**](../guides/storage.md) | What media exists, where it lives, and what retention will do to it next |
+| [**Sites**](../guides/hybrid-sites.md) | Your own locations running the Volt site agent, with the Hybrid Sites add-on: their servers and health |
 | [**Workflows**](../guides/workflows.md) | The steps every stream, recording and file goes through, and where each piece of work is now |
 | [**Content Types**](../guides/content-types.md) | What metadata each kind of content carries, and which guide fields it fills |
 | [**Genres**](../guides/genres.md) | The account's own genre list that streams and titles are tagged from |

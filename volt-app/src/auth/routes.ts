@@ -258,7 +258,7 @@ authRouter.get(
     const u = await one<any>(
       `SELECT u.id, u.email, u.display_name, u.role, u.status, u.platform_role,
               u.email_verified_at, u.phone_verified_at,
-              a.id AS account_id, a.name AS account_name, a.plan_tier, a.status AS account_status, a.require_admin_mfa
+              a.id AS account_id, a.name AS account_name, a.plan_tier, a.status AS account_status, a.require_admin_mfa, a.licences
          FROM users u JOIN accounts a ON a.id=u.account_id WHERE u.id=$1`, [req.auth!.sub]);
     if (!u) {
       // api-key principal
@@ -279,7 +279,7 @@ authRouter.get(
       roles: roles.map((r) => ({ id: r.id, name: r.name, key: r.role_key })),
       // legacy single-group fields
       userGroupId: roles[0]?.id ?? null, userGroupName: roles[0]?.name ?? null,
-      account: { id: u.account_id, name: u.account_name, plan: u.plan_tier, status: u.account_status },
+      account: { id: u.account_id, name: u.account_name, plan: u.plan_tier, status: u.account_status, licences: u.licences ?? [] },
       // `permissions` is the contract; `features` is the same map under its old name.
       permissions: acc.perms, features: acc.perms,
       model: accessDescription(),

@@ -19,10 +19,16 @@ const only = process.argv[2] ?? '';
   const { createServer } = await import('../src/server');
   const { listSpecsForDocs } = await import('../src/util/listQuery');
   const { query } = await import('../src/db');
+  const { LICENCES } = await import('../src/services/sites/licences');
+  // Lists behind a licensed add-on (Hybrid Sites, build queue H1) answer 403
+  // without it. Every list is exercised here, so the test account holds every
+  // licence for the run (its own database: check.js gives each suite one).
+  const email = process.env.DOCS_TEST_EMAIL ?? 'admin@volt.test';
+  await query(`UPDATE accounts SET licences = $2::text[] WHERE id = (SELECT account_id FROM users WHERE email = $1)`, [email, [...LICENCES]]);
   const app: any = createServer();
   const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as any).port}`;
   const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: process.env.DOCS_TEST_EMAIL ?? 'admin@volt.test', password: process.env.DOCS_TEST_PASSWORD ?? 'VoltTest!2026' }) });
+    body: JSON.stringify({ email, password: process.env.DOCS_TEST_PASSWORD ?? 'VoltTest!2026' }) });
   const token = (await login.json() as any).access;
   if (!token) { console.error('FAIL sign-in for the test failed'); process.exit(1); }
   const H = { authorization: `Bearer ${token}` };

@@ -788,6 +788,11 @@
       "class": "default",
       "why": "vod-src, the prefix the origin bucket policy keeps away from the CDN."
     },
+    "VOLT_ENCODER_VERSION": {
+      "class": "not-on-aws-yet",
+      "why": "The volt-encoder release Hybrid Sites hosts are told to run (site config). Nothing runs at a site until site encoding; Terraform sets it with the encoder image tag then.",
+      "item": "H4"
+    },
     "VOLT_TRASH_DAYS": {
       "class": "default",
       "why": "How long deleted media can be restored; the product default."

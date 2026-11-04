@@ -28,6 +28,7 @@ import UiSamplesPage from './pages/UiSamples'
 import PlanLimitsPage from './pages/PlanLimits'
 import AccountSettingsPage from './pages/AccountSettings'
 import CaptionsPage from './pages/Captions'
+import SitesPage from './pages/Sites'
 import ReframeSettingsPage from './pages/ReframeSettings'
 import PermissionsMapPage from './pages/PermissionsMap'
 import { GlobalNotices, PageNoticesProvider, usePageNotice, Notice } from './notices'
@@ -164,6 +165,7 @@ const ADMIN_NAV: NavGroup[] = [
     { key: 'encoding', label: 'Encoding Profiles', icon: I.fleet },
     { key: 'watchfolders', label: 'Watchfolders', icon: I.storage },
     { key: 'storage', label: 'Storage', icon: I.storage },
+    { key: 'sites', label: 'Sites', icon: I.storage },
     { key: 'workflows', label: 'Workflows', icon: I.workflows },
     { key: 'content-types', label: 'Content Types', icon: I.epg },
     { key: 'genres', label: 'Genres', icon: I.tag },
@@ -402,6 +404,9 @@ export default function App() {
     if (key === 'system') return !!me.platformRole
     // The audit log is for account administrators (owner, admin).
     if (key === 'audit') return access.isAdminTier
+    // Hybrid Sites is a licensed add-on (build queue H1): no page at all for an
+    // account without the licence, and for administrators only.
+    if (key === 'sites') return access.isAdminTier && !!me.account?.licences?.includes('hybrid_sites')
     // Social accounts sits with the settings, but its list is read through
     // /api/social, which is Media library & publishing. Offer it only to whom
     // both answer, or a settings-only role opens a page that cannot load
@@ -741,6 +746,8 @@ export default function App() {
             ? <ReframeSettingsPage />
             : section === 'captions'
             ? <CaptionsPage />
+            : section === 'sites'
+            ? <SitesPage />
             : section === 'permissions'
             ? <PermissionsMapPage />
             : section === 'system'

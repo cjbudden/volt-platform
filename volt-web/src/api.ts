@@ -1200,6 +1200,20 @@ export const api = {
   accountSettings: (): Promise<AccountSettings> => req('/account-settings'),
   patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null; trickPlayDefault?: boolean }): Promise<AccountSettings> =>
     req('/account-settings', { method: 'PATCH', body: JSON.stringify(b) }),
+  /** Admin > Sites, the Hybrid Sites add-on (volt-app modules/sites.ts, HYBRID_SITES.md). */
+  sites: (): Promise<{ items: SiteRow[] }> => req('/sites?limit=500'),
+  site: (id: string): Promise<SiteDetail> => req(`/sites/${encodeURIComponent(id)}`),
+  createSite: (b: { name: string; description?: string | null }): Promise<SiteRow> => req('/sites', { method: 'POST', body: JSON.stringify(b) }),
+  patchSite: (id: string, b: { name?: string; description?: string | null; status?: 'active' | 'disabled' }): Promise<SiteRow> =>
+    req(`/sites/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  createEnrolmentToken: (id: string, expiresInHours?: number): Promise<{ id: string; token: string; prefix: string; expiresAt: string }> =>
+    req(`/sites/${encodeURIComponent(id)}/enrolment-tokens`, { method: 'POST', body: JSON.stringify(expiresInHours ? { expiresInHours } : {}) }),
+  withdrawEnrolmentToken: (id: string, tokenId: string): Promise<null> =>
+    req(`/sites/${encodeURIComponent(id)}/enrolment-tokens/${encodeURIComponent(tokenId)}`, { method: 'DELETE' }),
+  decideHost: (id: string, hostId: string, verb: 'approve' | 'reject'): Promise<SiteHost> =>
+    req(`/sites/${encodeURIComponent(id)}/hosts/${encodeURIComponent(hostId)}/${verb}`, { method: 'POST', body: '{}' }),
+  rotateHostCredential: (id: string, hostId: string): Promise<{ id: string; prefix: string; pending: boolean }> =>
+    req(`/sites/${encodeURIComponent(id)}/hosts/${encodeURIComponent(hostId)}/rotate-credential`, { method: 'POST', body: '{}' }),
   /** Admin > Captions (modules/captionsSettings.ts). */
   captionsSettings: (): Promise<CaptionsSettings> => req('/account-settings/captions'),
   patchCaptionsProvider: (provider: CaptionsProvider): Promise<CaptionsSettings> =>
@@ -2101,6 +2115,8 @@ export const api = {
   platformPatchAccount: (id: string, b: {
     name?: string; planTier?: 'standard' | 'pro' | 'enterprise'
     maxChannels?: number; maxConcurrentSources?: number; status?: 'active' | 'suspended'
+    /** The whole list of licensed add-ons (hybrid_sites, mirror_archive), replacing the old one. */
+    licences?: string[]
   }): Promise<PlatformAccountRow> => req(`/platform/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   /** An account's groups: each ties channels to a transcode or packaging profile. */
   platformAccountGroups: (id: string): Promise<PlatformGroupRow[]> => req(`/platform/accounts/${id}/groups`),
@@ -2291,6 +2307,30 @@ export interface SecuritySummary {
   backupCodesRemaining: number; required: boolean
 }
 
+/** Hybrid Sites (volt-app services/sites/sites.ts). */
+export type SiteHealth = 'disabled' | 'no_hosts' | 'healthy' | 'degraded' | 'offline'
+export type HostHealth = 'never' | 'online' | 'stale' | 'offline'
+export interface SiteRow {
+  id: string; name: string; description: string | null; status: 'active' | 'disabled'; version: number; configVersion: number
+  health: SiteHealth
+  hosts: { total: number; approved: number; pending: number; online: number }
+  agentVersions: string[]; encoderVersions: string[]; lastContactAt: string | null
+  createdAt: string; updatedAt: string
+}
+export interface SiteHost {
+  id: string; siteId: string; hostname: string; status: 'pending' | 'approved' | 'rejected'; health: HostHealth
+  cpuCores: number | null; memoryBytes: number | null
+  gpus: { name: string; vendor: string | null; memoryBytes: number | null; encodeSessions: number | null }[]
+  diskFreeBytes: number | null; diskTotalBytes: number | null
+  os: string | null; arch: string | null; agentVersion: string | null; encoderVersion: string | null
+  lastHeartbeatAt: string | null; lastConfigVersion: number | null; decidedAt: string | null; createdAt: string
+}
+export interface SiteDetail extends SiteRow {
+  hostList: SiteHost[]
+  enrolmentTokens: { id: string; prefix: string; expiresAt: string; createdAt: string }[]
+  heartbeatSeconds: number; staleAfterSeconds: number; offlineAfterSeconds: number
+}
+
 export interface Me {
   kind?: 'admin'
   id: string; email?: string; displayName?: string | null
@@ -2301,7 +2341,8 @@ export interface Me {
   platformRole?: string | null
   roles?: { id: string; name: string; key: string | null }[]
   userGroupId?: string | null; userGroupName?: string | null
-  account?: { id: string; name: string; plan: string; status: string }
+  /** licences: add-ons the account is licensed for (hybrid_sites, mirror_archive); off unless listed. */
+  account?: { id: string; name: string; plan: string; status: string; licences?: string[] }
   /** Effective level per feature: the contract the console gates on. */
   permissions?: Record<string, AccessLevel>
   /** Same map, original name. */
@@ -2373,6 +2414,8 @@ export interface PlatformAccountRow {
   status?: 'active' | 'suspended'
   channels?: number | string; users?: number | string
   created_at?: string
+  /** Licensed add-ons; empty unless the system admin adds one. */
+  licences?: string[]
 }
 
 export interface EventSourceRow {

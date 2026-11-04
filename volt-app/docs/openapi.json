@@ -306,6 +306,11 @@
    "description": "Signup registers a new organisation from a website: it creates the client account and its owner, or records the registration for later, depending on how registration is set up.\n\n**Use it to:**\n- Read the plans on offer and whether they can be bought online with `GET /api/signup/config`\n- Register with `POST /api/signup`\n- Check a payment from the return page with `POST /api/signup/checkout-status`\n\n**Credential:** none.\n\n**Good to know:** registration never takes a password. The owner receives a welcome link and sets one through Onboarding, then invites their team."
   },
   {
+   "name": "Sites",
+   "x-displayName": "Sites",
+   "description": "Sites are your own locations running the Volt site agent, with the Hybrid Sites add-on: their servers (hosts), enrolment and health.\n\n**Use it to:**\n- Create and edit sites with `POST /api/sites` and `PATCH /api/sites/{id}`\n- Add a server with `POST /api/sites/{id}/enrolment-tokens`, then approve or reject it with `POST /api/sites/{id}/hosts/{hostId}/approve` or `.../reject`\n- Watch health and versions with `GET /api/sites` and `GET /api/sites/{id}`\n- Give a server a new credential with `POST /api/sites/{id}/hosts/{hostId}/rotate-credential`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Hybrid Sites add-on on the account.\n\n**Good to know:** a server waiting for approval takes no work and does not count towards a site's health."
+  },
+  {
    "name": "Social",
    "x-displayName": "Social publishing",
    "description": "Social publishing sends your VOD assets to linked social accounts and tracks each post.\n\n**Use it to:**\n- See which platforms are available with `GET /api/social/platforms` and link an account with `POST /api/social/connect/{platform}`\n- Publish an asset to one or more accounts with `POST /api/social/publish/{assetId}` (prefill from `GET /api/social/publish/{assetId}/defaults`)\n- Publish an Image Library picture as an Instagram feed post or a Threads post with `POST /api/social/publish-image/{fileId}`, after checking the account's 24 hour publishing limit with `GET /api/social/accounts/{id}/publishing-limit`\n- Follow, retry or take down posts with `GET /api/social/publications` and the `retry` and `remove` requests\n- Refresh view counts (and likes and follower counts, where the platform gives them) with `POST /api/social/sync-views`\n\n**Credential:** admin session (Bearer) or account secret key, with `vod: view` to read, `vod: operate` to publish or retry and `vod: manage` to link, remove or sync.\n\n**Good to know:** a sandbox account (`POST /api/social/sandbox/{platform}`) behaves like a platform without posting, for testing."
@@ -456,6 +461,7 @@
     "Scheduled Clips",
     "Search",
     "Share Links",
+    "Sites",
     "Social",
     "Sources",
     "Status",
@@ -29033,6 +29039,441 @@
     "responses": {
      "200": {
       "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/sites": {
+   "get": {
+    "operationId": "getSites",
+    "summary": "List sites",
+    "tags": [
+     "Sites"
+    ],
+    "description": "The account's sites, each with its `health` (healthy, degraded, offline, no_hosts or disabled, from its approved hosts only), host counts, the agent and encoder versions its hosts run and when one was last heard from. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `status`, `created_at`, `updated_at`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Search name. Every word must match, case-insensitive."
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `name=value` (comma list = any of), or `name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "active",
+        "disabled"
+       ]
+      },
+      "description": "active, or disabled (its agents are refused). Filter: `status=value` (comma list = any of), or `status[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "created_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `created_at=value`, or `created_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "updated_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `updated_at=value`, or `updated_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "name"
+      },
+      "description": "Comma list of: id, name, status, created_at, updated_at. Prefix `-` for descending. Default `name`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 500,
+       "default": 100
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "x-volt-list": true
+   },
+   "post": {
+    "operationId": "postSites",
+    "summary": "Create a site",
+    "tags": [
+     "Sites"
+    ],
+    "description": "A location of yours that will run the Volt site agent: `name` (unique in the account, ignoring case) and an optional `description`. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/sites/{id}": {
+   "get": {
+    "operationId": "getSitesByID",
+    "summary": "Get a site",
+    "tags": [
+     "Sites"
+    ],
+    "description": "The site with `hostList` (each host's standing, health and the facts it last reported), its unused enrolment tokens by prefix (never in clear) and the heartbeat timings. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchSitesByID",
+    "summary": "Update a site",
+    "tags": [
+     "Sites"
+    ],
+    "description": "Rename, describe, or set `status` to `disabled` (its agents are refused) or `active`. Send the `version` you read to refuse a change made by someone else in between. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/sites/{id}/enrolment-tokens": {
+   "post": {
+    "operationId": "postSitesByIDEnrolmentTokens",
+    "summary": "Make an enrolment token",
+    "tags": [
+     "Sites"
+    ],
+    "description": "A one-time token for the site agent (`volt-agent site enrol <server> <token>`), valid for `expiresInHours` (default 24, at most 168). The token is in this answer only. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/sites/{id}/enrolment-tokens/{tokenId}": {
+   "delete": {
+    "operationId": "deleteSitesByIDEnrolmentTokensByTokenId",
+    "summary": "Withdraw an enrolment token",
+    "tags": [
+     "Sites"
+    ],
+    "description": "An unused token stops working. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "tokenId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/sites/{id}/hosts/{hostId}/approve": {
+   "post": {
+    "operationId": "postSitesByIDHostsByHostIdApprove",
+    "summary": "Approve a host",
+    "tags": [
+     "Sites"
+    ],
+    "description": "The host may take work at this site. It learns of it on its next heartbeat. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "hostId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/sites/{id}/hosts/{hostId}/reject": {
+   "post": {
+    "operationId": "postSitesByIDHostsByHostIdReject",
+    "summary": "Reject a host",
+    "tags": [
+     "Sites"
+    ],
+    "description": "The host is refused and its credential stops working at once. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "hostId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/sites/{id}/hosts/{hostId}/rotate-credential": {
+   "post": {
+    "operationId": "postSitesByIDHostsByHostIdRotateCredential",
+    "summary": "Rotate a host's credential",
+    "tags": [
+     "Sites"
+    ],
+    "description": "A new credential for the host, handed to its agent on the next heartbeat; the old one stops working the first time the new one is used. The new secret is never returned here. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "hostId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
      }
     }
    }

@@ -10,6 +10,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { signAccess } from '../auth/jwt';
 import { hashPassword } from '../auth/password';
 import { planUsage, assertAllocationFits } from '../services/plan';
+import { LICENCES } from '../services/sites/licences';
 
 export const platformRouter = Router();
 
@@ -76,7 +77,7 @@ platformRouter.get(
   asyncHandler(async (_req, res) => {
     const rows = await query(
       `SELECT a.id, a.name, a.plan_tier, a.max_channels, a.max_concurrent_sources,
-              COALESCE(a.status,'active') AS status, a.created_at, a.x_enabled, a.mp3_feed_enabled, (a.x_client_id IS NOT NULL) AS x_own_app,
+              COALESCE(a.status,'active') AS status, a.created_at, a.x_enabled, a.mp3_feed_enabled, a.licences, (a.x_client_id IS NOT NULL) AS x_own_app,
               (SELECT count(*) FROM channels c JOIN groups g ON g.id=c.group_id WHERE g.account_id=a.id) AS channels,
               (SELECT count(*) FROM users u WHERE u.account_id=a.id) AS users
          FROM accounts a ORDER BY a.name`
@@ -165,6 +166,9 @@ const patchAccountSchema = z.object({
   /** MP3 for this account's radio listeners, made on demand from the HLS (build
    *  queue 2.1c-2). Off by default until it is decided whether to offer it. */
   mp3FeedEnabled: z.boolean().optional(),
+  /** Licensed add-ons (build queue H1): the whole list, replacing the old one.
+   *  Each is off until it is listed here. */
+  licences: z.array(z.enum(LICENCES)).max(LICENCES.length).optional(),
 });
 
 platformRouter.patch(
@@ -188,10 +192,12 @@ platformRouter.patch(
          status=COALESCE($6,status),
          x_enabled=COALESCE($7,x_enabled),
          mp3_feed_enabled=COALESCE($8,mp3_feed_enabled),
+         licences=COALESCE($9::text[],licences),
          updated_at=now()
        WHERE id=$1
-       RETURNING id, name, plan_tier, max_channels, max_concurrent_sources, status, x_enabled, mp3_feed_enabled, created_at`,
-      [req.params.id, b.name ?? null, b.planTier ?? null, b.maxChannels ?? null, b.maxConcurrentSources ?? null, b.status ?? null, b.xEnabled ?? null, b.mp3FeedEnabled ?? null]
+       RETURNING id, name, plan_tier, max_channels, max_concurrent_sources, status, x_enabled, mp3_feed_enabled, licences, created_at`,
+      [req.params.id, b.name ?? null, b.planTier ?? null, b.maxChannels ?? null, b.maxConcurrentSources ?? null, b.status ?? null, b.xEnabled ?? null, b.mp3FeedEnabled ?? null,
+       b.licences ? [...new Set(b.licences)] : null]
     );
     if (!row) throw notFound('account not found');
     if (b.status === 'suspended') {

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**843 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 669 · Platform API: 32 · Machine-to-machine: 12 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**855 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 678 · Platform API: 32 · Machine-to-machine: 15 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -928,6 +928,20 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/share-links/:id` | admin session (Bearer) or account secret key | sharing: view |  |
 | POST | `/api/share-links/:id/revoke` | admin session (Bearer) or account secret key | sharing: manage |  |
 
+### `/api/sites`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/sites` | admin session (Bearer) or account secret key | settings: view |  |
+| POST | `/api/sites` | admin session (Bearer) or account secret key | settings: manage |  |
+| GET | `/api/sites/:id` | admin session (Bearer) or account secret key | settings: view |  |
+| PATCH | `/api/sites/:id` | admin session (Bearer) or account secret key | settings: manage |  |
+| POST | `/api/sites/:id/enrolment-tokens` | admin session (Bearer) or account secret key | settings: manage |  |
+| DELETE | `/api/sites/:id/enrolment-tokens/:tokenId` | admin session (Bearer) or account secret key | settings: manage |  |
+| POST | `/api/sites/:id/hosts/:hostId/approve` | admin session (Bearer) or account secret key | settings: manage |  |
+| POST | `/api/sites/:id/hosts/:hostId/reject` | admin session (Bearer) or account secret key | settings: manage |  |
+| POST | `/api/sites/:id/hosts/:hostId/rotate-credential` | admin session (Bearer) or account secret key | settings: manage |  |
+
 ### `/api/social`
 
 | Method | Path | Credential | Access | Viewer tier |
@@ -1330,6 +1344,14 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/payments/webhooks/:provider/:accountId` | payment provider signature | callback |  |
+
+### `/api/site-agent`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/site-agent/config` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/enrol` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/heartbeat` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 
 ### `/api/social`
 

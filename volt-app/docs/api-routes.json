@@ -5428,6 +5428,114 @@
  },
  {
   "method": "GET",
+  "path": "/api/site-agent/config",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/enrol",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/heartbeat",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "GET",
+  "path": "/api/sites",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sites",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "GET",
+  "path": "/api/sites/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/sites/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sites/:id/enrolment-tokens",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/sites/:id/enrolment-tokens/:tokenId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sites/:id/hosts/:hostId/approve",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sites/:id/hosts/:hostId/reject",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "POST",
+  "path": "/api/sites/:id/hosts/:hostId/rotate-credential",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/sites"
+ },
+ {
+  "method": "GET",
   "path": "/api/social/accounts",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

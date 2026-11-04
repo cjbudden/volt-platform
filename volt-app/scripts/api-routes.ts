@@ -82,6 +82,7 @@ const PUBLIC_CRED: [RegExp, string][] = [
 const MACHINE: [RegExp, string][] = [
   [/^\/api\/engine-hooks/, 'engine callback signature'],
   [/^\/api\/addon-callbacks/, 'add-on run token'],
+  [/^\/api\/site-agent/, 'site host credential (Bearer vsite_...); enrol takes a one-time enrolment token'],
   [/^\/api\/payments\/webhooks/, 'payment provider signature'],
   [/^\/api\/radio\/icecast/, 'Icecast auth callback secret'],
   [/^\/api\/ingest\/transfers\/[^/]+\/events/, 'transfer provider callback (checked per provider)'],
