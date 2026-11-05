@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.51.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · Media Library: Audio files (MP3, WAV, M4A, AAC, FLAC) become audio assets: Volt encodes the sound alone to AAC, packaged as HLS and DASH, and the asset plays with the audio player. Uploads of audio files used to fail at the encode.
+- added · Watchfolders: New watchfolders start with a fifth default rule, Audio to the Media Library, and a rule may send audio files to the Media Library. Older folders get it from Add default rules.
+
+### Internal
+
+- added · Tests: vod-audio-asset suite: an mp3 with cover art encoded as an audio asset through the real handler and vod_encoder.py, the API and library flags, a file with nothing to encode refused, and an mp3 dropped into a fresh watch folder.
+
 ## 0.50.0 (2026-11-05)
 
 ### Product (in customer release notes)
