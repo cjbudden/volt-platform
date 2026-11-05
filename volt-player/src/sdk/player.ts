@@ -464,14 +464,13 @@ export class VoltPlayer {
     // AD BREAK: while the stream says a break is on, nothing of ours is drawn
     // over it (no Up next, no programme cards, no bugs), only the break itself.
     const adBreak = adBreakAt(this.streamGraphics.values(), currentTime);
-    const fillerNow = !adBreak && this.fillerAt(e.live, wallClock);
-    const graphics = !graphicsOn ? [] : adBreak ? [adBreak]
-      : fillerNow ? activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic === 'up-next')
-      // Songs are data for now playing (sdk/songs.ts), not something drawn.
-      : activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic !== 'song');
     // No guide loaded: the stream's own programme marker names what is on.
     // Read whether or not graphics are drawn: now / next is data, not a graphic.
-    const inband = !sched.length && e.presentationStart != null ? activeAt(this.streamGraphics.values(), currentTime).find((g) => g.graphic === 'programme') : undefined;
+    // The LATEST-STARTED programme marker in force is the one on air. Markers can
+    // overlap (a repeat of the same item, an open-ended strand, a marker whose
+    // duration runs past the guide slot): taking the oldest kept naming the
+    // previous programme after the next had started (6 Nov, FAST Goldframe).
+    const inband = !sched.length && e.presentationStart != null ? activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic === 'programme').pop() : undefined;
     const programme = sched.length ? programmeAt(sched, wallClock ?? Date.now())
       : inband ? { id: inband.data.id || inband.id, title: inband.data.title || '', subtitle: inband.data.subtitle ?? null, description: inband.data.description ?? null,
           imageUrl: inband.data.image ?? null, startsAt: e.presentationStart! + inband.start * 1000,
@@ -495,6 +494,12 @@ export class VoltPlayer {
           imageUrl: inband.data.next_image ?? null, startsAt: Number.isFinite(ns) ? ns : (programme?.endsAt ?? Date.now()), endsAt: Number.POSITIVE_INFINITY };
       }
     }
+    // Filler and graphics from THIS tick's programme, not the last tick's.
+    const fillerNow = !adBreak ? this.fillerAt(e.live, wallClock, programme, nextProgramme) : null;
+    const graphics = !graphicsOn ? [] : adBreak ? [adBreak]
+      : fillerNow ? activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic === 'up-next')
+      // Songs are data for now playing (sdk/songs.ts), not something drawn.
+      : activeAt(this.streamGraphics.values(), currentTime).filter((g) => g.graphic !== 'song');
     const item = this.s.item;
     const dismissKey = programme ? `p:${programme.id}` : `i:${this.s.index}`;
     // The stream's own Up next wins over one worked out from a fetched guide: it is
@@ -547,7 +552,7 @@ export class VoltPlayer {
     if (!casting) this.attempt?.adBreak(adBreak ? (adBreak.data.break || adBreak.id) : this.s.ad ? vodBreakId(this.s.ad) : null);
     // BETWEEN PROGRAMMES: the loop or slate (the programme's own content is over), or a break.
     const breakEnds = adBreak && adBreak.end != null && e.presentationStart != null ? e.presentationStart + adBreak.end * 1000 : null;
-    const fillerProg = fillerNow ? this.fillerAt(e.live, wallClock) : null;
+    const fillerProg = fillerNow;
     const between: PlayerState['between'] = adBreak ? { kind: 'break', resumesAt: breakEnds, next: programme }
       : fillerProg ? { kind: 'filler', resumesAt: (nextProgramme ?? fillerProg.next)?.startsAt ?? fillerProg.endsAt, next: nextProgramme ?? fillerProg.next } : null;
     // SONGS AT THE PLAYHEAD (1.7b): only when the stream carries them, so a
@@ -945,9 +950,8 @@ export class VoltPlayer {
    * its guide slot; past that, until the next programme, the playout fills the
    * gap. Also when no programme is on and one is announced.
    */
-  private fillerAt(live: boolean, clock: number | null): { endsAt: number; next: Programme | null } | null {
+  private fillerAt(live: boolean, clock: number | null, p: Programme | null, n: Programme | null): { endsAt: number; next: Programme | null } | null {
     if (!live || clock == null) return null;
-    const p = this.s.programme, n = this.s.nextProgramme;
     if (!p) return n && clock < n.startsAt ? { endsAt: n.startsAt, next: n } : null;
     const dur = Number(p.meta?.duration);
     if (!Number.isFinite(dur) || dur <= 0) return null;

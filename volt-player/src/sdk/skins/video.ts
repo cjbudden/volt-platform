@@ -250,7 +250,7 @@ export function videoSkin(): Skin {
     setIcon(parts.big, st.status === 'ended' ? 'replay' : 'play');
 
     // Up next, and Skip
-    // Between programmes the countdown and the Coming up card say it; no second Up next.
+    // Between programmes the countdown (top right) says what is coming; no second Up next.
     up.update(st.between ? { ...st, upNext: null } : st);
     air.update(st);
     skip.update(st);

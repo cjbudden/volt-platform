@@ -10,15 +10,22 @@
 //  own on iPhone), and the player hides every other graphic meanwhile.
 //
 //  THE PROGRAMME CARD. The programme's details as the stream carries them
-//  (title, image, description, genre, rating, year, what is next) on pause,
-//  for a few seconds when a programme starts, and between programmes (then
-//  about what is coming). Never over an ad break. In the console it is also
-//  the operator's proof that the metadata is in the stream and read.
+//  (title, image, description, genre, rating, year, what is next), bottom left.
+//  It gives context, nothing more (Christian, 6 Nov): it shows "Now playing"
+//  for a few seconds when playback starts and when a new programme starts, then
+//  fades; it has a close button; it shows on pause. It is NEVER shown for an ad,
+//  an ad break, or the channel's loop, slate or brand between programmes: what
+//  comes next there is the countdown's job (top right), so the card never says
+//  "Coming up" a second time. In the console it is also the operator's proof
+//  that the metadata is in the stream and read.
 // ============================================================================
 import type { PlayerState, Programme, SkinContext } from '../types';
-import { el, fmtClock, fmtTime, show, text } from './kit';
+import { button, el, fmtClock, fmtTime, show, text } from './kit';
 
-const INTRO_MS = 8000;
+/** How long the Now playing card stays up when playback or a programme starts. */
+export const INTRO_MS = 3000;
+/** Its fade out (matches the CSS transition). */
+const FADE_MS = 400;
 
 /** Genre · rating · year · language · S1 E2, from a programme marker's metadata. */
 export function metaLine(p: Programme | null): string {
@@ -54,8 +61,12 @@ export function onAir(c: SkinContext, variant: 'overlay' | 'console' = 'overlay'
   const meta = el('span', 'vp-pc-m');
   const desc = el('p');
   const next = el('span', 'vp-pc-n');
+  // Close: hides the card until there is something new to say (the next
+  // programme, or the next pause). The card itself lets clicks through to the
+  // player; only this button takes them.
+  const close = button('close', t('dismiss'), (e) => { e.stopPropagation(); e.preventDefault(); dismissed = shownKey; fadeOut(); }, 'vp-btn vp-pc-x', 16);
   const card = el('div', `vp-pc${variant === 'console' ? ' console' : ''}`, { role: 'region', 'aria-label': t('aboutProgramme') },
-    img, el('div', 'vp-pc-b', undefined, kick, title, meta, desc, next));
+    img, el('div', 'vp-pc-b', undefined, kick, title, meta, desc, next), close);
   show(cd, false); show(card, false);
   // ONE per player. The stage outlives a skin (the console switches Console /
   // Viewer on the same player), so a skin mounted before left its own card
@@ -72,8 +83,32 @@ export function onAir(c: SkinContext, variant: 'overlay' | 'console' = 'overlay'
     document.head.appendChild(s);
   }
 
-  let lastId: string | null = null;
+  // The intro runs once per programme, from the moment it is actually playing
+  // (so a player that loads paused, or buffers first, still gets its few seconds).
+  let introFor: string | null = null;
   let introUntil = 0;
+  // What the card is showing now ('intro:<id>' or 'pause:<id>'), and what the
+  // viewer closed: a closed card stays closed until the key changes.
+  let shownKey = '';
+  let dismissed = '';
+  let visible = false;
+  let wasPaused = false;
+  let pauseSeq = 0;
+  let fadeTimer: ReturnType<typeof setTimeout> | null = null;
+  function fadeIn() {
+    if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    show(card, true);
+    if (!visible) { card.classList.add('vp-pc-out'); void card.offsetWidth; }
+    card.classList.remove('vp-pc-out');
+    visible = true;
+  }
+  function fadeOut() {
+    if (!visible) return;
+    visible = false;
+    card.classList.add('vp-pc-out');
+    if (fadeTimer) clearTimeout(fadeTimer);
+    fadeTimer = setTimeout(() => { fadeTimer = null; if (!visible) show(card, false); }, FADE_MS);
+  }
 
   return {
     update(st: PlayerState) {
@@ -95,16 +130,21 @@ export function onAir(c: SkinContext, variant: 'overlay' | 'console' = 'overlay'
         }
       }
 
-      // ---- programme card
+      // ---- programme card: Now playing, only for real programme content
       const p = st.programme;
-      if (p?.id !== lastId) { lastId = p?.id ?? null; introUntil = p && st.playing ? Date.now() + INTRO_MS : 0; }
+      const content = live && !!p && !b && !st.ad && !st.adBreak;
+      if (content && st.playing && p!.id !== introFor) { introFor = p!.id; introUntil = Date.now() + INTRO_MS; }
       const paused = !st.playing && (st.status === 'paused' || st.status === 'ready');
-      const subject = b?.kind === 'filler' ? (b.next ?? null) : p;
-      const want = live && !!subject && b?.kind !== 'break' && !st.ad
-        && (paused || b?.kind === 'filler' || Date.now() < introUntil);
-      show(card, want);
-      if (!want || !subject) return;
-      text(kick, b?.kind === 'filler' ? t('comingUp') : paused ? t('paused') : t('onNow'));
+      if (paused && !wasPaused) pauseSeq++;
+      wasPaused = paused;
+      const intro = content && st.playing && Date.now() < introUntil;
+      const key = !content ? '' : paused ? `pause:${p!.id}:${pauseSeq}` : intro ? `intro:${p!.id}` : '';
+      const want = !!key && key !== dismissed;
+      if (!want) { fadeOut(); return; }
+      shownKey = key;
+      fadeIn();
+      const subject = p!;
+      text(kick, paused ? t('paused') : t('nowPlaying'));
       text(title, subject.title);
       text(meta, metaLine(subject));
       show(meta, !!metaLine(subject));
@@ -113,7 +153,7 @@ export function onAir(c: SkinContext, variant: 'overlay' | 'console' = 'overlay'
       const src = subject.imageUrl ?? '';
       if (src && src !== badSrc) { if (img.getAttribute('src') !== src) img.src = src; show(img, img.complete ? img.naturalWidth > 0 : true); }
       else show(img, false);
-      const nx = b?.kind === 'filler' ? null : st.nextProgramme;
+      const nx = st.nextProgramme;
       text(next, nx ? `${t('next')}: ${nx.title}${Number.isFinite(nx.startsAt) ? ` · ${fmtClock(nx.startsAt)}` : ''}` : '');
       show(next, !!nx);
     },
@@ -125,8 +165,11 @@ export const ON_AIR_CSS = `
 .vp .vp-cd small{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary)}
 .vp .vp-cd b{display:block;font-size:13px;line-height:1.3;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vp .vp-cd-t{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:rgba(255,255,255,.85)}
-.vp .vp-pc{position:absolute;left:16px;bottom:var(--vp-lift,16px);transition:bottom .25s ease;z-index:6;display:flex;gap:14px;width:min(520px,calc(100% - 32px));padding:14px;background:rgba(14,16,22,.9);border-radius:calc(var(--vp-radius) - 2px);color:#fff;box-shadow:0 12px 40px rgba(0,0,0,.45);pointer-events:none}
+.vp .vp-pc{position:absolute;left:16px;bottom:var(--vp-lift,16px);transition:bottom .25s ease,opacity .4s ease;opacity:1;z-index:6;display:flex;gap:14px;width:min(520px,calc(100% - 32px));padding:14px 40px 14px 14px;background:rgba(14,16,22,.9);border-radius:calc(var(--vp-radius) - 2px);color:#fff;box-shadow:0 12px 40px rgba(0,0,0,.45);pointer-events:none}
 .vp .vp-pc.console{bottom:16px}
+.vp .vp-pc.vp-pc-out{opacity:0}
+.vp .vp-pc .vp-pc-x{position:absolute;top:6px;right:6px;width:28px;height:28px;padding:0;pointer-events:auto;color:rgba(255,255,255,.7);background:transparent;border:0;border-radius:6px;cursor:pointer}
+.vp .vp-pc .vp-pc-x:hover,.vp .vp-pc .vp-pc-x:focus-visible{color:#fff;background:rgba(255,255,255,.12)}
 .vp.vp-gfx-bottom .vp-pc{bottom:auto;top:56px}
 .vp.vp-gfx-bottom .vp-pc.console{top:14px}
 .vp .vp-pc img{width:128px;height:72px;object-fit:cover;border-radius:6px;flex:none;background:#222}
