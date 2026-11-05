@@ -59,6 +59,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 | [**Workflows**](../guides/workflows.md) | The steps every stream, recording and file goes through, and where each piece of work is now |
 | [**Content Types**](../guides/content-types.md) | What metadata each kind of content carries, and which guide fields it fills |
 | [**Genres**](../guides/genres.md) | The account's own genre list that streams and titles are tagged from |
+| [**Rights**](../guides/rights.md) | The rights profile every asset carries: where, on which apps, for what and until when. Nothing else can go wider |
 | [**Publishing Rules**](../guides/publishing-rules.md) | Where on-demand content goes when it is published, and who can watch it, where and until when |
 | [**On-demand ads**](../guides/on-demand-ads.md) | Ad breaks in on-demand titles: where they go, filled by your ad server and your house spots, ad-free for viewers who paid |
 | [**Ingest Rules**](../guides/ingest-rules.md) | What happens to a file when it arrives: its name, where it is filed, duplicates, required metadata |

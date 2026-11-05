@@ -124,6 +124,9 @@ export interface OpenRequest {
    *  account default at encode time rather than here, so a default changed
    *  during a long upload is still the one that applies. */
   ladderGroupId?: string | null;
+  /** 'vod' only: the rights profile the asset gets (build queue R1). Null:
+   *  the account default, applied by the database as the row is made. */
+  rightsProfileId?: string | null;
   /** Ingest framework inputs ('vod' only): where the file came from within the
    *  drop, the content type chosen up front, metadata typed before upload, and
    *  which source rung applies ('panel', 'api', a watchfolder id, a provider). */
@@ -180,10 +183,11 @@ export async function openSession(req: OpenRequest): Promise<{ session: UploadSe
     const asset = await one<{ id: string }>(
       `INSERT INTO vod_assets
          (account_id, source_kind, kind, title, source_bytes, ladder_group_id,
-          start_epoch_ms, end_epoch_ms, duration_ms, thumb_status)
-       VALUES ($1,'upload','clip',$2,$3,$4,0,0,0,'processing')
+          start_epoch_ms, end_epoch_ms, duration_ms, thumb_status, rights_profile_id, rights_set_by)
+       VALUES ($1,'upload','clip',$2,$3,$4,0,0,0,'processing',
+               (SELECT id FROM rights_profiles WHERE id = $5 AND account_id = $1), CASE WHEN $5::uuid IS NULL THEN NULL ELSE 'chosen at upload' END)
        RETURNING id`,
-      [req.accountId, req.name, req.totalBytes, req.ladderGroupId ?? null]
+      [req.accountId, req.name, req.totalBytes, req.ladderGroupId ?? null, req.rightsProfileId ?? null]
     );
     vodAssetId = asset?.id ?? null;
   }

@@ -50,6 +50,7 @@ import Radio from './pages/Radio'
 import RadioDetail from './pages/RadioDetail'
 import ContentTypesPage from './pages/ContentTypes'
 import GenresPage from './pages/Genres'
+import RightsPage from './pages/Rights'
 import PublishingPage from './pages/Publishing'
 import IngestRulesPage from './pages/IngestRules'
 import PaymentsPage from './pages/Payments'
@@ -116,7 +117,7 @@ const NAV_FEATURE: Record<string, string> = {
   'encode-jobs': 'media',
   encoding: 'encoding', groups: 'settings', captions: 'settings', reframing: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access', sso: 'users',
   // Admin sections
-  'content-types': 'settings', genres: 'settings', publishing: 'settings', ingest: 'settings', social: 'settings',
+  'content-types': 'settings', genres: 'settings', rights: 'rights', publishing: 'settings', ingest: 'settings', social: 'settings',
   // On-demand ads are read and changed through /api/vod/ads: Media library & publishing.
   'on-demand-ads': 'vod',
   payments: 'payments', apikeys: 'apps',
@@ -169,6 +170,7 @@ const ADMIN_NAV: NavGroup[] = [
     { key: 'workflows', label: 'Workflows', icon: I.workflows },
     { key: 'content-types', label: 'Content Types', icon: I.epg },
     { key: 'genres', label: 'Genres', icon: I.tag },
+    { key: 'rights', label: 'Rights', icon: I.shield },
     { key: 'publishing', label: 'Publishing Rules', icon: I.vod },
     { key: 'on-demand-ads', label: 'On-demand ads', icon: I.vod },
     { key: 'ingest', label: 'Ingest Rules', icon: I.vod },
@@ -312,7 +314,7 @@ export default function App() {
   // Everything comes from /auth/me (the server), never from the email domain.
   const who = me?.displayName?.trim() || me?.email || email
   const initials = (who.includes('@') ? who.split('@')[0] : who).split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '·'
-  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', sso: 'Single sign-on', system: 'System Admin', 'content-types': 'Content Types', genres: 'Genres', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts', 'on-demand-ads': 'On-demand ads' }
+  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', sso: 'Single sign-on', system: 'System Admin', 'content-types': 'Content Types', genres: 'Genres', rights: 'Rights', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts', 'on-demand-ads': 'On-demand ads' }
   const label = [...NAV, ...ADMIN_NAV].flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -716,6 +718,8 @@ export default function App() {
             ? <ContentTypesPage />
             : section === 'genres'
             ? <GenresPage />
+            : section === 'rights'
+            ? <RightsPage path={route.path} />
             : section === 'publishing'
             ? <PublishingPage />
             : section === 'ingest'

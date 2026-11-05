@@ -171,6 +171,7 @@ async function main() {
   await seedFast();
   await seedFrames();
   await seedG8Sections();
+  await seedRights();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -626,6 +627,50 @@ async function seedG8Sections() {
        ON CONFLICT (id) DO UPDATE SET last_heartbeat_at = EXCLUDED.last_heartbeat_at`,
       [id, SITE, ACCOUNT, hostname, status, cores, memGb * 2 ** 30, JSON.stringify(gpus), free, total, arch, ago]);
   }
+}
+
+/**
+ * RIGHTS (build queue R1): three provider profiles beside the two built-ins,
+ * one with its agreement and one without, one ending soon, and the account's
+ * library spread across them, so the Rights guide shows a working list, a
+ * profile with apps and territories, and an asset narrowed inside its profile.
+ * Neutral provider names: a screenshot carries whatever the page shows.
+ */
+async function seedRights() {
+  const P = { sport: '5b0c1d2e-3f40-4a51-8b62-7c83d94ea501', films: '5b0c1d2e-3f40-4a51-8b62-7c83d94ea502', archive: '5b0c1d2e-3f40-4a51-8b62-7c83d94ea503' };
+  await query(`SELECT volt_rights_builtin($1, 'open'), volt_rights_builtin($1, 'closed')`, [ACCOUNT]);
+  const until = new Date(Date.now() + 45 * 86400_000).toISOString();
+  const rows: [string, string, string, string, string[], string, string[], string[], string[], string, any][] = [
+    [P.sport, 'Example Sports League · Pacific', 'Example Sports League', 'allow', ['AU', 'NZ', 'FJ'], 'allow', ['web', 'mobile', 'smart_tv'],
+      ['on_demand', 'fast', 'clips', 'ads'], ['subscription', 'ppv'], 'relative', { count: 12, unit: 'month', from: 'first_air' }],
+    [P.films, 'Example Films catalogue', 'Example Films', 'block', ['US', 'CA'], 'block', ['partner'],
+      ['on_demand', 'fast'], ['free', 'members'], 'fixed', { from: '2026-01-01T00:00:00Z', until: '2027-12-31T23:59:59Z' }],
+    [P.archive, 'News archive', 'In-house archive', 'allow', ['AU'], 'allow', ['web'], ['on_demand', 'clips'], ['members'], 'fixed', { until }],
+  ];
+  for (const [id, name, provider, tm, terr, am, apps, uses, accessTypes, wk, w] of rows) {
+    await query(
+      `INSERT INTO rights_profiles(id, account_id, name, provider, takedown_contact, territory_mode, territories, app_mode, app_types, uses, access_types,
+                                   window_kind, window_from, window_until, relative_count, relative_unit, relative_from)
+       VALUES ($1,$2,$3,$4,'rights@example.com',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (id) DO NOTHING`,
+      [id, ACCOUNT, name, provider, tm, terr, am, apps, uses, accessTypes, wk, wk === 'fixed' ? w.from ?? null : null, w.until ?? null, w.count ?? null, w.unit ?? null, wk === 'relative' ? w.from : null]);
+  }
+  // The agreement of the first two, stored as the API stores it (private keys).
+  for (const id of [P.sport, P.films]) {
+    const key = `rights-agreements/${ACCOUNT}/${id}/docs-agreement.pdf`;
+    await imageStore().put(key, Buffer.from('%PDF-1.4\n% Example agreement for the docs seed\n'), 'application/pdf');
+    await query(`UPDATE rights_profiles SET agreement = $2::jsonb WHERE id = $1 AND agreement IS NULL`,
+      [id, JSON.stringify({ name: id === P.sport ? 'League-agreement-2026.pdf' : 'Films-licence-v3.pdf', size: 248_310, type: 'application/pdf', key, uploadedBy: DOCS_LOGIN.email, uploadedAt: '2026-03-12T01:00:00Z' })]);
+  }
+  // The library, spread: the newest assets on the league, the next on films, two on the archive.
+  const assets = await query<{ id: string }>(
+    `SELECT v.id FROM vod_assets v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN groups g ON g.id = c.group_id
+      WHERE COALESCE(v.account_id, g.account_id) = $1 ORDER BY v.created_at DESC, v.id`, [ACCOUNT]);
+  const plan = [P.sport, P.sport, P.sport, P.films, P.films, P.archive, P.archive];
+  for (let i = 0; i < Math.min(plan.length, assets.length); i++) {
+    await query(`UPDATE vod_assets SET rights_profile_id = $2, rights_set_by = $3, rights_set_at = now() - interval '2 days' WHERE id = $1`,
+      [assets[i].id, plan[i], i < 2 ? 'watchfolder' : i < 5 ? 'chosen at upload' : `set by ${DOCS_LOGIN.email}`]);
+  }
+  if (assets[0]) await query(`UPDATE vod_assets SET rights_narrow = '{"territories":["AU","NZ"]}'::jsonb WHERE id = $1`, [assets[0].id]);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

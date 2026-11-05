@@ -312,6 +312,9 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
   const [name, setName] = useState(app?.name ?? '')
   const [type, setType] = useState<AppType>(app?.type ?? 'web')
   const [enabled, setEnabled] = useState(app?.enabled ?? true)
+  // WHAT IT IS USED FOR (build queue R1): rights can allow or block embed
+  // players and venue screens separately from the client's own apps.
+  const [surface, setSurface] = useState<'embed' | 'venue' | null>(app?.surface ?? null)
   const r = app?.restrictions || {}
   const initialOrigins = ((r.referrers || r.origins || []) as string[]).join('\n')
   const initialIps = ((r.ipAllowlist || []) as string[]).join('\n')
@@ -368,10 +371,10 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
     setBusy(true)
     try {
       if (isEdit) {
-        await api.updateApp(app!.id, { name: name.trim(), restrictions: buildRestrictions(), enabled })
+        await api.updateApp(app!.id, { name: name.trim(), restrictions: buildRestrictions(), enabled, surface: type === 'server' ? null : surface })
         onDone()
       } else {
-        const created = await api.createApp({ name: name.trim(), type, restrictions: buildRestrictions() })
+        const created = await api.createApp({ name: name.trim(), type, restrictions: buildRestrictions(), surface: type === 'server' ? null : surface })
         onDone(created.publishableKey)
       }
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
@@ -421,6 +424,13 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
                 onPick={() => setType(pf.v)} />
             ))
           )}
+
+          {type !== 'server' && <>
+            <div className="sec-label">Used for</div>
+            <ChoiceRow on={surface === null} title="Your own site or app" sub="Rights treat it by its platform: web, mobile or smart TV." onPick={() => setSurface(null)} />
+            <ChoiceRow on={surface === 'embed'} title="An embed player on other sites" sub="Rights can allow or block embeds separately from your own apps." onPick={() => setSurface('embed')} />
+            <ChoiceRow on={surface === 'venue'} title="Venue screens" sub="Kiosks and screens you run on site. Rights can allow or block them separately." onPick={() => setSurface('venue')} />
+          </>}
 
           <div className="sec-label">Where the key works</div>
           {attested ? (

@@ -468,12 +468,12 @@ export async function pendingVideoItems(folderId: string, limit = 50): Promise<P
 
 export async function loadVideoIngestFolder(id: string): Promise<VideoIngestFolder | null> {
   const f = await one<any>(
-    `SELECT id, account_id, kind, config, enabled, ladder_group_id
+    `SELECT id, account_id, kind, config, enabled, ladder_group_id, rights_profile_id
        FROM watchfolders WHERE id = $1`, [id]);
   if (!f || !f.enabled || !['local', 's3'].includes(f.kind)) return null;
   const path = folderPath(f);
   if (!path) return null;
-  return { id: f.id, accountId: f.account_id, path, ladderGroupId: f.ladder_group_id ?? null };
+  return { id: f.id, accountId: f.account_id, path, ladderGroupId: f.ladder_group_id ?? null, rightsProfileId: f.rights_profile_id ?? null };
 }
 
 /** Ingest whatever is waiting in one folder: images now, video queued. */

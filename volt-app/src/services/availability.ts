@@ -21,6 +21,7 @@ import { resolveForAsset, windowFor, type Target, type Resolved } from './publis
 import { evaluateAccessRules, type ViewerCtx, type AccessOutcome } from './accessRules';
 import { upsertViewer, viewerEntitlements } from './entitlements';
 import { touchViewer, cachedEntitlements, vodAvailabilityRow } from './viewerPath';
+import { rightsForAsset, rightsForAssetId, evaluateRights, accessAllowed, accessKindsFor, appAllowed, appTypeOf, type RightsAppType } from './rightsProfiles';
 
 export interface PublishOutcome {
   asset: any;
@@ -82,10 +83,31 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
     throw new NotPublishable('qc_failed', 'The publishing rule blocks publishing while QC has failed.');
   if (opts.auto && !s.autoPublish) throw new NotPublishable('manual_only', 'This asset is published by hand under its rules.');
 
-  const { from, until } = windowFor(s);
+  // THE RIGHTS CAP (build queue R1). Nothing is published that the rights do
+  // not allow on demand, and the window is always inside the rights window.
+  const rights = (await rightsForAssetId(assetId))!;
+  if (!rights.uses.includes('on_demand')) {
+    throw new NotPublishable('rights', `The rights (${rights.profileName}) do not allow this asset on demand.`);
+  }
+  // "Now" is taken after the window, as before: a window that opens at
+  // publish must not read as a millisecond in the future (scheduled).
+  let { from, until } = windowFor(s);
   const now = new Date();
+  if (rights.until && rights.until <= now) throw new NotPublishable('rights', `The rights window (${rights.profileName}) has ended.`);
+  if (rights.from && from < rights.from) from = rights.from;
+  if (rights.until && (!until || until > rights.until)) until = rights.until;
   const state: 'scheduled' | 'available' = from > now ? 'scheduled' : 'available';
-  const targets = opts.targets ?? s.targets;
+  // Asked for by name (Publish to social), a point the rights rule out is refused with the reason.
+  if (opts.targets?.some((t) => t.kind === 'social') && !rights.uses.includes('social')) {
+    throw new NotPublishable('rights', `The rights (${rights.profileName}) do not allow social posting.`);
+  }
+  // Publishing points the rights rule out are left out: social when the rights
+  // do not allow social, an app the rights do not allow.
+  const appTypes = new Map<string, RightsAppType>((await query<any>(`SELECT id, type, surface FROM apps WHERE account_id = $1`, [accountId])).map((r) => [String(r.id), appTypeOf(r.type, r.surface)]));
+  const targets = (opts.targets ?? s.targets).filter((t) =>
+    t.kind === 'social' ? rights.uses.includes('social')
+      : t.kind === 'app' ? appAllowed(rights, appTypes.get(t.appId) ?? null, t.appId)
+      : true);
 
   const stamp = {
     buildAt: asset.built_at ?? null, review: asset.review_state ?? 'draft', qc: asset.qc_state ?? null,
@@ -194,19 +216,25 @@ export async function viewerContext(accountId: string, geo: string | undefined, 
   return { country: geo ?? null, viewerId: v.id, groups: v.groups ?? [], entitlements: await cachedEntitlements(v.id, () => viewerEntitlements(v.id)) };
 }
 
-export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false, viewer?: ViewerCtx | null):
-  Promise<{ allowed: boolean; reason?: string; paywall?: any; rule?: AccessOutcome } | null> {
+export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false, viewer?: ViewerCtx | null, appType?: RightsAppType | null):
+  Promise<{ allowed: boolean; reason?: string; paywall?: any; rule?: AccessOutcome; rights?: boolean } | null> {
   const a = await vodAvailabilityRow(assetId);   // cached; edits and the availability clock invalidate it
   if (!a) return null;
   const st = a.availability_state ?? 'draft';
   if (st === 'withdrawn') return { allowed: false, reason: 'this content is no longer available' };
   if (st === 'expired') return { allowed: false, reason: 'this content is no longer available' };
   if (st === 'scheduled') return { allowed: false, reason: `available from ${new Date(a.available_from).toISOString()}` };
-  if (st === 'draft') {
-    // Assets from before availability existed: `published` still decides.
-    if (!a.published) return { allowed: false, reason: 'not published' };
-    return { allowed: true };
-  }
+  if (st === 'draft' && !a.published) return { allowed: false, reason: 'not published' };
+  // THE RIGHTS CAP (build queue R1), before collection access and the policy:
+  // outside the rights nothing below can let the viewer in. The profile is
+  // cached by id, so a warm gate still makes no database reads.
+  const rights = await rightsForAsset(a);
+  const capped = evaluateRights(rights, { country: geo ?? null, appType: appType ?? null, appId: appId ?? null, use: 'on_demand' });
+  if (!capped.allowed) return { allowed: false, reason: capped.reason, rights: true };
+  // Assets from before availability existed: `published` still decides.
+  if (st === 'draft') return accessAllowed(rights, ['free']) ? { allowed: true } : { allowed: false, reason: 'The rights do not allow free access.', rights: true };
+  // Whatever lets the viewer in must be an access type the rights allow.
+  const outsideRights = (kinds: ReturnType<typeof accessKindsFor>) => !accessAllowed(rights, kinds);
   const s = a.availability ?? {};
   // PER-APP PUBLISHING. When the plan names apps, only those apps may play it.
   const targets: Target[] = Array.isArray(s.targets) ? s.targets : [];
@@ -223,14 +251,28 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
     const outcome = evaluateAccessRules(rules,
       { relation: fromAsset ? 'this' : 'ondemand', schemaId: a.schema_id, assetId, ownerId: a.channel_id ?? a.event_id },
       viewer ?? { country: geo ?? null, viewerId: null, groups: [], entitlements: [] });
-    if (outcome.allowed) { if (outcome.via !== 'no_rule') return { allowed: true, rule: outcome }; }
-    else return { allowed: false, reason: outcome.message, paywall: outcome.products ?? null, rule: outcome };
+    if (outcome.allowed) {
+      if (outcome.via !== 'no_rule') {
+        const terms = rules.find((r: any) => r.id === outcome.ruleId)?.then.terms ?? null;
+        if (outsideRights(accessKindsFor(outcome.via, undefined, terms))) return { allowed: false, reason: 'The rights do not allow this kind of access.', rights: true };
+        return { allowed: true, rule: outcome };
+      }
+    } else {
+      // A paywall offers only what the rights allow to be sold.
+      if (outcome.reason === 'payment_required' && outcome.products?.length) {
+        const sellable = outcome.products.filter((t) => accessAllowed(rights, accessKindsFor('entitlement', undefined, [t])));
+        if (!sellable.length) return { allowed: false, reason: 'The rights do not allow this kind of access.', rights: true };
+        return { allowed: false, reason: outcome.message, paywall: sellable, rule: { ...outcome, products: sellable } };
+      }
+      return { allowed: false, reason: outcome.message, paywall: outcome.products ?? null, rule: outcome };
+    }
   }
   const g = s.geo ?? { mode: 'worldwide', countries: [] };
   const country = (geo || '').toUpperCase();
   const list: string[] = (g.countries || []).map((c: string) => String(c).toUpperCase());
   if (g.mode === 'block' && country && list.includes(country)) return { allowed: false, reason: `not available in ${country}` };
   if (g.mode === 'allow' && (!country || !list.includes(country))) return { allowed: false, reason: `not available in ${country || 'your region'}` };
+  if (outsideRights(accessKindsFor(undefined, s.access ?? 'free'))) return { allowed: false, reason: 'The rights do not allow this kind of access.', rights: true };
   const hasEntitlement = entitled || !!(viewer?.entitlements?.length);
   if ((s.access === 'entitled' || s.access === 'paid') && !hasEntitlement) {
     return { allowed: false, reason: s.access === 'paid' ? 'payment required' : 'entitlement required', paywall: s.paywall ?? null };

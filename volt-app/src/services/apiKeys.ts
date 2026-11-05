@@ -68,6 +68,8 @@ export interface AppRow {
   type: 'web' | 'ios' | 'android' | 'tv' | 'roku' | 'server';
   restrictions: any;
   enabled: boolean;
+  /** An embed player or venue screens, for the rights (build queue R1). */
+  surface?: 'embed' | 'venue' | null;
 }
 
 /**

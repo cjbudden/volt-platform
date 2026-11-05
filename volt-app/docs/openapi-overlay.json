@@ -450,6 +450,10 @@
     "SSO Connections": {
       "hidden": true,
       "description": "Left out of the customer reference until it has a usage statement (added hidden by the 29 Oct build queue run so the release could regenerate openapi.json; write the statement and remove hidden to publish it)."
+    },
+    "Rights": {
+      "displayName": "Rights",
+      "description": "The rights profile every asset carries: where it may be shown (territories), on which apps, for which uses (on demand, FAST and linear, clips, social, downloads, ads), with which access types and inside which window. Rights are the cap: collection access and publishing policies decide inside them, and the play gate, publishing and FAST refuse anything outside them.\n\n**Use it to:**\n- List and manage profiles with `GET /api/rights/profiles`, `POST /api/rights/profiles` and `PUT /api/rights/profiles/{id}`\n- Choose what new assets get with `PUT /api/rights/settings`\n- Set or narrow one asset's rights with `PUT /api/rights/assets/{assetId}`, or many at once with `POST /api/rights/assign`\n- Store the agreement with `PUT /api/rights/agreements/{id}`\n- Ask what the rights alone allow with `POST /api/rights/check`\n\n**Credential:** admin session or account secret key (Rights: view to check, manage to change and to read agreements; the profile list is open to any signed-in user for pickers).\n\n**Good to know:** two profiles are built in (No restrictions, All restricted) and cannot be changed. A title can narrow its profile, never widen it. Uploads, tus uploads and watchfolders take `rightsProfileId`."
     }
   },
   "GET /api/vod/:id/delete-impact": {
@@ -812,5 +816,75 @@
   "GET /api/watchfolders/site-options": {
     "summary": "On-prem watchfolder options",
     "description": "What the New watchfolder form may offer for an on-prem folder: `licensed` (whether the account has the Hybrid Sites add-on), its `sites` (id, name, status) and the `placements` with whether each can be chosen yet (`upload_cloud` can; `encode_site` arrives with site encoders). An on-prem folder is then created with `POST /api/watchfolders` and `\"kind\": \"site\"`, `siteId`, `placement` and `config.path` (the folder's path on the site's server)."
+  },
+  "GET /api/rights/profiles": {
+    "summary": "List rights profiles",
+    "description": "The account's rights profiles, the two built-ins (`builtin`: `open` for No restrictions, `closed` for All restricted) and its own, each with `assetCount` and `isDefault` (what new assets get). Every asset carries one profile: territories, apps, uses, access types and window. Nothing can show an asset outside its rights.",
+    "tag": "Rights"
+  },
+  "POST /api/rights/profiles": {
+    "summary": "Create a rights profile",
+    "description": "Territories (`territoryMode` `worldwide`, `allow` or `block` with `territories` as ISO country codes), apps (`appMode` `all`, `allow` or `block` with `appTypes` from `web`, `mobile`, `smart_tv`, `embed`, `partner`, `venue` and `appIds` naming registered apps), `uses` (`on_demand`, `fast`, `clips`, `social`, `downloads`, `ads`), `accessTypes` (`free`, `members`, `subscription`, `ppv`) and `window` (`open`, `fixed` with `from` and `until`, or `relative` with `count`, `unit` and `from`: `first_air` or `ingest`).",
+    "tag": "Rights"
+  },
+  "GET /api/rights/profiles/:id": {
+    "summary": "Get a rights profile",
+    "description": "One profile, with `assetCount`, `isDefault` and `setBy` (how its assets got it: watchfolder, chosen at upload, account default, set or bulk by a person).",
+    "tag": "Rights"
+  },
+  "PUT /api/rights/profiles/:id": {
+    "summary": "Change a rights profile",
+    "description": "Replaces the profile's settings (same body as create). Built-in profiles cannot be changed (409). Every asset on the profile follows the change at once: the play gate, publishing and FAST read it straight away.",
+    "tag": "Rights"
+  },
+  "DELETE /api/rights/profiles/:id": {
+    "summary": "Delete a rights profile",
+    "description": "Only a profile no asset uses and that is not the default for new assets (409 otherwise). Built-ins cannot be deleted.",
+    "tag": "Rights"
+  },
+  "GET /api/rights/profiles/:id/assets": {
+    "summary": "Assets on a rights profile",
+    "description": "The assets that carry the profile, newest assignment first, with whether each is narrowed. `limit` (up to 500) and `offset`.",
+    "tag": "Rights"
+  },
+  "PUT /api/rights/agreements/:id": {
+    "summary": "Upload the agreement",
+    "description": "The file's bytes as the body (up to 25 MB), its name in `name`. Stored privately, never public. Replaces the one before.",
+    "tag": "Rights"
+  },
+  "GET /api/rights/agreements/:id": {
+    "summary": "Download the agreement",
+    "description": "Needs Rights: Manage. Every download is written to the audit log.",
+    "tag": "Rights"
+  },
+  "GET /api/rights/settings": {
+    "summary": "Default rights for new assets",
+    "description": "`defaultProfileId` (what an asset gets when its upload, watchfolder or API call names no profile) and the ids of the two built-ins.",
+    "tag": "Rights"
+  },
+  "PUT /api/rights/settings": {
+    "summary": "Change the default rights",
+    "description": "`{ \"defaultProfileId\" }`. Applies to new assets only.",
+    "tag": "Rights"
+  },
+  "GET /api/rights/assets/:id": {
+    "summary": "An asset's rights",
+    "description": "Its `profile`, its own `narrow`ing, how it got them, and the `effective` rights (the profile with the narrowing applied).",
+    "tag": "Rights"
+  },
+  "PUT /api/rights/assets/:id": {
+    "summary": "Set an asset's rights",
+    "description": "`{ \"profileId\", \"narrow\" }`. `narrow` can only take away: `territories` (only these), `blockTerritories`, `appTypes` (only these), `blockAppIds`, `uses` (only these), `from`, `until`. A narrowing wider than the profile is refused with 422 and the reasons in `problems`.",
+    "tag": "Rights"
+  },
+  "POST /api/rights/assign": {
+    "summary": "Assign a rights profile in bulk",
+    "description": "`{ \"profileId\", \"assetIds\": [...] }`, up to 1,000. Assets of another account are skipped. Per-title narrowing is cleared unless `keepNarrowing` is true.",
+    "tag": "Rights"
+  },
+  "POST /api/rights/check": {
+    "summary": "Check the rights",
+    "description": "`{ \"assetId\", \"country\", \"appId\" or \"appType\", \"use\", \"at\" }`: what the rights alone answer (`allowed`, and `code` `territory`, `app`, `use` or `window` with a `reason`). Collection access and the publishing policy decide inside this; the play gate gives the full answer.",
+    "tag": "Rights"
   }
 }

@@ -20,6 +20,7 @@ import SkipMarkers from '../SkipMarkers'
 import { RuleEditor } from '../RuleEditor'
 import { MetadataForm, TypePicker } from '../ContentTypeFields'
 import type { AssetAvailability } from '../api'
+import AssetRightsPanel from '../rights/AssetRightsPanel'
 import { useRoute } from '../router'
 import { BulkBar, SelectAllHead, SelectCell, bulkSummary, runBulk, useSelection } from '../listActions'
 import { NoMatches, usePref } from '../listFilters'
@@ -171,7 +172,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
-  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'metadata' | 'files' | 'encode' | 'formats'>('play')
+  const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'rights' | 'metadata' | 'files' | 'encode' | 'formats'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
   async function load() {
@@ -232,11 +233,11 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
   return (
     <div style={{ padding: '8px 2px 14px' }}>
       <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 12 }}>
-        {(['play', 'markers', 'metadata', 'files', 'encode', 'formats', 'availability', 'history'] as const).map(t => (
+        {(['play', 'markers', 'metadata', 'files', 'encode', 'formats', 'rights', 'availability', 'history'] as const).map(t => (
           <button key={t} className={`btn ${tab === t ? 'primary' : 'ghost'}`}
             style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
             onClick={() => { if (t !== tab && !confirmLeave()) return; setTab(t) }}>
-            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'files' ? 'Companion files' : t === 'encode' ? 'Encode' : t === 'formats' ? 'Formats' : t === 'availability' ? 'Availability' : 'History'}
+            {t === 'play' ? 'Preview' : t === 'markers' ? 'Skip markers' : t === 'metadata' ? 'Metadata' : t === 'files' ? 'Companion files' : t === 'encode' ? 'Encode' : t === 'formats' ? 'Formats' : t === 'availability' ? 'Availability' : t === 'rights' ? 'Rights' : 'History'}
           </button>
         ))}
         <AvailabilityBadge state={d.availability_state} until={d.available_until} />
@@ -426,6 +427,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
       {/* SOCIAL FORMATS: 9:16, 1:1 and 4:5 framed by following the picture (volt/REFRAME.md). */}
       {tab === 'formats' && <FormatsPanel asset={d} />}
 
+      {tab === 'rights' && <AssetRightsPanel assetId={d.id} />}
       {tab === 'availability' && (
         <AvailabilityPanel d={d} onChanged={() => { load(); onChanged() }} />
       )}

@@ -70,6 +70,8 @@ const openBody = z.object({
    *  which is deliberate: a long upload should not pin a default that was
    *  changed while its bytes were in flight. */
   ladderGroupId: z.string().uuid().nullable().optional(),
+  /** 'vod' only: the rights profile (build queue R1). Omitted: the account default. */
+  rightsProfileId: z.string().uuid().nullable().optional(),
   /** Ingest framework: path within the drop (folder picks), the content type
    *  chosen up front, metadata typed before upload, and the source rung. */
   relativePath: z.string().max(1000).nullable().optional(),
@@ -89,6 +91,7 @@ uploadsRouter.post('/', asyncHandler(async (req, res) => {
     purpose: b.purpose,
     fillerKind: b.purpose === 'vod' ? undefined : (b.fillerKind ?? 'loop'),
     ladderGroupId: b.purpose === 'vod' ? (b.ladderGroupId ?? null) : null,
+    rightsProfileId: b.purpose === 'vod' ? (b.rightsProfileId ?? null) : null,
     name: b.name,
     filename: b.filename,
     contentType: b.contentType,

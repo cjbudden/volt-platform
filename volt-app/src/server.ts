@@ -97,6 +97,7 @@ import { mountHealth, publicOnlyGuard } from './scale/health';
 import { publicAuthRouter, publicMeRouter } from './modules/publicApi';
 import { epgPublicRouter } from './modules/epgPublic';
 import { collectionsRouter } from './modules/collections';
+import { rightsRouter } from './modules/rights';
 import { viewersAdminRouter } from './modules/viewersAdmin';
 import { scaleConfig } from './scale/config';
 
@@ -566,6 +567,7 @@ export function createServer() {
   app.use('/api/vod', contentLinksRouter);               // content links, Read from file name (before vodRouter's /:id; modules/contentLinks.ts)
   app.use('/api/vod', vodFramesRouter);                  // frame index and exact frames: /:id/frame-index, /:id/frame (modules/frames.ts)
   app.use('/api/vod', vodRouter);                        // derived VOD assets + metadata
+  app.use('/api/rights', rightsRouter);                 // rights profiles, the cap on every asset (modules/rights.ts, build queue R1)
   app.use('/api/collections', collectionsRouter);       // nested collections of library assets (modules/collections.ts)
   app.use('/api/metadata-schemas', metadataSchemasRouter); // named metadata schemas
   app.use('/api/metadata-lists', metadataListsRouter);     // the account's pick lists: genres (services/metadataLists.ts)

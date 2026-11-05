@@ -163,7 +163,15 @@ export const watchfoldersRouter = Router();
 watchfoldersRouter.use(requireAuth);
 
 const FOLDER_EDITABLE = ['name', 'kind', 'config', 'default_target_kind', 'quarantine_path',
-  'enabled', 'ladder_group_id', 'placement'];
+  'enabled', 'ladder_group_id', 'placement', 'rights_profile_id'];
+
+/** A rights profile named on a folder must be one of the account's (build queue R1). */
+async function ownRightsProfile(acct: string, id: unknown): Promise<string | null> {
+  if (id == null || id === '') return null;
+  const p = await one<any>(`SELECT id FROM rights_profiles WHERE id::text = $1 AND account_id = $2`, [String(id), acct]);
+  if (!p) throw badRequest('That rights profile is not one of this account\'s.');
+  return p.id;
+}
 
 /** A placement this release can run; 'encode_site' is refused until site encoders (H4). */
 function assertPlacement(v: unknown) {
@@ -256,10 +264,11 @@ watchfoldersRouter.post('/', asyncHandler(async (req, res) => {
   }
   const who = actor(req);
   const row = await one<any>(
-    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id, site_id, placement)
-     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8,$9,$10) RETURNING *`,
+    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id, site_id, placement, rights_profile_id)
+     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8,$9,$10,$11) RETURNING *`,
     [accountId(req), b.name, b.kind, JSON.stringify(b.config), b.defaultTargetKind ?? null,
-     b.quarantinePath, who.userId, b.ladderGroupId ?? null, site?.id ?? null, placement]
+     b.quarantinePath, who.userId, b.ladderGroupId ?? null, site?.id ?? null, placement,
+     await ownRightsProfile(accountId(req), (req.body ?? {}).rightsProfileId)]
   );
   const rules = b.defaultRules ? await addDefaults(row) : [];
   // The site's agents pick up a new folder on their next config pull.
@@ -305,6 +314,7 @@ watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
   if ('quarantinePath' in b) patch.quarantine_path = b.quarantinePath;
   if ('enabled' in b) patch.enabled = !!b.enabled;
   if ('ladderGroupId' in b) patch.ladder_group_id = b.ladderGroupId;
+  if ('rightsProfileId' in b) patch.rights_profile_id = await ownRightsProfile(accountId(req), b.rightsProfileId);
   if ('placement' in b) {
     if (cur.kind !== 'site') throw badRequest('Only an on-prem folder has a placement');
     assertPlacement(b.placement);

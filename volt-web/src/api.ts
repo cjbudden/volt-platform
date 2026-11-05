@@ -2125,9 +2125,9 @@ export const api = {
   // ---- admin: apps & API keys ----
   apps: (): Promise<AppReg[]> => req('/apps'),
   app: (id: string): Promise<AppReg & { keys: ApiKeyRow[] }> => req(`/apps/${id}`),
-  createApp: (b: { name: string; type: AppType; restrictions?: Record<string, any> }): Promise<AppReg & { publishableKey: MintedKey }> =>
+  createApp: (b: { name: string; type: AppType; restrictions?: Record<string, any>; surface?: 'embed' | 'venue' | null }): Promise<AppReg & { publishableKey: MintedKey }> =>
     req('/apps', { method: 'POST', body: JSON.stringify(b) }),
-  updateApp: (id: string, b: { name?: string; restrictions?: Record<string, any>; enabled?: boolean }): Promise<AppReg> =>
+  updateApp: (id: string, b: { name?: string; restrictions?: Record<string, any>; enabled?: boolean; surface?: 'embed' | 'venue' | null }): Promise<AppReg> =>
     req(`/apps/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   rotateAppKey: (id: string): Promise<MintedKey> => req(`/apps/${id}/keys`, { method: 'POST' }),
   revokeApiKey: async (keyId: string): Promise<void> => {
@@ -2419,6 +2419,8 @@ export interface ViewerDetail extends ViewerRow {
 export type AppType = 'web' | 'ios' | 'android' | 'tv' | 'roku' | 'server'
 export interface AppReg {
   id: string; name: string; type: AppType
+  /** An embed player on other sites, or venue screens: how the rights see it (build queue R1). */
+  surface?: 'embed' | 'venue' | null
   restrictions: Record<string, any>; enabled: boolean
   created_at: string; updated_at?: string
 }

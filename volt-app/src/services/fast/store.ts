@@ -23,6 +23,7 @@ import { houseFill, fillBreak, type HouseAd, type PodPlan } from './pod';
 import { spliceInsert, toHex, eventIdFor } from './scte35';
 import { resolve as resolveVast, expandTag, bestSource, type Fetcher, type TagContext } from './vast';
 import { sourceQuality, type Role } from './ladder';
+import { effectiveRights, type RightsProfile } from '../rightsProfiles';
 
 export const DEFAULT_HORIZON_DAYS = 7;
 const SEGMENT_SEC = Number(process.env.FAST_SEGMENT_SEC ?? 2);
@@ -70,7 +71,8 @@ export async function libraryFor(accountId: string): Promise<Map<string, Library
     `SELECT v.id, v.title, v.duration_ms, v.metadata, v.master_key, v.available_from, v.available_until,
             v.availability_state, v.break_cues_ms, v.poster_key,
             v.source_key, v.encode_result, v.ingest, v.export_mp3_key, v.export_m4a_key, v.top_height, v.progressive_key,
-            c.kind AS channel_kind, ${usageStatusSql('v')} AS usage_status
+            c.kind AS channel_kind, ${usageStatusSql('v')} AS usage_status,
+            v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
@@ -81,8 +83,17 @@ export async function libraryFor(accountId: string): Promise<Map<string, Library
         AND v.availability_state <> 'withdrawn'
       ORDER BY v.created_at DESC
       LIMIT 20000`, [accountId]);
+  // THE RIGHTS CAP (build queue R1). An asset whose rights do not allow FAST
+  // and linear is not in the library a lineup plans from, and its playable
+  // window is the narrower of its availability and its rights window.
+  const profiles = new Map<string, RightsProfile>((await query<RightsProfile>(
+    `SELECT * FROM rights_profiles WHERE account_id = $1`, [accountId])).map((p) => [p.id, p]));
   const m = new Map<string, LibraryAsset>();
   for (const r of rows) {
+    const rights = effectiveRights(r.rights_profile_id ? profiles.get(String(r.rights_profile_id)) ?? null : null, r);
+    if (!rights.uses.includes('fast')) continue;
+    if (rights.from && (!r.available_from || new Date(r.available_from) < rights.from)) r.available_from = rights.from;
+    if (rights.until && (!r.available_until || new Date(r.available_until) > rights.until)) r.available_until = rights.until;
     const spliceReady = !!r.master_key && r.encode_result?.zeroStart === true;
     m.set(String(r.id), {
       ...assetFromRow(r),

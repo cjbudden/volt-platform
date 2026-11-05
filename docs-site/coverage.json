@@ -1,6 +1,6 @@
 {
   "_comment": "Which guide covers each part of Volt (build queue 1.14-G0). sections: every console nav item (scripts/check-coverage.mjs reads the nav from the console source and fails when one is missing here or listed here but gone). workflows: how sections work together. developer: the customer developer topics. pages: the cross-cutting pages. 'guides' are paths under docs/. 'batch' is the build-queue item that writes them; a batch listed in 'required' must have every entry covered by guides that follow the template, so each guides item adds its batch here when it is done. 'internal' entries are for Volt staff and never get a customer guide.",
-  "required": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G8", "H1"],
+  "required": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G8", "H1", "R1"],
   "templates": {
     "section": ["What it is for", "Before you start", "Step by step", "How it connects", "Who can do it", "Troubleshooting", "Through the API"],
     "workflow": ["What it is for", "Before you start", "The flow", "Step by step", "Who can do it", "Troubleshooting", "Through the API"],
@@ -33,6 +33,7 @@
     { "key": "workflows", "label": "Workflows", "batch": "G3", "guides": ["guides/workflows.md"] },
     { "key": "content-types", "label": "Content Types", "batch": "G3", "guides": ["guides/content-types.md"] },
     { "key": "genres", "label": "Genres", "batch": "G8", "guides": ["guides/genres.md"] },
+    { "key": "rights", "label": "Rights", "batch": "R1", "guides": ["guides/rights.md"] },
     { "key": "publishing", "label": "Publishing Rules", "batch": "G3", "guides": ["guides/publishing-rules.md"] },
     { "key": "on-demand-ads", "label": "On-demand ads", "batch": "G3", "guides": ["guides/on-demand-ads.md"] },
     { "key": "ingest", "label": "Ingest Rules", "batch": "G3", "guides": ["guides/ingest-rules.md"] },

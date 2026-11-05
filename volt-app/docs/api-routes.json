@@ -5284,6 +5284,132 @@
  },
  {
   "method": "GET",
+  "path": "/api/rights/agreements/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/rights/agreements/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "GET",
+  "path": "/api/rights/assets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: view",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/rights/assets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "POST",
+  "path": "/api/rights/assign",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "POST",
+  "path": "/api/rights/check",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: view",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "GET",
+  "path": "/api/rights/profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "POST",
+  "path": "/api/rights/profiles",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/rights/profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "GET",
+  "path": "/api/rights/profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/rights/profiles/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "GET",
+  "path": "/api/rights/profiles/:id/assets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "GET",
+  "path": "/api/rights/settings",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: any signed-in admin user (lookup for forms)",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/rights/settings",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "rights: manage",
+  "viewerTier": false,
+  "group": "/api/rights"
+ },
+ {
+  "method": "GET",
   "path": "/api/scheduled-clips",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

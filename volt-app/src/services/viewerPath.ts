@@ -53,7 +53,7 @@ export function appById(id: string | null | undefined): Promise<AppLookupRow | n
   return cached<AppLookupRow | null>(
     `app:${id}`,
     { ttlSec: C().keyTtlSec, tags: [`app:${id}`], l2: true },
-    () => one<AppLookupRow>(`SELECT id, type, restrictions, enabled FROM apps WHERE id=$1`, [id])
+    () => one<AppLookupRow>(`SELECT id, type, restrictions, enabled, surface FROM apps WHERE id=$1`, [id])
   );
 }
 
@@ -92,7 +92,8 @@ export function vodAvailabilityRow(assetId: string): Promise<any | null> {
     `vodavail:${assetId}`,
     { ttlSec: C().rulesTtlSec, tags: [`asset:${assetId}`] },
     () => one<any>(
-      `SELECT availability_state, availability, availability_sources, available_from, available_until, published, schema_id, channel_id, event_id
+      `SELECT availability_state, availability, availability_sources, available_from, available_until, published, schema_id, channel_id, event_id,
+              rights_profile_id, rights_narrow, created_at, first_aired_at
          FROM vod_assets WHERE id = $1`, [assetId])
   );
 }

@@ -462,6 +462,20 @@
       "alt": "The Genres page: the genre list with the box to add genres, each genre with Retire and Remove, and beside it where the list is used and how changes land"
     },
     {
+      "name": "rights",
+      "guide": "guides/rights.md",
+      "path": "/rights",
+      "waitFor": ".rt-table",
+      "alt": "The Rights page: summary tiles, the default for new assets, and the list of profiles with their territories, app icons, uses, access, window, asset count, agreement and status"
+    },
+    {
+      "name": "rights-profile",
+      "guide": "guides/rights.md",
+      "path": "/rights/5b0c1d2e-3f40-4a51-8b62-7c83d94ea501",
+      "waitFor": ".rt-main",
+      "alt": "A rights profile: owner, territories as chips, app types as cards with icons and named apps, uses, access types, the window and the agreement, with where it plays and how assets got it beside them"
+    },
+    {
       "name": "single-sign-on",
       "guide": "guides/single-sign-on.md",
       "path": "/sso",

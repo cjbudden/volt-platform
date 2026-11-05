@@ -85,6 +85,8 @@ export interface VideoIngestFolder {
   path: string;
   /** The ladder every VOD asset from this folder is encoded to. */
   ladderGroupId?: string | null;
+  /** The rights profile everything from this folder gets (null: the account default). */
+  rightsProfileId?: string | null;
   userId?: string | null;
 }
 
@@ -107,6 +109,7 @@ export interface VideoIngestStore {
   createVodAsset(a: {
     accountId: string; title: string; sourceKey: string; sourceBytes: number;
     ladderGroupId: string | null; sourceKind: 'watchfolder' | 'upload';
+    rightsProfileId?: string | null;
   }): Promise<{ id: string }>;
   createFillerAsset(a: {
     id: string; accountId: string; name: string; sourceKey: string; bytes: number;
@@ -233,6 +236,7 @@ export async function ingestVideoItem(
       asset = await store.createVodAsset({
         accountId: f.accountId, title, sourceKey: dest, sourceBytes: bytes,
         ladderGroupId: f.ladderGroupId ?? null, sourceKind: 'watchfolder',
+        rightsProfileId: f.rightsProfileId ?? null,
       });
     } catch (e: any) {
       await unlink(dest).catch(() => { /* an orphan copy is the cheap failure */ });
@@ -316,10 +320,11 @@ export const pgVideoIngestStore: VideoIngestStore = {
     const row = await one<any>(
       `INSERT INTO vod_assets
          (account_id, source_kind, kind, title, source_key, source_bytes, ladder_group_id,
-          start_epoch_ms, end_epoch_ms, duration_ms, thumb_status)
-       VALUES ($1,$2,'clip',$3,$4,$5,$6,0,0,0,'processing')
+          start_epoch_ms, end_epoch_ms, duration_ms, thumb_status, rights_profile_id, rights_set_by)
+       VALUES ($1,$2,'clip',$3,$4,$5,$6,0,0,0,'processing',
+               (SELECT id FROM rights_profiles WHERE id = $7 AND account_id = $1), CASE WHEN $7::uuid IS NULL THEN NULL ELSE $8 END)
        RETURNING id`,
-      [a.accountId, a.sourceKind, a.title, a.sourceKey, a.sourceBytes, a.ladderGroupId]
+      [a.accountId, a.sourceKind, a.title, a.sourceKey, a.sourceBytes, a.ladderGroupId, a.rightsProfileId ?? null, a.sourceKind === 'watchfolder' ? 'watchfolder' : 'chosen at upload']
     );
     return { id: row.id };
   },

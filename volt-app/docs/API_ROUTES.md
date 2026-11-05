@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**878 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 680 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**892 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 694 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -903,6 +903,25 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/reports/stream/:id` | admin session (Bearer) or account secret key | analytics: view |  |
 | GET | `/api/reports/streams` | admin session (Bearer) or account secret key | analytics: view |  |
 | GET | `/api/reports/streams.csv` | admin session (Bearer) or account secret key | analytics: view |  |
+
+### `/api/rights`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/rights/agreements/:id` | admin session (Bearer) or account secret key | rights: manage |  |
+| PUT | `/api/rights/agreements/:id` | admin session (Bearer) or account secret key | rights: manage |  |
+| GET | `/api/rights/assets/:id` | admin session (Bearer) or account secret key | rights: view |  |
+| PUT | `/api/rights/assets/:id` | admin session (Bearer) or account secret key | rights: manage |  |
+| POST | `/api/rights/assign` | admin session (Bearer) or account secret key | rights: manage |  |
+| POST | `/api/rights/check` | admin session (Bearer) or account secret key | rights: view |  |
+| GET | `/api/rights/profiles` | admin session (Bearer) or account secret key | rights: any signed-in admin user (lookup for forms) |  |
+| POST | `/api/rights/profiles` | admin session (Bearer) or account secret key | rights: manage |  |
+| DELETE | `/api/rights/profiles/:id` | admin session (Bearer) or account secret key | rights: manage |  |
+| GET | `/api/rights/profiles/:id` | admin session (Bearer) or account secret key | rights: any signed-in admin user (lookup for forms) |  |
+| PUT | `/api/rights/profiles/:id` | admin session (Bearer) or account secret key | rights: manage |  |
+| GET | `/api/rights/profiles/:id/assets` | admin session (Bearer) or account secret key | rights: any signed-in admin user (lookup for forms) |  |
+| GET | `/api/rights/settings` | admin session (Bearer) or account secret key | rights: any signed-in admin user (lookup for forms) |  |
+| PUT | `/api/rights/settings` | admin session (Bearer) or account secret key | rights: manage |  |
 
 ### `/api/scheduled-clips`
 

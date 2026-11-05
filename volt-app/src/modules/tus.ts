@@ -40,7 +40,8 @@ export class PgTusStore implements TusStore {
       accountId: who.accountId, openedBy: who.userId, purpose: 'vod',
       name: (md.name || filename).replace(/\.[^.]+$/, '').slice(0, 200), filename,
       contentType: md.filetype || md.type || 'application/octet-stream', totalBytes: Math.max(1, length),
-      ladderGroupId: md.ladderGroupId || null, relativePath: md.relativePath || null,
+      ladderGroupId: md.ladderGroupId || null, rightsProfileId: /^[0-9a-f-]{36}$/i.test(md.rightsProfileId || '') ? md.rightsProfileId : null,
+      relativePath: md.relativePath || null,
       schemaId: md.schemaId || null, metadata, source: md.source || 'tus',
       retryOf: retryOf(md.retryOf),
     });

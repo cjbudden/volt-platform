@@ -16,6 +16,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, type IngestPreviewRow, type IngestHeld, type IngestTransfer } from './api'
 import { startUpload, subscribe, type UploadItem } from './uploadManager'
+import { rightsApi } from './rights/rightsApi'
 import { tusUpload } from './tusClient'
 import { TypePicker, MetadataForm } from './ContentTypeFields'
 import { openDropboxChooser, openOneDrivePicker, openGooglePicker, pickerConfigured } from './cloudPickers'
@@ -75,6 +76,10 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const [src, setSrc] = useState<Source>('device')
   const [picked, setPicked] = useState<Picked[]>([])
   const [typeId, setTypeId] = useState<string | null>(null)
+  // RIGHTS (build queue R1): every asset gets a profile. Empty = the account default.
+  const [rightsId, setRightsId] = useState<string>('')
+  const [rightsList, setRightsList] = useState<{ id: string; name: string; isDefault?: boolean }[]>([])
+  useEffect(() => { rightsApi.profiles().then(l => setRightsList(l.map(p => ({ id: p.id, name: p.name, isDefault: p.isDefault })))).catch(() => {}) }, [])
   // WHAT THESE FILES ARE, ASKED BEFORE A BYTE MOVES. The type decides the
   // metadata form, the naming and the publishing rules, so a file uploaded
   // without one lands in the library as "No type" and has to be fixed by hand.
@@ -178,10 +183,10 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
           onDone(); done.push(p.id); continue
         }
         if (phone) {
-          await tusUpload(p.file, { endpoint: '/api/tus', token: getToken() ?? '', metadata: { source, ...(t ? { schemaId: t } : {}), ...(Object.keys(m).length ? { metadata: JSON.stringify(m) } : {}), ...(p.retry ? { retryOf: JSON.stringify(p.retry) } : {}) }, onProgress: (s, tot) => setTusProg(x => ({ ...x, [p.id]: s / tot })) })
+          await tusUpload(p.file, { endpoint: '/api/tus', token: getToken() ?? '', metadata: { source, ...(t ? { schemaId: t } : {}), ...(rightsId ? { rightsProfileId: rightsId } : {}), ...(Object.keys(m).length ? { metadata: JSON.stringify(m) } : {}), ...(p.retry ? { retryOf: JSON.stringify(p.retry) } : {}) }, onProgress: (s, tot) => setTusProg(x => ({ ...x, [p.id]: s / tot })) })
           setTusProg(x => { const c = { ...x }; delete c[p.id]; return c }); onDone(); loadHeld()
         } else {
-          await startUpload(p.file, { kind: 'loop', purpose: 'vod', source, schemaId: t, metadata: Object.keys(m).length ? m : null, retryOf: p.retry ?? null })
+          await startUpload(p.file, { kind: 'loop', purpose: 'vod', source, schemaId: t, metadata: Object.keys(m).length ? m : null, retryOf: p.retry ?? null, rightsProfileId: rightsId || null })
         }
         done.push(p.id)
       } catch (e: any) { setErr(String(e?.message ?? e)) }
@@ -301,6 +306,16 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             {sheet === 'all' ? 'Close metadata for all' : typeId ? 'Type and metadata for all' : 'Set type and metadata for all'}
           </button>
         </div>
+
+        {rightsList.length > 0 && (
+          <div className="ig-type" role="group" aria-label="Rights for the files you add">
+            <label className="ig-type-l" htmlFor="ig-rights">Rights</label>
+            <select id="ig-rights" className="inp" style={{ maxWidth: 320, padding: '6px 10px' }} value={rightsId} onChange={e => setRightsId(e.target.value)}>
+              <option value="">{`Account default (${rightsList.find(r => r.isDefault)?.name ?? 'No restrictions'})`}</option>
+              {rightsList.filter(r => !r.isDefault).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+        )}
 
         {sheet === 'all' && (
           <div className="ig-sheet">

@@ -61,7 +61,7 @@ export function classifyGate(status: number, body: any, note: GateNote): { reaso
   if (status === 403 && typeof body?.error === 'string' && body.error.startsWith('blocked:')) return { reason: 'app_restriction', layer, ruleId };
   if (status >= 500) return { reason: 'error', layer, ruleId };
   if (layer === 'account' || layer === 'channel') return { reason: 'geo', layer, ruleId };
-  if (layer === 'programme') return { reason: 'rights', layer, ruleId };
+  if (layer === 'programme' || layer === 'rights') return { reason: 'rights', layer, ruleId };
   if (layer === 'rules') {
     const why = r?.rule?.reason;
     return { reason: why === 'geo' ? 'geo' : why === 'members_only' ? 'sign_in' : why === 'group' ? 'group' : why === 'payment_required' ? 'payment' : 'rules', layer, ruleId };

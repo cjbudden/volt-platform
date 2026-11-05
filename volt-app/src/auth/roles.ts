@@ -134,6 +134,13 @@ export const CATALOGUE: FeatureDef[] = [
   { key: 'downloads', label: 'Downloads', area: 'content', prefixes: ['/api/downloads'],
     operate: [new RegExp(`^/api/downloads/vod/${ID}/link$`)],
     operateMeans: 'Download media files (MP4, MP3, AAC)' },
+  // RIGHTS (build queue R1): the profiles every asset carries, who may change
+  // them and who may read the agreements. Pickers in upload and asset forms
+  // list the profiles, so reading the list is open; reading an agreement is
+  // Manage (below), and every read of one is audited.
+  { key: 'rights', label: 'Rights', area: 'content', prefixes: ['/api/rights'],
+    readOpen: ['/api/rights/profiles', '/api/rights/settings'],
+    readWrites: [/^\/api\/rights\/check$/] },
   { key: 'media', label: 'Files, uploads & storage', area: 'content',
     prefixes: ['/api/files', '/api/filler-assets', '/api/uploads', '/api/tus', '/api/watchfolders', '/api/storage', '/api/jobs',
       // THE INGEST QUEUE is handling uploads, not configuring ingest: what is held,
@@ -374,6 +381,10 @@ export async function requirementFor(method: string, rawPath: string, body?: any
   // anywhere. The account default and the content type rungs stay Account
   // settings. A uuid that is not a channel is taken as an event: the handler
   // refuses an owner the account does not have.
+  // A rights agreement is a contract: reading one is Rights: manage, not view.
+  if (!write && /^\/api\/rights\/agreements\/[^/]+$/.test(path)) {
+    return { features: ['rights'], level: 'manage', reason: 'rights agreement' };
+  }
   if (path === '/api/publishing-rules/points' || path === '/api/publishing-rules/resolve') {
     return { features: ['settings', 'vod', 'channels', 'radio', 'events', 'fast'], level: 'view', reason: 'publishing rule lookup' };
   }

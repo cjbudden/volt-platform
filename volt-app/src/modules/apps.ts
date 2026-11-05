@@ -12,6 +12,7 @@ import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { generateKey, verifyKey, checkRestrictions, mintPlaybackToken, appForKey } from '../services/apiKeys';
 import { evaluateAccess } from '../services/rights';
+import { appTypeOf } from '../services/rightsProfiles';
 import { assetKindFor, currentProgrammeWindow } from '../services/viewerPath';
 import { resolveLiveManifest, resolveEventManifest } from './publicLive';
 import { viewerGeo, edgeCache, noStore } from '../scale/edge';
@@ -43,6 +44,8 @@ appsRouter.use(requireAuth);
 const appSchema = z.object({
   name: z.string().min(1),
   type: z.enum(['web', 'ios', 'android', 'tv', 'roku', 'server']),
+  /** An embed player on other sites, or venue screens: how the rights see it (build queue R1). */
+  surface: z.enum(['embed', 'venue']).nullable().optional(),
   restrictions: z.record(z.any()).default({}),
 });
 
@@ -62,8 +65,8 @@ appsRouter.post(
   asyncHandler(async (req, res) => {
     const b = appSchema.parse(req.body);
     const app = await one<any>(
-      `INSERT INTO apps(account_id, name, type, restrictions) VALUES ($1,$2,$3::app_type,$4::jsonb) RETURNING *`,
-      [accountId(req), b.name, b.type, JSON.stringify(b.restrictions)]
+      `INSERT INTO apps(account_id, name, type, restrictions, surface) VALUES ($1,$2,$3::app_type,$4::jsonb,$5) RETURNING *`,
+      [accountId(req), b.name, b.type, JSON.stringify(b.restrictions), b.surface ?? null]
     );
     const key = await issueKey(accountId(req), app.id, 'publishable', ['playback']);
     res.status(201).json({ ...app, publishableKey: key });
@@ -146,12 +149,17 @@ appsRouter.get('/:id', asyncHandler(async (req, res) => {
 }));
 
 appsRouter.put('/:id', asyncHandler(async (req, res) => {
-  const b = z.object({ name: z.string().optional(), restrictions: z.record(z.any()).optional(), enabled: z.boolean().optional() }).parse(req.body);
+  const b = z.object({ name: z.string().optional(), restrictions: z.record(z.any()).optional(), enabled: z.boolean().optional(),
+    /** What the app is used for, for the rights (build queue R1): null for your own site or app. */
+    surface: z.enum(['embed', 'venue']).nullable().optional() }).parse(req.body);
   const app = await one(
-    `UPDATE apps SET name=COALESCE($3,name), restrictions=COALESCE($4::jsonb,restrictions), enabled=COALESCE($5,enabled), updated_at=now()
+    `UPDATE apps SET name=COALESCE($3,name), restrictions=COALESCE($4::jsonb,restrictions), enabled=COALESCE($5,enabled),
+            surface=CASE WHEN $6 THEN $7 ELSE surface END, updated_at=now()
       WHERE id=$1 AND account_id=$2 RETURNING *`,
-    [req.params.id, accountId(req), b.name ?? null, b.restrictions ? JSON.stringify(b.restrictions) : null, b.enabled ?? null]
+    [req.params.id, accountId(req), b.name ?? null, b.restrictions ? JSON.stringify(b.restrictions) : null, b.enabled ?? null,
+     b.surface !== undefined, b.surface ?? null]
   );
+  try { (await import('../scale/cache')).invalidateTag(`app:${req.params.id}`); } catch { /* the short cache catches up */ }
   if (!app) throw notFound('App not found');
   res.json(app);
 }));
@@ -318,12 +326,12 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   // typed, and it used to unlock members-only and paid content.
   const vi = await viewerInputs(req, b, key.account_id, app, geo);
   if (vi.signedIn) { cacheable = false; edgeSec = 0; }
-  let rights = await evaluateAccess(b.assetId, geo, { appId: key.app_id, entitled: vi.entitled, accountId: key.account_id, viewer: vi.viewer, viewerCtx: vi.viewerCtx });
+  let rights = await evaluateAccess(b.assetId, geo, { appId: key.app_id, appType: appTypeOf(app.type, app.surface), entitled: vi.entitled, accountId: key.account_id, viewer: vi.viewer, viewerCtx: vi.viewerCtx });
   // Just bought it? The token's entitlement snapshot predates the purchase:
   // only when it says no, look at the (cached) live entitlements once.
   if (!rights.allowed && vi.claims && !rights.replacementAssetId) {
     const fresh = await cachedEntitlements(vi.claims.sub, () => viewerEntitlements(vi.claims!.sub));
-    rights = await evaluateAccess(b.assetId, geo, { appId: key.app_id, accountId: key.account_id,
+    rights = await evaluateAccess(b.assetId, geo, { appId: key.app_id, appType: appTypeOf(app.type, app.surface), accountId: key.account_id,
       viewerCtx: { ...vi.viewerCtx!, entitlements: fresh } });
   }
   note.rights = rights;
@@ -566,7 +574,7 @@ accessRouter.post(
       throw new ApiError(404, 'unknown asset');
     }
     const vi = await viewerInputs(req, b, key.account_id, app, viewerGeo(req, b.geo));
-    const rights = await evaluateAccess(b.assetId, viewerGeo(req, b.geo), { appId: key.app_id, entitled: vi.entitled, accountId: key.account_id, viewer: vi.viewer, viewerCtx: vi.viewerCtx });
+    const rights = await evaluateAccess(b.assetId, viewerGeo(req, b.geo), { appId: key.app_id, appType: appTypeOf(app?.type, app?.surface), entitled: vi.entitled, accountId: key.account_id, viewer: vi.viewer, viewerCtx: vi.viewerCtx });
     const reasons = [reason, rights.allowed ? null : rights.reason].filter(Boolean);
     const r: any = rights;
     res.json({ allowed: !reason && rights.allowed, assetId: b.assetId, reasons, replacementAssetId: rights.replacementAssetId ?? null,

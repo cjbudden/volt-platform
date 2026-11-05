@@ -282,6 +282,11 @@
    "description": "Operating reports say, for each channel, station and event, every time it ran, how long for, how long it was on air, why each run ended, and what the audience did. Built for SLA reviews and monthly client reporting.\n\n**Use it to:**\n- Read one stream's report with `GET /api/reports/stream/{id}?from=&to=`\n- Download it as a spreadsheet with `GET /api/reports/stream/{id}.csv`, one row per run plus a TOTAL row\n- Summarise every stream for a period with `GET /api/reports/streams`, filtered by `kind` and `q` and sorted with `sort=-hours_run`\n- Download the period summary with `GET /api/reports/streams.csv`\n\n**Credential:** admin session (Bearer) or account secret key, with `analytics: view`.\n\n**Good to know:** a null figure means \"not known\", never zero. An exact per-run peak exists only while raw viewing sessions are retained; older runs report `peak_basis: not_retained` with the day's peak beside it. Reports survive deleting the stream, and historical rows keep the name the stream ran under."
   },
   {
+   "name": "Rights",
+   "x-displayName": "Rights",
+   "description": "The rights profile every asset carries: where it may be shown (territories), on which apps, for which uses (on demand, FAST and linear, clips, social, downloads, ads), with which access types and inside which window. Rights are the cap: collection access and publishing policies decide inside them, and the play gate, publishing and FAST refuse anything outside them.\n\n**Use it to:**\n- List and manage profiles with `GET /api/rights/profiles`, `POST /api/rights/profiles` and `PUT /api/rights/profiles/{id}`\n- Choose what new assets get with `PUT /api/rights/settings`\n- Set or narrow one asset's rights with `PUT /api/rights/assets/{assetId}`, or many at once with `POST /api/rights/assign`\n- Store the agreement with `PUT /api/rights/agreements/{id}`\n- Ask what the rights alone allow with `POST /api/rights/check`\n\n**Credential:** admin session or account secret key (Rights: view to check, manage to change and to read agreements; the profile list is open to any signed-in user for pickers).\n\n**Good to know:** two profiles are built in (No restrictions, All restricted) and cannot be changed. A title can narrow its profile, never widen it. Uploads, tus uploads and watchfolders take `rightsProfileId`."
+  },
+  {
    "name": "Scheduled Clips",
    "x-displayName": "Scheduled clips",
    "description": "Scheduled clips are clipping windows set on a live timeline. When the window ends, Volt cuts it into a VOD asset.\n\n**Use it to:**\n- List clipping windows with `GET /api/scheduled-clips`\n- Schedule a clip, choosing a manifest, progressive or both, with `POST /api/scheduled-clips`\n- Cancel a clip that has not been cut yet with `DELETE /api/scheduled-clips/{id}`\n\n**Credential:** admin session (Bearer) or account secret key, with `recordings: view` to read and `recordings: manage` to change.\n\n**Good to know:** a clip can only be cancelled while it is still scheduled."
@@ -458,6 +463,7 @@
     "Publishing Rules",
     "Recordings",
     "Reports",
+    "Rights",
     "Scheduled Clips",
     "Search",
     "Share Links",
@@ -28134,6 +28140,603 @@
      "Reports"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/agreements/{id}": {
+   "get": {
+    "operationId": "getRightsAgreementsByID",
+    "summary": "Download the agreement",
+    "tags": [
+     "Rights"
+    ],
+    "description": "Needs Rights: Manage. Every download is written to the audit log.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putRightsAgreementsByID",
+    "summary": "Upload the agreement",
+    "tags": [
+     "Rights"
+    ],
+    "description": "The file's bytes as the body (up to 25 MB), its name in `name`. Stored privately, never public. Replaces the one before.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/assets/{id}": {
+   "get": {
+    "operationId": "getRightsAssetsByID",
+    "summary": "An asset's rights",
+    "tags": [
+     "Rights"
+    ],
+    "description": "Its `profile`, its own `narrow`ing, how it got them, and the `effective` rights (the profile with the narrowing applied).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putRightsAssetsByID",
+    "summary": "Set an asset's rights",
+    "tags": [
+     "Rights"
+    ],
+    "description": "`{ \"profileId\", \"narrow\" }`. `narrow` can only take away: `territories` (only these), `blockTerritories`, `appTypes` (only these), `blockAppIds`, `uses` (only these), `from`, `until`. A narrowing wider than the profile is refused with 422 and the reasons in `problems`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/assign": {
+   "post": {
+    "operationId": "postRightsAssign",
+    "summary": "Assign a rights profile in bulk",
+    "tags": [
+     "Rights"
+    ],
+    "description": "`{ \"profileId\", \"assetIds\": [...] }`, up to 1,000. Assets of another account are skipped. Per-title narrowing is cleared unless `keepNarrowing` is true.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/check": {
+   "post": {
+    "operationId": "postRightsCheck",
+    "summary": "Check the rights",
+    "tags": [
+     "Rights"
+    ],
+    "description": "`{ \"assetId\", \"country\", \"appId\" or \"appType\", \"use\", \"at\" }`: what the rights alone answer (`allowed`, and `code` `territory`, `app`, `use` or `window` with a `reason`). Collection access and the publishing policy decide inside this; the play gate gives the full answer.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/profiles": {
+   "get": {
+    "operationId": "getRightsProfiles",
+    "summary": "List rights profiles",
+    "tags": [
+     "Rights"
+    ],
+    "description": "The account's rights profiles, the two built-ins (`builtin`: `open` for No restrictions, `closed` for All restricted) and its own, each with `assetCount` and `isDefault` (what new assets get). Every asset carries one profile: territories, apps, uses, access types and window. Nothing can show an asset outside its rights.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: any signed-in admin user (lookup for forms)\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `provider`, `builtin`, `territory_mode`, `app_mode`, `window_kind`, `window_until`, `created_at`, `updated_at`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Search name, provider. Every word must match, case-insensitive."
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `name=value` (comma list = any of), or `name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "provider",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `provider=value` (comma list = any of), or `provider[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "builtin",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "open",
+        "closed"
+       ]
+      },
+      "description": "Filter: `builtin=value` (comma list = any of), or `builtin[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "territory_mode",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "worldwide",
+        "allow",
+        "block"
+       ]
+      },
+      "description": "Filter: `territory_mode=value` (comma list = any of), or `territory_mode[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "app_mode",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "all",
+        "allow",
+        "block"
+       ]
+      },
+      "description": "Filter: `app_mode=value` (comma list = any of), or `app_mode[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "window_kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "open",
+        "fixed",
+        "relative"
+       ]
+      },
+      "description": "Filter: `window_kind=value` (comma list = any of), or `window_kind[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "window_until",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `window_until=value`, or `window_until[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "created_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `created_at=value`, or `created_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "updated_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `updated_at=value`, or `updated_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "name"
+      },
+      "description": "Comma list of: id, name, provider, builtin, territory_mode, app_mode, window_kind, window_until, created_at, updated_at. Prefix `-` for descending. Default `name`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 200,
+       "default": 50
+      },
+      "description": "Page size. Without limit, cursor or offset this list returns up to 1000 rows (compatibility); pass limit to page."
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "x-volt-list": true
+   },
+   "post": {
+    "operationId": "postRightsProfiles",
+    "summary": "Create a rights profile",
+    "tags": [
+     "Rights"
+    ],
+    "description": "Territories (`territoryMode` `worldwide`, `allow` or `block` with `territories` as ISO country codes), apps (`appMode` `all`, `allow` or `block` with `appTypes` from `web`, `mobile`, `smart_tv`, `embed`, `partner`, `venue` and `appIds` naming registered apps), `uses` (`on_demand`, `fast`, `clips`, `social`, `downloads`, `ads`), `accessTypes` (`free`, `members`, `subscription`, `ppv`) and `window` (`open`, `fixed` with `from` and `until`, or `relative` with `count`, `unit` and `from`: `first_air` or `ingest`).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/profiles/{id}": {
+   "delete": {
+    "operationId": "deleteRightsProfilesByID",
+    "summary": "Delete a rights profile",
+    "tags": [
+     "Rights"
+    ],
+    "description": "Only a profile no asset uses and that is not the default for new assets (409 otherwise). Built-ins cannot be deleted.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "get": {
+    "operationId": "getRightsProfilesByID",
+    "summary": "Get a rights profile",
+    "tags": [
+     "Rights"
+    ],
+    "description": "One profile, with `assetCount`, `isDefault` and `setBy` (how its assets got it: watchfolder, chosen at upload, account default, set or bulk by a person).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: any signed-in admin user (lookup for forms)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putRightsProfilesByID",
+    "summary": "Change a rights profile",
+    "tags": [
+     "Rights"
+    ],
+    "description": "Replaces the profile's settings (same body as create). Built-in profiles cannot be changed (409). Every asset on the profile follows the change at once: the play gate, publishing and FAST read it straight away.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/profiles/{id}/assets": {
+   "get": {
+    "operationId": "getRightsProfilesByIDAssets",
+    "summary": "Assets on a rights profile",
+    "tags": [
+     "Rights"
+    ],
+    "description": "The assets that carry the profile, newest assignment first, with whether each is narrowed. `limit` (up to 500) and `offset`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: any signed-in admin user (lookup for forms)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/rights/settings": {
+   "get": {
+    "operationId": "getRightsSettings",
+    "summary": "Default rights for new assets",
+    "tags": [
+     "Rights"
+    ],
+    "description": "`defaultProfileId` (what an asset gets when its upload, watchfolder or API call names no profile) and the ids of the two built-ins.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: any signed-in admin user (lookup for forms)",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putRightsSettings",
+    "summary": "Change the default rights",
+    "tags": [
+     "Rights"
+    ],
+    "description": "`{ \"defaultProfileId\" }`. Applies to new assets only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** rights: manage",
     "security": [
      {
       "adminBearer": []

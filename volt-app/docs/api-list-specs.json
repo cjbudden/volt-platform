@@ -3376,6 +3376,168 @@
  },
  {
   "method": "GET",
+  "path": "/api/rights/profiles",
+  "search": [
+   "name",
+   "provider"
+  ],
+  "defaultSort": "name",
+  "defaultLimit": 50,
+  "maxLimit": 200,
+  "allowOffset": false,
+  "unpagedLimit": 1000,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "name": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "provider": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "builtin": {
+    "type": "enum",
+    "values": [
+     "open",
+     "closed"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "territory_mode": {
+    "type": "enum",
+    "values": [
+     "worldwide",
+     "allow",
+     "block"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "app_mode": {
+    "type": "enum",
+    "values": [
+     "all",
+     "allow",
+     "block"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "window_kind": {
+    "type": "enum",
+    "values": [
+     "open",
+     "fixed",
+     "relative"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "window_until": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "created_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "updated_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
   "path": "/api/scheduled-clips",
   "search": [
    "title",

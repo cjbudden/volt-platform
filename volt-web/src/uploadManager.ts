@@ -222,6 +222,8 @@ export interface StartOptions {
   /** 'vod' only. Omitted takes the account default AT ENCODE TIME, so a default
    *  changed during a long upload is still the one that applies. */
   ladderGroupId?: string | null
+  /** 'vod' only: the rights profile (build queue R1). Omitted: the account default. */
+  rightsProfileId?: string | null
   /** Ingest framework: the path inside a dropped or picked folder, the content
    *  type chosen up front, metadata typed before upload, the source rung. */
   relativePath?: string | null
@@ -250,7 +252,7 @@ export async function startUpload(file: File, opts: StartOptions): Promise<Uploa
       body: JSON.stringify({
         purpose: opts.purpose ?? 'filler',
         ...(opts.purpose === 'vod'
-          ? { ladderGroupId: opts.ladderGroupId ?? null,
+          ? { ladderGroupId: opts.ladderGroupId ?? null, rightsProfileId: opts.rightsProfileId ?? undefined,
               relativePath: opts.relativePath ?? ((file as any).webkitRelativePath || null),
               schemaId: opts.schemaId ?? null, metadata: opts.metadata ?? undefined,
               source: opts.source ?? 'panel', retryOf: opts.retryOf ?? null }
