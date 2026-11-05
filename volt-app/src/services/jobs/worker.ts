@@ -75,7 +75,7 @@ export function startWorker(opts: {
     try {
       const result = await fn({
         job,
-        progress: (pct, note) => heartbeat(job.id, pct, note),
+        progress: async (pct, note) => { await heartbeat(job.id, pct, note); },
         isCancelled: () => stopping,
       });
       await succeed(job.id, result ?? {});

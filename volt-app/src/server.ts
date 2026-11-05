@@ -1,5 +1,5 @@
 import { captionsSettingsRouter } from './modules/captionsSettings';
-import { sitesRouter, siteAgentRouter } from './modules/sites';
+import { sitesRouter, siteAgentRouter, siteTransferRouter } from './modules/sites';
 import { reframeRouter, reframeSettingsRouter } from './modules/reframe';
 import { CAPTION_LANGUAGES } from './services/captionLanguages';
 import { accountSettingsRouter } from './modules/accountSettings';
@@ -124,6 +124,8 @@ export function createServer() {
   app.use('/api/tus', tusRouter);
   // The site agent's uploads from an on-prem watchfolder (host credential; build queue H2).
   app.use('/api/site-agent/tus', siteTusRouter);
+  // Signed transfers for a site job's files on this server (build queue H3): raw bytes too.
+  app.use('/api/site-agent/transfers', siteTransferRouter);
   // Vendor encode-engine webhooks: the adapter verifies a signature over the raw bytes.
   app.use('/api/engine-hooks', engineHooksRouter);
   // SaaS signup payments (Stripe Checkout): signature over the raw bytes.

@@ -31,6 +31,14 @@
  *   POST   /api/site-agent/watchfolders/:id/reviews/:itemId    { ok, error } the file was moved to review, or not
  *   POST   /api/site-agent/watchfolders/:id/scanned            { error } a pass finished
  *   /api/site-agent/tus                                        the upload itself (modules/siteTus.ts)
+ *
+ * The job lease (H3; an APPROVED host, its own site's pool only):
+ *   POST   /api/site-agent/jobs/lease                  { types? } -> the next job of the site's pool, or 204
+ *   POST   /api/site-agent/jobs/:id/progress           { leaseId, pct?, note? } extends the lease
+ *   POST   /api/site-agent/jobs/:id/complete           { leaseId, result? }
+ *   POST   /api/site-agent/jobs/:id/fail               { leaseId, error, code?, permanent? } retried with backoff unless permanent
+ *   POST   /api/site-agent/jobs/:id/transfer-url       { leaseId, name } one URL for one object the job lists
+ *   GET|PUT /api/site-agent/transfers/:token           a signed transfer of a file on this server (no credential: the URL is it)
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -43,6 +51,7 @@ import { writeAudit, actor, patchEntity } from '../services/audit';
 import { requireLicence } from '../services/sites/licences';
 import * as S from '../services/sites/sites';
 import * as W from '../services/sites/siteWatchfolders';
+import * as J from '../services/sites/siteJobs';
 
 export const sitesRouter = Router();
 sitesRouter.use(requireAuth, requireMinRole('admin'), asyncHandler(async (req, _res, next) => {
@@ -261,3 +270,40 @@ siteAgentRouter.post('/watchfolders/:id/scanned', asyncHandler(async (req, res) 
   const p = await S.authenticateSite(req.headers.authorization);
   res.json(await W.scanReport(p, req.params.id, req.body?.error ?? null));
 }));
+
+// ---- the job lease (H3) ------------------------------------------------------------
+
+siteAgentRouter.post('/jobs/lease', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  const job = await J.lease(p, req.body?.types);
+  if (!job) return res.status(204).end();
+  res.json(job);
+}));
+
+siteAgentRouter.post('/jobs/:id/progress', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await J.progress(p, req.params.id, req.body ?? {}));
+}));
+
+siteAgentRouter.post('/jobs/:id/complete', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await J.complete(p, req.params.id, req.body ?? {}));
+}));
+
+siteAgentRouter.post('/jobs/:id/fail', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await J.failJob(p, req.params.id, req.body ?? {}));
+}));
+
+siteAgentRouter.post('/jobs/:id/transfer-url', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await J.transferUrl(p, req.params.id, req.body ?? {}));
+}));
+
+/**
+ * Signed transfers of files on this server's own disk. Mounted before the
+ * JSON parser (server.ts): an upload is raw bytes streamed to disk. The token
+ * is the credential, checked against the job's current lease on every use.
+ */
+export const siteTransferRouter = Router();
+siteTransferRouter.all('/:token', asyncHandler(async (req, res) => { await J.serveTransfer(req, res); }));

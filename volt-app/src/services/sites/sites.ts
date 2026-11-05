@@ -275,7 +275,8 @@ export async function siteConfig(p: SitePrincipal) {
     watchfolders: approved
       ? (await (await import('./siteWatchfolders')).foldersForSite(p)).map((f) => ({ id: f.id, name: f.name, path: f.path, placement: f.placement }))
       : [],
-    pools: [] as unknown[],
+    // The pool this site's hosts lease work from (H3): POST /api/site-agent/jobs/lease.
+    pools: approved ? [{ name: `site:${s.id}`, leaseSeconds: (await import('../jobs/queue')).LEASE_SECONDS }] : [],
     work: approved ? 'ready' : 'waiting_for_approval',
   };
 }

@@ -5454,6 +5454,51 @@
   "group": "/api/site-agent"
  },
  {
+  "method": "POST",
+  "path": "/api/site-agent/jobs/:id/complete",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/jobs/:id/fail",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/jobs/:id/progress",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/jobs/:id/transfer-url",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/jobs/lease",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
   "method": "OPTIONS",
   "path": "/api/site-agent/tus",
   "api": "machine",

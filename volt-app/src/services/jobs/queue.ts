@@ -40,6 +40,8 @@ export interface JobRow {
   finished_at: string | null;
   created_at: string;
   dedupe_key: string | null;
+  /** NULL: the cloud. `site:<id>`: a Hybrid Site's pool, leased over HTTPS (H3). */
+  pool: string | null;
 }
 
 export interface EnqueueOpts {
@@ -54,7 +56,12 @@ export interface EnqueueOpts {
   runAfter?: Date;
   /** Same key while queued or running returns the existing job instead of a duplicate. */
   dedupeKey?: string | null;
+  /** Leave unset for cloud work. `sitePool(siteId)` sends it to a Hybrid Site (H3). */
+  pool?: string | null;
 }
+
+/** The pool name of a Hybrid Site: only that site's approved hosts lease from it. */
+export const sitePool = (siteId: string) => `site:${siteId}`;
 
 /** How long a worker may hold a job before the reaper assumes it died. */
 export const LEASE_SECONDS = 120;
@@ -71,14 +78,14 @@ export function backoffSeconds(attempt: number): number {
 export async function enqueue(opts: EnqueueOpts): Promise<JobRow> {
   const row = await one<JobRow>(
     `INSERT INTO jobs (type, payload, priority, max_attempts, correlation_id,
-                       channel_id, event_id, created_by, run_after, dedupe_key)
-     VALUES ($1,$2::jsonb,$3,$4,$5,$6,$7,$8,COALESCE($9, now()),$10)
+                       channel_id, event_id, created_by, run_after, dedupe_key, pool)
+     VALUES ($1,$2::jsonb,$3,$4,$5,$6,$7,$8,COALESCE($9, now()),$10,$11)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [opts.type, JSON.stringify(opts.payload ?? {}), opts.priority ?? 100,
      opts.maxAttempts ?? 3, opts.correlationId ?? null, opts.channelId ?? null,
      opts.eventId ?? null, opts.createdBy ?? null, opts.runAfter ?? null,
-     opts.dedupeKey ?? null]
+     opts.dedupeKey ?? null, opts.pool ?? null]
   );
   if (row) return row;
   // The unique partial index rejected it: an equivalent job is already in flight.
@@ -99,22 +106,41 @@ export async function enqueue(opts: EnqueueOpts): Promise<JobRow> {
  */
 export async function claim(types: string[], workerId: string): Promise<JobRow | null> {
   if (!types.length) return null;
+  // Cloud workers take cloud work only: a site's job waits for that site.
+  return claimWhere(`pool IS NULL AND type = ANY($1)`, [types], workerId);
+}
+
+/**
+ * Claim the next ready job of one pool for a remote worker (a Hybrid Site
+ * host, H3). `types` narrows it to what that worker can run; null takes any.
+ * The lease, attempts, backoff and reaper are the same as for cloud work.
+ */
+export async function claimInPool(pool: string, types: string[] | null, workerId: string): Promise<JobRow | null> {
+  if (!pool) throw new Error('claimInPool needs a pool; cloud work is claimed with claim()');
+  if (types && !types.length) return null;
+  return types
+    ? claimWhere(`pool = $1 AND type = ANY($2)`, [pool, types], workerId)
+    : claimWhere(`pool = $1`, [pool], workerId);
+}
+
+async function claimWhere(filter: string, args: unknown[], workerId: string): Promise<JobRow | null> {
+  const w = args.length + 1;
   const rows = await query<JobRow>(
     `UPDATE jobs j SET
         state       = 'running',
         attempts    = j.attempts + 1,
-        claimed_by  = $2,
+        claimed_by  = $${w},
         claimed_at  = now(),
-        lease_until = now() + make_interval(secs => $3),
+        lease_until = now() + make_interval(secs => $${w + 1}),
         started_at  = COALESCE(j.started_at, now())
       WHERE j.id = (
         SELECT id FROM jobs
-         WHERE state = 'queued' AND type = ANY($1) AND run_after <= now()
+         WHERE state = 'queued' AND ${filter} AND run_after <= now()
          ORDER BY priority, run_after, created_at
          FOR UPDATE SKIP LOCKED
          LIMIT 1)
       RETURNING j.*`,
-    [types, workerId, LEASE_SECONDS]
+    [...args, workerId, LEASE_SECONDS]
   );
   const job = rows[0] ?? null;
   if (job) {
@@ -126,26 +152,36 @@ export async function claim(types: string[], workerId: string): Promise<JobRow |
   return job;
 }
 
-/** Extend the lease and report progress. A long job MUST call this or be reaped. */
-export async function heartbeat(jobId: string, progressPct?: number, note?: string): Promise<void> {
-  await query(
+/**
+ * Extend the lease and report progress. A long job MUST call this or be reaped.
+ *
+ * `workerId` makes it conditional on still holding the lease: a remote worker
+ * whose lease was reaped and handed to another must not keep the job alive or
+ * finish it. Answers whether the lease was still held.
+ */
+export async function heartbeat(jobId: string, progressPct?: number, note?: string, workerId?: string): Promise<boolean> {
+  const rows = await query(
     `UPDATE jobs SET
        lease_until   = now() + make_interval(secs => $2),
        progress_pct  = COALESCE($3, progress_pct),
        progress_note = COALESCE($4, progress_note)
-     WHERE id = $1 AND state = 'running'`,
-    [jobId, LEASE_SECONDS, progressPct ?? null, note ?? null]
+     WHERE id = $1 AND state = 'running' AND ($5::text IS NULL OR claimed_by = $5)
+     RETURNING id`,
+    [jobId, LEASE_SECONDS, progressPct ?? null, note ?? null, workerId ?? null]
   );
+  return rows.length > 0;
 }
 
-export async function succeed(jobId: string, result?: Record<string, unknown>): Promise<void> {
-  await query(
+export async function succeed(jobId: string, result?: Record<string, unknown>, workerId?: string): Promise<boolean> {
+  const rows = await query(
     `UPDATE jobs SET state='succeeded', progress_pct=100, result=$2::jsonb,
             finished_at=now(), lease_until=NULL, last_error=NULL, error_code=NULL
-      WHERE id=$1 AND state='running'`,
-    [jobId, JSON.stringify(result ?? {})]
+      WHERE id=$1 AND state='running' AND ($3::text IS NULL OR claimed_by = $3)
+      RETURNING id`,
+    [jobId, JSON.stringify(result ?? {}), workerId ?? null]
   );
-  await closeAttempt(jobId, 'succeeded');
+  if (rows.length) await closeAttempt(jobId, 'succeeded');
+  return rows.length > 0;
 }
 
 /**
@@ -158,29 +194,31 @@ export async function succeed(jobId: string, result?: Record<string, unknown>): 
  * and delays the operator learning what is wrong.
  */
 export async function fail(
-  jobId: string, err: unknown, opts: { code?: string; permanent?: boolean } = {}
-): Promise<void> {
+  jobId: string, err: unknown, opts: { code?: string; permanent?: boolean; workerId?: string } = {}
+): Promise<boolean> {
   const message = err instanceof Error ? err.message : String(err);
   const job = await one<JobRow>(`SELECT * FROM jobs WHERE id=$1`, [jobId]);
-  if (!job) return;
+  if (!job) return false;
   const exhausted = opts.permanent === true || job.attempts >= job.max_attempts;
-  if (exhausted) {
-    await query(
+  // With a workerId only the current lease holder may fail it (a remote
+  // worker whose lease was reaped is told so instead of undoing the retry).
+  const rows = exhausted
+    ? await query(
       `UPDATE jobs SET state='failed', last_error=$2, error_code=$3,
               finished_at=now(), lease_until=NULL
-        WHERE id=$1 AND state='running'`,
-      [jobId, message.slice(0, 2000), opts.code ?? null]
-    );
-  } else {
-    await query(
+        WHERE id=$1 AND state='running' AND ($4::text IS NULL OR claimed_by = $4) RETURNING id`,
+      [jobId, message.slice(0, 2000), opts.code ?? null, opts.workerId ?? null]
+    )
+    : await query(
       `UPDATE jobs SET state='queued', last_error=$2, error_code=$3,
               lease_until=NULL, claimed_by=NULL, claimed_at=NULL,
               run_after = now() + make_interval(secs => $4)
-        WHERE id=$1 AND state='running'`,
-      [jobId, message.slice(0, 2000), opts.code ?? null, backoffSeconds(job.attempts)]
+        WHERE id=$1 AND state='running' AND ($5::text IS NULL OR claimed_by = $5) RETURNING id`,
+      [jobId, message.slice(0, 2000), opts.code ?? null, backoffSeconds(job.attempts), opts.workerId ?? null]
     );
-  }
+  if (!rows.length) return false;
   await closeAttempt(jobId, 'failed', message, opts.code);
+  return true;
 }
 
 export async function cancel(jobId: string): Promise<boolean> {

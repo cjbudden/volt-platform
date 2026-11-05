@@ -79,6 +79,17 @@ Each server reports every 30 seconds. One not heard from for 90 seconds is **Sta
 
 The agent keeps sending heartbeats while it uploads, so a long upload never makes a server look **Stale**. A server waiting for approval does not watch any folder.
 
+### Work that runs at the site
+
+Some work can be sent to a site instead of running in Volt's cloud (the copies and encodes of later releases of the add-on). The servers of the site fetch it themselves:
+
+- An approved, **Online** server asks Volt for the next job of its own site over HTTPS. It never sees another site's work, and nothing reaches into your network.
+- The server reports progress as it goes. If it stops reporting for about two minutes (it was switched off, or lost its connection), the job goes back to the site and another approved server takes it.
+- Files move through short-lived links made for one job and one file, valid for 15 minutes. The server cannot ask for any other file.
+- A failed job is retried after a pause, and fails for good after its attempts are used up, with the reason the server gave.
+
+A server waiting for approval is given no work. Work for a disabled site waits until you enable it.
+
 ### Switch a site off
 
 Choose **Disable site**. Its servers are refused until you choose **Enable site**; nothing is deleted.
@@ -117,6 +128,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A server stays **Waiting for approval** | Nobody has approved it yet | Check its facts and choose **Approve** |
 | **Make an enrolment token** is greyed out | The site is disabled | Choose **Enable site** first |
 | **A site with this name already exists** | Names are unique in the account, ignoring capitals | Choose another name |
+| Work for a site waits and does not start | No approved server of the site is **Online**, or the site is disabled | Start the agent on a server of the site, or choose **Enable site** |
 | An on-prem watchfolder's **Last pass** stays old | No approved server of the site is running the agent, or it cannot read the folder | Check the server here; the folder's page shows the agent's last error under **Last scan failed** |
 
 ## Through the API
