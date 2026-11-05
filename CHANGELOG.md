@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.50.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · Watchfolders: A rule can send images straight into Loops & Fillers as slates (target kind filler-slate), ready for a channel or event to show when its input drops.
+- added · Watchfolders: Artwork finds its episode: an image dropped into a watchfolder with a type word at the end of its name, such as Scrubs-s1-e1_poster.png or Scrubs-s1-e1-thumbnail.jpg, becomes that video's Poster or Thumbnail, as if chosen on the asset page. A rule can also give every image it takes an image type.
+- improved · Watchfolders: Try a filename now shows the image type a file would get, and the video an image or caption would be attached to.
+
+### Internal
+
+- added · Watchfolders: watchfolder-image-types suite, 69 assertions: type words, rule types, slates, attach after and before the video, 24 hour unmatched, dry run.
+
 ## 0.49.0 (2026-11-05)
 
 ### Product (in customer release notes)
