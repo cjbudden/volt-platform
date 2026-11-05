@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.47.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · API: GET /api/watchfolders/site-options, and on-prem watchfolders through POST /api/watchfolders with kind site, siteId, placement (upload_cloud) and the folder's path on the site's server.
+- added · Sites: The site agent (0.3.0) watches the site's on-prem watchfolders beside its heartbeat, and Reprocess on a refused file asks it to move the file back into the folder.
+- added · Watchfolders: With the Hybrid Sites add-on, a watchfolder can be on your own storage at a site. The site's agent sorts it with the folder's rules, keeps refused files in the review folder at the site, and uploads accepted video to Volt to be encoded; an interrupted upload carries on where it stopped.
+
+### Internal
+
+- added · Tests: site-watchfolders check suite: licence, credential scope, a real agent pass over a folder, the quiet-file rule, rules changed, a cut upload resumed by a fresh agent, Reprocess round trip, and the agent as a second process.
+
 ## 0.46.0 (2026-11-04)
 
 ### Product (in customer release notes)
