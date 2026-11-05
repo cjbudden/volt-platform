@@ -1,1 +1,5 @@
-{ "compilerOptions": { "target": "ES2022", "module": "commonjs", "moduleResolution": "node", "esModuleInterop": true, "strict": true, "skipLibCheck": true, "outDir": "dist", "rootDir": "src", "declaration": true }, "include": ["src/**/*.ts"] }
+{
+  "compilerOptions": { "target": "ES2022", "module": "commonjs", "moduleResolution": "node", "esModuleInterop": true, "strict": true, "skipLibCheck": true, "outDir": "dist", "rootDir": "..", "declaration": true },
+  "//": "rootDir is the repo, not src: the site agent compiles volt-app's watchfolder scanner.ts and rules.ts from their own files (build queue H2), so the agent and the cloud decide a file with the same code. The CLI is dist/volt-agent/src/cli.js.",
+  "include": ["src/**/*.ts"]
+}

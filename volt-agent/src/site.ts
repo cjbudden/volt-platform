@@ -8,7 +8,11 @@
 //             approval in the console.
 //    run      every heartbeatSeconds report the same facts; pull config when
 //             the cloud says it changed; take a rotated credential when one is
-//             handed over and keep using it from then on.
+//             handed over and keep using it from then on. Once the host is
+//             approved, also watch the site's on-prem watchfolders and upload
+//             what they accept (siteWatch.ts, build queue H2), beside the
+//             heartbeat rather than inside it, so a long upload never makes
+//             the host look stale.
 //
 //  OUTBOUND ONLY: the agent calls the cloud over HTTPS and listens on nothing.
 //  The credential lives in the state file, readable by its owner only.
@@ -18,7 +22,9 @@ import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import * as os from 'node:os';
 
-export const AGENT_VERSION = '0.2.0';
+import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
+
+export const AGENT_VERSION = '0.3.0';
 
 export interface SiteState {
   server: string;
@@ -30,6 +36,8 @@ export interface SiteState {
   config?: any;
   status?: string;
   lastHeartbeatAt?: string;
+  /** What the watchfolder passes remember (siteWatch.ts); never the truth, only saved work. */
+  watch?: SiteWatchMemory;
 }
 
 export interface HostFacts {
@@ -125,19 +133,38 @@ export async function beat(state: SiteState, stateFile: string, facts?: HostFact
 }
 
 /** Heartbeat for ever. Network faults are logged and retried; a refusal stops the agent. */
-export async function runSite(stateFile: string, log: (s: string) => void = console.log, signal?: AbortSignal) {
+export async function runSite(stateFile: string, log: (s: string) => void = console.log, signal?: AbortSignal, opts: { watchEverySeconds?: number } = {}) {
   const state = await loadSiteState(stateFile);
   if (!state) throw new Error(`No enrolment in ${stateFile}. Run: volt-agent site enrol <server> <token>`);
   let every = 30;
+  // THE WATCH LOOP, one pass at a time, started beside the heartbeat. A pass
+  // that is still uploading when the next one is due is simply not doubled.
+  state.watch = state.watch ?? emptyMemory();
+  let watching = false; let lastWatch = 0;
+  const watchEvery = (opts.watchEverySeconds ?? 15) * 1000;
+  const watch = async () => {
+    if (watching || signal?.aborted || state.status !== 'approved' || Date.now() - lastWatch < watchEvery) return;
+    watching = true; lastWatch = Date.now();
+    try {
+      await watchPass({ server: state.server, credential: () => state.credential, memory: state.watch!, log });
+      await saveSiteState(stateFile, state);
+    } catch (e: any) {
+      log(`[watch] pass failed, retrying: ${e?.message ?? e}`);
+    } finally { watching = false; lastWatch = Date.now(); }
+  };
+  const watchTimer = setInterval(() => { void watch(); }, Math.min(watchEvery, 5000));
+  signal?.addEventListener('abort', () => clearInterval(watchTimer), { once: true });
   while (!signal?.aborted) {
     try {
       const r = await beat(state, stateFile);
       every = r.heartbeatSeconds ?? every;
       log(`[site] ${state.siteName ?? state.siteId}: host ${r.status}${r.rotate ? ', credential rotated' : ''}${r.pullConfig ? `, config ${state.configVersion}` : ''}`);
+      void watch();
     } catch (e: any) {
-      if (e.status === 401 || e.status === 403) { log(`[site] refused: ${e.message}`); throw e; }
+      if (e.status === 401 || e.status === 403) { clearInterval(watchTimer); log(`[site] refused: ${e.message}`); throw e; }
       log(`[site] heartbeat failed, retrying: ${e.message}`);
     }
     await new Promise((res) => { const t = setTimeout(res, every * 1000); signal?.addEventListener('abort', () => { clearTimeout(t); res(null); }, { once: true }); });
   }
+  clearInterval(watchTimer);
 }

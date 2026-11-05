@@ -17,6 +17,7 @@ Sites is where you look after the Hybrid Sites add-on: your own locations, such 
 - **Adding servers:** a one-time enrolment token for each new server. The server reports what it has (processor cores, memory, graphics cards and how many encodes each can run at once, free disk) and then waits for you.
 - **Approving:** a server takes no work until an administrator approves it. Reject one you do not recognise.
 - **Health at a glance:** each site's health, the agent and encoder versions its servers run, and when each was last heard from.
+- **Watchfolders at the site:** folders on your own storage that the site's agent sorts with Volt's rules, uploading accepted video to Volt and keeping refused files at the site (see [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder)).
 
 An administrator sets a site up once and comes back when a server is added, replaced or stops reporting.
 
@@ -70,6 +71,14 @@ Each server reports every 30 seconds. One not heard from for 90 seconds is **Sta
 1. Open the site and choose **Rotate credential** on the server.
 2. The agent picks up the new credential on its next heartbeat, and the old one stops working as soon as the new one is used. Nothing needs doing on the server.
 
+### Watch a folder at the site
+
+1. Make sure at least one server at the site is approved and **Online**.
+2. In **Admin**, **Watchfolders**, choose **New watchfolder**, then **On-prem, at a site**, pick this site and type the folder's path on the server (see [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder)).
+3. The agent on each approved server of the site picks the folder up within a minute. It needs to read the folder and write its review folder (`_review` inside it).
+
+The agent keeps sending heartbeats while it uploads, so a long upload never makes a server look **Stale**. A server waiting for approval does not watch any folder.
+
 ### Switch a site off
 
 Choose **Disable site**. Its servers are refused until you choose **Enable site**; nothing is deleted.
@@ -78,7 +87,7 @@ Choose **Disable site**. Its servers are refused until you choose **Enable site*
 
 | Section | How it relates |
 |---|---|
-| [Watchfolders](watchfolders.md) | Folders at a site, watched by the site's agent, follow (a later release of the add-on) |
+| [Watchfolders](watchfolders.md) | Folders at a site, watched by the site's agent with the folder's rules; accepted video is uploaded and encoded in Volt |
 | [Storage](storage.md) | Copies of media kept at a site will show there beside the cloud copies (a later release of the add-on) |
 | [Workflows](workflows.md) | Work done at a site will appear on the map with its own success and error rates (a later release of the add-on) |
 | [Audit log](audit-log.md) | Sites, enrolment tokens, approvals, rejections and new credentials are recorded |
@@ -108,6 +117,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A server stays **Waiting for approval** | Nobody has approved it yet | Check its facts and choose **Approve** |
 | **Make an enrolment token** is greyed out | The site is disabled | Choose **Enable site** first |
 | **A site with this name already exists** | Names are unique in the account, ignoring capitals | Choose another name |
+| An on-prem watchfolder's **Last pass** stays old | No approved server of the site is running the agent, or it cannot read the folder | Check the server here; the folder's page shows the agent's last error under **Last scan failed** |
 
 ## Through the API
 

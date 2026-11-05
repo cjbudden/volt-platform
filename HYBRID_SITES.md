@@ -187,7 +187,7 @@ About 10 to 14 build sessions of the size the recent FAST and SSAI builds took, 
 | Phase | Queue | State |
 | --- | --- | --- |
 | 1. Sites, hosts and enrolment | H1 | Built (see below) |
-| 2. On-prem watchfolder, upload to cloud | H2 | Not started |
+| 2. On-prem watchfolder, upload to cloud | H2 | Built (see below) |
 | 3. Job lease, then Mirror and Archive | H3 | Not started |
 | 4. Site encoding | H4 | Not started |
 | 5. Fallback, DRM proxy and docs | H5 | Not started |
@@ -204,5 +204,17 @@ About 10 to 14 build sessions of the size the recent FAST and SSAI builds took, 
 - **Agent.** `volt-agent site enrol <server> <token> [state.json]` and `volt-agent site run [state.json]` (volt-agent/src/site.ts): cores, memory, NVIDIA GPUs through `nvidia-smi` (encode sessions from `VOLT_NVENC_SESSIONS`, otherwise unknown), free disk; state file mode 600.
 - **Console.** Admin, Sites (volt-web/src/pages/Sites.tsx). Guide: docs-site/docs/guides/hybrid-sites.md.
 - **Audit.** Sites, tokens issued and withdrawn, enrolment, approve and reject, rotation.
-- **Not yet:** pools, watchfolders and work in the config (H2 onwards); signed agent updates; a hypervisor connection to create worker VMs.
+- **Not yet:** pools and work in the config (H3 onwards); signed agent updates; a hypervisor connection to create worker VMs.
+
+**Phase 2 as built (H2).**
+
+- **Folder kind `site`** (migration 0128): `watchfolders.site_id` and `placement` (`upload_cloud`; `encode_site` allowed by the schema for H4, refused by the API with 422 `placement_not_available`). Creating one needs the `hybrid_sites` licence and a site of the account; it bumps the site's config version. `GET /api/watchfolders/site-options` tells the console form what to offer. The server's own scan and ingest passes, and Scan now (409 `scanned_at_site`), leave site folders alone.
+- **Rules run at the site, shared not copied.** The agent compiles volt-app's `services/watchfolder/scanner.ts` and `rules.ts` from their own files (volt-agent `tsconfig.json` rootDir is the repo), so the console's dry run and the decision at the site are the same code. `scanner.ts` gained an optional checksum hook so the agent hashes a file once while its size and mtime stay the same.
+- **Agent routes** (approved host of the folder's own site only; a pending host gets 403 `waiting_for_approval`): `GET /api/site-agent/watchfolders` (folders with rules, as the scanner takes them), `/known`, `/quarantine-keys`, `/items` (one decision), `/uploads`, `/returns`, `/scanned` (`services/sites/siteWatchfolders.ts`, `modules/sites.ts`).
+- **The cloud decides again.** A reported acceptance is classified with the cloud's copy of the rules; if they changed in between the report is refused (409 `rules_changed`) and the agent decides the file again next pass. A refusal is recorded as it happened (the file is already in the review folder at the site).
+- **Review folder on site.** A refused file is moved into the folder's review folder at the site and never leaves the customer's network; the console queue lists it as for a local folder. A refusal whose report failed waits in the agent's outbox and is sent first next pass. Reprocess sets `watchfolder_items.site_action = 'return'`; the agent moves the file back and reports it, or the row returns to Needs review with why.
+- **Upload and encode in the cloud.** `/api/site-agent/tus` (`modules/siteTus.ts`): the same tus server and upload sessions as `/api/tus`, opened only for an accepted item of the host's own site with the size it was accepted at, names and source taken from the item. The upload is kept on the item (`watchfolder_items.upload_session_id`), so a restarted agent, even with no state file, resumes from the cloud's offset. On the last byte the normal upload path runs (ingest rules with the folder as source, the VOD encode or Loops & Fillers), the asset is marked `source_kind = 'watchfolder'` and the item closes as In library with `vod_asset_id`.
+- **Video only from a site for now.** An accepted file whose target goes to the Image Library is marked Failed with the reason (the image ingest reads files from the server's own disk).
+- **Agent 0.3.0.** `volt-agent site run` watches the site's folders beside the heartbeat (a pass every 15 s, never two at once), so a long upload does not make the host stale; its checksum memory and outbox live in the state file.
+- **Console.** Watchfolders: New watchfolder offers On-prem, at a site (with the licence), the site and the path on the site's server; the folder page names the site, shows Where it is encoded and no Scan now; the queue shows Sent back rows waiting for the agent. Guides: `docs-site/docs/guides/watchfolders.md` (Create an on-prem watchfolder), `hybrid-sites.md` (Watch a folder at the site).
 

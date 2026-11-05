@@ -47,6 +47,7 @@ import { socialRouter, socialPublicRouter } from './modules/social';
 import { publishingRulesRouter } from './modules/publishingRules';
 import { ingestRouter as ingestRulesRouter, ingestCallbacksRouter } from './modules/ingestRules';
 import { tusRouter } from './modules/tus';
+import { siteTusRouter } from './modules/siteTus';
 import { paymentsRouter, paymentsAppRouter, paymentsWebhookRouter } from './modules/payments';
 import { epgRouter } from './modules/epg';
 import { fastRouter, fastPlayoutRouter, fastPublicRouter } from './modules/fast';
@@ -121,6 +122,8 @@ export function createServer() {
   // tus resumable uploads: PATCH bodies are raw octets, so this too sits before
   // the JSON parser. Any tus client (iOS, Android, Uppy, tus-py) uploads here.
   app.use('/api/tus', tusRouter);
+  // The site agent's uploads from an on-prem watchfolder (host credential; build queue H2).
+  app.use('/api/site-agent/tus', siteTusRouter);
   // Vendor encode-engine webhooks: the adapter verifies a signature over the raw bytes.
   app.use('/api/engine-hooks', engineHooksRouter);
   // SaaS signup payments (Stripe Checkout): signature over the raw bytes.

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**855 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 678 · Platform API: 32 · Machine-to-machine: 15 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**870 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 679 · Platform API: 32 · Machine-to-machine: 29 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1207,6 +1207,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/watchfolders/:id/rules/:ruleId` | admin session (Bearer) or account secret key | media: manage |  |
 | PATCH | `/api/watchfolders/:id/rules/:ruleId` | admin session (Bearer) or account secret key | media: manage |  |
 | POST | `/api/watchfolders/:id/scan` | admin session (Bearer) or account secret key | media: manage |  |
+| GET | `/api/watchfolders/site-options` | admin session (Bearer) or account secret key | media: view |  |
 
 ### `/api/workflows`
 
@@ -1352,6 +1353,20 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | GET | `/api/site-agent/config` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/enrol` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/heartbeat` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| OPTIONS | `/api/site-agent/tus` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/tus` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| DELETE | `/api/site-agent/tus/:id` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| HEAD | `/api/site-agent/tus/:id` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| OPTIONS | `/api/site-agent/tus/:id` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| PATCH | `/api/site-agent/tus/:id` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| GET | `/api/site-agent/watchfolders` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/watchfolders/:id/items` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/watchfolders/:id/known` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| GET | `/api/site-agent/watchfolders/:id/quarantine-keys` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| GET | `/api/site-agent/watchfolders/:id/returns` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/watchfolders/:id/returns/:itemId` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/watchfolders/:id/scanned` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| GET | `/api/site-agent/watchfolders/:id/uploads` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 
 ### `/api/social`
 

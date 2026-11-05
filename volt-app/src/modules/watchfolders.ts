@@ -24,6 +24,12 @@
  * turns that from an incident into a question. It shares `classify()` with the
  * scanner, so it cannot drift from what will actually happen.
  *
+ * ON-PREM FOLDERS (kind 'site', build queue H2): a folder on a customer's
+ * storage, scanned by the site agent of a Hybrid Site with the same rules.
+ * Needs the Hybrid Sites licence. Scan now does not apply (the agent scans
+ * every pass), and Reprocess asks the agent to move the file back, since it
+ * is not on this server. GET /site-options lists what the form may offer.
+ *
  * RESOLVING A QUARANTINED ITEM IS TWO REAL ACTIONS, not a status change:
  *   REPROCESS moves the file back to where it came from and marks the row so the
  *             next scan considers it again. Used after correcting a rule.
@@ -45,6 +51,9 @@ import { loadFolder, pgItemStore, ingestFolder, syncS3, mirrorQuarantines } from
 import { scanFolder } from '../services/watchfolder/scanner';
 import { ingestableTargetKinds, libraryKindFor } from '../services/watchfolder/ingest';
 import { videoTargetKinds, videoTargetFor } from '../services/watchfolder/videoIngest';
+import { hasLicence, requireLicence } from '../services/sites/licences';
+import { PLACEMENTS, PLACEMENTS_BUILT } from '../services/sites/siteWatchfolders';
+import { ApiError } from '../util/http';
 
 /**
  * THE TARGET KINDS A FILE CAN ACTUALLY BE TAKEN IN AS (build queue 1.14-G3a-3).
@@ -76,7 +85,24 @@ export const watchfoldersRouter = Router();
 watchfoldersRouter.use(requireAuth);
 
 const FOLDER_EDITABLE = ['name', 'kind', 'config', 'default_target_kind', 'quarantine_path',
-  'enabled', 'ladder_group_id'];
+  'enabled', 'ladder_group_id', 'placement'];
+
+/** A placement this release can run; 'encode_site' is refused until site encoders (H4). */
+function assertPlacement(v: unknown) {
+  if (!(PLACEMENTS as readonly string[]).includes(String(v))) throw badRequest(`placement must be one of ${PLACEMENTS.join(', ')}`);
+  if (!(PLACEMENTS_BUILT as readonly string[]).includes(String(v))) {
+    throw Object.assign(new ApiError(422, 'Encode at site arrives with site encoders. Use Upload and encode in the cloud for now.'), { code: 'placement_not_available' });
+  }
+}
+
+/** The account's site, for an on-prem folder, and the licence it needs. */
+async function siteFor(acct: string, siteId: unknown) {
+  await requireLicence(acct, 'hybrid_sites');
+  if (!siteId || !/^[0-9a-f-]{36}$/i.test(String(siteId))) throw badRequest('An on-prem folder needs the site whose agent watches it (siteId)');
+  const site = await one<any>(`SELECT id, name FROM sites WHERE id = $1 AND account_id = $2`, [siteId, acct]);
+  if (!site) throw badRequest('That site is not one of this account\'s sites');
+  return site;
+}
 
 /** Account-scoped fetch. Every route goes through this: a folder id is a UUID an
  *  operator could paste from anywhere, and the tenant boundary is not optional. */
@@ -91,8 +117,11 @@ async function ownedFolder(req: any) {
 
 const createSchema = z.object({
   name: z.string().min(1),
-  kind: z.enum(['local', 's3']).default('local'),
+  kind: z.enum(['local', 's3', 'site']).default('local'),
   config: z.record(z.any()).default({}),
+  /** kind 'site': the Hybrid Site whose agent watches the folder, and where the work runs. */
+  siteId: z.string().nullable().optional(),
+  placement: z.string().nullable().optional(),
   defaultTargetKind: z.string().nullable().optional(),
   quarantinePath: z.string().default('_review'),
   /** The ladder every video file this folder accepts is encoded to. Null falls
@@ -105,8 +134,10 @@ watchfoldersRouter.get('/', asyncHandler(async (req, res) => {
     `SELECT w.*,
             (SELECT count(*) FROM watchfolder_rules r WHERE r.watchfolder_id = w.id)::int AS rule_count,
             (SELECT count(*) FROM watchfolder_items i
-              WHERE i.watchfolder_id = w.id AND i.status = 'quarantined')::int AS review_count
+              WHERE i.watchfolder_id = w.id AND i.status = 'quarantined')::int AS review_count,
+            s.name AS site_name
        FROM watchfolders w
+       LEFT JOIN sites s ON s.id = w.site_id
       WHERE w.account_id = $1
       ORDER BY w.created_at DESC`,
     [accountId(req)]
@@ -114,23 +145,53 @@ watchfoldersRouter.get('/', asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 
+/**
+ * What the New watchfolder form may offer for an on-prem folder: whether the
+ * account holds Hybrid Sites, its sites, and the placements. Readable by
+ * whoever manages watchfolders, who need not be an administrator (the Sites
+ * API itself is for administrators).
+ */
+watchfoldersRouter.get('/site-options', asyncHandler(async (req, res) => {
+  const licensed = await hasLicence(accountId(req), 'hybrid_sites');
+  const sites = licensed
+    ? await query<any>(`SELECT id, name, status FROM sites WHERE account_id = $1 ORDER BY name`, [accountId(req)])
+    : [];
+  res.json({
+    licensed,
+    sites: sites.map((x) => ({ id: x.id, name: x.name, status: x.status })),
+    placements: PLACEMENTS.map((p) => ({ placement: p, available: (PLACEMENTS_BUILT as readonly string[]).includes(p) })),
+  });
+}));
+
 watchfoldersRouter.post('/', asyncHandler(async (req, res) => {
   const b = createSchema.parse(req.body);
   if (b.defaultTargetKind) assertTargetKind(b.defaultTargetKind, 'files the rules do not catch');
+  let site: { id: string; name: string } | null = null;
+  let placement: string | null = null;
+  if (b.kind === 'site') {
+    site = await siteFor(accountId(req), b.siteId);
+    placement = b.placement ?? 'upload_cloud';
+    assertPlacement(placement);
+    if (!String(b.config?.path ?? '').trim()) throw badRequest('An on-prem folder needs its path on the site host (config.path)');
+  }
   const who = actor(req);
   const row = await one<any>(
-    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id)
-     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8) RETURNING *`,
+    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id, site_id, placement)
+     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8,$9,$10) RETURNING *`,
     [accountId(req), b.name, b.kind, JSON.stringify(b.config), b.defaultTargetKind ?? null,
-     b.quarantinePath, who.userId, b.ladderGroupId ?? null]
+     b.quarantinePath, who.userId, b.ladderGroupId ?? null, site?.id ?? null, placement]
   );
+  // The site's agents pick up a new folder on their next config pull.
+  if (site) await query(`UPDATE sites SET config_version = config_version + 1 WHERE id = $1`, [site.id]);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
-    action: 'create', entityType: 'watchfolder', entityId: row.id, snapshot: { name: b.name, kind: b.kind } });
-  res.status(201).json(row);
+    action: 'create', entityType: 'watchfolder', entityId: row.id,
+    snapshot: { name: b.name, kind: b.kind, ...(site ? { site: site.name, placement } : {}) } });
+  res.status(201).json({ ...row, site_name: site?.name ?? null });
 }));
 
 watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
   const f = await ownedFolder(req);
+  const site = f.site_id ? await one<any>(`SELECT name FROM sites WHERE id = $1`, [f.site_id]) : null;
   const rules = await query<any>(
     `SELECT * FROM watchfolder_rules WHERE watchfolder_id = $1 ORDER BY ordinal`, [f.id]);
   const items = await query<any>(
@@ -143,7 +204,7 @@ watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
        FROM watchfolder_items WHERE watchfolder_id = $1`, [f.id]);
   // The kinds the rule form offers come with the folder, so the console never
   // has its own copy of the list to fall out of step with the server's.
-  res.json({ ...f, rules, items, counts, targetKinds: targetKinds() });
+  res.json({ ...f, site_name: site?.name ?? null, rules, items, counts, targetKinds: targetKinds() });
 }));
 
 watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
@@ -160,6 +221,11 @@ watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
   if ('quarantinePath' in b) patch.quarantine_path = b.quarantinePath;
   if ('enabled' in b) patch.enabled = !!b.enabled;
   if ('ladderGroupId' in b) patch.ladder_group_id = b.ladderGroupId;
+  if ('placement' in b) {
+    if (cur.kind !== 'site') throw badRequest('Only an on-prem folder has a placement');
+    assertPlacement(b.placement);
+    patch.placement = b.placement;
+  }
   const who = actor(req);
   // patchEntity, not a bare UPDATE: it versions, audits, and publishes the live
   // `record` frame, so a second admin editing this folder is told.
@@ -311,6 +377,9 @@ watchfoldersRouter.post('/:id/dry-run', asyncHandler(async (req, res) => {
 
 watchfoldersRouter.post('/:id/scan', asyncHandler(async (req, res) => {
   const f = await ownedFolder(req);
+  if (f.kind === 'site') {
+    throw Object.assign(new ApiError(409, 'This folder is on a site: its agent scans it on every pass, so there is nothing to scan from here.'), { code: 'scanned_at_site' });
+  }
   const loaded = await loadFolder(f.id);
   if (!loaded) throw badRequest('this folder is disabled or has no path');
   try {
@@ -406,6 +475,15 @@ watchfoldersRouter.post('/:id/items/:itemId/resolve', asyncHandler(async (req, r
               reason=$4
         WHERE id=$1 AND status='failed'`,
       [item.id, who.userId, b.note ?? null, `retrying after: ${String(item.reason ?? 'the ingest failed')}`.slice(0, 500)]);
+  } else if (b.resolution === 'reprocess' && f.kind === 'site') {
+    // THE FILE IS ON THE CUSTOMER'S STORAGE, not here. The row asks the site
+    // agent to move it back (site_action 'return'); it does so on its next
+    // pass and the scan after that decides it again. If it cannot, the row
+    // returns to Needs review with the reason.
+    await query(
+      `UPDATE watchfolder_items
+          SET status='reprocessed', site_action='return', resolved_at=now(), resolved_by=$2, resolution_note=$3
+        WHERE id=$1`, [item.id, who.userId, b.note ?? null]);
   } else if (b.resolution === 'reprocess') {
     // PUT IT BACK WHERE IT CAME FROM, then mark the row. The file has to exist in
     // the drop folder again before the row says it will be reconsidered, or a

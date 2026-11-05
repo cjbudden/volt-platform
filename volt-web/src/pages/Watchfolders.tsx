@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   api, type Watchfolder, type WatchfolderRule, type WatchfolderItem,
-  type WatchfolderDryRun, type WatchfolderScan, type LadderGroup,
+  type WatchfolderDryRun, type WatchfolderScan, type LadderGroup, type WatchfolderSiteOptions,
 } from '../api'
 import { pressable } from '../a11y'
 import { useAccess } from '../access'
@@ -31,7 +31,19 @@ import { ConfirmDialog } from '../listActions'
    quarantined file matched nothing, a failed one matched and then the ingest
    broke, and an operator who cannot tell them apart will go looking for a rule
    that is not the problem.
+
+   ON-PREM FOLDERS (build queue H2) are on a customer's storage and scanned by
+   the agent of a Hybrid Site, with these same rules. Offered only to an
+   account licensed for Hybrid Sites. The page says where the folder is and
+   where its files are encoded; there is no Scan now (the agent scans every
+   pass), and Reprocess asks the agent to move the file back.
    ========================================================================== */
+
+/** Where an on-prem folder's work runs, in the console's words. */
+const PLACEMENT: Record<string, { label: string; help: string }> = {
+  upload_cloud: { label: 'Upload and encode in the cloud', help: 'The site agent uploads each accepted video file, resumable, and Volt encodes it like any upload. For sites without encoders.' },
+  encode_site: { label: 'Encode at site', help: 'Encoded by encoders at the site; only the packaged output is uploaded. Arrives with site encoders.' },
+}
 
 const STATUS: Record<string, { label: string; tone: string; help: string }> = {
   seen:        { label: 'Waiting',     tone: 'var(--brand,#3f7bff)', help: 'Classified, waiting for the next ingest pass.' },
@@ -75,6 +87,18 @@ function Pill({ status }: { status: string }) {
       fontWeight: 600, color: s.tone, background: 'color-mix(in srgb, currentColor 12%, transparent)',
       border: '1px solid color-mix(in srgb, currentColor 35%, transparent)',
     }}>{s.label}</span>
+  )
+}
+
+/** "On <site>": the folder is on a customer's storage, watched by that site's agent. */
+function SiteTag({ name }: { name?: string | null }) {
+  return (
+    <span className="tag" title="An on-prem folder: on this site's storage, scanned by its agent">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ verticalAlign: '-1px', marginRight: 4 }}>
+        <path d="M3 21h18" /><path d="M5 21V8l7-5 7 5v13" /><path d="M9 21v-6h6v6" />
+      </svg>
+      On {name ?? 'a site'}
+    </span>
   )
 }
 
@@ -314,6 +338,7 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
           <option value="failed">Failed</option>
           <option value="seen">Waiting</option>
           <option value="ingested">In library</option>
+          <option value="reprocessed">Sent back</option>
           <option value="removed">Dismissed</option>
         </select>
         <button type="button" className="btn ghost" onClick={load} style={{ marginLeft: 'auto' }}>Refresh</button>
@@ -343,7 +368,12 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
               )}
               {it.quarantine_key && (
                 <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
-                  now at <code>{it.quarantine_key}</code>
+                  now at <code>{it.quarantine_key}</code>{folder.kind === 'site' ? ` on ${folder.site_name ?? 'the site'}` : ''}
+                </div>
+              )}
+              {it.site_action === 'return' && (
+                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--brand,#3f7bff)' }}>
+                  Waiting for the site agent to move it back into the folder.
                 </div>
               )}
             </div>
@@ -359,7 +389,9 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
               {canManage && it.status === 'quarantined' && (
                 <>
                   <button type="button" className="btn ghost" disabled={busy === it.id}
-                    title="Put the file back in the drop folder and look at it again on the next scan."
+                    title={folder.kind === 'site'
+                      ? 'The site agent puts the file back in the drop folder on its next pass and decides it again.'
+                      : 'Put the file back in the drop folder and look at it again on the next scan.'}
                     onClick={() => resolve(it, 'reprocess')}>Reprocess</button>
                   <button type="button" className="btn ghost" disabled={busy === it.id}
                     title="Close this entry. The file itself stays in the review folder."
@@ -449,6 +481,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
             </span>
           )}
           <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{folder.config?.path}</code>
+          {folder.kind === 'site' && <SiteTag name={folder.site_name} />}
           {!folder.enabled && <Pill status="off" />}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {canManage && renaming == null && (
@@ -464,7 +497,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
               <button type="button" className="btn ghost" style={{ color: 'var(--danger,#f87171)' }}
                 onClick={() => setConfirmDelete(true)}>✕ Delete</button>
             )}
-            {canManage && (
+            {canManage && folder.kind !== 'site' && (
               <button type="button" className="btn primary" onClick={runScan} disabled={busy || !folder.enabled}
                 title={folder.enabled ? undefined : 'Switched off. Switch it on to scan.'}>{busy ? 'Scanning…' : 'Scan now'}</button>
             )}
@@ -476,10 +509,34 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
             confirmLabel="Delete watchfolder" typeToConfirm={folder.name}
             onCancel={() => setConfirmDelete(false)} onConfirm={remove} />
         )}
-        <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 8 }}>
-          {folder.enabled ? 'Scanned automatically every minute.' : 'Switched off: not scanned until it is switched on again.'} Refused files go to <code>{folder.quarantine_path}</code> inside
-          this folder. Last scan {ago(folder.last_scan_at)}.
-        </p>
+        {folder.kind === 'site' ? (
+          <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 8 }}>
+            {folder.enabled ? `On ${folder.site_name ?? 'a site'}: its agent scans this folder with these rules every pass.` : 'Switched off: the site agent does not scan it until it is switched on again.'} Refused
+            files go to <code>{folder.quarantine_path}</code> inside this folder at the site and never leave it. Last pass {ago(folder.last_scan_at)}.
+          </p>
+        ) : (
+          <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 8 }}>
+            {folder.enabled ? 'Scanned automatically every minute.' : 'Switched off: not scanned until it is switched on again.'} Refused files go to <code>{folder.quarantine_path}</code> inside
+            this folder. Last scan {ago(folder.last_scan_at)}.
+          </p>
+        )}
+        {folder.kind === 'site' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }} htmlFor="wf-placement">Where it is encoded</label>
+            <select id="wf-placement" className="inp sel-sm" style={{ width: 'auto', maxWidth: '100%' }}
+              value={folder.placement ?? 'upload_cloud'} disabled={!canManage}
+              onChange={async (e) => {
+                try { await api.patchWatchfolder(folder.id, { placement: e.target.value }); setErr(''); load() }
+                catch (er: any) { setErr(String(er?.message ?? er)) }
+              }}>
+              <option value="upload_cloud">{PLACEMENT.upload_cloud.label}</option>
+              <option value="encode_site" disabled>{PLACEMENT.encode_site.label} (with site encoders, not yet available)</option>
+            </select>
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
+              {PLACEMENT[folder.placement ?? 'upload_cloud']?.help}
+            </span>
+          </div>
+        )}
         {/* THE LADDER. Video files this folder accepts are encoded to it; images
             and slates are unaffected, which is why it sits with the scan
             settings rather than with the rules. */}
@@ -552,21 +609,28 @@ export default function Watchfolders() {
   const [open, setOpen] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [creating, setCreating] = useState(false)
-  const [draft, setDraft] = useState({ name: '', path: '' })
+  const [draft, setDraft] = useState({ name: '', path: '', where: 'local' as 'local' | 'site', siteId: '' })
+  const [siteOpts, setSiteOpts] = useState<WatchfolderSiteOptions | null>(null)
   const canManage = useAccess().can('media', 'manage')
 
   const load = useCallback(() => {
     api.watchfolders().then(setFolders).catch(e => setErr(String(e?.message ?? e)))
   }, [])
   useEffect(load, [load])
+  // ON-PREM IS OFFERED ONLY WITH THE LICENCE. Without Hybrid Sites the form is
+  // exactly what it was: a name and a path on this server.
+  useEffect(() => { api.watchfolderSiteOptions().then(setSiteOpts).catch(() => setSiteOpts(null)) }, [])
+  const activeSites = (siteOpts?.sites ?? []).filter(x => x.status === 'active')
 
   const create = async () => {
     if (!draft.name.trim() || !draft.path.trim()) { setErr('A watchfolder needs a name and a path.'); return }
+    if (draft.where === 'site' && !draft.siteId) { setErr('Choose the site whose agent watches this folder.'); return }
     try {
-      const f = await api.createWatchfolder({
-        name: draft.name.trim(), kind: 'local', config: { path: draft.path.trim(), min_age_ms: 5000 },
-      })
-      setCreating(false); setDraft({ name: '', path: '' }); load(); setOpen(f.id)
+      const f = await api.createWatchfolder(draft.where === 'site'
+        ? { name: draft.name.trim(), kind: 'site', siteId: draft.siteId, placement: 'upload_cloud',
+            config: { path: draft.path.trim(), min_age_ms: 10000 } }
+        : { name: draft.name.trim(), kind: 'local', config: { path: draft.path.trim(), min_age_ms: 5000 } })
+      setCreating(false); setDraft({ name: '', path: '', where: 'local', siteId: '' }); setErr(''); load(); setOpen(f.id)
     } catch (e: any) { setErr(String(e?.message ?? e)) }
   }
 
@@ -587,12 +651,41 @@ export default function Watchfolders() {
       </p>
 
       {creating && (
-        <div className="card" style={{ padding: 16, marginBottom: 14, display: 'grid', gap: 8, gridTemplateColumns: '1fr 2fr auto' }}>
-          <input style={box} placeholder="Name" value={draft.name}
-            onChange={e => setDraft({ ...draft, name: e.target.value })} />
-          <input style={box} placeholder="/Volumes/Ingest/drop" value={draft.path}
-            onChange={e => setDraft({ ...draft, path: e.target.value })} />
-          <button type="button" className="btn primary" onClick={create}>Create</button>
+        <div className="card" style={{ padding: 16, marginBottom: 14, display: 'grid', gap: 10 }}>
+          {siteOpts?.licensed && (
+            <div role="radiogroup" aria-label="Where the folder is" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 'var(--fs-sm)' }}>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="wf-where" checked={draft.where === 'local'} onChange={() => setDraft({ ...draft, where: 'local' })} />
+                On this server
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="wf-where" checked={draft.where === 'site'}
+                  onChange={() => setDraft({ ...draft, where: 'site', siteId: draft.siteId || activeSites[0]?.id || '' })} />
+                On-prem, at a site
+              </label>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input style={{ ...box, flex: '1 1 160px' }} placeholder="Name" aria-label="Name" value={draft.name}
+              onChange={e => setDraft({ ...draft, name: e.target.value })} />
+            {draft.where === 'site' && (
+              <select className="inp" aria-label="Site" style={{ flex: '1 1 160px', width: 'auto', maxWidth: '100%' }} value={draft.siteId}
+                onChange={e => setDraft({ ...draft, siteId: e.target.value })}>
+                {activeSites.length === 0 && <option value="">No active site: add one in Admin, Sites</option>}
+                {activeSites.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            )}
+            <input style={{ ...box, flex: '2 1 240px' }} aria-label={draft.where === 'site' ? 'Path on the site host' : 'Path'}
+              placeholder={draft.where === 'site' ? '/mnt/nas/drop (on the site host)' : '/Volumes/Ingest/drop'} value={draft.path}
+              onChange={e => setDraft({ ...draft, path: e.target.value })} />
+            <button type="button" className="btn primary" onClick={create}>Create</button>
+          </div>
+          {draft.where === 'site' && (
+            <p style={{ margin: 0, fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
+              The site's agent scans this folder with the rules you set here. {PLACEMENT.upload_cloud.label}: {PLACEMENT.upload_cloud.help} Refused files
+              go to the review folder at the site and never leave it.
+            </p>
+          )}
         </div>
       )}
 
@@ -608,6 +701,7 @@ export default function Watchfolders() {
             <div>
               <div style={{ fontWeight: 600 }}>{f.name}</div>
               <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{f.config?.path}</code>
+              {f.kind === 'site' && <> <SiteTag name={f.site_name} /></>}
             </div>
             <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint,#8b93a7)' }}>
               {f.rule_count ?? 0} rule{(f.rule_count ?? 0) === 1 ? '' : 's'}

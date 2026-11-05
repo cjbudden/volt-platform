@@ -255,8 +255,8 @@ export async function heartbeat(p: SitePrincipal, rawFacts: any, heldConfigVersi
 
 /**
  * What a host should run. In H1 this is the site, the host's own standing and
- * the encoder version the cloud pins; H2 and later add the site's watchfolders
- * and pools. A pending host gets the same shape with nothing to do.
+ * the encoder version the cloud pins; H2 adds the site's watchfolders, later
+ * phases its pools. A pending host gets the same shape with nothing to do.
  */
 export async function siteConfig(p: SitePrincipal) {
   const s = await one<any>(`SELECT id, name, config_version FROM sites WHERE id = $1`, [p.siteId]);
@@ -269,7 +269,12 @@ export async function siteConfig(p: SitePrincipal) {
     heartbeatSeconds: HEARTBEAT_SECONDS,
     // The released encoder image every site runs; a site never picks its own.
     encoder: { image: 'volt-encoder', version: process.env.VOLT_ENCODER_VERSION || null },
-    watchfolders: [] as unknown[],
+    // The site's on-prem watchfolders (H2), names and placements only: the
+    // agent pulls each folder's rules every pass from /watchfolders, so a rule
+    // edited in the console applies at the next pass without a config bump.
+    watchfolders: approved
+      ? (await (await import('./siteWatchfolders')).foldersForSite(p)).map((f) => ({ id: f.id, name: f.name, path: f.path, placement: f.placement }))
+      : [],
     pools: [] as unknown[],
     work: approved ? 'ready' : 'waiting_for_approval',
   };

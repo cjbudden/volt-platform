@@ -5454,6 +5454,132 @@
   "group": "/api/site-agent"
  },
  {
+  "method": "OPTIONS",
+  "path": "/api/site-agent/tus",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/tus",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/site-agent/tus/:id",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "HEAD",
+  "path": "/api/site-agent/tus/:id",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "OPTIONS",
+  "path": "/api/site-agent/tus/:id",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/site-agent/tus/:id",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "GET",
+  "path": "/api/site-agent/watchfolders",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/watchfolders/:id/items",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/watchfolders/:id/known",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "GET",
+  "path": "/api/site-agent/watchfolders/:id/quarantine-keys",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "GET",
+  "path": "/api/site-agent/watchfolders/:id/returns",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/watchfolders/:id/returns/:itemId",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/watchfolders/:id/scanned",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "GET",
+  "path": "/api/site-agent/watchfolders/:id/uploads",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
   "method": "GET",
   "path": "/api/sites",
   "api": "admin",
@@ -7322,6 +7448,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "GET",
+  "path": "/api/watchfolders/site-options",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
   "viewerTier": false,
   "group": "/api/watchfolders"
  },

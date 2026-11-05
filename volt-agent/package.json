@@ -1,11 +1,21 @@
 {
   "name": "@volt/agent",
-  "version": "0.2.0",
-  "description": "Volt agent: watches folders, recognises cloud drive sync roots, uploads with tus or asks Volt to fetch cloud to cloud; on a Hybrid Site, enrols the host, sends heartbeats and pulls config.",
+  "version": "0.3.0",
+  "description": "Volt agent: watches folders, recognises cloud drive sync roots, uploads with tus or asks Volt to fetch cloud to cloud; on a Hybrid Site, enrols the host, sends heartbeats, pulls config and runs the site's on-prem watchfolders.",
   "license": "MIT",
-  "bin": { "volt-agent": "dist/cli.js" },
-  "main": "dist/index.js",
-  "scripts": { "build": "tsc -p tsconfig.json", "start": "node dist/cli.js" },
-  "engines": { "node": ">=20" },
-  "devDependencies": { "typescript": "^5.4.0", "@types/node": "^20.11.0" }
+  "bin": {
+    "volt-agent": "dist/volt-agent/src/cli.js"
+  },
+  "main": "dist/volt-agent/src/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/volt-agent/src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0"
+  }
 }

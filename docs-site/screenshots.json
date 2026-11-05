@@ -277,6 +277,19 @@
       "alt": "The Encoding profiles page: the list of renditions with the form to add one, the New ladder card, and a ladder with its rungs and the preview of what a source would get"
     },
     {
+      "name": "watchfolders-on-prem",
+      "guide": "guides/watchfolders.md",
+      "path": "/watchfolders",
+      "waitFor": "h2",
+      "click": [
+        "text=New watchfolder",
+        "text=On-prem, at a site"
+      ],
+      "settleMs": 600,
+      "_why": "Before the watchfolders shot: that one opens a folder, and the page is not reloaded between shots, so the list with its New watchfolder button is only there first.",
+      "alt": "The New watchfolder form with On-prem, at a site chosen: the name, the site, and the folder's path on the site's server"
+    },
+    {
       "name": "watchfolders",
       "guide": "guides/watchfolders.md",
       "path": "/watchfolders",

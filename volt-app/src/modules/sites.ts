@@ -18,6 +18,17 @@
  *   POST   /api/site-agent/enrol       token + host facts -> host (pending) + its credential
  *   POST   /api/site-agent/heartbeat   host facts -> standing, config version, rotated credential
  *   GET    /api/site-agent/config      what the host should run
+ *
+ * On-prem watchfolders (H2; an APPROVED host of the folder's own site only):
+ *   GET    /api/site-agent/watchfolders                        folders with their rules, as the scanner takes them
+ *   POST   /api/site-agent/watchfolders/:id/known              { objectKey, checksum } -> { known }
+ *   GET    /api/site-agent/watchfolders/:id/quarantine-keys    review folder names in use
+ *   POST   /api/site-agent/watchfolders/:id/items              one decision (accepted, or refused and moved)
+ *   GET    /api/site-agent/watchfolders/:id/uploads            accepted video still to upload, with its open upload
+ *   GET    /api/site-agent/watchfolders/:id/returns            refused files an operator sent back
+ *   POST   /api/site-agent/watchfolders/:id/returns/:itemId    { ok, error } the file was moved back, or not
+ *   POST   /api/site-agent/watchfolders/:id/scanned            { error } a pass finished
+ *   /api/site-agent/tus                                        the upload itself (modules/siteTus.ts)
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -29,6 +40,7 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { writeAudit, actor, patchEntity } from '../services/audit';
 import { requireLicence } from '../services/sites/licences';
 import * as S from '../services/sites/sites';
+import * as W from '../services/sites/siteWatchfolders';
 
 export const sitesRouter = Router();
 sitesRouter.use(requireAuth, requireMinRole('admin'), asyncHandler(async (req, _res, next) => {
@@ -193,4 +205,47 @@ siteAgentRouter.post('/heartbeat', asyncHandler(async (req, res) => {
 siteAgentRouter.get('/config', asyncHandler(async (req, res) => {
   const p = await S.authenticateSite(req.headers.authorization);
   res.json(await S.siteConfig(p));
+}));
+
+// ---- on-prem watchfolders (H2) ----------------------------------------------------
+
+siteAgentRouter.get('/watchfolders', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  W.requireApprovedHost(p);
+  res.json({ items: await W.foldersForSite(p) });
+}));
+
+siteAgentRouter.post('/watchfolders/:id/known', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json({ known: await W.isKnown(p, req.params.id, req.body?.objectKey, req.body?.checksum) });
+}));
+
+siteAgentRouter.get('/watchfolders/:id/quarantine-keys', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json({ items: await W.quarantineKeysInUse(p, req.params.id) });
+}));
+
+siteAgentRouter.post('/watchfolders/:id/items', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.status(201).json(await W.recordDecision(p, req.params.id, req.body ?? {}));
+}));
+
+siteAgentRouter.get('/watchfolders/:id/uploads', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json({ items: await W.pendingUploads(p, req.params.id) });
+}));
+
+siteAgentRouter.get('/watchfolders/:id/returns', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json({ items: await W.pendingReturns(p, req.params.id) });
+}));
+
+siteAgentRouter.post('/watchfolders/:id/returns/:itemId', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await W.returned(p, req.params.id, req.params.itemId, req.body?.ok !== false, req.body?.error ?? null));
+}));
+
+siteAgentRouter.post('/watchfolders/:id/scanned', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await W.scanReport(p, req.params.id, req.body?.error ?? null));
 }));

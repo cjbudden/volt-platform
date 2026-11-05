@@ -48,6 +48,14 @@ export interface ScanFolder {
   minAgeMs?: number;
   /** Safety valve so one enormous folder cannot monopolise a scan. */
   maxFiles?: number;
+  /**
+   * How a file's checksum is had. The default reads the whole file. The site
+   * agent (build queue H2) passes one that remembers the answer for a path
+   * whose size and mtime have not moved, because on a customer's NAS the drop
+   * holds hour-long masters and hashing each of them on every pass would keep
+   * the share busy for nothing. Same decision either way.
+   */
+  checksum?: (absPath: string, st: { size: number; mtimeMs: number }) => Promise<string>;
 }
 
 export interface SeenItem {
@@ -165,7 +173,8 @@ export async function scanFolder(f: ScanFolder, store: ItemStore, now = Date.now
       // briefly a truncated file with a perfectly good name.
       if (now - st.mtimeMs < minAge) { res.skippedTooNew.push(objectKey); continue; }
 
-      const checksum = await checksumFile(join(f.path, objectKey.split('/').join(sep)));
+      const abs = join(f.path, objectKey.split('/').join(sep));
+      const checksum = f.checksum ? await f.checksum(abs, st) : await checksumFile(abs);
       // IDEMPOTENCE. Keyed on content as well as name, so a corrected re-drop
       // under the same filename is a new item rather than a silent no-op.
       if (await store.isKnown(f.id, objectKey, checksum)) { res.skippedKnown++; continue; }

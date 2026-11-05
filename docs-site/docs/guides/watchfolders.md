@@ -17,6 +17,7 @@ A watchfolder is a folder Volt keeps an eye on. Files dropped into it are sorted
 - **Sorting by name.** Rules match the file name, such as `slate_*.png`, and say what kind of file it is. The first rule that matches wins.
 - **Nothing lost on a guess.** A file no rule accepts, or that a rule refuses, is moved to the folder's review folder and listed in the **Queue** until someone deals with it.
 - **Checking before you drop.** **Try a filename** shows what would happen to a file before it arrives.
+- **Folders on your own storage.** With the Hybrid Sites add-on, a watchfolder can be on a NAS or server at one of your sites. The site's agent sorts it with the same rules, keeps refused files at the site and uploads the accepted video to Volt.
 
 Media operations staff and librarians use it day to day; an administrator usually sets the folders up.
 
@@ -35,6 +36,25 @@ Media operations staff and librarians use it day to day; an administrator usuall
 3. Type a **Name** and the folder's path, then choose **Create**. The new folder opens.
 
 Volt scans every watchfolder automatically every minute. A file still being copied in is left until it has stopped changing.
+
+### Create an on-prem watchfolder
+
+With the Hybrid Sites add-on, a watchfolder can be on storage at one of your [sites](hybrid-sites.md), such as a NAS share in your broadcast centre. The site's agent scans it there, with the rules you set on this page.
+
+1. Choose **New watchfolder**, then **On-prem, at a site**. (Without the add-on the form has no such choice.)
+2. Pick the **Site**, type a **Name** and the folder's path **on the site's server**, such as `/mnt/nas/drop`, then choose **Create**.
+3. Add rules as for any watchfolder.
+
+![The New watchfolder form with On-prem, at a site chosen: the name, the site, and the folder's path on the site's server](/img/screens/watchfolders-on-prem.png)
+
+What happens to a file in an on-prem folder:
+
+- The agent waits until the file has stopped changing for 10 seconds, then decides it with the folder's rules.
+- A file the rules refuse goes to the review folder **at the site** and is listed in the **Queue** here. It never leaves your network.
+- An accepted video file is uploaded to Volt (**Upload and encode in the cloud**), then goes through your [Ingest Rules](ingest-rules.md) and is encoded like any upload. A dropped connection or a restarted server does not start the upload again: it carries on from where it stopped.
+- Only video crosses to Volt from a site for now: a file whose rule sends it to the Image Library is marked **Failed** with the reason, and stays where it is.
+
+The folder's page says which site it is on (**On** and the site's name) and when the agent last looked at it. There is no **Scan now**: the agent looks at the folder every few seconds. **Where it is encoded** shows **Upload and encode in the cloud**; **Encode at site**, with encoders at your site, comes with a later release of the add-on.
 
 A watchfolder can also be a folder in a storage bucket instead of a path (set up through the API, see [Through the API](#through-the-api)). Where your Volt runs on AWS, a bucket folder under `watch/` in Volt's own bucket is taken in as soon as a file finishes uploading, usually within seconds, and Volt also looks through every bucket folder once an hour in case a file was missed.
 
@@ -85,7 +105,7 @@ Video files go through your [Ingest Rules](ingest-rules.md), with this folder as
 
 ### Deal with files that need a person
 
-1. The **Queue** starts on **Needs a person**: files that need review and files that failed. Choose another view to see **Needs review**, **Failed**, **Waiting**, **In library** or **Dismissed**. **Refresh** reloads it.
+1. The **Queue** starts on **Needs a person**: files that need review and files that failed. Choose another view to see **Needs review**, **Failed**, **Waiting**, **In library**, **Sent back** or **Dismissed**. **Refresh** reloads it.
 2. Each row shows the file, the reason it was stopped, where it is now (**now at** its place in the review folder), its status, size and when it was seen.
 
    | Status | Means |
@@ -94,10 +114,10 @@ Video files go through your [Ingest Rules](ingest-rules.md), with this folder as
    | **In library** | Added to the Image Library, the Media Library (where a video shows its encode) or Loops & Fillers |
    | **Needs review** | No rule matched, or a rule refused it. The file is in the review folder |
    | **Failed** | It matched a rule, but adding it to the library did not complete |
-   | **Sent back** | Returned to the folder to be looked at again |
+   | **Sent back** | Returned to the folder to be looked at again. For an on-prem folder, "Waiting for the site agent to move it back into the folder" until the agent has done so |
    | **Dismissed** | Closed by someone. The file was left where it was |
 
-3. For a file in **Needs review**: fix or add the rule, then choose **Reprocess**. The file goes back into the watchfolder and the next scan looks at it again.
+3. For a file in **Needs review**: fix or add the rule, then choose **Reprocess**. The file goes back into the watchfolder and the next scan looks at it again. In an on-prem folder the site's agent moves it back on its next pass; if it cannot (someone moved the file away), the entry returns to **Needs review** and says why.
 4. For a file that **Failed**: read the reason under it and fix the cause (for example, replace a damaged file under the same name), then choose **Retry**. The file never left the watchfolder; it goes back to **Waiting** and is taken in again on the next pass, within a minute. If it fails again, the new reason is shown.
 5. If the file was not wanted, choose **Dismiss**. The entry is closed and the file stays where it is: in the review folder for a file that needed review, in the watchfolder for one that failed. Nothing on this page deletes a file.
 
@@ -121,6 +141,7 @@ At the top of the folder's page:
 | [Ingest Rules](ingest-rules.md) | Video files are ingested through them; a source rule can name the folder (**Folder:** and its name) |
 | [Encoding Profiles](encoding-profiles.md) | The ladders offered under **Encode video to** |
 | [Storage](storage.md) | Where accepted files are kept |
+| [Sites](hybrid-sites.md) | With the Hybrid Sites add-on, the sites whose agents watch on-prem folders |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -155,12 +176,18 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "the file is no longer in the review folder; somebody has already moved or deleted it" | Someone moved the file by hand | Put it back in the watchfolder yourself, or **Dismiss** the entry |
 | **Try a filename** is greyed out with "Your role cannot try file names here" | Your role cannot run a dry run | Ask for Files, uploads & storage: Operate |
 | **Scan now** is greyed out | The watchfolder is switched off | Choose **▶ Switch on** |
+| No **Scan now** on a folder that says **On** and a site | An on-prem folder: the site's agent scans it | Nothing to do. If **Last pass** is old, check the site's server on [Sites](hybrid-sites.md) |
+| No **On-prem, at a site** in the New watchfolder form | The account does not have the Hybrid Sites add-on | Ask Volt about the add-on |
+| "goes to the Image Library, which an on-prem folder does not feed yet" | A file in an on-prem folder matched a rule for images | Put images in a watchfolder on Volt, or upload them |
+| "the site agent could not move it back" | After **Reprocess**, the file was no longer in the review folder at the site | Put the file back in the watchfolder at the site yourself, or **Dismiss** the entry |
+| "Encode at site arrives with site encoders" | Through the API, an on-prem folder was given the placement `encode_site` | Use `upload_cloud` for now |
 
 ## Through the API
 
 | Request | Does |
 |---|---|
-| `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket) |
+| `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket; or `"kind": "site"` with `siteId`, `config.path` on the site's server and `placement`, for an on-prem folder) |
+| `GET /api/watchfolders/site-options` | Whether the account has the Hybrid Sites add-on, its sites, and which placements can be chosen |
 | `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules and `targetKinds` (each kind a rule can take in and the library it goes to); rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
 | `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension`, `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`) |
 | `PATCH /api/watchfolders/{id}/rules/{ruleId}`, `DELETE /api/watchfolders/{id}/rules/{ruleId}` | Changes (including `ordinal` and `enabled`) or deletes a rule |
@@ -180,6 +207,14 @@ A folder in a bucket. Give it a prefix under `watch/` when it is in Volt's own b
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Agency drops", "kind": "s3", "config": {"prefix": "watch/agency/"}}' \
+  "https://your-volt-host/api/watchfolders"
+```
+
+An on-prem folder (Hybrid Sites add-on). Without the add-on the answer is `403` with the code `licence_required`; `placement` is `upload_cloud` for now.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Newsroom NAS drop", "kind": "site", "siteId": "'$SITE_ID'", "placement": "upload_cloud", "config": {"path": "/mnt/nas/drop"}}' \
   "https://your-volt-host/api/watchfolders"
 ```
 

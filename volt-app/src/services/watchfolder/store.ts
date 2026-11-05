@@ -183,15 +183,28 @@ export async function loadFolder(id: string): Promise<ScanFolder | null> {
     `SELECT id, account_id, kind, config, default_target_kind, quarantine_path, enabled
        FROM watchfolders WHERE id = $1`, [id]);
   if (!f || !f.enabled) return null;
+  // A SITE FOLDER IS NOT ON THIS MACHINE (build queue H2). Its path is on the
+  // customer's storage and the site agent scans it there; scanning the same
+  // path here would read whatever this server happens to have at it.
+  if (f.kind === 'site') return null;
   // An S3 folder is mirrored into a local staging root first (s3walk.ts), and
   // from there it is a local folder like any other. The path is that root.
   const path = f.kind === 's3' ? s3StagingRoot(f.id) : String(f.config?.path ?? '');
   if (!path) return null;
   if (f.kind === 's3') mkdirSync(path, { recursive: true });
 
+  return toScanFolder(f, path);
+}
+
+/**
+ * A folder row as the scanner takes it: its ordered rules and its policy. The
+ * site agent gets exactly this for its folders (services/sites/siteWatchfolders.ts),
+ * so the rules a site runs are the rules the console shows.
+ */
+export async function toScanFolder(f: any, path: string): Promise<ScanFolder> {
   const rules = await query<any>(
     `SELECT id, ordinal, name, match_type, pattern, target_kind, workflow, action, reject_reason, enabled
-       FROM watchfolder_rules WHERE watchfolder_id = $1 ORDER BY ordinal`, [id]);
+       FROM watchfolder_rules WHERE watchfolder_id = $1 ORDER BY ordinal`, [f.id]);
 
   const policy: FolderPolicy = {
     defaultTargetKind: f.default_target_kind ?? null,

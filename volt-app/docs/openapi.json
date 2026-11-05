@@ -39371,6 +39371,32 @@
     }
    }
   },
+  "/api/watchfolders/site-options": {
+   "get": {
+    "operationId": "getWatchfoldersSiteOptions",
+    "summary": "On-prem watchfolder options",
+    "tags": [
+     "Watchfolders"
+    ],
+    "description": "What the New watchfolder form may offer for an on-prem folder: `licensed` (whether the account has the Hybrid Sites add-on), its `sites` (id, name, status) and the `placements` with whether each can be chosen yet (`upload_cloud` can; `encode_site` arrives with site encoders). An on-prem folder is then created with `POST /api/watchfolders` and `\"kind\": \"site\"`, `siteId`, `placement` and `config.path` (the folder's path on the site's server).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/workflows/events": {
    "get": {
     "operationId": "getWorkflowsEvents",

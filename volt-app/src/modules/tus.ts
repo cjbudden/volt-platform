@@ -31,7 +31,7 @@ function retryOf(v: string | undefined) {
   return null;
 }
 
-class PgTusStore implements TusStore {
+export class PgTusStore implements TusStore {
   async create(who: Who, length: number, md: Record<string, string>): Promise<TusInfo> {
     let metadata: Record<string, any> | null = null;
     try { metadata = md.metadata ? JSON.parse(md.metadata) : null; } catch { metadata = null; }
@@ -96,7 +96,7 @@ class PgTusStore implements TusStore {
   }
 }
 
-function toInfo(s: UploadSession, md: Record<string, string>): TusInfo {
+export function toInfo(s: UploadSession, md: Record<string, string>): TusInfo {
   return {
     id: s.id, length: Number(s.total_bytes), offset: Number(s.received_bytes ?? 0), metadata: md,
     expiresAt: s.expires_at, extra: { state: s.state },
@@ -111,13 +111,21 @@ export const tusRouter = createTusRouter({
     await new Promise<void>((resolve, reject) => requireAuth(req as any, {} as any, (e?: any) => (e ? reject(e) : resolve())));
     return { accountId: accountId(req as any), userId: actorId(req as any) } as Who;
   },
-  onComplete: async (info, _who, sha) => {
-    const s = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [info.id]);
-    if (!s || s.state === 'complete') return;
-    const dest = destinationFor(s);
-    mkdirSync(join(dest, '..'), { recursive: true });
-    renameSync(join(sessionDir(s.id), 'upload.tus'), dest);
-    // completeLanded removes the session's parts (this disk, and the bucket's on AWS).
-    await completeLanded(s, dest, info.length, sha);
-  },
+  onComplete: async (info, _who, sha) => { await landTus(info, sha); },
 });
+
+/**
+ * The last byte is in: move the file to where an upload lands and run the
+ * normal upload path (ingest rules, then the encode). Shared with the site
+ * agent's tus endpoint (modules/siteTus.ts, build queue H2).
+ */
+export async function landTus(info: TusInfo, sha: string): Promise<boolean> {
+  const s = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [info.id]);
+  if (!s || s.state === 'complete') return false;
+  const dest = destinationFor(s);
+  mkdirSync(join(dest, '..'), { recursive: true });
+  renameSync(join(sessionDir(s.id), 'upload.tus'), dest);
+  // completeLanded removes the session's parts (this disk, and the bucket's on AWS).
+  await completeLanded(s, dest, info.length, sha);
+  return true;
+}

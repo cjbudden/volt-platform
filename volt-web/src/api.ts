@@ -846,7 +846,12 @@ export interface PlayerReport {
 export interface Watchfolder {
   id: string
   name: string
-  kind: 'local' | 's3'
+  /** 'site': on a customer's storage, scanned by a Hybrid Site's agent (build queue H2). */
+  kind: 'local' | 's3' | 'site'
+  site_id?: string | null
+  site_name?: string | null
+  /** kind 'site': upload_cloud (the agent uploads, the cloud encodes); encode_site arrives with site encoders. */
+  placement?: 'upload_cloud' | 'encode_site' | null
   config: { path?: string; min_age_ms?: number; library_folder?: string; delete_after_ingest?: boolean;
             max_ingest_bytes?: number; min_bytes?: number; max_bytes?: number; default_workflow?: string }
   default_target_kind: string | null
@@ -892,9 +897,19 @@ export interface WatchfolderItem {
   /** Why, in the words recorded AT THE DECISION. Not recomputed on read. */
   reason: string | null
   quarantine_key: string | null
+  /** 'return': Reprocess was pressed on a site folder's file; the site agent has yet to move it back. */
+  site_action?: 'return' | null
+  /** The Media Library record a file from a site became. */
+  vod_asset_id?: string | null
   rule_name: string | null
   seen_at: string
   resolved_at: string | null
+}
+
+export interface WatchfolderSiteOptions {
+  licensed: boolean
+  sites: { id: string; name: string; status: 'active' | 'disabled' }[]
+  placements: { placement: 'upload_cloud' | 'encode_site'; available: boolean }[]
 }
 
 export interface WatchfolderDryRun {
@@ -1301,11 +1316,14 @@ export const api = {
     req(`/encode-profiles/ladders/${id}/preview?height=${height ?? ''}&fps=${fps ?? ''}`),
 
   watchfolders: (): Promise<Watchfolder[]> => req('/watchfolders'),
+  /** What the New watchfolder form may offer for an on-prem folder (Hybrid Sites licence, sites, placements). */
+  watchfolderSiteOptions: (): Promise<WatchfolderSiteOptions> => req('/watchfolders/site-options'),
   watchfolder: (id: string): Promise<Watchfolder & { rules: WatchfolderRule[] }> =>
     req(`/watchfolders/${id}`),
   createWatchfolder: (b: {
-    name: string; kind?: 'local' | 's3'; config?: Record<string, any>
+    name: string; kind?: 'local' | 's3' | 'site'; config?: Record<string, any>
     defaultTargetKind?: string | null; quarantinePath?: string
+    siteId?: string | null; placement?: 'upload_cloud' | 'encode_site' | null
   }): Promise<Watchfolder> => req('/watchfolders', { method: 'POST', body: JSON.stringify(b) }),
   patchWatchfolder: (id: string, b: Record<string, any>): Promise<Watchfolder> =>
     req(`/watchfolders/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),

@@ -804,5 +804,9 @@
   "POST /api/sites/:id/hosts/:hostId/rotate-credential": {
     "summary": "Rotate a host's credential",
     "description": "A new credential for the host, handed to its agent on the next heartbeat; the old one stops working the first time the new one is used. The new secret is never returned here. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
+  },
+  "GET /api/watchfolders/site-options": {
+    "summary": "On-prem watchfolder options",
+    "description": "What the New watchfolder form may offer for an on-prem folder: `licensed` (whether the account has the Hybrid Sites add-on), its `sites` (id, name, status) and the `placements` with whether each can be chosen yet (`upload_cloud` can; `encode_site` arrives with site encoders). An on-prem folder is then created with `POST /api/watchfolders` and `\"kind\": \"site\"`, `siteId`, `placement` and `config.path` (the folder's path on the site's server)."
   }
 }
