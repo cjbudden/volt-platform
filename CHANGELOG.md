@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.54.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · API Keys & Apps: An app can be registered as an embed player or as venue screens, so rights can allow or block those separately from your web, mobile and TV apps.
+- added · Rights: Choose what new assets get: No restrictions (where every existing asset starts), All restricted, or one of your provider profiles. Uploads and watchfolders can name a profile, a title can narrow its profile but never widen it, and each profile keeps its agreement privately for rights admins.
+- added · Rights: Rights profiles. Every asset now carries a rights profile that sets where it may be shown, on which apps, for which uses (on demand, FAST and linear, clips, social, downloads, ads), with which access types and inside which window. Publishing, the play gate and FAST lineups never go outside it. Find it under Admin, Media setup, Rights, and on each asset's new Rights tab.
+
+### Internal
+
+- added · Tests: rights-profiles suite: the rights cap on the play gate, publishing and FAST, narrowing, the insert trigger and backfill, agreements and permissions.
+
 ## 0.53.0 (2026-11-05)
 
 ### Product (in customer release notes)
