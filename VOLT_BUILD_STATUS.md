@@ -2198,7 +2198,7 @@ What: work can now be sent to a Hybrid Site and run there. A job queued with a s
 - **Not done**: Mirror and Archive (H3-2). The agent's credential still needs the `hybrid_sites` licence; Mirror and Archive is sold separately, so H3-2 lets `mirror_archive` alone open the agent routes it needs.
 
 
-### R1 Rights profiles (6 Nov 2026, vNEXT)
+### R1 Rights profiles (6 Nov 2026, v0.54.0)
 
 Every asset carries one rights profile: territories, apps, uses, access types and window. Rights are the cap: collection access and publishing policies decide inside them, and the play gate, publishing and FAST refuse anything outside them. Design: Publishing Policies doc, "Rights"; screens: https://claude.ai/artifact/VQzYLH1vs2ygwqNjGww8mE.
 
