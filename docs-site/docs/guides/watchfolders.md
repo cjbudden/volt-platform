@@ -7,13 +7,14 @@ guide: section
 
 # Watchfolders
 
-A watchfolder is a folder Volt keeps an eye on. Files dropped into it are sorted by the folder's rules into the Image Library, the Media Library or Loops & Fillers; a file that matches no rule is moved to a review folder and listed for a person, never deleted and never guessed at. Most people come here to add a rule, or to clear the files waiting for review.
+A watchfolder is a folder Volt keeps an eye on. Files dropped into it are sorted by the folder's rules into the Image Library, the Media Library or Loops & Fillers. A new folder starts with default rules by file type, so images and video are taken in from the first drop; a file that matches no rule is moved to a review folder and listed for a person, never deleted and never guessed at. Most people come here to add a rule, or to clear the files waiting for review.
 
-![A watchfolder's page: its path and Scan now button, the numbered rules with the one that would win highlighted, the Try a filename box, and the queue of files that need a person](/img/screens/watchfolders.png)
+![A watchfolder's page: its path and Scan now button, the numbered rules (one of the folder's own, then the two default rules by file type) with the one that would win highlighted, the Try a filename box, and the queue of files that need a person](/img/screens/watchfolders.png)
 
 ## What it is for
 
 - **Regular deliveries.** Slates, posters, logos, programmes and loops that arrive from an agency, an edit suite or another system go into one folder and land in the right library on their own.
+- **Sorting by type, out of the box.** Every new folder sends images to the Image Library and video to the Media Library with two default rules you can change or switch off.
 - **Sorting by name.** Rules match the file name, such as `slate_*.png`, and say what kind of file it is. The first rule that matches wins.
 - **Nothing lost on a guess.** A file no rule accepts, or that a rule refuses, is moved to the folder's review folder and listed in the **Queue** until someone deals with it.
 - **Checking before you drop.** **Try a filename** shows what would happen to a file before it arrives.
@@ -33,7 +34,7 @@ Media operations staff and librarians use it day to day; an administrator usuall
 
 1. Open **Admin** and choose **Watchfolders** (under **Media setup**).
 2. Choose **New watchfolder**.
-3. Type a **Name** and the folder's path, then choose **Create**. The new folder opens.
+3. Type a **Name** and the folder's path, then choose **Create**. The new folder opens, with the [default rules by file type](#default-rules-by-file-type) already in its list.
 
 Volt scans every watchfolder automatically every minute. A file still being copied in is left until it has stopped changing.
 
@@ -42,7 +43,7 @@ Volt scans every watchfolder automatically every minute. A file still being copi
 With the Hybrid Sites add-on, a watchfolder can be on storage at one of your [sites](hybrid-sites.md), such as a NAS share in your broadcast centre. The site's agent scans it there, with the rules you set on this page.
 
 1. Choose **New watchfolder**, then **On-prem, at a site**. (Without the add-on the form has no such choice.)
-2. Pick the **Site**, type a **Name** and the folder's path **on the site's server**, such as `/mnt/nas/drop`, then choose **Create**.
+2. Pick the **Site**, type a **Name** and the folder's path **on the site's server**, such as `/mnt/nas/drop`, then choose **Create**. The folder starts with the default rule for video (only video crosses from a site for now).
 3. Add rules as for any watchfolder.
 
 ![The New watchfolder form with On-prem, at a site chosen: the name, the site, and the folder's path on the site's server](/img/screens/watchfolders-on-prem.png)
@@ -58,6 +59,23 @@ The folder's page says which site it is on (**On** and the site's name) and when
 
 A watchfolder can also be a folder in a storage bucket instead of a path (set up through the API, see [Through the API](#through-the-api)). Where your Volt runs on AWS, a bucket folder under `watch/` in Volt's own bucket is taken in as soon as a file finishes uploading, usually within seconds, and Volt also looks through every bucket folder once an hour in case a file was missed.
 
+### Default rules by file type
+
+Every new watchfolder starts with one rule per file type, at the bottom of its list and marked **Default**:
+
+| Rule | Matches | Goes to |
+|---|---|---|
+| **Images to the Image Library** | `png`, `jpg`, `jpeg`, `webp`, `gif`, `tif`, `tiff` | The Image Library, as an image (`image`) |
+| **Video to the Media Library** | `mp4`, `mov`, `m4v`, `mxf`, `mkv`, `ts`, `webm` | The Media Library, encoded to the folder's ladder (`vod`) |
+
+They are ordinary rules: **Try a filename** shows them, and you can move, switch off or delete them like any other.
+
+- **Your own rules come first.** A rule you add goes above the default rules, so `loop_*.mp4` to Loops & Fillers wins over the video default for those files, and every other video still goes to the Media Library.
+- **On** and **Off** on a rule's row switch it off and on again. A file the rule would have caught goes to the rules below it, or to review. The rule keeps its place in the list.
+- **A file nothing recognises still goes to review**, such as a project file or a PDF. Audio files and caption or metadata files go to review for now too.
+- **Folders made before the default rules** keep exactly the rules they have. **Add default rules**, next to **Rules**, adds the ones the folder lacks after its own rules, so nothing it does today changes. The button also appears when a default rule has been deleted, and adds it back.
+- An on-prem folder starts with the video rule only.
+
 ### Add rules
 
 1. On the folder's page, under **Rules**, fill in the row at the bottom:
@@ -66,10 +84,10 @@ A watchfolder can also be a folder in a storage bucket instead of a path (set up
    |---|---|
    | **Rule name** | A name people will recognise, such as "Slates" |
    | Pattern | The file names it matches, such as `slate_*.png`. `*` stands for any characters and `?` for one character; capitals do not matter. Only the file name is matched, not the folders it is in |
-   | Target kind | What the file is, picked from the list (see below). It starts as `slate`. The list holds only the kinds Volt takes in, grouped by the library each goes to |
+   | Target kind | What the file is, picked from the list (see below). It starts as `slate`. The list holds only the kinds Volt takes in, grouped by the library each goes to. When the pattern ends in a file type, such as `.png` or `.mp4`, only the places that take that type are offered |
    | Workflow | A label kept with the file, and added as a tag to images. It starts as `register` and does not change where the file goes |
 
-2. Choose **Add rule**. It is added to the bottom of the list, numbered.
+2. Choose **Add rule**. It is added after your other rules and above the default rules, numbered.
 3. Put specific rules above general ones: **↑** and **↓** move a rule. `slate_*.png` must be above `*.png`, or every slate is filed by the general rule.
 4. **✕** deletes a rule. Volt asks first; choose **Delete rule** to confirm. Files already taken in are not affected.
 
@@ -81,7 +99,7 @@ The target kind decides where an accepted file goes:
 | `vod`, `video`, `programme`, `program` or `episode` | The Media Library, encoded to the folder's ladder |
 | `loop` or `filler` | Loops & Fillers, as a loop |
 
-Those are the only kinds a rule that accepts files can use; Volt refuses any other. A rule saved before this check with another kind is marked **never taken in** in the list: the files it accepts would wait for ever, so delete it and add it again with a kind from the list.
+Those are the only kinds a rule that accepts files can use; Volt refuses any other. A rule must also send each type of file somewhere that takes it: a rule for `*.png` can send images to the Image Library but not to the Media Library, and a rule for `*.mp4` can send video to the Media Library or Loops & Fillers but not to the Image Library. A pattern that could match any file, such as `promo_*`, is not checked this way. A rule saved before this check with another kind is marked **never taken in** in the list: the files it accepts would wait for ever, so delete it and add it again with a kind from the list.
 
 ### Try a filename
 
@@ -151,7 +169,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See watchfolders, their rules and queues | Files, uploads & storage: View |
 | Try a filename | Files, uploads & storage: Operate |
-| Create, rename, switch off and delete a watchfolder, add, move and delete rules, choose the ladder, scan now, reprocess, retry and dismiss | Files, uploads & storage: Manage |
+| Create, rename, switch off and delete a watchfolder, add, move, switch off and delete rules, add the default rules, choose the ladder, scan now, reprocess, retry and dismiss | Files, uploads & storage: Manage |
 
 Without Manage, the buttons for these are not shown.
 
@@ -163,7 +181,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|---|
 | **A watchfolder needs a name and a path.** | One of the two boxes is empty | Fill in both, then **Create** |
 | **A rule needs a name and a pattern.** | The rule name or the pattern is empty | Fill in both, then **Add rule** |
-| **No rules yet, so every file will go to review. That is the safe default, not a fault.** | The folder has no rules | Add rules for the files you expect |
+| **No rules yet, so every file will go to review. That is the safe default, not a fault.** | The folder has no rules: it was made before the default rules, or they were deleted | Choose **Add default rules**, or add rules for the files you expect |
+| A message that the pattern "matches an image" (or a video, or a caption file) "which" a library "does not take" | The rule would send a type of file somewhere that cannot take it in | Pick a target kind from the place the message names. The rule form offers only those |
+| **This pattern matches** caption files (or audio files) and no target kind is offered | Volt does not take those in through a rule yet | Leave them to go to review |
+| An image or video goes to review in a folder with the default rules | The default rule for it is switched **Off**, or its extension is not in the rule | Switch it **On**, or add the extension to the rule's pattern |
 | **Last scan failed:** and a reason, or **scan failing** in the list | Volt could not read the folder | Check the path is right and the folder is still there; contact Volt support if it is |
 | "no rule matched and this folder has no default, so it needs a person to look at it" | No rule matches the file name | Add or change a rule, then **Reprocess** |
 | "refused by rule" and a rule name | A rule refuses files like this | Expected; **Dismiss** it, or change the rule |
@@ -186,10 +207,11 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | Request | Does |
 |---|---|
-| `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket; or `"kind": "site"` with `siteId`, `config.path` on the site's server and `placement`, for an on-prem folder) |
+| `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket; or `"kind": "site"` with `siteId`, `config.path` on the site's server and `placement`, for an on-prem folder). A new folder starts with the default rules by file type, returned as `rules`; send `"defaultRules": false` to start with none |
 | `GET /api/watchfolders/site-options` | Whether the account has the Hybrid Sites add-on, its sites, and which placements can be chosen |
-| `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules and `targetKinds` (each kind a rule can take in and the library it goes to); rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
-| `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension`, `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`) |
+| `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules (a default rule has `builtin` set to `images` or `video`), `defaultsMissing` (the default rules it lacks) and `targetKinds` (each kind a rule can take in, the library it goes to and the file types it `accepts`); rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
+| `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension` (one, or a list such as `"png, jpg"`), `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`). A rule whose pattern names a file type and sends it somewhere that does not take that type is refused with `400` and the code `target_does_not_fit_type` |
+| `POST /api/watchfolders/{id}/rules/defaults` | Adds the default rules by file type the folder lacks, after its own rules: `201` with `added` and the folder's `rules`, or `200` with an empty `added` when it has them all |
 | `PATCH /api/watchfolders/{id}/rules/{ruleId}`, `DELETE /api/watchfolders/{id}/rules/{ruleId}` | Changes (including `ordinal` and `enabled`) or deletes a rule |
 | `POST /api/watchfolders/{id}/dry-run` | What would happen to a file name |
 | `POST /api/watchfolders/{id}/scan` | Scans now |

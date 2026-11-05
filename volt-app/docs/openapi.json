@@ -39335,6 +39335,42 @@
     }
    }
   },
+  "/api/watchfolders/{id}/rules/defaults": {
+   "post": {
+    "operationId": "postWatchfoldersByIDRulesDefaults",
+    "summary": "Add the default rules by file type",
+    "tags": [
+     "Watchfolders"
+    ],
+    "description": "Adds the default rules a watchfolder lacks (images to the Image Library, video to the Media Library; an on-prem folder gets the video rule only), after the folder's own rules, so nothing it does today changes for a file an existing rule already catches. A new folder starts with them unless it was created with `\"defaultRules\": false`; this is for folders made before them, or whose default was deleted. Answers 201 with `added` and the folder's `rules`, or 200 with an empty `added` when the folder has them all. Needs `media: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/watchfolders/{id}/scan": {
    "post": {
     "operationId": "postWatchfoldersByIDScan",

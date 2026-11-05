@@ -122,10 +122,19 @@ async function main() {
      ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config`,
     [WATCH, ACCOUNT, JSON.stringify({ path: watchDir }), ADMIN]);
   await query(`DELETE FROM watchfolder_rules WHERE watchfolder_id=$1`, [WATCH]);
+  // One rule of the operator's own above the default rules by type a new
+  // folder starts with (build queue H2b), as the guide's screenshot shows.
   await query(
     `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, workflow) VALUES
-       ($1,1,'Slates','glob','slate_*.png','slate','register'),
-       ($1,2,'Programmes','glob','*.mp4','programme','register')`, [WATCH]);
+       ($1,10,'Slates','glob','slate_*.png','slate','register')`, [WATCH]);
+  const { defaultRulesFor, defaultOrdinals } = await import('../src/services/watchfolder/defaults');
+  const defs = defaultRulesFor('local');
+  const ords = defaultOrdinals([{ ordinal: 10 }], defs.length);
+  for (const [i, d] of defs.entries()) {
+    await query(
+      `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, builtin)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`, [WATCH, ords[i], d.name, d.matchType, d.pattern, d.targetKind, d.builtin]);
+  }
   const DEMO = '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e20';
   await query(
     `INSERT INTO addon_services(id, account_id, name, description, category, kind, signing_secret, accepts, steps, timeout_sec)

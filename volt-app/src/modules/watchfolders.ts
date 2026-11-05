@@ -52,6 +52,7 @@ import { scanFolder } from '../services/watchfolder/scanner';
 import { ingestableTargetKinds, libraryKindFor } from '../services/watchfolder/ingest';
 import { videoTargetKinds, videoTargetFor } from '../services/watchfolder/videoIngest';
 import { hasLicence, requireLicence } from '../services/sites/licences';
+import { defaultRulesFor, typesOfPattern, customOrdinal, defaultOrdinals, type FileType } from '../services/watchfolder/defaults';
 import { PLACEMENTS, PLACEMENTS_BUILT } from '../services/sites/siteWatchfolders';
 import { ApiError } from '../util/http';
 
@@ -64,11 +65,59 @@ import { ApiError } from '../util/http';
  * keep in step. A refusing rule takes no kind into anything, so it is not
  * checked.
  */
-export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loops' }[] {
+export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loops'; accepts: FileType[] }[] {
   return [
-    ...ingestableTargetKinds().map((kind) => ({ kind, goesTo: 'images' as const })),
-    ...videoTargetKinds().map((kind) => ({ kind, goesTo: videoTargetFor(kind) === 'loop' ? 'loops' as const : 'media' as const })),
+    ...ingestableTargetKinds().map((kind) => ({ kind, goesTo: 'images' as const, accepts: ['image'] as FileType[] })),
+    ...videoTargetKinds().map((kind) => ({ kind, goesTo: videoTargetFor(kind) === 'loop' ? 'loops' as const : 'media' as const, accepts: ['video'] as FileType[] })),
   ];
+}
+
+const TYPE_WORDS: Record<FileType, string> = { image: 'an image', video: 'a video', audio: 'an audio file', caption: 'a caption file', sidecar: 'a metadata file' };
+const GOES_TO_WORDS = { images: 'the Image Library', media: 'the Media Library', loops: 'Loops & Fillers' } as const;
+
+/**
+ * WHERE A RULE MAY SEND EACH FILE TYPE (build queue H2b (d)). A rule whose
+ * pattern can only match one kind of file (`*.png`, `extension: mp4, mov`)
+ * may only send it somewhere that takes that kind in: an image to the Image
+ * Library, a video to the Media Library or Loops & Fillers. Before this an
+ * `*.png -> vod` rule was accepted and every matching file failed at the
+ * encode. A pattern that could match anything (`loop_*`) is not checked here;
+ * the ingest step still refuses a file it cannot take, with the reason.
+ */
+function assertFitsType(kind: unknown, matchType: unknown, pattern: unknown) {
+  const types = typesOfPattern(String(matchType ?? 'glob'), String(pattern ?? ''));
+  if (!types) return;
+  const k = targetKinds().find((t) => t.kind === String(kind ?? '').toLowerCase().trim());
+  if (!k) return;
+  const misfit = types.filter((t) => !k.accepts.includes(t));
+  if (!misfit.length) return;
+  const where = targetKinds().filter((t) => misfit.every((m) => t.accepts.includes(m)));
+  const offer = where.length
+    ? `Send it to ${[...new Set(where.map((t) => GOES_TO_WORDS[t.goesTo]))].join(' or ')} instead (${where.map((t) => t.kind).join(', ')}).`
+    : 'Volt does not take that kind of file in through a rule yet, so leave it to go to review.';
+  throw Object.assign(badRequest(`"${String(pattern)}" matches ${misfit.map((m) => TYPE_WORDS[m]).join(' and ')}, which ${GOES_TO_WORDS[k.goesTo]} does not take. ${offer}`),
+    { code: 'target_does_not_fit_type' });
+}
+
+/** Insert the defaults a folder lacks, after everything it already has. */
+async function addDefaults(folder: { id: string; kind: string }): Promise<any[]> {
+  const have = await query<any>(`SELECT ordinal, builtin FROM watchfolder_rules WHERE watchfolder_id = $1`, [folder.id]);
+  const missing = defaultRulesFor(folder.kind).filter((d) => !have.some((r) => r.builtin === d.builtin));
+  const ords = defaultOrdinals(have, missing.length);
+  const added: any[] = [];
+  for (const [i, d] of missing.entries()) {
+    added.push(await one<any>(
+      `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, action, enabled, builtin)
+       VALUES ($1,$2,$3,$4,$5,$6,'accept',true,$7) RETURNING *`,
+      [folder.id, ords[i], d.name, d.matchType, d.pattern, d.targetKind, d.builtin]));
+  }
+  return added;
+}
+
+/** Defaults this folder does not have (deleted, or made before H2b). */
+async function missingDefaults(folder: { id: string; kind: string }): Promise<string[]> {
+  const have = await query<any>(`SELECT builtin FROM watchfolder_rules WHERE watchfolder_id = $1 AND builtin IS NOT NULL`, [folder.id]);
+  return defaultRulesFor(folder.kind).filter((d) => !have.some((r) => r.builtin === d.builtin)).map((d) => d.builtin);
 }
 
 function takesIn(kind: unknown): boolean {
@@ -127,6 +176,8 @@ const createSchema = z.object({
   /** The ladder every video file this folder accepts is encoded to. Null falls
    *  back to the account default at encode time. */
   ladderGroupId: z.string().uuid().nullable().optional(),
+  /** Start with the default rules by file type (H2b). On unless asked not to. */
+  defaultRules: z.boolean().default(true),
 });
 
 watchfoldersRouter.get('/', asyncHandler(async (req, res) => {
@@ -181,12 +232,13 @@ watchfoldersRouter.post('/', asyncHandler(async (req, res) => {
     [accountId(req), b.name, b.kind, JSON.stringify(b.config), b.defaultTargetKind ?? null,
      b.quarantinePath, who.userId, b.ladderGroupId ?? null, site?.id ?? null, placement]
   );
+  const rules = b.defaultRules ? await addDefaults(row) : [];
   // The site's agents pick up a new folder on their next config pull.
   if (site) await query(`UPDATE sites SET config_version = config_version + 1 WHERE id = $1`, [site.id]);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: 'create', entityType: 'watchfolder', entityId: row.id,
     snapshot: { name: b.name, kind: b.kind, ...(site ? { site: site.name, placement } : {}) } });
-  res.status(201).json({ ...row, site_name: site?.name ?? null });
+  res.status(201).json({ ...row, site_name: site?.name ?? null, rules });
 }));
 
 watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
@@ -204,7 +256,8 @@ watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
        FROM watchfolder_items WHERE watchfolder_id = $1`, [f.id]);
   // The kinds the rule form offers come with the folder, so the console never
   // has its own copy of the list to fall out of step with the server's.
-  res.json({ ...f, site_name: site?.name ?? null, rules, items, counts, targetKinds: targetKinds() });
+  res.json({ ...f, site_name: site?.name ?? null, rules, items, counts, targetKinds: targetKinds(),
+    defaultsMissing: await missingDefaults(f) });
 }));
 
 watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
@@ -269,12 +322,16 @@ watchfoldersRouter.get('/:id/rules', asyncHandler(async (req, res) => {
 watchfoldersRouter.post('/:id/rules', asyncHandler(async (req, res) => {
   const f = await ownedFolder(req);
   const b = ruleSchema.parse(req.body);
-  if (b.action === 'accept') assertTargetKind(b.targetKind, 'every file this rule accepts');
-  // APPENDED, in tens. A new rule must never silently outrank the existing ones,
-  // and the gaps leave room to insert without renumbering the whole set.
-  const last = await one<any>(
-    `SELECT COALESCE(max(ordinal), 0) AS n FROM watchfolder_rules WHERE watchfolder_id=$1`, [f.id]);
-  const ordinal = b.ordinal ?? (Number(last?.n ?? 0) + 10);
+  if (b.action === 'accept') {
+    assertTargetKind(b.targetKind, 'every file this rule accepts');
+    assertFitsType(b.targetKind, b.matchType, b.pattern);
+  }
+  // APPENDED, in tens, after the other custom rules. A new rule must never
+  // silently outrank the existing ones, and the gaps leave room to insert
+  // without renumbering the whole set. It goes ABOVE the default rules by
+  // type, which are the catch-all: see services/watchfolder/defaults.ts.
+  const have = await query<any>(`SELECT ordinal, builtin FROM watchfolder_rules WHERE watchfolder_id=$1`, [f.id]);
+  const ordinal = b.ordinal ?? customOrdinal(have);
   const row = await one<any>(
     `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern,
                                    target_kind, workflow, action, reject_reason, enabled)
@@ -287,6 +344,24 @@ watchfoldersRouter.post('/:id/rules', asyncHandler(async (req, res) => {
     action: 'create', entityType: 'watchfolder_rule', entityId: row.id,
     snapshot: { folder: f.id, pattern: b.pattern, targetKind: b.targetKind } });
   res.status(201).json(row);
+}));
+
+/**
+ * Add the default rules by file type a folder lacks: a folder made before
+ * H2b, or one whose default was deleted. Existing rules are not touched and
+ * the defaults go after them, so nothing the folder does today changes for a
+ * file an existing rule already catches.
+ */
+watchfoldersRouter.post('/:id/rules/defaults', asyncHandler(async (req, res) => {
+  const f = await ownedFolder(req);
+  const added = await addDefaults(f);
+  if (added.length) {
+    const who = actor(req);
+    await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+      action: 'update', entityType: 'watchfolder', entityId: f.id,
+      snapshot: { defaultRulesAdded: added.map((r) => r.builtin) } });
+    }
+  res.status(added.length ? 201 : 200).json({ added, rules: await query(`SELECT * FROM watchfolder_rules WHERE watchfolder_id=$1 ORDER BY ordinal`, [f.id]) });
 }));
 
 watchfoldersRouter.patch('/:id/rules/:ruleId', asyncHandler(async (req, res) => {
@@ -307,12 +382,16 @@ watchfoldersRouter.patch('/:id/rules/:ruleId', asyncHandler(async (req, res) => 
   if (!sets.length) throw badRequest('nothing to change');
   // The kind is checked against what the rule will be after the change: a rule
   // switched from refusing to accepting needs a kind that is taken in too.
-  if ('targetKind' in b || b.action === 'accept') {
-    const cur = await one<any>(`SELECT target_kind, action FROM watchfolder_rules WHERE id=$1 AND watchfolder_id=$2`,
+  if ('targetKind' in b || b.action === 'accept' || 'pattern' in b || 'matchType' in b) {
+    const cur = await one<any>(`SELECT target_kind, action, match_type, pattern FROM watchfolder_rules WHERE id=$1 AND watchfolder_id=$2`,
       [req.params.ruleId, f.id]);
     if (!cur) throw notFound('rule not found');
     const action = 'action' in b ? b.action : cur.action;
-    if (action === 'accept') assertTargetKind('targetKind' in b ? b.targetKind : cur.target_kind, 'every file this rule accepts');
+    const kind = 'targetKind' in b ? b.targetKind : cur.target_kind;
+    if (action === 'accept') {
+      assertTargetKind(kind, 'every file this rule accepts');
+      assertFitsType(kind, 'matchType' in b ? b.matchType : cur.match_type, 'pattern' in b ? b.pattern : cur.pattern);
+    }
   }
   params.push(req.params.ruleId, f.id);
   const row = await one<any>(

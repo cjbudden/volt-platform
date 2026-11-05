@@ -878,6 +878,8 @@ export interface WatchfolderRule {
   action: 'accept' | 'reject'
   reject_reason: string | null
   enabled: boolean
+  /** Which default rule by file type this is ('images', 'video'), or null for a rule someone wrote. */
+  builtin?: string | null
 }
 
 /** Every state an object in a watched folder can be in. `seen` means classified
@@ -1340,6 +1342,9 @@ export const api = {
     req(`/watchfolders/${id}/rules/${ruleId}`, { method: 'PATCH', body: JSON.stringify(b) }),
   deleteWatchfolderRule: (id: string, ruleId: string) =>
     req(`/watchfolders/${id}/rules/${ruleId}`, { method: 'DELETE' }),
+  /** Add the default rules by file type this folder lacks, after its own rules. */
+  addWatchfolderDefaultRules: (id: string): Promise<{ added: WatchfolderRule[]; rules: WatchfolderRule[] }> =>
+    req(`/watchfolders/${id}/rules/defaults`, { method: 'POST' }),
 
   /** Ask what WOULD happen, without a file. Shares the scanner's classifier. */
   watchfolderDryRun: (id: string, filename: string, sizeBytes?: number | null): Promise<WatchfolderDryRun> =>

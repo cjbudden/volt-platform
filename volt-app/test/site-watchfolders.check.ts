@@ -94,7 +94,9 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   ok(r.status === 400, 'no path: refused', r);
   r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, placement: 'encode_site', config: { path: root } });
   ok(r.status === 422 && r.body?.code === 'placement_not_available', 'Encode at site refused until site encoders', r);
-  r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, config: { path: root, min_age_ms: 10000 } });
+  // Without the default rules by type (H2b): this suite writes its own rules,
+  // and its "rules changed" case needs a .mov that no rule takes in.
+  r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, config: { path: root, min_age_ms: 10000 }, defaultRules: false });
   ok(r.status === 201 && r.body.kind === 'site' && r.body.site_id === site && r.body.placement === 'upload_cloud' && r.body.site_name === 'Main broadcast centre', 'created: Upload and encode in the cloud by default', r.body);
   const fid = r.body.id;
   ok((await one<any>(`SELECT config_version FROM sites WHERE id = $1`, [site]))!.config_version === cv0 + 1, "the site's config version moved");

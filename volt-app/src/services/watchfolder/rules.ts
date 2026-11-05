@@ -124,8 +124,12 @@ export function matches(rule: WatchRule, name: string): boolean {
       // form is the normal case, and an unclosed bracket there should refuse
       // that rule, not stop every folder on the account from being scanned.
       case 'regex': return new RegExp(p, 'i').test(base);
-      case 'extension': return base.toLowerCase().endsWith(
-        (p.startsWith('.') ? p : '.' + p).toLowerCase());
+      // A LIST IS ALLOWED: `png, jpg, jpeg`, so one rule per file type is one
+      // rule (the default rules, build queue H2b). A single extension behaves
+      // exactly as before. Split here rather than imported, because the site
+      // agent compiles this file on its own (H2).
+      case 'extension': return p.split(/[\s,;|]+/).map((x) => x.trim()).filter(Boolean)
+        .some((x) => base.toLowerCase().endsWith((x.startsWith('.') ? x : '.' + x).toLowerCase()));
       case 'prefix': return base.toLowerCase().startsWith(p.toLowerCase());
       case 'suffix': return base.toLowerCase().endsWith(p.toLowerCase());
       default: return false;

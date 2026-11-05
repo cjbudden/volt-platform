@@ -7444,6 +7444,15 @@
  },
  {
   "method": "POST",
+  "path": "/api/watchfolders/:id/rules/defaults",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/watchfolders"
+ },
+ {
+  "method": "POST",
   "path": "/api/watchfolders/:id/scan",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

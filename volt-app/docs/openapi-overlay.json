@@ -805,6 +805,10 @@
     "summary": "Rotate a host's credential",
     "description": "A new credential for the host, handed to its agent on the next heartbeat; the old one stops working the first time the new one is used. The new secret is never returned here. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only."
   },
+  "POST /api/watchfolders/:id/rules/defaults": {
+    "summary": "Add the default rules by file type",
+    "description": "Adds the default rules a watchfolder lacks (images to the Image Library, video to the Media Library; an on-prem folder gets the video rule only), after the folder's own rules, so nothing it does today changes for a file an existing rule already catches. A new folder starts with them unless it was created with `\"defaultRules\": false`; this is for folders made before them, or whose default was deleted. Answers 201 with `added` and the folder's `rules`, or 200 with an empty `added` when the folder has them all. Needs `media: manage`."
+  },
   "GET /api/watchfolders/site-options": {
     "summary": "On-prem watchfolder options",
     "description": "What the New watchfolder form may offer for an on-prem folder: `licensed` (whether the account has the Hybrid Sites add-on), its `sites` (id, name, status) and the `placements` with whether each can be chosen yet (`upload_cloud` can; `encode_site` arrives with site encoders). An on-prem folder is then created with `POST /api/watchfolders` and `\"kind\": \"site\"`, `siteId`, `placement` and `config.path` (the folder's path on the site's server)."

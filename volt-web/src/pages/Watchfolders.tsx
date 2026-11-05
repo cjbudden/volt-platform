@@ -104,8 +104,8 @@ function SiteTag({ name }: { name?: string | null }) {
 
 /* ---------------------------------------------------------------- rules ---- */
 
-function Rules({ folder, rules, kinds, reload }: {
-  folder: Watchfolder; rules: WatchfolderRule[]; kinds: TargetKind[]; reload: () => void
+function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
+  folder: Watchfolder; rules: WatchfolderRule[]; kinds: TargetKind[]; defaultsMissing: string[]; reload: () => void
 }) {
   const { can } = useAccess()
   const canManage = can('media', 'manage')
@@ -171,6 +171,28 @@ function Rules({ folder, rules, kinds, reload }: {
 
   const winner = dry?.rules.find(r => r.winner)?.id ?? null
 
+  // SWITCHED OFF, NOT DELETED: a default rule an operator does not want today
+  // can come back with one click, and its place in the order is kept.
+  const toggle = async (r: WatchfolderRule) => {
+    setBusy(true); setErr('')
+    try { await api.patchWatchfolderRule(folder.id, r.id, { enabled: !r.enabled }); reload() }
+    catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
+  }
+
+  const addDefaults = async () => {
+    setBusy(true); setErr('')
+    try { await api.addWatchfolderDefaultRules(folder.id); reload() }
+    catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
+  }
+
+  // The destinations a new rule may name, by what its pattern matches.
+  const draftTypes = patternTypes(draft.pattern)
+  const fits = (k: TargetKind) => !draftTypes || !k.accepts || draftTypes.every(t => k.accepts!.includes(t))
+  const offered = kinds.filter(fits)
+  useEffect(() => {
+    if (offered.length && !offered.some(k => k.kind === draft.targetKind)) setDraft(d => ({ ...d, targetKind: offered[0].kind }))
+  }, [draft.pattern]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const removeRule = async (r: WatchfolderRule) => {
     setDeleting(null); setBusy(true); setErr('')
     try { await api.deleteWatchfolderRule(folder.id, r.id); reload() }
@@ -184,6 +206,16 @@ function Rules({ folder, rules, kinds, reload }: {
         <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
           First match wins, top to bottom. A file matching nothing goes to review.
         </span>
+        {canManage && defaultsMissing.length > 0 && (
+          <button type="button" className="btn ghost" style={{ marginLeft: 'auto', padding: '4px 10px' }}
+            onClick={addDefaults} disabled={busy}
+            title="Adds the rules by file type this folder does not have, below its own rules. Nothing it does today changes.">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 5 }}>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Add default rules
+          </button>
+        )}
       </div>
 
       {rules.length === 0 && (
@@ -202,7 +234,16 @@ function Rules({ folder, rules, kinds, reload }: {
             opacity: r.enabled ? 1 : 0.55,
           }}>
             <span style={{ color: 'var(--faint,#8b93a7)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
-            <span style={{ fontWeight: 600 }}>{r.name}</span>
+            <span style={{ fontWeight: 600 }}>
+              {r.name}
+              {r.builtin && (
+                <span className="tag" style={{ marginLeft: 8, color: 'var(--faint,#8b93a7)', background: 'var(--panel,#10131a)', border: '1px solid var(--border,#242a36)' }}
+                  title="A default rule by file type. Edit it, switch it off or move it like any other rule.">
+                  Default
+                </span>
+              )}
+              {!r.enabled && <span style={{ marginLeft: 8, fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', fontWeight: 400 }}>off</span>}
+            </span>
             <code style={{ fontSize: 'var(--fs-xs)' }}>{r.pattern}</code>
             <span style={{ fontSize: 'var(--fs-sm)' }}>
               {r.action === 'reject'
@@ -220,6 +261,11 @@ function Rules({ folder, rules, kinds, reload }: {
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{r.workflow ?? '—'}</span>
             <span style={{ display: 'flex', gap: 4 }}>
               {canManage && <>
+              <button type="button" className="btn ghost" disabled={busy}
+                onClick={() => toggle(r)} aria-pressed={r.enabled}
+                aria-label={`${r.enabled ? 'Switch off' : 'Switch on'} ${r.name}`}
+                title={r.enabled ? 'Switch this rule off. Files it catches go to the rules below it.' : 'Switch this rule back on'}
+                style={{ padding: '3px 8px', minWidth: 44 }}>{r.enabled ? 'On' : 'Off'}</button>
               <button type="button" className="btn ghost" disabled={busy || i === 0}
                 onClick={() => move(i, -1)} aria-label={`Move ${r.name} up`}
                 style={{ padding: '3px 8px' }}>↑</button>
@@ -252,9 +298,9 @@ function Rules({ folder, rules, kinds, reload }: {
             every matching file waiting for ever. */}
         <select style={box} aria-label="Target kind" value={draft.targetKind}
           onChange={e => setDraft({ ...draft, targetKind: e.target.value })}>
-          {(['images', 'media', 'loops'] as const).map(g => (
+          {(['images', 'media', 'loops'] as const).filter(g => offered.some(k => k.goesTo === g)).map(g => (
             <optgroup key={g} label={GOES_TO[g]}>
-              {kinds.filter(k => k.goesTo === g).map(k => <option key={k.kind} value={k.kind}>{k.kind}</option>)}
+              {offered.filter(k => k.goesTo === g).map(k => <option key={k.kind} value={k.kind}>{k.kind}</option>)}
             </optgroup>
           ))}
         </select>
@@ -262,6 +308,13 @@ function Rules({ folder, rules, kinds, reload }: {
           onChange={e => setDraft({ ...draft, workflow: e.target.value })} />
         <button type="button" className="btn primary" onClick={add} disabled={busy}>Add rule</button>
       </div>
+      )}
+      {canManage && draftTypes && (
+        <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 6 }}>
+          {offered.length
+            ? <>This pattern matches {TYPE_LABEL[draftTypes[0]]}, so only places that take {TYPE_LABEL[draftTypes[0]]} are offered.</>
+            : <>Volt does not take {TYPE_LABEL[draftTypes[0]]} in through a rule yet. Without a rule they go to review.</>}
+        </p>
       )}
       {err && <p style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-sm)' }}>{err}</p>}
 
@@ -420,7 +473,7 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
 
 function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const canManage = useAccess().can('media', 'manage')
-  const [folder, setFolder] = useState<(Watchfolder & { rules: WatchfolderRule[]; targetKinds?: TargetKind[] }) | null>(null)
+  const [folder, setFolder] = useState<(Watchfolder & { rules: WatchfolderRule[]; targetKinds?: TargetKind[]; defaultsMissing?: string[] }) | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [scan, setScan] = useState<WatchfolderScan | null>(null)
@@ -591,7 +644,8 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
           </p>
         )}
       </div>
-      <Rules folder={folder} rules={folder.rules ?? []} kinds={folder.targetKinds ?? []} reload={load} />
+      <Rules folder={folder} rules={folder.rules ?? []} kinds={folder.targetKinds ?? []}
+        defaultsMissing={folder.defaultsMissing ?? []} reload={load} />
       <Queue folder={folder} reload={load} />
     </div>
   )
@@ -602,7 +656,25 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
 /** Where an accepted file of each target kind goes, in the console's words. */
 const GOES_TO: Record<string, string> = { images: 'Image Library', media: 'Media Library', loops: 'Loops & Fillers' }
 
-type TargetKind = { kind: string; goesTo: 'images' | 'media' | 'loops' }
+type TargetKind = { kind: string; goesTo: 'images' | 'media' | 'loops'; accepts?: string[] }
+
+/** The file types a pattern can only match, the same reading as the server's
+ *  (services/watchfolder/defaults.ts typesOfPattern), so the destination list
+ *  offers only places that take that kind of file. The server checks it again. */
+const TYPE_EXT: Record<string, string[]> = {
+  image: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'tif', 'tiff'],
+  video: ['mp4', 'mov', 'm4v', 'mxf', 'mkv', 'ts', 'webm'],
+  audio: ['mp3', 'wav', 'm4a', 'aac', 'flac'],
+  caption: ['srt', 'vtt', 'ttml', 'dfxp'],
+  sidecar: ['json', 'xml', 'nfo', 'csv'],
+}
+function patternTypes(pattern: string): string[] | null {
+  const m = /\.([a-z0-9]+)$/i.exec(pattern.trim())
+  if (!m) return null
+  const t = Object.keys(TYPE_EXT).find(k => TYPE_EXT[k].includes(m[1].toLowerCase()))
+  return t ? [t] : null
+}
+const TYPE_LABEL: Record<string, string> = { image: 'images', video: 'video', audio: 'audio files', caption: 'caption files', sidecar: 'metadata files' }
 
 export default function Watchfolders() {
   const [folders, setFolders] = useState<Watchfolder[]>([])
