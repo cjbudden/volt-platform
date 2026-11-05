@@ -122,14 +122,17 @@ async function main() {
      ON CONFLICT (id) DO UPDATE SET config=EXCLUDED.config`,
     [WATCH, ACCOUNT, JSON.stringify({ path: watchDir }), ADMIN]);
   await query(`DELETE FROM watchfolder_rules WHERE watchfolder_id=$1`, [WATCH]);
-  // One rule of the operator's own above the default rules by type a new
-  // folder starts with (build queue H2b), as the guide's screenshot shows.
+  // Two rules of the operator's own above the default rules by type a new
+  // folder starts with (build queue H2b), as the guide's screenshot shows:
+  // slates straight into Loops & Fillers, and key art as each episode's Hero
+  // backdrop (H2b-3).
   await query(
-    `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, workflow) VALUES
-       ($1,10,'Slates','glob','slate_*.png','slate','register')`, [WATCH]);
+    `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, workflow, image_type) VALUES
+       ($1,10,'Slates','glob','slate_*.png','filler-slate','register',NULL),
+       ($1,20,'Key art','glob','*_key_art.jpg','image','register','hero')`, [WATCH]);
   const { defaultRulesFor, defaultOrdinals } = await import('../src/services/watchfolder/defaults');
   const defs = defaultRulesFor('local');
-  const ords = defaultOrdinals([{ ordinal: 10 }], defs.length);
+  const ords = defaultOrdinals([{ ordinal: 20 }], defs.length);
   for (const [i, d] of defs.entries()) {
     await query(
       `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind, builtin)

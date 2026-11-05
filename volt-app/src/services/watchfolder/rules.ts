@@ -46,6 +46,10 @@ export interface WatchRule {
   action?: 'accept' | 'reject';
   rejectReason?: string | null;
   enabled?: boolean;
+  /** For an image rule: the asset image type its images are for (H2b-3, imageTypes.ts). */
+  imageType?: string | null;
+  /** A type word at the end of the name wins over imageType. On by default. */
+  imageTypeFromName?: boolean;
 }
 
 export interface FolderPolicy {

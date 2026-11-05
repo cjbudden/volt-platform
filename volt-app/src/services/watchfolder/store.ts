@@ -130,6 +130,9 @@ import {
 import { quarantineKey } from './rules';
 import { moveToQuarantine } from './scanner';
 import { ingestCompanions, companionTargetKinds, type CompanionStore, type CompanionFolder } from './companionIngest';
+import { ingestSlateItem, slateTargetKinds, type SlateStore } from './slateIngest';
+import { attachTypedImages, type ImageAttachStore, type WaitingImage } from './imageAttach';
+import type { TypeChoice } from './imageTypes';
 
 export const pgItemStore: ItemStore = {
   async isKnown(folderId, objectKey, checksum) {
@@ -330,12 +333,15 @@ export const pgIngestStore: IngestStore = {
     return !!r;
   },
 
-  async markIngested(itemId, mediaFileId, path) {
+  async markIngested(itemId, mediaFileId, path, want) {
+    // An image meant as an asset's image of a type (H2b-3) is marked waiting;
+    // the attach pass below matches it to its video.
     await query(
       `UPDATE watchfolder_items
-          SET status = 'ingested', media_file_id = $2, resolved_at = now(), reason = $3
+          SET status = 'ingested', media_file_id = $2, resolved_at = now(), reason = $3,
+              image_type = $4, image_attach = CASE WHEN $4::text IS NULL THEN NULL ELSE 'waiting' END
         WHERE id = $1 AND status = 'seen'`,
-      [itemId, mediaFileId, `ingested to ${path}`]
+      [itemId, mediaFileId, `ingested to ${path}`, want?.imageType ?? null]
     );
   },
 
@@ -377,7 +383,16 @@ export async function loadIngestFolder(id: string): Promise<IngestFolder | null>
     // know an ingested object and do not fetch it again.
     deleteAfterIngest: f.kind === 's3' || !!f.config?.delete_after_ingest,
     maxBytes: Number(f.config?.max_ingest_bytes ?? DEFAULT_MAX_INGEST_BYTES),
+    imageTypes: await videoImageTypes(f.account_id),
   };
+}
+
+/** The account's image types a video asset offers (enabled), as type words read them (H2b-3). */
+export async function videoImageTypes(accountId: string): Promise<TypeChoice[]> {
+  const { listImageTypes } = await import('../media/assetImageSet');
+  return (await listImageTypes(accountId))
+    .filter((t) => t.enabled && t.appliesTo.includes('video'))
+    .map((t) => ({ key: t.key, label: t.label }));
 }
 
 /**
@@ -388,22 +403,27 @@ export async function loadIngestFolder(id: string): Promise<IngestFolder | null>
  * growing with the library and doing nothing with them. They stay `seen` for the
  * workflow that owns them, and this query simply does not ask for them.
  */
-export async function pendingItems(folderId: string, limit = 200): Promise<PendingItem[]> {
+export async function pendingItems(folderId: string, limit = 200, kinds: string[] = ingestableTargetKinds()): Promise<PendingItem[]> {
   const rows = await query<any>(
-    `SELECT id, object_key, checksum, target_kind, workflow
-       FROM watchfolder_items
-      WHERE watchfolder_id = $1 AND status = 'seen'
+    // The rule's image type (H2b-3) as it is now: a rule corrected before the
+    // file is taken in applies to it.
+    `SELECT i.id, i.object_key, i.checksum, i.target_kind, i.workflow,
+            r.image_type, COALESCE(r.image_type_from_name, true) AS image_type_from_name
+       FROM watchfolder_items i
+       LEFT JOIN watchfolder_rules r ON r.id = i.matched_rule_id
+      WHERE i.watchfolder_id = $1 AND i.status = 'seen'
         -- Not already claimed by a pass that is still working on it. The claim
         -- itself is what makes this safe; this only avoids loading rows that
         -- would immediately fail to claim.
-        AND (resolved_at IS NULL OR resolved_at < now() - interval '10 minutes')
-        AND lower(target_kind) = ANY($2::text[])
-      ORDER BY seen_at LIMIT $3`,
-    [folderId, ingestableTargetKinds(), limit]
+        AND (i.resolved_at IS NULL OR i.resolved_at < now() - interval '10 minutes')
+        AND lower(i.target_kind) = ANY($2::text[])
+      ORDER BY i.seen_at LIMIT $3`,
+    [folderId, kinds, limit]
   );
   return rows.map((r) => ({
     id: r.id, objectKey: r.object_key, checksum: r.checksum,
     targetKind: r.target_kind, workflow: r.workflow,
+    imageType: r.image_type ?? null, imageTypeFromName: r.image_type_from_name !== false,
   }));
 }
 
@@ -449,6 +469,15 @@ export async function ingestFolder(folderId: string): Promise<IngestSummary | nu
     ? await ingestPending(f, items, pgIngestStore)
     : { ingested: 0, deferred: 0, skipped: 0, failed: 0, outcomes: [] };
 
+  // SLATES TO LOOPS & FILLERS (H2b-3): images a rule sent there as fallbacks.
+  for (const item of await pendingItems(folderId, 200, slateTargetKinds())) {
+    const o = await ingestSlateItem(f, item, pgSlateStore);
+    summary.outcomes.push(o as any);
+    if (o.result === 'slate') summary.slates = (summary.slates ?? 0) + 1;
+    else if (o.result === 'failed') summary.failed++;
+    else summary.skipped++;
+  }
+
   // VIDEO IS QUEUED, NOT INGESTED, and it is counted separately for that reason:
   // an encode that has been accepted is not an asset that can be played, and one
   // counter for both would report work as finished that has not started.
@@ -487,8 +516,74 @@ export async function ingestFolder(folderId: string): Promise<IngestSummary | nu
     // A bucket folder's review files go back to the bucket's review prefix.
     if (reviewed.length) await mirrorQuarantines(folderId, reviewed);
   }
+  // TYPED IMAGES LAST (H2b-3), for the same reason: a poster dropped beside
+  // its video becomes that asset's poster in the pass the video landed in.
+  const typed = await attachTypedImages({ id: f.id, accountId: f.accountId }, await waitingTypedImages(folderId, f.imageTypes ?? []), pgImageAttachStore);
+  for (const o of typed) {
+    summary.outcomes.push(o as any);
+    if (o.result === 'typed') summary.typed = (summary.typed ?? 0) + 1;
+    else if (o.result === 'waiting') summary.typedWaiting = (summary.typedWaiting ?? 0) + 1;
+  }
   return summary;
 }
+
+/** Images in the library meant as an asset's image of a type, not matched yet (H2b-3). */
+export async function waitingTypedImages(folderId: string, types: TypeChoice[] = [], limit = 200): Promise<WaitingImage[]> {
+  const rows = await query<any>(
+    `SELECT i.id, i.object_key, i.image_type, i.seen_at, m.store_key, m.kind, m.width, m.height
+       FROM watchfolder_items i
+       JOIN media_files m ON m.id = i.media_file_id
+      WHERE i.watchfolder_id = $1 AND i.status = 'ingested' AND i.image_attach = 'waiting'
+      ORDER BY i.seen_at LIMIT $2`, [folderId, limit]);
+  return rows.map((r) => ({
+    id: r.id, objectKey: r.object_key, imageType: r.image_type, typeLabel: types.find((t) => t.key === r.image_type)?.label,
+    storeKey: r.store_key, libraryKind: r.kind, width: r.width ?? null, height: r.height ?? null, seenAt: new Date(r.seen_at).getTime(),
+  }));
+}
+
+export const pgImageAttachStore: ImageAttachStore = {
+  candidates: (folderId) => pgCompanionStore.candidates(folderId),
+  async setType(a) {
+    const S = await import('../media/assetImageSet');
+    const { fitWarnings } = await import('../media/assetImageRules');
+    await S.setTypeImage(a.assetId, a.accountId, a.typeKey, `/${a.storeKey}`, a.by);
+    const t = (await S.listImageTypes(a.accountId)).find((x) => x.key === a.typeKey);
+    const d = await one<any>(`SELECT width, height FROM media_files WHERE account_id = $1 AND store_key = $2`, [a.accountId, a.storeKey]);
+    const v = await one<any>(`SELECT title FROM vod_assets WHERE id = $1`, [a.assetId]);
+    return { assetTitle: v?.title ?? 'the asset', typeLabel: t?.label ?? a.typeKey, warnings: t ? fitWarnings(t, d?.width, d?.height) : [] };
+  },
+  async note(itemId, state, reason, assetId) {
+    await query(
+      `UPDATE watchfolder_items SET image_attach = $2, reason = $3, vod_asset_id = COALESCE($4::uuid, vod_asset_id)
+        WHERE id = $1 AND (image_attach IS DISTINCT FROM $2 OR reason IS DISTINCT FROM $3)`,
+      [itemId, state, reason.slice(0, 500), assetId ?? null]);
+  },
+};
+
+export const pgSlateStore: SlateStore = {
+  claim: (itemId) => pgIngestStore.claim(itemId),
+  async createSlate(a) {
+    const { putFiller } = await import('../media/fillerStore');
+    const { safeExt } = await import('../uploads');
+    // Laid out exactly as a slate copied from the Image Library
+    // (modules/fillerAssets.ts copy-from-library): row, bytes, then ready.
+    const row = await one<any>(
+      `INSERT INTO filler_assets(account_id, kind, name, status, width, height, content_type, filename)
+       VALUES ($1,'slate',$2,'processing',$3,$4,$5,$6) RETURNING id`,
+      [a.accountId, a.name, a.width, a.height, a.contentType, a.filename]);
+    const key = `filler/${a.accountId}/${row.id}${safeExt(a.filename)}`;
+    try { await putFiller(key, a.body); }
+    catch (e) { await query(`DELETE FROM filler_assets WHERE id = $1`, [row.id]).catch(() => {}); throw e; }
+    await query(`UPDATE filler_assets SET status = 'ready', source_key = $2, bytes = $3, uploaded_at = now(), updated_at = now() WHERE id = $1`,
+      [row.id, key, a.body.length]);
+    await (await import('../jobs/handlers/fillerThumbs')).queueFillerThumbs(row.id);
+    return { id: row.id };
+  },
+  async markLanded(itemId, note) {
+    await query(`UPDATE watchfolder_items SET status = 'ingested', reason = $2, resolved_at = now() WHERE id = $1 AND status = 'seen'`, [itemId, note.slice(0, 500)]);
+  },
+  markFailed: (itemId, reason) => pgIngestStore.markFailed(itemId, reason),
+};
 
 /** Companions (captions, sidecars) waiting to be attached to their video. */
 export async function pendingCompanionItems(folderId: string, limit = 200): Promise<(PendingItem & { seenAt: number })[]> {

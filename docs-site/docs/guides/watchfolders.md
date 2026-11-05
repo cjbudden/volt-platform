@@ -9,12 +9,13 @@ guide: section
 
 A watchfolder is a folder Volt keeps an eye on. Files dropped into it are sorted by the folder's rules into the Image Library, the Media Library or Loops & Fillers, and captions and metadata files are attached to the video they are named after. A new folder starts with default rules by file type, so images, video, captions and metadata files are taken in from the first drop; a file that matches no rule is moved to a review folder and listed for a person, never deleted and never guessed at. Most people come here to add a rule, or to clear the files waiting for review.
 
-![A watchfolder's page: its path and Scan now button, the numbered rules (one of the folder's own, then the four default rules by file type) with the one that would win highlighted, the Try a filename box, and the queue of files that need a person](/img/screens/watchfolders.png)
+![A watchfolder's page: its path and Scan now button, the numbered rules (two of the folder's own, one with an image type, then the four default rules by file type) with the one that would win highlighted, the Try a filename box, and the queue of files that need a person](/img/screens/watchfolders.png)
 
 ## What it is for
 
 - **Regular deliveries.** Slates, posters, logos, programmes and loops that arrive from an agency, an edit suite or another system go into one folder and land in the right library on their own.
 - **Sorting by type, out of the box.** Every new folder sends images to the Image Library and video to the Media Library, and attaches captions and metadata files to their video, with four default rules you can change or switch off.
+- **Artwork that finds its episode.** `Scrubs-s1-e1_poster.png` becomes the Poster of `Scrubs-s1-e1.mp4`, and `Scrubs-s1-e1-thumbnail.jpg` its Thumbnail, from the word at the end of the name or the image type on the rule.
 - **Subtitles with their programme.** Drop `Scrubs-s1-e1_en.vtt` beside `Scrubs-s1-e1.mp4` and the episode gets an English subtitle track, in either order (see [Captions and metadata files by name](#captions-and-metadata-files-by-name)).
 - **Sorting by name.** Rules match the file name, such as `slate_*.png`, and say what kind of file it is. The first rule that matches wins.
 - **Nothing lost on a guess.** A file no rule accepts, or that a rule refuses, is moved to the folder's review folder and listed in the **Queue** until someone deals with it.
@@ -91,6 +92,28 @@ A caption or metadata file is attached to the video whose file name, without its
 - **Up to 25 MB each**, the same limit as on the asset page. A larger file goes to **Needs review** at once. A caption Volt cannot read is attached switched off, and the reason says so; the asset page shows what is wrong with it.
 - Captions and metadata files are not taken in from an on-prem folder yet.
 
+### Artwork by name: thumbnails, posters and other image types
+
+An image the Image Library takes in can also become one of a video's images: its Thumbnail, Poster, Hero backdrop and the other [image types](media-library.md#watch-it-and-choose-its-image-preview) your account uses. Volt reads a type word at the end of the image's name, after `-`, `_`, `.` or a space, with capitals ignored, and attaches the image to the video whose name the rest of it starts with, the same way as a caption.
+
+| Word at the end of the name | Image type | Filed in the Image Library as |
+|---|---|---|
+| `thumbnail`, `thumb` | Thumbnail (the video's main image) | Keyframe |
+| `poster` | Poster | Poster |
+| `cover` | Cover | Image |
+| `hero`, `backdrop`, `background`, `fanart` | Hero backdrop | Image |
+| `banner` | Banner | Image |
+| `social`, `share` | Social share card | Image |
+| `title`, `titleart`, `clearlogo`, `logo-title` | Title art | Image |
+| Your account's own type, by its key or its name | That type | Image |
+
+- **Example**: with `Scrubs-s1-e1.mp4` in the folder, `Scrubs-s1-e1-thumbnail.jpg` becomes its Thumbnail (the image shown for the video everywhere) and `Scrubs-s1-e1_poster.png` its Poster, exactly as if you had chosen them under **Image** on the asset's **Preview**.
+- **The image is in the Image Library at once**, whatever happens next. One that arrives before its video says "waiting for a video named like it" and is attached on the pass after the video lands. With no video after **24 hours** it stays in the Image Library on its own, and the entry says no asset was matched.
+- **Never refused for its shape.** A poster that is not 2:3, or a thumbnail smaller than recommended, is attached anyway; the entry and **Image** on the asset's **Preview** say what does not fit.
+- **Words that are not image types**: `brand` or `logo`, `watermark` and `slate` at the end of a name file the image in the Image Library as that kind (`Station-logo.png` is a brand image), attached to nothing.
+- **No type word, or your own words**: give the rule an **Image type** (see [Add rules](#add-rules)). A rule for `*_key_art.jpg` with the image type Hero backdrop makes every matching image the Hero backdrop of its video. A type word in the name still wins, unless you clear **A type word in the name wins** on the rule.
+- **Where Volt looks**: videos this watchfolder has taken into the Media Library, the longest matching name first, as for captions. Images from an on-prem folder are not taken in yet.
+
 ### Add rules
 
 1. On the folder's page, under **Rules**, fill in the row at the bottom:
@@ -101,6 +124,8 @@ A caption or metadata file is attached to the video whose file name, without its
    | Pattern | The file names it matches, such as `slate_*.png`. `*` stands for any characters and `?` for one character; capitals do not matter. Only the file name is matched, not the folders it is in |
    | Target kind | What the file is, picked from the list (see below). It starts as `slate`. The list holds only the kinds Volt takes in, grouped by the library each goes to. When the pattern ends in a file type, such as `.png` or `.mp4`, only the places that take that type are offered |
    | Workflow | A label kept with the file, and added as a tag to images. It starts as `register` and does not change where the file goes |
+   | **Image type** | Shown when the target kind goes to the Image Library. **From the name only** (the default) reads the type word at the end of the name; pick a type to give every image this rule takes that type. See [Artwork by name](#artwork-by-name-thumbnails-posters-and-other-image-types) |
+   | **A type word in the name wins** | On by default: a type word in the name, such as `_poster`, wins over the rule's image type. Clear it to always use the rule's type |
 
 2. Choose **Add rule**. It is added after your other rules and above the default rules, numbered.
 3. Put specific rules above general ones: **↑** and **↓** move a rule. `slate_*.png` must be above `*.png`, or every slate is filed by the general rule.
@@ -112,7 +137,8 @@ The target kind decides where an accepted file goes:
 |---|---|
 | `slate`, `poster`, `watermark`, `brand` or `logo`, `keyframe` or `thumbnail`, `image` or `still` | The Image Library, as that kind of image |
 | `vod`, `video`, `programme`, `program` or `episode` | The Media Library, encoded to the folder's ladder |
-| `loop` or `filler` | Loops & Fillers, as a loop |
+| `loop` or `filler` | Loops & Fillers, as a loop, for video files |
+| `filler-slate` | Loops & Fillers, as a slate a channel or event can show when its input drops, for image files. (`slate` files the image in the Image Library instead) |
 | `companion` | Attached to the video it is named after, for caption and metadata files only. Offered under **Attach to its video** |
 
 Those are the only kinds a rule that accepts files can use; Volt refuses any other. A rule must also send each type of file somewhere that takes it: a rule for `*.png` can send images to the Image Library but not to the Media Library, and a rule for `*.mp4` can send video to the Media Library or Loops & Fillers but not to the Image Library. A pattern that could match any file, such as `promo_*`, is not checked this way. A rule saved before this check with another kind is marked **never taken in** in the list: the files it accepts would wait for ever, so delete it and add it again with a kind from the list.
@@ -120,7 +146,7 @@ Those are the only kinds a rule that accepts files can use; Volt refuses any oth
 ### Try a filename
 
 1. Under **Try a filename**, type a file name, such as `slate_open.png`.
-2. Volt answers with the same check the scanner uses: **Accepted as** the target kind and the number of the rule that wins (that rule is highlighted), or **Sent to** the review folder with the reason.
+2. Volt answers with the same check the scanner uses: **Accepted as** the target kind and the number of the rule that wins (that rule is highlighted), or **Sent to** the review folder with the reason. For an image it also says the image type it would be and why (from the word in the name, or from the rule), and the video it would be attached to, or that it would wait for one. For a caption it names the video too.
 3. Change or reorder the rules until every name you expect is accepted the way you want.
 
 If your role cannot try file names, the box is greyed out and says so: it needs Files, uploads & storage: Operate.
@@ -203,6 +229,11 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A caption stays **Waiting** with "waiting for its video" | No video of this folder is named like it yet, or its video is still arriving | Drop the video with the same start to its name. After 24 hours the caption goes to review |
 | "no video in this folder is named like it ... after 24 hours" | Nothing matched the caption or metadata file's name within a day | Drop the video and **Reprocess**, or add the file on the asset's **Companion files** tab |
 | "... over the 25 MB limit for companion files" | The caption or metadata file is too large | Split or compress it, then add it again |
+| An image stays in the Image Library with "waiting for a video named like it" | No video of this folder is named like the start of the image's name yet | Drop the video. After 24 hours the image stays in the Image Library unattached; choose it under **Image** on the asset's **Preview** instead |
+| "No asset in this folder is named like it after 24 hours, so no asset was matched" | Nothing matched the image's name within a day | Choose the image under **Image** on the asset's **Preview** |
+| "Not 2:3" or "Smaller than the recommended" after an attached image | The image does not fit its type's shape or size | Nothing has to be done; portals crop it around its focus point. Deliver a better fitting file to replace it |
+| A message that only a rule taking images into the Image Library can set an image type | The rule sends files somewhere else, or refuses them | Choose an Image Library target kind, or set the image type back to **From the name only** |
+| A message that the image type "is not an image type of this account that is switched on" | Through the API, `imageType` named a type the account does not have, or has switched off | Use a key from `imageTypes` on the folder, or switch it on under **Image types…** on an asset's **Preview** |
 | An image or video goes to review in a folder with the default rules | The default rule for it is switched **Off**, or its extension is not in the rule | Switch it **On**, or add the extension to the rule's pattern |
 | **Last scan failed:** and a reason, or **scan failing** in the list | Volt could not read the folder | Check the path is right and the folder is still there; contact Volt support if it is |
 | "no rule matched and this folder has no default, so it needs a person to look at it" | No rule matches the file name | Add or change a rule, then **Reprocess** |
@@ -228,13 +259,13 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|
 | `GET /api/watchfolders`, `POST /api/watchfolders` | Lists watchfolders, or creates one (`name`, `config.path`; or `"kind": "s3"` with `config.bucket` and `config.prefix` for a folder in a bucket; or `"kind": "site"` with `siteId`, `config.path` on the site's server and `placement`, for an on-prem folder). A new folder starts with the default rules by file type, returned as `rules`; send `"defaultRules": false` to start with none |
 | `GET /api/watchfolders/site-options` | Whether the account has the Hybrid Sites add-on, its sites, and which placements can be chosen |
-| `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules (a default rule has `builtin` set to `images`, `video`, `captions` or `sidecars`), `defaultsMissing` (the default rules it lacks) and `targetKinds` (each kind a rule can take in, the library it goes to and the file types it `accepts`); rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
-| `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension` (one, or a list such as `"png, jpg"`), `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`). A rule whose pattern names a file type and sends it somewhere that does not take that type is refused with `400` and the code `target_does_not_fit_type` |
+| `GET /api/watchfolders/{id}`, `PATCH /api/watchfolders/{id}`, `DELETE /api/watchfolders/{id}` | One watchfolder with its rules (a default rule has `builtin` set to `images`, `video`, `captions` or `sidecars`), `defaultsMissing` (the default rules it lacks), `targetKinds` (each kind a rule can take in, the library it goes to and the file types it `accepts`) and `imageTypes` (the account's image types a rule can name); rename it, switch it off (`enabled`), set a default target kind or the ladder; delete it |
+| `GET /api/watchfolders/{id}/rules`, `POST /api/watchfolders/{id}/rules` | Lists or adds rules. The API can also match by `regex`, `extension` (one, or a list such as `"png, jpg"`), `prefix` or `suffix`, and add refusing rules (`"action": "reject"` with a `rejectReason`). A rule whose pattern names a file type and sends it somewhere that does not take that type is refused with `400` and the code `target_does_not_fit_type`. An Image Library rule may carry `imageType` (a key from `imageTypes`) and `imageTypeFromName` (`true` by default); `imageType` on any other rule is refused with `image_type_needs_image_rule`, an unknown or switched off type with `unknown_image_type` |
 | `POST /api/watchfolders/{id}/rules/defaults` | Adds the default rules by file type the folder lacks, after its own rules: `201` with `added` and the folder's `rules`, or `200` with an empty `added` when it has them all |
 | `PATCH /api/watchfolders/{id}/rules/{ruleId}`, `DELETE /api/watchfolders/{id}/rules/{ruleId}` | Changes (including `ordinal` and `enabled`) or deletes a rule |
-| `POST /api/watchfolders/{id}/dry-run` | What would happen to a file name |
+| `POST /api/watchfolders/{id}/dry-run` | What would happen to a file name: the `decision`, and for an image `imageType` (`key`, `label`, `from` the `name` or the `rule`, the `word`) and `libraryKind`; for an image with a type or a caption, `asset` (the video it would go with, and `waiting` while that video is not taken in yet), or `null` |
 | `POST /api/watchfolders/{id}/scan` | Scans now |
-| `GET /api/watchfolders/{id}/items` | The queue; filter with `?status=quarantined`, `failed`, `seen`, `ingested`, `reprocessed` or `removed` |
+| `GET /api/watchfolders/{id}/items` | The queue; filter with `?status=quarantined`, `failed`, `seen`, `ingested`, `reprocessed` or `removed`. An image meant for a video has `image_type` and `image_attach` (`waiting`, `attached` or `unmatched`) |
 | `POST /api/watchfolders/{id}/items/{itemId}/resolve` | `{"resolution": "reprocess"}` or `{"resolution": "remove"}` for a file in review or one that failed (reprocess on a failed file retries it) |
 
 ```bash

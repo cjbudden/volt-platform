@@ -880,6 +880,10 @@ export interface WatchfolderRule {
   enabled: boolean
   /** Which default rule by file type this is ('images', 'video'), or null for a rule someone wrote. */
   builtin?: string | null
+  /** The asset image type images this rule accepts are for (poster, hero...), or null. */
+  image_type?: string | null
+  /** A type word at the end of the file name wins over image_type. */
+  image_type_from_name?: boolean
 }
 
 /** Every state an object in a watched folder can be in. `seen` means classified
@@ -919,6 +923,12 @@ export interface WatchfolderDryRun {
   decision:
     | { decision: 'accept'; targetKind: string; workflow: string | null; ruleId: string | null }
     | { decision: 'quarantine'; reason: string; ruleId: string | null }
+  /** The asset image type the file would be, from its name or its rule. */
+  imageType?: { key: string; label: string; from: 'name' | 'rule'; word: string | null } | null
+  /** Where in the Image Library it would be filed (poster, keyframe, brand...). */
+  libraryKind?: string | null
+  /** The asset it would go with, matched by name. `waiting`: its video is not in yet. */
+  asset?: { objectKey: string; id: string | null; title: string | null; waiting: boolean } | null
   quarantinePath: string
   rules: { id: string; ordinal: number; name: string; pattern: string; targetKind: string
            action: string; enabled: boolean; winner: boolean }[]
@@ -1335,7 +1345,7 @@ export const api = {
   addWatchfolderRule: (id: string, b: {
     name: string; matchType?: string; pattern: string; targetKind: string
     workflow?: string | null; action?: 'accept' | 'reject'; rejectReason?: string | null
-    ordinal?: number; enabled?: boolean
+    ordinal?: number; enabled?: boolean; imageType?: string | null; imageTypeFromName?: boolean
   }): Promise<WatchfolderRule> =>
     req(`/watchfolders/${id}/rules`, { method: 'POST', body: JSON.stringify(b) }),
   patchWatchfolderRule: (id: string, ruleId: string, b: Record<string, any>): Promise<WatchfolderRule> =>

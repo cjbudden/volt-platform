@@ -51,7 +51,10 @@ import { loadFolder, pgItemStore, ingestFolder, syncS3, mirrorQuarantines } from
 import { scanFolder } from '../services/watchfolder/scanner';
 import { ingestableTargetKinds, libraryKindFor } from '../services/watchfolder/ingest';
 import { videoTargetKinds, videoTargetFor } from '../services/watchfolder/videoIngest';
-import { companionTargetKinds, isCompanionTarget } from '../services/watchfolder/companionIngest';
+import { companionTargetKinds, isCompanionTarget, bestMatch } from '../services/watchfolder/companionIngest';
+import { slateTargetKinds, isSlateTarget } from '../services/watchfolder/slateIngest';
+import { resolveImageType } from '../services/watchfolder/imageTypes';
+import { pgCompanionStore, videoImageTypes } from '../services/watchfolder/store';
 import { hasLicence, requireLicence } from '../services/sites/licences';
 import { defaultRulesFor, typesOfPattern, customOrdinal, defaultOrdinals, type FileType } from '../services/watchfolder/defaults';
 import { PLACEMENTS, PLACEMENTS_BUILT } from '../services/sites/siteWatchfolders';
@@ -70,6 +73,8 @@ export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loo
   return [
     ...ingestableTargetKinds().map((kind) => ({ kind, goesTo: 'images' as const, accepts: ['image'] as FileType[] })),
     ...videoTargetKinds().map((kind) => ({ kind, goesTo: videoTargetFor(kind) === 'loop' ? 'loops' as const : 'media' as const, accepts: ['video'] as FileType[] })),
+    // An image to Loops & Fillers as a slate (H2b-3): a stream's fallback still.
+    ...slateTargetKinds().map((kind) => ({ kind, goesTo: 'loops' as const, accepts: ['image'] as FileType[] })),
     // Captions and metadata sidecars, attached by name to their video (H2b-2).
     ...companionTargetKinds().map((kind) => ({ kind, goesTo: 'companions' as const, accepts: ['caption', 'sidecar'] as FileType[] })),
   ];
@@ -124,7 +129,24 @@ async function missingDefaults(folder: { id: string; kind: string }): Promise<st
 }
 
 function takesIn(kind: unknown): boolean {
-  return !!libraryKindFor(String(kind ?? '')) || !!videoTargetFor(String(kind ?? '')) || isCompanionTarget(String(kind ?? ''));
+  return !!libraryKindFor(String(kind ?? '')) || !!videoTargetFor(String(kind ?? '')) || isCompanionTarget(String(kind ?? '')) || isSlateTarget(String(kind ?? ''));
+}
+
+/**
+ * A rule's image type (H2b-3) must be one of the account's types for video,
+ * and only a rule that takes images into the Image Library can carry one:
+ * nothing else becomes an asset's image.
+ */
+async function assertImageType(acct: string, imageType: unknown, action: unknown, kind: unknown) {
+  if (imageType == null || imageType === '') return;
+  if (action === 'reject' || !libraryKindFor(String(kind ?? ''))) {
+    throw Object.assign(badRequest('Only a rule that takes images into the Image Library can set an image type.'), { code: 'image_type_needs_image_rule' });
+  }
+  const types = await videoImageTypes(acct);
+  if (!types.some((t) => t.key === imageType)) {
+    throw Object.assign(badRequest(`"${String(imageType)}" is not an image type of this account that is switched on. Use one of: ${types.map((t) => t.key).join(', ')}.`),
+      { code: 'unknown_image_type' });
+  }
 }
 
 function assertTargetKind(kind: unknown, what: string) {
@@ -260,7 +282,9 @@ watchfoldersRouter.get('/:id', asyncHandler(async (req, res) => {
   // The kinds the rule form offers come with the folder, so the console never
   // has its own copy of the list to fall out of step with the server's.
   res.json({ ...f, site_name: site?.name ?? null, rules, items, counts, targetKinds: targetKinds(),
-    defaultsMissing: await missingDefaults(f) });
+    defaultsMissing: await missingDefaults(f),
+    // What a rule's image type may be (H2b-3): the account's types for video.
+    imageTypes: await videoImageTypes(accountId(req)) });
 }));
 
 watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
@@ -315,6 +339,10 @@ const ruleSchema = z.object({
   rejectReason: z.string().nullable().optional(),
   ordinal: z.number().int().optional(),
   enabled: z.boolean().default(true),
+  /** The asset image type an image this rule accepts is for (H2b-3). */
+  imageType: z.string().nullable().optional(),
+  /** A type word at the end of the name wins over imageType (on by default). */
+  imageTypeFromName: z.boolean().default(true),
 });
 
 watchfoldersRouter.get('/:id/rules', asyncHandler(async (req, res) => {
@@ -329,6 +357,7 @@ watchfoldersRouter.post('/:id/rules', asyncHandler(async (req, res) => {
     assertTargetKind(b.targetKind, 'every file this rule accepts');
     assertFitsType(b.targetKind, b.matchType, b.pattern);
   }
+  await assertImageType(accountId(req), b.imageType, b.action, b.targetKind);
   // APPENDED, in tens, after the other custom rules. A new rule must never
   // silently outrank the existing ones, and the gaps leave room to insert
   // without renumbering the whole set. It goes ABOVE the default rules by
@@ -337,10 +366,11 @@ watchfoldersRouter.post('/:id/rules', asyncHandler(async (req, res) => {
   const ordinal = b.ordinal ?? customOrdinal(have);
   const row = await one<any>(
     `INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern,
-                                   target_kind, workflow, action, reject_reason, enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+                                   target_kind, workflow, action, reject_reason, enabled,
+                                   image_type, image_type_from_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
     [f.id, ordinal, b.name, b.matchType, b.pattern, b.targetKind, b.workflow ?? null,
-     b.action, b.rejectReason ?? null, b.enabled]
+     b.action, b.rejectReason ?? null, b.enabled, b.imageType || null, b.imageTypeFromName]
   );
   const who = actor(req);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
@@ -382,11 +412,13 @@ watchfoldersRouter.patch('/:id/rules/:ruleId', asyncHandler(async (req, res) => 
   if ('rejectReason' in b) put('reject_reason', b.rejectReason);
   if ('ordinal' in b) put('ordinal', b.ordinal);
   if ('enabled' in b) put('enabled', !!b.enabled);
+  if ('imageType' in b) put('image_type', b.imageType || null);
+  if ('imageTypeFromName' in b) put('image_type_from_name', b.imageTypeFromName !== false);
   if (!sets.length) throw badRequest('nothing to change');
   // The kind is checked against what the rule will be after the change: a rule
   // switched from refusing to accepting needs a kind that is taken in too.
-  if ('targetKind' in b || b.action === 'accept' || 'pattern' in b || 'matchType' in b) {
-    const cur = await one<any>(`SELECT target_kind, action, match_type, pattern FROM watchfolder_rules WHERE id=$1 AND watchfolder_id=$2`,
+  if ('targetKind' in b || b.action === 'accept' || 'pattern' in b || 'matchType' in b || 'imageType' in b || 'action' in b) {
+    const cur = await one<any>(`SELECT target_kind, action, match_type, pattern, image_type FROM watchfolder_rules WHERE id=$1 AND watchfolder_id=$2`,
       [req.params.ruleId, f.id]);
     if (!cur) throw notFound('rule not found');
     const action = 'action' in b ? b.action : cur.action;
@@ -395,6 +427,9 @@ watchfoldersRouter.patch('/:id/rules/:ruleId', asyncHandler(async (req, res) => 
       assertTargetKind(kind, 'every file this rule accepts');
       assertFitsType(kind, 'matchType' in b ? b.matchType : cur.match_type, 'pattern' in b ? b.pattern : cur.pattern);
     }
+    // Checked against the rule as it will be: moving a typed rule off the
+    // Image Library needs its type cleared too.
+    await assertImageType(accountId(req), 'imageType' in b ? b.imageType : cur.image_type, action, kind);
   }
   params.push(req.params.ruleId, f.id);
   const row = await one<any>(
@@ -435,6 +470,7 @@ watchfoldersRouter.post('/:id/dry-run', asyncHandler(async (req, res) => {
     id: r.id, ordinal: r.ordinal, name: r.name, matchType: r.match_type, pattern: r.pattern,
     targetKind: r.target_kind, workflow: r.workflow, action: r.action,
     rejectReason: r.reject_reason, enabled: r.enabled,
+    imageType: r.image_type ?? null, imageTypeFromName: r.image_type_from_name !== false,
   }));
   const policy: FolderPolicy = {
     defaultTargetKind: f.default_target_kind ?? null,
@@ -443,13 +479,37 @@ watchfoldersRouter.post('/:id/dry-run', asyncHandler(async (req, res) => {
     maxBytes: f.config?.max_bytes ?? null,
   };
   const decision = classify(name, sizeBytes, mapped, policy);
+
+  // THE TYPE AND THE ASSET (H2b-3): what an image would be for, and which
+  // asset it, or a caption, would go with, asked of the same functions the
+  // ingest pass runs. `asset` is null when nothing in the folder fits yet.
+  let imageType: any = null, asset: any = null, libraryKind: string | null = null;
+  if (decision.decision === 'accept') {
+    const kind = libraryKindFor(decision.targetKind);
+    const rule = mapped.find((r) => r.id === decision.ruleId);
+    if (kind) {
+      const t = resolveImageType(name, { imageType: rule?.imageType, imageTypeFromName: rule?.imageTypeFromName }, await videoImageTypes(accountId(req)));
+      libraryKind = kind === 'other' && t ? t.libraryKind : kind;
+      if (t?.typeKey) imageType = { key: t.typeKey, label: t.label, from: t.from, word: t.word };
+    }
+    if ((imageType && kind) || isCompanionTarget(decision.targetKind)) {
+      const m = bestMatch(name, await pgCompanionStore.candidates(f.id));
+      if (m) {
+        const v = m.assetId ? await one<any>(`SELECT id, title FROM vod_assets WHERE id = $1`, [m.assetId]) : null;
+        asset = { objectKey: m.objectKey, id: v?.id ?? null, title: v?.title ?? null, waiting: !m.assetId };
+      }
+    }
+  }
   res.json({
     filename: name,
     decision,
+    imageType,
+    libraryKind,
+    asset,
     quarantinePath: f.quarantine_path,
     rules: mapped.map((r) => ({
       id: r.id, ordinal: r.ordinal, name: r.name, pattern: r.pattern,
-      targetKind: r.targetKind, action: r.action, enabled: r.enabled,
+      targetKind: r.targetKind, action: r.action, enabled: r.enabled, imageType: r.imageType ?? null,
       winner: 'ruleId' in decision && decision.ruleId === r.id,
     })),
   });

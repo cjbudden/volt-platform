@@ -65,6 +65,7 @@ import { readFile, stat, unlink } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { checksumFile } from './scanner';
 import { probeImage } from '../imageDims';
+import { resolveImageType, type TypeChoice } from './imageTypes';
 
 /** The kinds `media_files.kind` accepts. Anything else is not a library image. */
 export type MediaKind = 'watermark' | 'slate' | 'poster' | 'brand' | 'keyframe' | 'other';
@@ -129,7 +130,9 @@ export interface IngestStore {
    * has it, and the caller must not touch the file. See note 4b.
    */
   claim(itemId: string | number): Promise<boolean>;
-  markIngested(itemId: string | number, mediaFileId: string, path: string): Promise<void>;
+  /** `want`: the asset image type it is meant to be (H2b-3); the attach pass
+   *  then matches it to its asset by name. */
+  markIngested(itemId: string | number, mediaFileId: string, path: string, want?: { imageType: string }): Promise<void>;
   markFailed(itemId: string | number, reason: string): Promise<void>;
 }
 
@@ -139,6 +142,9 @@ export interface PendingItem {
   checksum: string | null;
   targetKind: string | null;
   workflow: string | null;
+  /** The matched rule's image type and whether the name may override it (H2b-3). */
+  imageType?: string | null;
+  imageTypeFromName?: boolean | null;
 }
 
 export interface IngestFolder {
@@ -153,6 +159,8 @@ export interface IngestFolder {
   /** Hard ceiling on a file read into memory. See note 5. */
   maxBytes?: number;
   userId?: string | null;
+  /** The account's image types for video (enabled). Absent: no image types are read. */
+  imageTypes?: TypeChoice[];
 }
 
 export type IngestOutcome =
@@ -276,7 +284,14 @@ export async function ingestItem(
 
     const buf = await readFile(abs);
     const info = probeImage(buf);
-    const wanted = libraryPathFor(item.objectKey, kind, f.libraryFolder);
+    // IMAGE TYPE FROM THE NAME OR THE RULE (H2b-3). A plain `image` rule files
+    // `..._poster.png` as a poster and `..._thumbnail.jpg` as a keyframe; a
+    // rule that named a kind itself (`slate`, `watermark`) keeps it.
+    const typed = f.imageTypes
+      ? resolveImageType(item.objectKey, { imageType: item.imageType, imageTypeFromName: item.imageTypeFromName }, f.imageTypes)
+      : null;
+    const fileKind: MediaKind = kind === 'other' && typed ? typed.libraryKind : kind;
+    const wanted = libraryPathFor(item.objectKey, fileKind, f.libraryFolder);
     const place = await freePath(f.accountId, wanted, (a, p) => store.pathInUse(a, p));
     const storeKey = storeKeyFor(f.accountId, place.path);
     const contentType = info.contentType || 'application/octet-stream';
@@ -289,7 +304,7 @@ export async function ingestItem(
     try {
       created = await store.createMediaFile({
         accountId: f.accountId,
-        kind,
+        kind: fileKind,
         path: place.path,
         folder: place.folder,
         name: place.name,
@@ -309,7 +324,8 @@ export async function ingestItem(
       return { result: 'failed', itemId: item.id, why };
     }
 
-    await store.markIngested(item.id, created.id, place.path);
+    await store.markIngested(item.id, created.id, place.path,
+      typed?.typeKey && typed.attach ? { imageType: typed.typeKey } : undefined);
 
     // Only once the library owns it, and never fatal: the file is already safe,
     // and a source left behind is skipped by the next scan on its checksum.
@@ -351,6 +367,12 @@ export interface IngestSummary {
   waiting?: number;
   /** Companions sent to review (too big, unreadable, or no video in 24 hours). */
   review?: number;
+  /** Images put into Loops & Fillers as slates (H2b-3). */
+  slates?: number;
+  /** Images set as their asset's image of a type (H2b-3). */
+  typed?: number;
+  /** Images in the library still waiting for the video they are named after. */
+  typedWaiting?: number;
   outcomes: IngestOutcome[];
 }
 

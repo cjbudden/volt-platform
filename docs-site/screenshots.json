@@ -297,7 +297,7 @@
       "click": [
         "text=Agency drop"
       ],
-      "alt": "A watchfolder's page: its path and Scan now button, the numbered rules with the one that would win highlighted, the Try a filename box, and the queue of files that need a person"
+      "alt": "A watchfolder's page: its path and Scan now button, the numbered rules (one with an image type) with the one that would win highlighted, the Try a filename box, and the queue of files that need a person"
     },
     {
       "name": "storage",

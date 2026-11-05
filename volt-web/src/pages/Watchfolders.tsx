@@ -104,13 +104,15 @@ function SiteTag({ name }: { name?: string | null }) {
 
 /* ---------------------------------------------------------------- rules ---- */
 
-function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
-  folder: Watchfolder; rules: WatchfolderRule[]; kinds: TargetKind[]; defaultsMissing: string[]; reload: () => void
+function Rules({ folder, rules, kinds, defaultsMissing, imageTypes, reload }: {
+  folder: Watchfolder; rules: WatchfolderRule[]; kinds: TargetKind[]; defaultsMissing: string[]
+  imageTypes: { key: string; label: string }[]; reload: () => void
 }) {
   const { can } = useAccess()
   const canManage = can('media', 'manage')
   const canTry = can('media', 'operate')
-  const [draft, setDraft] = useState({ name: '', pattern: '', targetKind: 'slate', workflow: 'register' })
+  const [draft, setDraft] = useState({ name: '', pattern: '', targetKind: 'slate', workflow: 'register', imageType: '', imageTypeFromName: true })
+  const typeLabel = (k?: string | null) => imageTypes.find(t => t.key === k)?.label ?? k ?? ''
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [deleting, setDeleting] = useState<WatchfolderRule | null>(null)
@@ -146,8 +148,9 @@ function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
       await api.addWatchfolderRule(folder.id, {
         name: draft.name.trim(), pattern: draft.pattern.trim(),
         targetKind: draft.targetKind.trim(), workflow: draft.workflow.trim() || null,
+        ...(toImages ? { imageType: draft.imageType || null, imageTypeFromName: draft.imageTypeFromName } : {}),
       })
-      setDraft({ ...draft, name: '', pattern: '' })
+      setDraft({ ...draft, name: '', pattern: '', imageType: '', imageTypeFromName: true })
       reload()
     } catch (e: any) { setErr(String(e?.message ?? e)) } finally { setBusy(false) }
   }
@@ -189,6 +192,9 @@ function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
   const draftTypes = patternTypes(draft.pattern)
   const fits = (k: TargetKind) => !draftTypes || !k.accepts || draftTypes.every(t => k.accepts!.includes(t))
   const offered = kinds.filter(fits)
+  // An image type is offered only for a rule that takes images into the
+  // Image Library: nothing else becomes an asset's image.
+  const toImages = kinds.find(k => k.kind === draft.targetKind)?.goesTo === 'images'
   useEffect(() => {
     if (offered.length && !offered.some(k => k.kind === draft.targetKind)) setDraft(d => ({ ...d, targetKind: offered[0].kind }))
   }, [draft.pattern]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -249,6 +255,12 @@ function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
               {r.action === 'reject'
                 ? <em style={{ color: 'var(--danger,#f87171)' }}>refuse</em>
                 : <>→ {r.target_kind}</>}
+              {r.action !== 'reject' && r.image_type && (
+                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}
+                  title={r.image_type_from_name === false ? 'Every image it takes is this type.' : 'Unless a type word at the end of the name says otherwise.'}>
+                  as {typeLabel(r.image_type)}{r.image_type_from_name === false ? '' : ', or by name'}
+                </div>
+              )}
               {/* A rule saved before the kinds were checked can still name one
                   that nothing takes in. Said on the row, so it gets fixed. */}
               {r.action !== 'reject' && kinds.length > 0 && !known.has(String(r.target_kind).toLowerCase()) && (
@@ -309,6 +321,27 @@ function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
         <button type="button" className="btn primary" onClick={add} disabled={busy}>Add rule</button>
       </div>
       )}
+      {canManage && toImages && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginTop: 8, fontSize: 'var(--fs-sm)' }}>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            Image type
+            <select style={box} aria-label="Image type" value={draft.imageType}
+              onChange={e => setDraft({ ...draft, imageType: e.target.value })}>
+              <option value="">From the name only</option>
+              {imageTypes.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+            title="A word at the end of the name, like _poster or -thumbnail, says the type. Off: every image this rule takes is the type above.">
+            <input type="checkbox" checked={draft.imageTypeFromName}
+              onChange={e => setDraft({ ...draft, imageTypeFromName: e.target.checked })} />
+            A type word in the name wins
+          </label>
+          <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
+            An image with a type becomes that image of the video it is named after.
+          </span>
+        </div>
+      )}
       {canManage && draftTypes && (
         <p style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)', marginTop: 6 }}>
           {offered.length
@@ -342,6 +375,17 @@ function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
                 Accepted as <strong>{dry.decision.targetKind}</strong>
                 {dry.decision.workflow ? <> for <strong>{dry.decision.workflow}</strong></> : null}
                 {winner ? <> by rule {rules.findIndex(r => r.id === winner) + 1}</> : null}
+                {dry.imageType && <span style={{ color: 'var(--text)' }}>
+                  {' '}· the <strong>{dry.imageType.label}</strong>{dry.imageType.from === 'name' ? <> (from “{dry.imageType.word}” in the name)</> : <> (from the rule)</>}
+                </span>}
+                {dry.asset && <span style={{ color: 'var(--text)' }}>
+                  {' '}· of {dry.asset.waiting
+                    ? <>the video <code>{dry.asset.objectKey}</code> once it is in (waits up to 24 hours)</>
+                    : <><strong>{dry.asset.title ?? dry.asset.objectKey}</strong></>}
+                </span>}
+                {dry.imageType && !dry.asset && <span style={{ color: 'var(--faint,#8b93a7)' }}>
+                  {' '}· no video in this folder is named like it yet, so it waits up to 24 hours, then stays in the Image Library
+                </span>}
               </span>
             ) : (
               <span style={{ color: 'var(--warn,#fbbf24)' }}>
@@ -473,7 +517,7 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
 
 function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const canManage = useAccess().can('media', 'manage')
-  const [folder, setFolder] = useState<(Watchfolder & { rules: WatchfolderRule[]; targetKinds?: TargetKind[]; defaultsMissing?: string[] }) | null>(null)
+  const [folder, setFolder] = useState<(Watchfolder & { rules: WatchfolderRule[]; targetKinds?: TargetKind[]; defaultsMissing?: string[]; imageTypes?: { key: string; label: string }[] }) | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [scan, setScan] = useState<WatchfolderScan | null>(null)
@@ -644,7 +688,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
           </p>
         )}
       </div>
-      <Rules folder={folder} rules={folder.rules ?? []} kinds={folder.targetKinds ?? []}
+      <Rules folder={folder} rules={folder.rules ?? []} kinds={folder.targetKinds ?? []} imageTypes={folder.imageTypes ?? []}
         defaultsMissing={folder.defaultsMissing ?? []} reload={load} />
       <Queue folder={folder} reload={load} />
     </div>
