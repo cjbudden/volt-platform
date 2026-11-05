@@ -134,7 +134,7 @@ export function assetFromRow(r: any): AssetInfo {
 export interface LineupSettings {
   cycleShift?: number;
   anchor?: string | null;
-  gridMin?: 0 | 5 | 15 | 30 | 60;
+  gridMin?: 0 | 1 | 2 | 5 | 15 | 30 | 60;
   backfill?: string[];
   seed?: string;
   horizonDays?: number;

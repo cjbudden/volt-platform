@@ -42,7 +42,7 @@ Programmers and channel managers use it.
 3. For a series slot, choose **Episodes each time**, **In episode order** or **Shuffled, no repeats**, and what happens at the last episode: **Start again from episode 1** or **Drop out**.
 4. Move, duplicate or remove slots to get the order you want.
 5. **What this run order does to a week** shows how long one pass is (with **Round programmes up to** set, each programme counts as rounded up in the guide), how many passes air this week, when the next pass starts and how many minutes of ads an hour. Notices under it warn about things like a run order so short it repeats titles within a few hours. Until the run order has a slot, it only asks you to add titles or series.
-6. Under **Channel clock**, choose whether to **Restart the run order daily** at a fixed time, whether to **Round programmes up to** the hour, whether to **Rotate the run order each pass**, how far to **Keep the guide written ahead**, and what to play **when a title is outside its rights window**.
+6. Under **Channel clock**, choose whether to **Restart the run order daily** at a fixed time, whether to **Round programmes up to** the next 1, 2, 5, 15 or 30 minutes or the hour, whether to **Rotate the run order each pass**, how far to **Keep the guide written ahead**, and what to play **when a title is outside its rights window**.
 7. Choose **Save draft** to keep your work. Nothing airs until you activate it.
 
 ![A FAST channel's Run order: the library of titles and series on the left, what the run order does to a week, then the series slot and the film slot](/img/screens/fast-run-order.png)

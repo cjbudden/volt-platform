@@ -35,7 +35,7 @@ export type AdRule = 'default' | 'none' | 'no_mid'
 export interface TitleSlot { id: string; kind: 'title'; pool: PoolRef[]; every?: number; phase?: number; label?: string; adRule?: AdRule }
 export interface SeriesSlot { id: string; kind: 'series'; series: string; count: number; order: 'sequential' | 'shuffle'; atEnd?: 'loop' | 'stop'; every?: number; phase?: number; encoreOf?: string | null; label?: string; adRule?: AdRule }
 export type Slot = TitleSlot | SeriesSlot
-export interface LineupSettings { cycleShift?: number; anchor?: string | null; gridMin?: 0 | 5 | 15 | 30 | 60; backfill?: string[]; horizonDays?: number }
+export interface LineupSettings { cycleShift?: number; anchor?: string | null; gridMin?: 0 | 1 | 2 | 5 | 15 | 30 | 60; backfill?: string[]; horizonDays?: number }
 export interface Lineup {
   id: string; channel_id: string; name: string; version: number; status: 'draft' | 'active' | 'archived'
   epoch: string; zone: string; slots: Slot[]; settings: LineupSettings; applied_until: string | null; applied_at: string | null; updated_at: string

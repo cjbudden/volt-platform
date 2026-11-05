@@ -25,7 +25,7 @@
 //                does not keep landing in the same part of the lineup;
 //    anchor      restart the lineup at a fixed local time every day (06:00),
 //                instead of free-running;
-//    gridMin     round each programme up to a 5/15/30/60 minute grid, padding
+//    gridMin     round each programme up to a 1/2/5/15/30/60 minute grid, padding
 //                with filler, so the guide reads like a traditional grid.
 //
 //  DETERMINISTIC. The plan is a pure function of the lineup and its epoch, so
@@ -106,7 +106,7 @@ export interface Lineup {
   /** Restart the run order at this local time every day ("06:00"). Null = free-running. */
   anchor?: string | null;
   zone: string;
-  gridMin?: 0 | 5 | 15 | 30 | 60;
+  gridMin?: 0 | 1 | 2 | 5 | 15 | 30 | 60;
   segmentSec?: number;
   ads?: AdPolicy;
   /** Used when a slot's title is out of its rights window: best duration fit first. */

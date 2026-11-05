@@ -298,7 +298,7 @@ const slotSchema = z.discriminatedUnion('kind', [
 const settingsSchema = z.object({
   cycleShift: z.number().int().min(0).max(50).optional(),
   anchor: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
-  gridMin: z.union([z.literal(0), z.literal(5), z.literal(15), z.literal(30), z.literal(60)]).optional(),
+  gridMin: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(5), z.literal(15), z.literal(30), z.literal(60)]).optional(),
   backfill: z.array(uuid).max(200).optional(),
   seed: z.string().max(60).optional(),
   horizonDays: z.number().int().min(1).max(14).optional(),

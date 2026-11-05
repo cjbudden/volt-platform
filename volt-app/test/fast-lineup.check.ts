@@ -161,6 +161,15 @@ const odd = lib(film('o1', 'Odd 97', 97), film('o2', 'Odd 83', 83));
 const gr = planLineup({ epoch, zone: Z, gridMin: 15, slots: [{ id: 'o1', kind: 'title', pool: [{ assetId: 'o1' }] }, { id: 'o2', kind: 'title', pool: [{ assetId: 'o2' }] }] }, odd, epoch, new Date(epoch.getTime() + 10 * HMS));
 ok(gr.programmes.every((p) => [0, 15, 30, 45].includes(Number(localTimeOf(p.start, Z).slice(3, 5)))), 'every programme starts on the 15 minute grid');
 ok(gr.programmes[0].padSec === 8 * 60, `97 min pads 8 min to 1h45 (got ${gr.programmes[0].padSec}s)`);
+// 1 and 2 minute grids (Christian, 6 Nov)
+ok(gridPad(at('2026-10-19T08:47:10+10:00'), 1, Z) === 50, '08:47:10 pads 50s to 08:48 on a 1 min grid');
+ok(gridPad(at('2026-10-19T08:46:10+10:00'), 2, Z) === 110, '08:46:10 pads 110s to 08:48 on a 2 min grid');
+ok(gridPad(at('2026-10-19T08:48:00+10:00'), 2, Z) === 0, 'on the 2 min grid already: no pad');
+const gr2 = planLineup({ epoch, zone: Z, gridMin: 2, slots: [{ id: 'o1', kind: 'title', pool: [{ assetId: 'o1' }] }, { id: 'o2', kind: 'title', pool: [{ assetId: 'o2' }] }] }, odd, epoch, new Date(epoch.getTime() + 10 * HMS));
+ok(gr2.programmes.every((p) => Number(localTimeOf(p.start, Z).slice(3, 5)) % 2 === 0 && p.start.getTime() % 60_000 === 0), 'every programme starts on the 2 minute grid');
+ok(gr2.programmes[0].padSec === 60, `97 min pads 1 min to 98 min on a 2 min grid (got ${gr2.programmes[0].padSec}s)`);
+const gr1 = planLineup({ epoch, zone: Z, gridMin: 1, slots: [{ id: 'o1', kind: 'title', pool: [{ assetId: 'o1' }] }] }, odd, epoch, new Date(epoch.getTime() + 5 * HMS));
+ok(gr1.programmes[0].padSec === 0, `a whole-minute 97 min title needs no pad on a 1 min grid (got ${gr1.programmes[0].padSec}s)`);
 
 // ---- breaks ------------------------------------------------------------------
 const pol = resolveAdPolicy({ enabled: true, loadMinPerHour: 8, breakSec: 120, betweenSec: 60 });

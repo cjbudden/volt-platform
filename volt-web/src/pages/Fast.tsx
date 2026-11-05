@@ -748,7 +748,7 @@ function SettingsCard({ settings, zone, lib, nSlots, onZone, onChange }: {
           <div className="hintxt">A restart pads the last programme before it, so the first slot always opens the day.</div></div>
         <div className="field"><label htmlFor="fgrid">Round programmes up to</label>
           <select id="fgrid" className="inp" value={settings.gridMin ?? 0} onChange={e => onChange({ gridMin: Number(e.target.value) as any })}>
-            <option value={0}>No rounding (back to back)</option><option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>The hour</option>
+            <option value={0}>No rounding (back to back)</option><option value={1}>1 minute</option><option value={2}>2 minutes</option><option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>The hour</option>
           </select>
           <div className="hintxt">The gap is filled with promos or the slate, so the guide reads like a traditional grid.</div></div>
         <div className="field"><label htmlFor="fshift">Rotate the run order each pass</label>
