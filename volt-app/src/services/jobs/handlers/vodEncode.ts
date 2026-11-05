@@ -159,10 +159,18 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     throw new PermanentError(
       `the source could not be read (${probe.error ?? 'no reason given'})`, 'unreadable_source');
   }
-  if (probe.hasVideo === false) {
-    throw new PermanentError(
-      'this file has no video track, so it cannot be encoded to a video ladder', 'no_video');
+  // A FILE WITH NO PICTURE IS AN AUDIO ASSET (build queue H2b-4), not a failed
+  // encode. It used to be refused here ("no video track"), so a dropped mp3
+  // could only go to review. Now it takes the sound-only path: one AAC
+  // rendition on the same encoder contract as every other encode's sound
+  // (ladder_args.py audio_track_args), packaged HLS and DASH like a video, and
+  // the library and the player know it is audio from the probe's hasVideo.
+  // A file with neither picture nor sound has nothing to encode.
+  const audioOnly = probe.hasVideo === false;
+  if (audioOnly && probe.hasAudio === false) {
+    throw new PermanentError('this file has neither picture nor sound, so there is nothing to encode', 'no_media');
   }
+  if (audioOnly) log.step('no picture in this file: encoding it as an audio asset (sound only)');
 
   await ctx.progress(6, 'choosing the ladder');
   let ladder;
@@ -178,16 +186,21 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     throw e;
   }
 
-  const fit = fitToSource(ladder, probe);
-  if (!fit.kept.length) {
+  // Sound only: no rungs to fit. The ladder still gives the segment length
+  // and the packaging, so an audio asset cuts and packages like the rest.
+  const fit: ReturnType<typeof fitToSource> = audioOnly
+    ? { ...fitToSource(ladder, { height: 1080 }), kept: [], dropped: [], adapted: [], notes: ['sound only: one AAC rendition, 128 kb/s stereo 48 kHz'] } as any
+    : fitToSource(ladder, probe);
+  const summary = audioOnly ? 'sound only, AAC 128 kb/s' : describeFit(fit);
+  if (!audioOnly && !fit.kept.length) {
     // fitToSource is written so this cannot happen; if it ever does, refusing is
     // far better than an encode that produces nothing and reports success.
     throw new PermanentError('the ladder fitted no rungs to this source', 'empty_ladder');
   }
-  log.step(`ladder "${ladder.groupName}": ${describeFit(fit)}`);
+  log.step(`ladder "${ladder.groupName}": ${summary}`);
   for (const n of fit.notes ?? []) log.step(`  ${n}`);
   if (fit.dropped.length) log.step(`  dropped: ${fit.dropped.map((r) => `${r.height}p (${r.why})`).join(', ')}`);
-  await ctx.progress(10, `encoding ${describeFit(fit)}`);
+  await ctx.progress(10, `encoding ${summary}`);
 
   const outDir = outDirFor(p.vodAssetId);
   await mkdir(outDir, { recursive: true });
@@ -202,6 +215,8 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     gpu: ladder.codecBackend === 'nvenc',
     packaging: ladder.packaging,
     has_audio: probe.hasAudio !== false,
+    // no video outputs at all (vod_encoder.py): the asset is its sound
+    audio_only: audioOnly,
     // a fixed-size ladder (frame_mode 'box'): every rung in its 16:9 box (vod_encoder.py box_filter)
     ...(fit.boxed ? { fit: 'box' } : {}),
     ladder: fit.kept,
@@ -217,7 +232,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   // a second worker started the same encode beside the first (both CPU-bound, the
   // console starved, then "worker stopped reporting; lease expired").
   let pct = 10;
-  let note = `encoding ${describeFit(fit)}`;
+  let note = `encoding ${summary}`;
   const beat = () => { void ctx.progress(Math.round(pct), note).catch(() => { /* the lease will be reaped */ }); };
   const timer = setInterval(beat, 20_000);
   let lastBeat = Date.now();
@@ -229,7 +244,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
       const m = [...chunk.matchAll(/progress encode (\d+(?:\.\d+)?)%(?: at (\S+))?/g)].pop();
       if (m) {
         pct = 10 + 80 * Math.min(1, Number(m[1]) / 100);
-        note = `encoding ${describeFit(fit)}: ${Math.round(Number(m[1]))}%${m[2] && m[2] !== '?' ? ` at ${m[2]}` : ''}`;
+        note = `encoding ${summary}: ${Math.round(Number(m[1]))}%${m[2] && m[2] !== '?' ? ` at ${m[2]}` : ''}`;
       } else if (/\[vod-encoder\] package:/.test(chunk)) {
         pct = 90; note = 'packaging HLS and DASH';
       }
@@ -297,6 +312,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
       width: probe.width ?? null, height: probe.height ?? null,
       fps: probe.fps ?? null, durationMs: probe.durationMs ?? null,
       hasAudio: probe.hasAudio ?? null,
+      hasVideo: probe.hasVideo ?? null,
       videoCodec: probe.videoCodec ?? null,
       videoProfile: probe.videoProfile ?? null,
       audioTracks: srcTracks,
@@ -311,7 +327,9 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     audio: probe.hasAudio === false ? [] : [{ sourceTrack: 0, codec: 'AAC', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: srcTracks[0]?.language ?? null }],
     captions: [],
     drm: 'clear',
-    summary: describeFit(fit),
+    // what the asset is: 'audio' when the file had no picture (H2b-4)
+    kind: audioOnly ? 'audio' : 'video',
+    summary: summary,
   };
 
   const bytes = srcBytes;
@@ -327,7 +345,9 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     const ac = String(probe.audioTracks?.[0]?.codec ?? '').toLowerCase();
     const okVideo = vc === 'h264' || vc === 'avc1';
     const okAudio = probe.hasAudio === false || !probe.audioTracks?.length || ac === 'aac' || ac === 'mp4a';
-    if (/\.(mp4|m4v|mov)$/i.test(p.sourcePath) && okVideo && okAudio) {
+    if (audioOnly) {
+      log.step('MP4: none for a sound-only asset; HLS and DASH');
+    } else if (/\.(mp4|m4v|mov)$/i.test(p.sourcePath) && okVideo && okAudio) {
       await ctx.progress(96, 'making the MP4');
       const target = join(outDir, 'file.mp4');
       const r = await new Promise<{ code: number | null; err: string }>((resolve) => {
@@ -409,46 +429,53 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   const outputs: { thumbnails: StepOutcome; sprites: StepOutcome; image: StepOutcome } = {
     thumbnails: { state: 'skipped' }, sprites: { state: 'skipped' }, image: { state: 'skipped' },
   };
-  try {
-    await ctx.progress(98, 'choosing a thumbnail');
-    const { extractFrames } = await import('../../media/assetImage');
-    const c = await extractFrames(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
-    outputs.thumbnails = { state: c.length ? 'ok' : 'failed', count: c.length, ...(c.length ? {} : { error: 'no frames could be read' }) };
-    log[c.length ? 'step' : 'warn'](`thumbnails: ${c.length} candidate stills`);
-  } catch (e: any) {
-    outputs.thumbnails = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
-    log.warn(`thumbnails failed: ${outputs.thumbnails.error}`);
-  }
-  try {
-    await ctx.progress(99, 'building the sprite sheets');
-    const sp = await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
-    if (sp) {
-      const tiles = sp.sheets.reduce((a, s) => a + s.tiles, 0);
-      outputs.sprites = { state: 'ok', count: sp.sheets.length, detail: `${tiles} previews, one every ${sp.intervalMs / 1000} s` };
-      log.step(`sprite sheets: ${sp.sheets.length} (${outputs.sprites.detail})`);
-    } else {
-      outputs.sprites = { state: 'skipped', detail: 'no duration or no video to sample' };
-      log.warn('sprite sheets: none made (no duration or no video to sample)');
+  // NOTHING TO LOOK AT in a sound-only asset: no stills, sprite sheets, frame
+  // index or social formats tracking. Its picture is a Cover image, set on
+  // its page or from the name of an image dropped beside it (H2b-3).
+  if (audioOnly) {
+    log.step('sound only: no stills, sprite sheets, frame index or social formats');
+  } else {
+    try {
+      await ctx.progress(98, 'choosing a thumbnail');
+      const { extractFrames } = await import('../../media/assetImage');
+      const c = await extractFrames(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+      outputs.thumbnails = { state: c.length ? 'ok' : 'failed', count: c.length, ...(c.length ? {} : { error: 'no frames could be read' }) };
+      log[c.length ? 'step' : 'warn'](`thumbnails: ${c.length} candidate stills`);
+    } catch (e: any) {
+      outputs.thumbnails = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
+      log.warn(`thumbnails failed: ${outputs.thumbnails.error}`);
     }
-  } catch (e: any) {
-    outputs.sprites = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
-    log.warn(`sprite sheets failed: ${outputs.sprites.error}`);
+    try {
+      await ctx.progress(99, 'building the sprite sheets');
+      const sp = await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+      if (sp) {
+        const tiles = sp.sheets.reduce((a, s) => a + s.tiles, 0);
+        outputs.sprites = { state: 'ok', count: sp.sheets.length, detail: `${tiles} previews, one every ${sp.intervalMs / 1000} s` };
+        log.step(`sprite sheets: ${sp.sheets.length} (${outputs.sprites.detail})`);
+      } else {
+        outputs.sprites = { state: 'skipped', detail: 'no duration or no video to sample' };
+        log.warn('sprite sheets: none made (no duration or no video to sample)');
+      }
+    } catch (e: any) {
+      outputs.sprites = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
+      log.warn(`sprite sheets failed: ${outputs.sprites.error}`);
+    }
+    try {
+      await (await import('./vodImage')).queueAssetImage(p.vodAssetId);
+      outputs.image = { state: 'ok', detail: 'asset image chosen by a vod.image job' };
+      log.step('queued: choose the asset image (vod.image)');
+    } catch (e: any) {
+      outputs.image = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
+      log.warn(`asset image not queued: ${outputs.image.error}`);
+    }
+    // Skip markers: the intro and credits, against the other episodes of its series.
+    await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
+    // Frame index of the rendition players get, for exact frames (services/frames).
+    await (await import('./frameIndex')).queueFrameIndex(p.vodAssetId);
+    // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
+    await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
+    log.step('queued: skip marker detection (vod.markers) and social formats tracking');
   }
-  try {
-    await (await import('./vodImage')).queueAssetImage(p.vodAssetId);
-    outputs.image = { state: 'ok', detail: 'asset image chosen by a vod.image job' };
-    log.step('queued: choose the asset image (vod.image)');
-  } catch (e: any) {
-    outputs.image = { state: 'failed', error: String(e?.message ?? e).slice(0, 400) };
-    log.warn(`asset image not queued: ${outputs.image.error}`);
-  }
-  // Skip markers: the intro and credits, against the other episodes of its series.
-  await (await import('./vodMarkers')).queueMarkerDetection(p.vodAssetId);
-  // Frame index of the rendition players get, for exact frames (services/frames).
-  await (await import('./frameIndex')).queueFrameIndex(p.vodAssetId);
-  // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
-  await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
-  log.step('queued: skip marker detection (vod.markers) and social formats tracking');
   // QC: an uploaded file is confirmed playable the same way a clip is, by
   // decoding what was packaged. Until it has run the asset reads "not checked"
   // and no picker offers it (services/assetReadiness.ts).
@@ -467,7 +494,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     master, mpd,
     renditions: fit.kept.length,
     dropped: fit.dropped.length,
-    summary: describeFit(fit),
+    summary: summary,
     outputs,
   };
 }

@@ -72,7 +72,11 @@ import { ApiError } from '../util/http';
 export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loops' | 'companions'; accepts: FileType[] }[] {
   return [
     ...ingestableTargetKinds().map((kind) => ({ kind, goesTo: 'images' as const, accepts: ['image'] as FileType[] })),
-    ...videoTargetKinds().map((kind) => ({ kind, goesTo: videoTargetFor(kind) === 'loop' ? 'loops' as const : 'media' as const, accepts: ['video'] as FileType[] })),
+    // The Media Library takes sound-only files too, as audio assets (H2b-4);
+    // Loops & Fillers does not: a loop is a picture that plays under a stream.
+    ...videoTargetKinds().map((kind) => videoTargetFor(kind) === 'loop'
+      ? { kind, goesTo: 'loops' as const, accepts: ['video'] as FileType[] }
+      : { kind, goesTo: 'media' as const, accepts: ['video', 'audio'] as FileType[] }),
     // An image to Loops & Fillers as a slate (H2b-3): a stream's fallback still.
     ...slateTargetKinds().map((kind) => ({ kind, goesTo: 'loops' as const, accepts: ['image'] as FileType[] })),
     // Captions and metadata sidecars, attached by name to their video (H2b-2).

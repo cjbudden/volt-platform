@@ -107,6 +107,8 @@ When a file is added, Volt reads its name in the same way and applies only what 
 
 The **Encode** tab shows the **Workflow** and **Ladder profile**, the **Source / mezzanine** it was made from, every rendition with its resolution, bitrate, codec, profile and frame rate, the audio tracks and the captions. For audio it shows the audio encode instead.
 
+An uploaded or dropped file with no picture, such as an MP3, WAV, M4A, AAC or FLAC file, becomes an **audio asset**: Volt encodes its sound alone to one AAC track (128 kb/s stereo, 48 kHz), packaged as HLS and DASH, and the asset plays with the audio player. Cover art inside an MP3 is not a picture, so it does not make the file a video. An audio asset has no stills, previews or social formats; give it a **Cover** image on its page. A file with neither picture nor sound is refused, with the reason on the asset.
+
 **Deliveries** lists each format (HLS, DASH, downloadable files) as **Ready**, **Being made**, **Requested, not made** or **Not requested**; it reports, it does not make files. **Download** lists the files you can take a copy of, with a **Download** button on each. A clip gets an MP4, MP3 or AAC file when it is cut in [Recordings](recordings.md) with an **Output** that includes one. An uploaded file gets an MP4 when it is already H.264 video with AAC sound in an MP4 or MOV file; any other upload plays as HLS and DASH only. Anything Volt has not recorded says **Not recorded**, and **What is not recorded** lists the gaps, so nothing is guessed.
 
 ### Mark the intro, recap and credits (Skip markers)

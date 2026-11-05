@@ -8,8 +8,8 @@
 //      order; a site folder starts with the video rule only; a folder made
 //      with `defaultRules: false` starts with none;
 //    - the dry run shows them like any rule, and a file nothing recognises
-//      (a project file, audio and captions until their runs) still goes to
-//      review;
+//      (a project file) still goes to review; audio goes to the Media
+//      Library as an audio asset (H2b-4);
 //    - a scan of a fresh folder takes a png into the Image Library and an mp4
 //      into the Media Library, with its encode queued;
 //    - a custom rule added later goes ABOVE the defaults and wins;
@@ -72,7 +72,7 @@ const check = (m: string, got: unknown, want: unknown) => {
   check('a full gap halves', D.customOrdinal([{ ordinal: 10 }, { ordinal: 14, builtin: 'images' }]), 12);
   check('no gap at all goes to the end', D.customOrdinal([{ ordinal: 10 }, { ordinal: 11, builtin: 'images' }]), 21);
   check('a site folder starts with the video rule only', D.defaultRulesFor('site').map((r) => r.builtin), ['video']);
-  check('local and bucket folders with images, video, captions and sidecars', [D.defaultRulesFor('local'), D.defaultRulesFor('s3')].map((l) => l.map((r) => r.builtin)), [['images', 'video', 'captions', 'sidecars'], ['images', 'video', 'captions', 'sidecars']]);
+  check('local and bucket folders with images, video, audio, captions and sidecars', [D.defaultRulesFor('local'), D.defaultRulesFor('s3')].map((l) => l.map((r) => r.builtin)), [['images', 'video', 'audio', 'captions', 'sidecars'], ['images', 'video', 'audio', 'captions', 'sidecars']]);
 
   const tag = Date.now().toString(36);
   const acct = (await one<any>(`INSERT INTO accounts(name) VALUES ($1) RETURNING id`, [`wfd-${tag}`]))!.id;
@@ -100,14 +100,15 @@ const check = (m: string, got: unknown, want: unknown) => {
     const made = await call('POST', '/api/watchfolders', { name: 'Agency drop', kind: 'local', config: { path: drop, min_age_ms: 1000 } });
     check('created', made.s, 201);
     const F = made.j.id;
-    check('with four rules in the answer', made.j.rules?.map((r: any) => r.builtin), ['images', 'video', 'captions', 'sidecars']);
+    check('with five rules in the answer', made.j.rules?.map((r: any) => r.builtin), ['images', 'video', 'audio', 'captions', 'sidecars']);
     const got = (await call('GET', `/api/watchfolders/${F}`)).j;
     check('shown as ordinary rules, images first', got.rules.map((r: any) => [r.name, r.match_type, r.target_kind, r.enabled]),
       [['Images to the Image Library', 'extension', 'image', true], ['Video to the Media Library', 'extension', 'vod', true],
-       ['Captions to their video', 'extension', 'companion', true], ['Metadata files to their video', 'extension', 'companion', true]]);
-    check('at the bottom of the order', got.rules.map((r: any) => r.ordinal), [100000, 100010, 100020, 100030]);
+       ['Audio to the Media Library', 'extension', 'vod', true], ['Captions to their video', 'extension', 'companion', true], ['Metadata files to their video', 'extension', 'companion', true]]);
+    check('at the bottom of the order', got.rules.map((r: any) => r.ordinal), [100000, 100010, 100020, 100030, 100040]);
     check('nothing missing', got.defaultsMissing, []);
-    check('the destinations say which file types they take', got.targetKinds.find((k: any) => k.kind === 'vod')?.accepts, ['video']);
+    check('the destinations say which file types they take', got.targetKinds.find((k: any) => k.kind === 'vod')?.accepts, ['video', 'audio']);
+    check('Loops & Fillers takes video only', got.targetKinds.find((k: any) => k.kind === 'loop')?.accepts, ['video']);
 
     console.log('\n== the dry run ==');
     check('a png goes to the Image Library', await kindOf(F, 'Scrubs-s1-e1.png'), 'image');
@@ -117,7 +118,7 @@ const check = (m: string, got: unknown, want: unknown) => {
     const d1 = await dry(F, 'Scrubs-s1-e1.mp4');
     check('the winning rule is the video default', d1.rules.find((r: any) => r.winner)?.name, 'Video to the Media Library');
     check('a project file still goes to review', await kindOf(F, 'edit.prproj'), 'review');
-    check('audio goes to review until audio assets', await kindOf(F, 'theme.mp3'), 'review');
+    check('audio goes to the Media Library as an audio asset (H2b-4)', [await kindOf(F, 'theme.mp3'), await kindOf(F, 'interview.WAV'), await kindOf(F, 'a.flac')], ['vod', 'vod', 'vod']);
     check('a caption goes to its video (companions by name, H2b-2)', await kindOf(F, 'Scrubs-s1-e1_en.vtt'), 'companion');
     check('a partial upload is still refused first', await kindOf(F, 'big.mp4.part'), 'review');
 
@@ -212,10 +213,10 @@ const check = (m: string, got: unknown, want: unknown) => {
       [acct, JSON.stringify({ path: olderDrop })]))!.id;
     await query(`INSERT INTO watchfolder_rules(watchfolder_id, ordinal, name, match_type, pattern, target_kind) VALUES ($1,10,'Posters','glob','*.png','poster')`, [older]);
     check('it keeps its rules and has no defaults', (await call('GET', `/api/watchfolders/${older}`)).j.rules.length, 1);
-    check('all shown as missing', (await call('GET', `/api/watchfolders/${older}`)).j.defaultsMissing, ['images', 'video', 'captions', 'sidecars']);
+    check('all shown as missing', (await call('GET', `/api/watchfolders/${older}`)).j.defaultsMissing, ['images', 'video', 'audio', 'captions', 'sidecars']);
     check('a png is still a poster', await kindOf(older, 'a.png'), 'poster');
     const oa = await call('POST', `/api/watchfolders/${older}/rules/defaults`);
-    check('all added after its own rule', oa.j.rules.map((r: any) => r.builtin ?? r.name), ['Posters', 'images', 'video', 'captions', 'sidecars']);
+    check('all added after its own rule', oa.j.rules.map((r: any) => r.builtin ?? r.name), ['Posters', 'images', 'video', 'audio', 'captions', 'sidecars']);
     check('a png is still a poster (its own rule wins)', await kindOf(older, 'a.png'), 'poster');
     check('a jpg is now an image', await kindOf(older, 'a.jpg'), 'image');
 
@@ -224,7 +225,7 @@ const check = (m: string, got: unknown, want: unknown) => {
     check('created with no rules', [bare.s, bare.j.rules], [201, []]);
     check('a png goes to review', await kindOf(bare.j.id, 'a.png'), 'review');
     const s3 = await call('POST', '/api/watchfolders', { name: 'Bucket', kind: 's3', config: { bucket: 'b', prefix: 'watch/x/' } });
-    check('a bucket folder gets the same four', s3.j.rules?.map((r: any) => r.builtin), ['images', 'video', 'captions', 'sidecars']);
+    check('a bucket folder gets the same five', s3.j.rules?.map((r: any) => r.builtin), ['images', 'video', 'audio', 'captions', 'sidecars']);
   } finally {
     srv.close();
     await pool.end();

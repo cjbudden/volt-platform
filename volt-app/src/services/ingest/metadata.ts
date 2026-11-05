@@ -26,6 +26,9 @@ export interface Extracted {
   type: Sniffed & { kind: MediaKind; declaredMime?: string | null; extensionMismatch: boolean };
   probe?: {
     format?: string; durationSec?: number | null; bitrateKbps?: number | null;
+    /** Whether the file has a picture (cover art is not one) and sound. An
+     *  asset whose probe says hasVideo false is an audio asset (H2b-4). */
+    hasVideo?: boolean; hasAudio?: boolean;
     /** The container in words ("QuickTime / MOV"), the file size ffprobe read, and how many streams it holds. */
     formatLong?: string | null; sizeBytes?: number | null; streams?: number;
     video?: {
@@ -111,6 +114,9 @@ export function interpretProbe(j: any): NonNullable<Extracted['probe']> {
   const subs: any[] = streams.filter((s) => s.codec_type === 'subtitle');
   return {
     format: j?.format?.format_name,
+    // Read by the library and the player to tell an audio asset from a video
+    // (vod.ts audio_only): kept with the facts so a refresh never drops it.
+    hasVideo: !!v, hasAudio: a.length > 0,
     formatLong: str(j?.format?.format_long_name),
     sizeBytes: num(j?.format?.size),
     streams: streams.length,

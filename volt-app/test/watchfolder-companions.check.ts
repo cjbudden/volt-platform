@@ -67,7 +67,7 @@ const SRT = (text: string) => `1\n00:00:00,000 --> 00:00:00,800\n${text}\n`;
   check('no fit, no match', C.bestMatch('Other_en.vtt', cands), null);
   check('the same subfolder first', C.bestMatch('b/Ep_en.vtt', [{ objectKey: 'a/Ep.mp4', assetId: 'x', seenAt: 9 }, { objectKey: 'b/Ep.mp4', assetId: 'y', seenAt: 1 }])?.assetId, 'y');
   check('a waiting video that fits better wins (the caption waits)', C.bestMatch('Show-e10_en.vtt', [{ objectKey: 'Show.mp4', assetId: 'a0' }, { objectKey: 'Show-e10.mp4', assetId: null }])?.assetId, null);
-  check('local and bucket folders start with captions and sidecars too', D.defaultRulesFor('local').map((r) => r.builtin), ['images', 'video', 'captions', 'sidecars']);
+  check('local and bucket folders start with captions and sidecars too', D.defaultRulesFor('local').map((r) => r.builtin), ['images', 'video', 'audio', 'captions', 'sidecars']);
   check('a site folder still starts with video only', D.defaultRulesFor('site').map((r) => r.builtin), ['video']);
 
   const tag = Date.now().toString(36);
@@ -104,14 +104,14 @@ const SRT = (text: string) => `1\n00:00:00,000 --> 00:00:00,800\n${text}\n`;
 
     console.log('\n== the rules ==');
     const got = (await call('GET', `/api/watchfolders/${F}`)).j;
-    check('four default rules, captions and sidecars after video', got.rules.map((r: any) => [r.builtin, r.target_kind]),
-      [['images', 'image'], ['video', 'vod'], ['captions', 'companion'], ['sidecars', 'companion']]);
+    check('five default rules, captions and sidecars after video and audio', got.rules.map((r: any) => [r.builtin, r.target_kind]),
+      [['images', 'image'], ['video', 'vod'], ['audio', 'vod'], ['captions', 'companion'], ['sidecars', 'companion']]);
     check('companion is offered for captions and sidecars', got.targetKinds.find((k: any) => k.kind === 'companion'), { kind: 'companion', goesTo: 'companions', accepts: ['caption', 'sidecar'] });
     const kindOf = async (filename: string) => { const d = (await call('POST', `/api/watchfolders/${F}/dry-run`, { filename, sizeBytes: 1000 })).j.decision; return d.decision === 'accept' ? d.targetKind : 'review'; };
     check('a caption goes to its video', await kindOf('Scrubs-s1-e1_en.vtt'), 'companion');
     check('an srt, a ttml and a dfxp too', [await kindOf('a.srt'), await kindOf('a.ttml'), await kindOf('a.dfxp')], ['companion', 'companion', 'companion']);
     check('a sidecar too', [await kindOf('a.json'), await kindOf('a.nfo'), await kindOf('a.xml'), await kindOf('a.csv')], ['companion', 'companion', 'companion', 'companion']);
-    check('audio still goes to review', await kindOf('theme.mp3'), 'review');
+    check('audio goes to the Media Library (H2b-4)', await kindOf('theme.mp3'), 'vod');
     const r1 = await call('POST', `/api/watchfolders/${F}/rules`, { name: 'Bad', matchType: 'glob', pattern: '*.vtt', targetKind: 'image' });
     check('a caption rule to the Image Library is refused, pointing to companion', [r1.s, /companion/.test(r1.j?.error ?? r1.j?.message ?? '')], [400, true]);
     const r2 = await call('POST', `/api/watchfolders/${F}/rules`, { name: 'Bad', matchType: 'glob', pattern: '*.png', targetKind: 'companion' });

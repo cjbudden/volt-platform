@@ -22,11 +22,13 @@
 //  attached by name to the video they go with (companionIngest.ts), waiting up
 //  to 24 hours for it.
 //
-//  WHAT IS NOT HERE YET, and why: audio-only files need an audio asset and an
-//  audio-only ladder (H2b-4). Until then they go to review, which is the
-//  honest answer. A folder at a site gets the video rule only: the agent does
-//  not carry images or companions across yet (H2b-4), and a rule there would
-//  accept files that are then refused.
+//  AUDIO (H2b-4) goes to the Media Library as an AUDIO ASSET: the same VOD
+//  path as a video, and the encode sees there is no picture and makes a
+//  sound-only rendition instead of a video ladder (vodEncode.ts).
+//
+//  WHAT IS NOT HERE YET, and why: a folder at a site gets the video rule only.
+//  The agent does not carry images, audio or companions across yet (H2b-5),
+//  and a rule there would accept files that are then refused.
 //
 //  `builtin` marks a row as one of these, so "Add default rules" on an older
 //  folder adds only the ones it lacks and the console can label them. Editing
@@ -93,11 +95,13 @@ export interface DefaultRule {
   targetKind: string;
 }
 
-const RULES: Record<'image' | 'video' | 'caption' | 'sidecar', DefaultRule> = {
+const RULES: Record<'image' | 'video' | 'audio' | 'caption' | 'sidecar', DefaultRule> = {
   image: { builtin: 'images', name: 'Images to the Image Library', matchType: 'extension',
     pattern: TYPE_EXTENSIONS.image.join(', '), targetKind: 'image' },
   video: { builtin: 'video', name: 'Video to the Media Library', matchType: 'extension',
     pattern: TYPE_EXTENSIONS.video.join(', '), targetKind: 'vod' },
+  audio: { builtin: 'audio', name: 'Audio to the Media Library', matchType: 'extension',
+    pattern: TYPE_EXTENSIONS.audio.join(', '), targetKind: 'vod' },
   caption: { builtin: 'captions', name: 'Captions to their video', matchType: 'extension',
     pattern: TYPE_EXTENSIONS.caption.join(', '), targetKind: 'companion' },
   sidecar: { builtin: 'sidecars', name: 'Metadata files to their video', matchType: 'extension',
@@ -106,7 +110,7 @@ const RULES: Record<'image' | 'video' | 'caption' | 'sidecar', DefaultRule> = {
 
 /** The defaults a folder of this kind starts with, in order. */
 export function defaultRulesFor(folderKind: string): DefaultRule[] {
-  return folderKind === 'site' ? [RULES.video] : [RULES.image, RULES.video, RULES.caption, RULES.sidecar];
+  return folderKind === 'site' ? [RULES.video] : [RULES.image, RULES.video, RULES.audio, RULES.caption, RULES.sidecar];
 }
 
 /** Where the defaults start. Far above any hand-made set, so custom rules fit below. */

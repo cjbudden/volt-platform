@@ -458,9 +458,12 @@ vodRouter.get(
     // rendition); an uploaded file with no stream is judged by the files it
     // produced. Asked here, once, rather than guessed from a black rectangle.
     const streamId = row.channel_id ?? row.event_id;
+    // A file with no picture (H2b-4) says so in its probe, from the ingest or
+    // the encode, whichever has read it.
     const audioOnly = streamId
       ? isAudioOnly(streamId)
-      : !!(row.export_mp3_key || row.export_m4a_key) && !row.progressive_key;
+      : (!!(row.export_mp3_key || row.export_m4a_key) && !row.progressive_key)
+        || row.ingest?.probe?.hasVideo === false || row.encode_result?.probe?.hasVideo === false;
     // ?include=linkedContent: the records this one links to and the ones linking
     // to it, one level deep, as summaries (services/contentLinks.ts). Absent, the
     // response is exactly what it was.

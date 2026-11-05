@@ -223,7 +223,15 @@ def build_encode_cmd(cfg, work_dir):
     fps = cfg["fps"]
     gpu = bool(cfg.get("gpu"))
     ladder = cfg["ladder"]
-    if not ladder:
+    # SOUND ONLY (build queue H2b-4): a file with no picture is an audio asset,
+    # encoded to its sound alone. That is the one job with no rungs; for any
+    # other job an empty ladder is still a control plane fault, refused here.
+    audio_only = bool(cfg.get("audio_only"))
+    if audio_only:
+        ladder = []
+        if not cfg.get("has_audio", True):
+            die("an audio-only job for a file with no sound: there is nothing to encode")
+    elif not ladder:
         die("the job config has no rungs; the control plane must not enqueue an empty ladder")
 
     # -progress pipe:2: machine-readable progress on stderr (key=value lines) that run()
@@ -411,6 +419,7 @@ def main():
         "renditions": [{"label": p["label"], "height": p["height"],
                         "bitrate_kbps": p["bitrate_kbps"]} for p in parts],
         "has_audio": audio_path is not None,
+        "audio_only": bool(cfg.get("audio_only")),
         # audio and video segment grids line up (see ZERO_START): the asset can be cut at a break
         "zero_start": bool(ZERO_START),
         "segment_seconds": cfg["segment_seconds"],
