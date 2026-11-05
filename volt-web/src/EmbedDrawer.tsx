@@ -4,7 +4,7 @@ import { pressable } from './a11y'
 import { FormStatus } from './notices'
 import { useAccess } from './access'
 import VoltPlayerView from './VoltPlayerView'
-import type { PlayerState, Theme } from '@volt/player'
+import type { BrandMark, PlayerState, Theme } from '@volt/player'
 
 /* ============================================================================
    EMBED PLAYER: the tag a web developer pastes to put this channel or event on
@@ -19,6 +19,14 @@ import type { PlayerState, Theme } from '@volt/player'
    embed the same event differently and nothing here is saved. The key is the
    one thing it cannot carry by itself: keys are stored hashed, so the drawer
    offers to create one for this embed, shown once, rather than a placeholder.
+
+   THE PREVIEW IS THIS CHANNEL (Christian, 6 Nov). Opened from a channel that
+   is running, it plays that channel's own output in the viewer skin with the
+   look chosen here: its programme, metadata, Up next and watermark, exactly
+   what a site visitor gets from the tag. A preview of somebody else's
+   programme ("The Morning Show") made people think the tag was wrong. When the
+   channel is not running there is nothing to play, so it shows the player
+   with the channel's own name and says so: never made-up programmes.
    ========================================================================== */
 
 export interface EmbedTarget {
@@ -27,6 +35,12 @@ export interface EmbedTarget {
   name: string
   /** Event start (ISO), for the preview's countdown. */
   startsAt?: string | null
+  /** The channel's output to play in the preview, when it is running (console origin URL). */
+  previewSrc?: string | null
+  /** The channel's watermark, drawn over the preview as viewers' players draw it. */
+  brandMark?: BrandMark | null
+  /** False when the channel is private: the embed's viewers cannot play it yet. */
+  isPublic?: boolean
 }
 
 type EventPreview = 'pre' | 'paywall' | 'live' | 'postponed' | 'replay'
@@ -48,11 +62,8 @@ function sampleState(target: EmbedTarget, skin: string, phase: EventPreview, now
     status: 'ready', access: { mode: null, message: null, products: [] },
   }
   if (target.kind === 'channel') {
-    const schedule = [
-      { id: 'p1', title: 'The Morning Show', subtitle: 'News, weather and guests', startsAt: now - 30 * 60_000, endsAt: now + 30 * 60_000 },
-      { id: 'p2', title: 'Midday Report', startsAt: now + 30 * 60_000, endsAt: now + 90 * 60_000 },
-    ]
-    return { ...base, schedule, programme: schedule[0], nextProgramme: schedule[1], canStartOver: true }
+    // Not running: the player as it frames THIS channel, with no invented programme.
+    return { ...base, schedule: [], programme: null, nextProgramme: null, canStartOver: false }
   }
   if (skin !== 'event' || phase === 'live') return { ...base, event: null, presentation: 'live', msToStart: null }
   const event = {
@@ -170,6 +181,8 @@ export function EmbedDrawer({ target, onClose }: { target: EmbedTarget; onClose:
     try { await navigator.clipboard.writeText(snippet); setCopied(true); setTimeout(() => setCopied(false), 1600) } catch { setErr('Select the snippet and copy it.') }
   }
 
+  // A running channel plays itself; otherwise the player is drawn with this channel's name.
+  const playLive = !isEvent && !!target.previewSrc
   const demo = sampleState(target, skin, phase, now)
   const check = (label: string, value: boolean, set: (v: boolean) => void, hint?: string) => (
     <label className="embed-check"><input type="checkbox" checked={value} onChange={e => set(e.target.checked)} /><span>{label}{hint && <small>{hint}</small>}</span></label>
@@ -285,9 +298,20 @@ export function EmbedDrawer({ target, onClose }: { target: EmbedTarget; onClose:
               )}
             </div>
             <div style={{ maxWidth: size === 'fixed' ? Math.max(240, width) : undefined }}>
-              <VoltPlayerView key={skin} skin={skin} theme={theme} demo={demo} />
+              {playLive
+                ? <VoltPlayerView key={`live-${skin}`} src={target.previewSrc} live autoplay skin={skin} theme={theme} extra={{ brandMark: target.brandMark ?? null }} />
+                : <VoltPlayerView key={skin} skin={skin} theme={theme} demo={demo} />}
             </div>
-            <div className="hintxt" style={{ marginTop: 6 }}>Sample data: the embed shows this {isEvent ? 'event' : 'channel'} live.</div>
+            <div className="hintxt" style={{ marginTop: 6 }}>
+              {playLive ? <>{target.name}, playing now, as the tag shows it to viewers.</>
+                : isEvent ? <>Sample data: the embed shows this event live.</>
+                : <>{target.name} is not running, so there is nothing to play here. The tag plays it once it is on air.</>}
+            </div>
+            {!isEvent && target.isPublic === false && (
+              <div className="hintxt" style={{ marginTop: 4, color: 'var(--warn, #e0a030)' }}>
+                {target.name} is private: the preview plays here because you are signed in to the console, but visitors to a site with this tag see it as not available until you make the channel public.
+              </div>
+            )}
 
             <div className="sec-label" style={{ marginTop: 16 }}>Tag</div>
             <pre className="embed-code">{snippet}</pre>

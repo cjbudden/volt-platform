@@ -378,7 +378,8 @@ export default function ChannelDetail({ id, onBack, onOpenSettings }: { id: stri
       {qcOpen && <QcPanel d={d} onClose={() => setQcOpen(false)} onRefresh={load} />}
 
       {shareOpen && <ShareDrawer target={{ kind: 'channel', id: d.id, name: d.name }} onClose={() => setShareOpen(false)} />}
-      {embedOpen && <EmbedDrawer target={{ kind: 'channel', id: d.id, name: d.name }} onClose={() => setEmbedOpen(false)} />}
+      {embedOpen && <EmbedDrawer target={{ kind: 'channel', id: d.id, name: d.name, isPublic: !!d.onAir,
+        previewSrc: d.status === 'live' ? originUrl(`/origin/${d.id}/live/master.m3u8`) : null }} onClose={() => setEmbedOpen(false)} />}
       {delOpen && <DeleteChannelDialog id={d.id} onClose={() => setDelOpen(false)} onDeleted={() => { setDelOpen(false); onBack() }} />}
 
       {confirmStart && (

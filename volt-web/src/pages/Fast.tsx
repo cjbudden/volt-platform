@@ -200,6 +200,14 @@ function FastBuilder({ id }: { id: string }) {
   const [stitched, setStitched] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [embedOpen, setEmbedOpen] = useState(false)
+  // The channel's own output for the embed preview, read when the drawer opens (null when it is not running).
+  const [embedSrc, setEmbedSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (!embedOpen) return
+    let gone = false
+    fastApi.channel(id).then(c => { if (!gone) setEmbedSrc(c.playout?.fresh && c.playout.status === 'running' ? c.urls?.hls ?? null : null) }).catch(() => { if (!gone) setEmbedSrc(null) })
+    return () => { gone = true }
+  }, [embedOpen, id])
   const [qcOpen, setQcOpen] = useState(false)
   // The playout's state for the header and QC, polled on its own so it never resets the run order being edited.
   const [playout, setPlayout] = useState<Playout | null>(null)
@@ -458,7 +466,7 @@ function FastBuilder({ id }: { id: string }) {
       {qcOpen && <FastQcDrawer channelId={id} name={ch.name} onAir={ch.onAir} active={active} settings={chSettings} urls={urls} stitched={stitched}
         onClose={() => setQcOpen(false)} onOpen={(v) => { setQcOpen(false); setView(v) }} />}
       {shareOpen && <ShareDrawer target={{ kind: 'channel', id, name: ch.name }} onClose={() => setShareOpen(false)} />}
-      {embedOpen && <EmbedDrawer target={{ kind: 'channel', id, name: ch.name }} onClose={() => setEmbedOpen(false)} />}
+      {embedOpen && <EmbedDrawer target={{ kind: 'channel', id, name: ch.name, isPublic: !!ch.onAir, previewSrc: embedSrc, brandMark: brandMarkOf(chSettings) }} onClose={() => setEmbedOpen(false)} />}
 
       {view === 'build' && tab === 'order' && (
         <div className="fast-cols">
