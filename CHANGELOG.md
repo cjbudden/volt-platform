@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.48.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · Watchfolders: A new watchfolder now starts with default rules by file type: images go to the Image Library and video to the Media Library from the first drop. They are ordinary rules you can edit, move or switch off, your own rules always come first, and Add default rules gives them to an existing folder without changing what it does today.
+- improved · Watchfolders: A rule can only send a type of file somewhere that takes it in: the rule form offers the right places for a pattern such as *.png or *.mp4, and a rule that would send images to the Media Library is refused with the reason. Every rule now has an On and Off switch.
+
+### Internal
+
+- added · Watchfolders: watchfolder-defaults suite (81 assertions); extension rules take a list; migration 0129 adds watchfolder_rules.builtin; the docs seed shows the default rules.
+
 ## 0.47.0 (2026-11-05)
 
 ### Product (in customer release notes)
