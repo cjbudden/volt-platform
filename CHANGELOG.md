@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.49.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · Watchfolders: Captions (SRT, WebVTT, TTML/DFXP) and metadata files (JSON, XML/NFO, CSV) dropped into a watchfolder are attached to the video they are named after: Scrubs-s1-e1_en.vtt gives Scrubs-s1-e1.mp4 an English subtitle track in HLS and DASH, with sdh and forced read from the name and the most specific name winning. A file that arrives before its video waits up to 24 hours for it, then goes to review.
+- changed · Watchfolders: New watchfolders start with two more default rules, Captions to their video and Metadata files to their video, and Add default rules adds them to older folders. Metadata files are attached for someone to review and apply, never applied by themselves.
+
+### Internal
+
+- added · Tests: watchfolder-companions suite (67 assertions): matching by name, waiting and the 24 hour review, the 25 MB limit, sidecars, unreadable captions and tracks in HLS and DASH, against a real database and real files.
+
 ## 0.48.0 (2026-11-05)
 
 ### Product (in customer release notes)
