@@ -1,6 +1,6 @@
 {
   "_comment": "Migrations and boot schema statements that have shipped (build queue D2). check-migrations.mjs does not judge them again but refuses an edit or removal. release.mjs adds each release's files; nothing else should change this file.",
-  "release": "0.51.0",
+  "release": "0.52.0",
   "migrations": {
     "0001_init.sql": "0c5653a0d33cd6f7e0bc826365d65f4779430f01c74274f4379697d45edfd0fc",
     "0002_jobs.sql": "6b3d27e80a234d1d568bf2391823fa7d87e5da1673582d78ff34c53052244d3c",
@@ -117,7 +117,8 @@
     "0127_hybrid_sites.sql": "d5dde1f37a40491781e03d65052e29588819cfd661ef5061e825cd5c84f179c5",
     "0128_site_watchfolders.sql": "7200271184b2b66231eedcf93eff86f0fefcf89ebe8c7d8066876207a67612bc",
     "0129_watchfolder_default_rules.sql": "f867478c4a760184882acbfb32b5af9439bbad3331fd2879df46533d11fe4886",
-    "0130_watchfolder_image_types.sql": "d639e78df927bd7d0355c312759606a34f610f5f3446a30d8f09005949f9abe7"
+    "0130_watchfolder_image_types.sql": "d639e78df927bd7d0355c312759606a34f610f5f3446a30d8f09005949f9abe7",
+    "0131_site_review_action.sql": "f088af62f1a758360068927adf00937008b539dc33fbb1be0d46e4bdaf88c32b"
   },
   "bootSchema": [
     "0443d7e75c3053e006f05e5c5a4f98cceb18844321c9eb5fec2840994b46b008",

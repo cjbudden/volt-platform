@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.52.0 (2026-11-05)
+
+### Product (in customer release notes)
+
+- added · Channels: FAST channels can now round programmes up to the next 1 or 2 minutes, as well as 5, 15 or 30 minutes or the hour, with the gap filled by the channel's loop or slate.
+- fixed · Player: On live and FAST channels the player now names the programme actually on air. When programme markers overlapped, it could keep showing the previous programme, with Up next and Starting soon for one that had already started.
+- added · Watchfolders: On-prem watchfolders at a Hybrid Site now take in images, slates, audio, captions and metadata files, not only video. The site agent uploads each accepted file and Volt takes it in as from a local folder; a caption sent to review is moved into the review folder at the site. New site folders get every default rule, and Add default rules gives older ones the rest. Update site agents to 0.4.0.
+- fixed · Channels: The Embed player preview now plays the channel it was opened from, with its own programme, details, Up next and watermark, exactly as the tag shows it to viewers. A channel that is not running shows its own name instead of a sample programme, and a private channel says that site visitors cannot play it until it is public.
+- changed · Player: The programme card at the bottom left now shows Now playing for about three seconds when playback starts and when a new programme starts, then fades. It has a close button, still shows on pause, and never appears for ads, ad breaks or the channel's loop between programmes, where the countdown at the top right says what is coming.
+
 ## 0.51.0 (2026-11-05)
 
 ### Product (in customer release notes)
