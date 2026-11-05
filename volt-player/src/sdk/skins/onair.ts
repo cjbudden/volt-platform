@@ -76,12 +76,12 @@ export function onAir(c: SkinContext, variant: 'overlay' | 'console' = 'overlay'
   // An image that does not load is left out, never drawn as a broken icon.
   let badSrc = '';
   img.addEventListener('error', () => { badSrc = img.getAttribute('src') ?? ''; show(img, false); });
-  if (!document.getElementById('vp-onair-css')) {
-    const s = document.createElement('style');
-    s.id = 'vp-onair-css';
-    s.textContent = ON_AIR_CSS;
-    document.head.appendChild(s);
-  }
+  // Injected once per page, but REFRESHED when it differs: a page left open
+  // across an update (or a dev hot reload) otherwise keeps the old rules, which
+  // is how the close button ended up beside the title instead of top right.
+  let css = document.getElementById('vp-onair-css') as HTMLStyleElement | null;
+  if (!css) { css = document.createElement('style'); css.id = 'vp-onair-css'; document.head.appendChild(css); }
+  if (css.textContent !== ON_AIR_CSS) css.textContent = ON_AIR_CSS;
 
   // The intro runs once per programme, from the moment it is actually playing
   // (so a player that loads paused, or buffers first, still gets its few seconds).
@@ -168,12 +168,12 @@ export const ON_AIR_CSS = `
 .vp .vp-pc{position:absolute;left:16px;bottom:var(--vp-lift,16px);transition:bottom .25s ease,opacity .4s ease;opacity:1;z-index:6;display:flex;gap:14px;width:min(520px,calc(100% - 32px));padding:14px 40px 14px 14px;background:rgba(14,16,22,.9);border-radius:calc(var(--vp-radius) - 2px);color:#fff;box-shadow:0 12px 40px rgba(0,0,0,.45);pointer-events:none}
 .vp .vp-pc.console{bottom:16px}
 .vp .vp-pc.vp-pc-out{opacity:0}
-.vp .vp-pc .vp-pc-x{position:absolute;top:6px;right:6px;width:28px;height:28px;padding:0;pointer-events:auto;color:rgba(255,255,255,.7);background:transparent;border:0;border-radius:6px;cursor:pointer}
-.vp .vp-pc .vp-pc-x:hover,.vp .vp-pc .vp-pc-x:focus-visible{color:#fff;background:rgba(255,255,255,.12)}
+.vp .vp-pc .vp-btn.vp-pc-x{position:absolute;top:8px;right:8px;z-index:1;width:28px;height:28px;padding:0;pointer-events:auto;color:rgba(255,255,255,.7);background:transparent;border:0;border-radius:6px;cursor:pointer}
+.vp .vp-pc .vp-btn.vp-pc-x:hover,.vp .vp-pc .vp-btn.vp-pc-x:focus-visible{color:#fff;background:rgba(255,255,255,.12)}
 .vp.vp-gfx-bottom .vp-pc{bottom:auto;top:56px}
 .vp.vp-gfx-bottom .vp-pc.console{top:14px}
 .vp .vp-pc img{width:128px;height:72px;object-fit:cover;border-radius:6px;flex:none;background:#222}
-.vp .vp-pc-b{min-width:0}
+.vp .vp-pc-b{min-width:0;flex:1 1 auto}
 .vp .vp-pc small{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vp-primary)}
 .vp .vp-pc b{display:block;font-size:16px;line-height:1.3;margin:2px 0}
 .vp .vp-pc-m,.vp .vp-pc-n{display:block;font-size:12px;color:rgba(255,255,255,.7)}
@@ -183,7 +183,7 @@ export const ON_AIR_CSS = `
    The card shrinks to what is on and what is next, so it never covers the picture. */
 @container (max-width:640px){.vp .vp-pc img{width:96px;height:54px}.vp .vp-pc p{-webkit-line-clamp:2}}
 @container (max-width:480px){
-  .vp .vp-pc{left:10px;width:auto;max-width:calc(100% - 20px);padding:8px 12px;gap:0}
+  .vp .vp-pc{left:10px;width:auto;max-width:calc(100% - 20px);padding:8px 40px 8px 12px;gap:0}
   .vp .vp-pc img,.vp .vp-pc p,.vp .vp-pc-m{display:none}
   .vp .vp-pc b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .vp .vp-pc small{font-size:10px}
