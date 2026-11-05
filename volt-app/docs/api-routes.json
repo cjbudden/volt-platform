@@ -5562,6 +5562,24 @@
   "group": "/api/site-agent"
  },
  {
+  "method": "GET",
+  "path": "/api/site-agent/watchfolders/:id/reviews",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/watchfolders/:id/reviews/:itemId",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
   "method": "POST",
   "path": "/api/site-agent/watchfolders/:id/scanned",
   "api": "machine",

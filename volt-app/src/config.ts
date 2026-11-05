@@ -319,6 +319,11 @@ export const config = {
     s3Endpoint: process.env.INGEST_S3_ENDPOINT || undefined,
     // S3 watchfolders are mirrored here before the local scanner sees them.
     s3StagingDir: process.env.INGEST_S3_STAGING_DIR ?? `${process.cwd()}/uploads-staging/s3-watch`,
+    // ON-PREM (SITE) FOLDERS: an image, slate or companion the site agent has
+    // uploaded waits here until it is taken in (build queue H2b-5). A copy:
+    // the original stays on the customer's storage, so a lost copy is
+    // uploaded again rather than missed.
+    siteStagingDir: process.env.SITE_STAGING_DIR ?? `${process.cwd()}/uploads-staging/site-watch`,
     // S3 WATCH FOLDERS, EVENT-DRIVEN (build queue 2.6). The queue the bucket's
     // ObjectCreated notifications land on (deploy/terraform/watchfolders.tf).
     // Set: the scheduler fetches each new object as it arrives and walks the

@@ -20,7 +20,7 @@ A watchfolder is a folder Volt keeps an eye on. Files dropped into it are sorted
 - **Sorting by name.** Rules match the file name, such as `slate_*.png`, and say what kind of file it is. The first rule that matches wins.
 - **Nothing lost on a guess.** A file no rule accepts, or that a rule refuses, is moved to the folder's review folder and listed in the **Queue** until someone deals with it.
 - **Checking before you drop.** **Try a filename** shows what would happen to a file before it arrives.
-- **Folders on your own storage.** With the Hybrid Sites add-on, a watchfolder can be on a NAS or server at one of your sites. The site's agent sorts it with the same rules, keeps refused files at the site and uploads the accepted video to Volt.
+- **Folders on your own storage.** With the Hybrid Sites add-on, a watchfolder can be on a NAS or server at one of your sites. The site's agent sorts it with the same rules, keeps refused files at the site and uploads accepted files to Volt: video, audio, images, slates, captions and metadata files.
 
 Media operations staff and librarians use it day to day; an administrator usually sets the folders up.
 
@@ -45,7 +45,7 @@ Volt scans every watchfolder automatically every minute. A file still being copi
 With the Hybrid Sites add-on, a watchfolder can be on storage at one of your [sites](hybrid-sites.md), such as a NAS share in your broadcast centre. The site's agent scans it there, with the rules you set on this page.
 
 1. Choose **New watchfolder**, then **On-prem, at a site**. (Without the add-on the form has no such choice.)
-2. Pick the **Site**, type a **Name** and the folder's path **on the site's server**, such as `/mnt/nas/drop`, then choose **Create**. The folder starts with the default rule for video (only video crosses from a site for now).
+2. Pick the **Site**, type a **Name** and the folder's path **on the site's server**, such as `/mnt/nas/drop`, then choose **Create**. The folder starts with the same default rules by file type as any other watchfolder.
 3. Add rules as for any watchfolder.
 
 ![The New watchfolder form with On-prem, at a site chosen: the name, the site, and the folder's path on the site's server](/img/screens/watchfolders-on-prem.png)
@@ -55,7 +55,10 @@ What happens to a file in an on-prem folder:
 - The agent waits until the file has stopped changing for 10 seconds, then decides it with the folder's rules.
 - A file the rules refuse goes to the review folder **at the site** and is listed in the **Queue** here. It never leaves your network.
 - An accepted video file is uploaded to Volt (**Upload and encode in the cloud**), then goes through your [Ingest Rules](ingest-rules.md) and is encoded like any upload. A dropped connection or a restarted server does not start the upload again: it carries on from where it stopped.
-- Only video crosses to Volt from a site for now: a file whose rule sends it to the Image Library is marked **Failed** with the reason, and stays where it is.
+- Audio is uploaded and becomes an audio asset in the Media Library, like an audio file you upload.
+- Images, slates, captions and metadata files are uploaded too, then taken in exactly as from a watchfolder on Volt: images to the Image Library (and, by name, to their video as a poster or thumbnail), slates to Loops & Fillers, captions and metadata files to their video. The original always stays at the site.
+- A caption that arrives before its video waits for it, up to 24 hours, without being uploaded twice. If it then goes to **Needs review**, the agent moves the file into the review folder **at the site**; until it has, the entry says "Waiting for the site agent to move it into the review folder".
+- A file over its limit is not uploaded at all: an image over the folder's size limit is marked **Failed**, a caption or metadata file over 25 MB goes to **Needs review** at the site.
 
 The folder's page says which site it is on (**On** and the site's name) and when the agent last looked at it. There is no **Scan now**: the agent looks at the folder every few seconds. **Where it is encoded** shows **Upload and encode in the cloud**; **Encode at site**, with encoders at your site, comes with a later release of the add-on.
 
@@ -79,7 +82,7 @@ They are ordinary rules: **Try a filename** shows them, and you can move, switch
 - **On** and **Off** on a rule's row switch it off and on again. A file the rule would have caught goes to the rules below it, or to review. The rule keeps its place in the list.
 - **A file nothing recognises still goes to review**, such as a project file or a PDF.
 - **Folders made before the default rules** keep exactly the rules they have. **Add default rules**, next to **Rules**, adds the ones the folder lacks after its own rules, so nothing it does today changes. The button also appears when a default rule has been deleted, and adds it back.
-- An on-prem folder starts with the video rule only.
+- An on-prem folder starts with the same default rules. One made before images, audio and captions crossed from a site has the video rule only; **Add default rules** adds the rest.
 
 ### Captions and metadata files by name
 
@@ -91,7 +94,7 @@ A caption or metadata file is attached to the video whose file name, without its
 - **Either order.** A caption that arrives before its video is **Waiting**, with "waiting for its video" under it, and is attached on the pass after the video lands. With no video after **24 hours** it goes to **Needs review** with the reason, and the file to the review folder. Drop the video and **Reprocess** it, or add the file on the asset page.
 - **A metadata file is attached, not applied.** Its values wait on the asset's **Companion files** tab for someone to review and apply them.
 - **Up to 25 MB each**, the same limit as on the asset page. A larger file goes to **Needs review** at once. A caption Volt cannot read is attached switched off, and the reason says so; the asset page shows what is wrong with it.
-- Captions and metadata files are not taken in from an on-prem folder yet.
+- On-prem folders work the same way: the site's agent uploads the file, and Volt attaches it.
 
 ### Artwork by name: thumbnails, posters and other image types
 
@@ -113,7 +116,7 @@ An image the Image Library takes in can also become one of a video's images: its
 - **Never refused for its shape.** A poster that is not 2:3, or a thumbnail smaller than recommended, is attached anyway; the entry and **Image** on the asset's **Preview** say what does not fit.
 - **Words that are not image types**: `brand` or `logo`, `watermark` and `slate` at the end of a name file the image in the Image Library as that kind (`Station-logo.png` is a brand image), attached to nothing.
 - **No type word, or your own words**: give the rule an **Image type** (see [Add rules](#add-rules)). A rule for `*_key_art.jpg` with the image type Hero backdrop makes every matching image the Hero backdrop of its video. A type word in the name still wins, unless you clear **A type word in the name wins** on the rule.
-- **Where Volt looks**: videos this watchfolder has taken into the Media Library, the longest matching name first, as for captions. Images from an on-prem folder are not taken in yet.
+- **Where Volt looks**: videos this watchfolder has taken into the Media Library, the longest matching name first, as for captions. Images from an on-prem folder are matched the same way.
 
 ### Add rules
 
@@ -250,7 +253,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Scan now** is greyed out | The watchfolder is switched off | Choose **▶ Switch on** |
 | No **Scan now** on a folder that says **On** and a site | An on-prem folder: the site's agent scans it | Nothing to do. If **Last pass** is old, check the site's server on [Sites](hybrid-sites.md) |
 | No **On-prem, at a site** in the New watchfolder form | The account does not have the Hybrid Sites add-on | Ask Volt about the add-on |
-| "goes to the Image Library, which an on-prem folder does not feed yet" | A file in an on-prem folder matched a rule for images | Put images in a watchfolder on Volt, or upload them |
+| "the file changed while it was uploading" | An on-prem file arrived different from the file the agent accepted (it was replaced during the upload) | Nothing to do: the new file is taken in as a new entry on the next pass |
+| "the site agent could not move it to the review folder" | Volt sent an on-prem file to review, but it was no longer in the watchfolder at the site | Find the file at the site, or **Dismiss** the entry |
 | "the site agent could not move it back" | After **Reprocess**, the file was no longer in the review folder at the site | Put the file back in the watchfolder at the site yourself, or **Dismiss** the entry |
 | "Encode at site arrives with site encoders" | Through the API, an on-prem folder was given the placement `encode_site` | Use `upload_cloud` for now |
 

@@ -28,15 +28,31 @@
 //       so it marks the item `site_action = 'return'`; the agent moves the
 //       file back out of the review folder and reports it.
 //
+//  IMAGES, SLATES AND COMPANIONS (build queue H2b-5) cross the same way: the
+//  agent uploads them on the same tus path, opened for the item. The copy
+//  lands in the folder's staging root on this server (siteStagingRoot, like
+//  an S3 folder's mirror) and is then taken in by the SAME passes a local
+//  drop uses (ingest.ts, slateIngest.ts, companionIngest.ts, imageAttach.ts),
+//  only over files that have landed. A caption that arrives before its video
+//  waits there; the pass runs again after every agent pass, so it attaches
+//  when the video lands. A companion sent to review is moved into the review
+//  folder AT THE SITE by the agent (`site_action = 'review'`), never here.
+//  Audio is a Media Library target like video, so it crosses with it.
+//
 //  A HOST WAITING FOR APPROVAL DOES NO WORK: every route here refuses it.
 //  Placement 'encode_site' is H4; such a folder is scanned but nothing is
 //  uploaded (the API does not yet accept it).
 // ============================================================================
+import { mkdir, rename, copyFile, unlink, stat } from 'node:fs/promises';
+import { join, sep, extname } from 'node:path';
 import { query, one } from '../../db';
 import { ApiError, notFound, conflict, badRequest } from '../../util/http';
-import { pgItemStore, toScanFolder } from '../watchfolder/store';
-import { classify } from '../watchfolder/rules';
+import { pgItemStore, toScanFolder, siteStagingRoot } from '../watchfolder/store';
+import { classify, quarantineKey } from '../watchfolder/rules';
 import { videoTargetFor, videoTargetKinds, videoTypeOf } from '../watchfolder/videoIngest';
+import { libraryKindFor, ingestableTargetKinds, DEFAULT_MAX_INGEST_BYTES } from '../watchfolder/ingest';
+import { isSlateTarget, slateTargetKinds, SLATE_MAX_BYTES } from '../watchfolder/slateIngest';
+import { isCompanionTarget, companionTargetKinds, COMPANION_MAX_BYTES } from '../watchfolder/companionIngest';
 import type { SitePrincipal } from './sites';
 
 export const PLACEMENTS = ['upload_cloud', 'encode_site'] as const;
@@ -45,6 +61,39 @@ export type Placement = typeof PLACEMENTS[number];
 export const PLACEMENTS_BUILT: readonly Placement[] = ['upload_cloud'];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * What an accepted site file becomes on this side: a Media Library or Loops &
+ * Fillers upload (video and audio, the upload path), or a FILE taken in by the
+ * local-drop passes once its copy lands (images, slates, companions).
+ */
+export function siteTargetFor(targetKind?: string | null): 'vod' | 'loop' | 'file' | null {
+  const v = videoTargetFor(targetKind);
+  if (v) return v;
+  if (libraryKindFor(targetKind) || isSlateTarget(targetKind) || isCompanionTarget(targetKind)) return 'file';
+  return null;
+}
+export function siteTargetKinds(): string[] {
+  return [...videoTargetKinds(), ...ingestableTargetKinds(), ...slateTargetKinds(), ...companionTargetKinds()];
+}
+
+/** The type an upload records, from the name: video, or audio for an audio asset (H2b-4). */
+function mediaTypeOf(name: string): string {
+  const audio: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac' };
+  return audio[extname(name).toLowerCase()] ?? videoTypeOf(name);
+}
+
+/**
+ * The most a file of this target may weigh, with the words the local passes
+ * use when they refuse it, so a 2 GB TIFF is refused at the decision instead
+ * of after crossing the customer's line. Null: no ceiling here (video).
+ */
+function ceilingFor(targetKind: string, folderConfig: any): { max: number; companion: boolean } | null {
+  if (isCompanionTarget(targetKind)) return { max: COMPANION_MAX_BYTES, companion: true };
+  if (isSlateTarget(targetKind)) return { max: SLATE_MAX_BYTES, companion: false };
+  if (libraryKindFor(targetKind)) return { max: Number(folderConfig?.max_ingest_bytes ?? DEFAULT_MAX_INGEST_BYTES), companion: false };
+  return null;
+}
 
 /** A pending host may heartbeat and read config, nothing more. */
 export function requireApprovedHost(p: SitePrincipal) {
@@ -127,17 +176,22 @@ export async function recordDecision(p: SitePrincipal, folderId: string, raw: an
       objectKey, checksum, sizeBytes, status: 'seen',
       targetKind: d.targetKind, workflow: d.workflow, matchedRuleId: d.ruleId,
     });
-    // ONLY VIDEO CROSSES TO THE CLOUD FROM A SITE FOR NOW (VOD and loops).
-    // An image target would otherwise wait for ever: the image ingest reads
-    // the file from this server's disk, and a site file is not on it.
-    if (!videoTargetFor(d.targetKind)) {
-      await query(
-        `UPDATE watchfolder_items SET status = 'failed', resolved_at = now(),
-                reason = $4
-          WHERE watchfolder_id = $1 AND object_key = $2 AND checksum = $3 AND status = 'seen'`,
-        [f.id, objectKey, checksum,
-         // Companions (captions, sidecars) are not carried from a site yet either (H2b-4).
-         `"${d.targetKind}" goes to ${String(d.targetKind ?? '').toLowerCase() === 'companion' ? 'a video as a companion file' : 'the Image Library'}, which an on-prem folder does not feed yet; only video (Media Library and Loops & Fillers) is taken in from a site`]);
+    // A FILE OVER ITS TARGET'S CEILING is refused now, before it crosses the
+    // customer's line, with the words the local passes would use: an image
+    // or slate fails, a companion goes to review at the site.
+    const cap = ceilingFor(String(d.targetKind ?? '').toLowerCase().trim(), f.config);
+    if (cap && sizeBytes > cap.max) {
+      const item = await one<any>(
+        `SELECT id FROM watchfolder_items WHERE watchfolder_id = $1 AND object_key = $2 AND checksum = $3 AND status = 'seen'`,
+        [f.id, objectKey, checksum]);
+      const name = objectKey.split('/').pop();
+      if (item && cap.companion) {
+        await sendToReviewAtSite(f, Number(item.id), objectKey,
+          `${name} is ${(sizeBytes / 1024 / 1024).toFixed(0)} MB, over the ${COMPANION_MAX_BYTES / 1024 / 1024} MB limit for companion files`);
+      } else if (item) {
+        await query(`UPDATE watchfolder_items SET status = 'failed', resolved_at = now(), reason = $2 WHERE id = $1 AND status = 'seen'`,
+          [item.id, `file is ${sizeBytes} bytes, over the ${cap.max} byte ingest ceiling for this folder; it was not uploaded from the site`]);
+      }
     }
   }
   const row = await one<any>(
@@ -160,8 +214,10 @@ export async function quarantineKeysInUse(p: SitePrincipal, folderId: string) {
 }
 
 /**
- * Accepted video files still to be uploaded, oldest first, with the upload
- * already opened for each (and how far it got), so a restarted agent resumes.
+ * Accepted files still to be uploaded, oldest first, with the upload already
+ * opened for each (and how far it got), so a restarted agent resumes. A file
+ * whose upload has landed and is waiting here (a caption waiting for its
+ * video) is not asked for again.
  */
 export async function pendingUploads(p: SitePrincipal, folderId: string) {
   requireApprovedHost(p);
@@ -174,7 +230,8 @@ export async function pendingUploads(p: SitePrincipal, folderId: string) {
        LEFT JOIN upload_sessions u ON u.id = i.upload_session_id
       WHERE i.watchfolder_id = $1 AND i.status = 'seen' AND i.site_action IS NULL
         AND lower(i.target_kind) = ANY($2::text[])
-      ORDER BY i.seen_at LIMIT 50`, [f.id, videoTargetKinds()]);
+        AND (u.id IS NULL OR u.state <> 'complete')
+      ORDER BY i.seen_at LIMIT 50`, [f.id, siteTargetKinds()]);
   return rows.map((r) => ({
     itemId: Number(r.id), objectKey: r.object_key, checksum: r.checksum, sizeBytes: Number(r.size_bytes),
     targetKind: r.target_kind,
@@ -192,6 +249,52 @@ export async function pendingReturns(p: SitePrincipal, folderId: string) {
     `SELECT id, object_key, quarantine_key FROM watchfolder_items
       WHERE watchfolder_id = $1 AND site_action = 'return' ORDER BY resolved_at LIMIT 200`, [f.id]);
   return rows.map((r) => ({ itemId: Number(r.id), objectKey: r.object_key, quarantineKey: r.quarantine_key }));
+}
+
+/**
+ * SENT TO REVIEW HERE, MOVED AT THE SITE (H2b-5). A companion this side
+ * cannot attach (too big, no video in 24 hours, a caption Volt cannot read)
+ * goes to Needs review as a local one does, but its file is on the
+ * customer's storage: the row names the review key and asks the agent to
+ * move it there (`site_action = 'review'`). The copy here is removed.
+ */
+export async function sendToReviewAtSite(f: { id: string; quarantine_path?: string | null }, itemId: number, objectKey: string, reason: string): Promise<string> {
+  const inUse = await pgItemStore.quarantineKeysInUse(f.id);
+  const root = String(f.quarantine_path || '_review').replace(/^\/+|\/+$/g, '');
+  const qKey = quarantineKey(root, objectKey, inUse);
+  await query(
+    `UPDATE watchfolder_items SET status = 'quarantined', reason = $2, quarantine_key = $3, resolved_at = NULL, site_action = 'review'
+      WHERE id = $1`, [itemId, reason.slice(0, 500), qKey]);
+  await unlink(stagedPath(f.id, objectKey)).catch(() => { /* never landed, or already gone */ });
+  return qKey;
+}
+
+/** Files to move into the review folder at the site. */
+export async function pendingReviews(p: SitePrincipal, folderId: string) {
+  requireApprovedHost(p);
+  const f = await siteFolder(p, folderId);
+  const rows = await query<any>(
+    `SELECT id, object_key, quarantine_key FROM watchfolder_items
+      WHERE watchfolder_id = $1 AND site_action = 'review' ORDER BY seen_at LIMIT 200`, [f.id]);
+  return rows.map((r) => ({ itemId: Number(r.id), objectKey: r.object_key, quarantineKey: r.quarantine_key }));
+}
+
+/** The agent moved a file into the review folder (or could not, and says why). */
+export async function reviewed(p: SitePrincipal, folderId: string, itemId: unknown, ok: boolean, error?: string | null) {
+  requireApprovedHost(p);
+  const f = await siteFolder(p, folderId);
+  const id = Number(itemId);
+  if (!Number.isSafeInteger(id)) throw notFound('item not found');
+  // Either way the row stays in Needs review: a file that could not be moved
+  // (someone took it away) is still one a person has to look at, and the
+  // note says it is not where the row says.
+  const r = await one<any>(
+    `UPDATE watchfolder_items SET site_action = NULL,
+            resolution_note = CASE WHEN $3::boolean THEN resolution_note ELSE $4 END
+      WHERE id = $1 AND watchfolder_id = $2 AND site_action = 'review' RETURNING id, status`,
+    [id, f.id, ok, `the site agent could not move it to the review folder: ${String(error ?? 'unknown error')}`.slice(0, 500)]);
+  if (!r) throw notFound('item not found, or not waiting to be moved to review');
+  return { itemId: id, status: r.status };
 }
 
 /** The agent moved a file back (or could not): the row says which. */
@@ -215,12 +318,18 @@ export async function returned(p: SitePrincipal, folderId: string, itemId: unkno
   return { itemId: id, status: r.status };
 }
 
-/** The agent's pass over one folder: when, and whether it failed. Shown on the folder page. */
+/**
+ * The agent's pass over one folder: when, and whether it failed. Shown on the
+ * folder page. Each pass also runs the folder's ingest again, so a caption or
+ * typed image waiting for its video attaches once the video has landed, and
+ * one waiting a day goes to review, with no scheduler of its own.
+ */
 export async function scanReport(p: SitePrincipal, folderId: string, error: unknown) {
   requireApprovedHost(p);
   const f = await siteFolder(p, folderId);
   const msg = error ? String(error).slice(0, 500) : null;
   await query(`UPDATE watchfolders SET last_scan_at = now(), last_scan_error = $2 WHERE id = $1`, [f.id, msg]);
+  await ingestSiteFolder(f.id).catch((e) => console.warn('[site watch] ingest after a pass failed', f.id, e?.message ?? e));
   return { ok: true };
 }
 
@@ -242,13 +351,14 @@ export async function itemForUpload(p: SitePrincipal, itemId: unknown, length: n
   if (!r) throw notFound('item not found');
   if ((r.placement ?? 'upload_cloud') !== 'upload_cloud') throw conflict('This folder encodes at the site; its files are not uploaded');
   if (r.status !== 'seen') throw conflict(`This file is ${r.status === 'ingested' ? 'already in the library' : r.status}; there is nothing to upload`);
-  const target = videoTargetFor(r.target_kind);
-  if (!target) throw conflict('Only video files are uploaded from a site');
+  const target = siteTargetFor(r.target_kind);
+  if (!target) throw conflict(`"${r.target_kind}" is not something a site uploads`);
+  if (r.upload_state === 'complete') throw conflict('This file has been uploaded already and is waiting to be taken in');
   if (Number(r.size_bytes) !== length) throw conflict(`The file is ${length} bytes now and was ${r.size_bytes} when it was accepted; it has changed, so it will be decided again as a new file`);
   return {
     item: r, target,
     existingUpload: r.upload_session_id && r.upload_state === 'open' ? String(r.upload_session_id) : null,
-    contentType: videoTypeOf(String(r.object_key)),
+    contentType: mediaTypeOf(String(r.object_key)),
   };
 }
 
@@ -288,4 +398,106 @@ export async function closeUploadedItem(uploadId: string) {
     `UPDATE watchfolder_items SET status = 'ingested', resolved_at = now(), vod_asset_id = $2, reason = $3
       WHERE upload_session_id = $1 AND status = 'seen'`,
     [uploadId, s.vod_asset_id ?? null, note.slice(0, 500)]);
+}
+
+/* ----------------------------------------- images and companions (H2b-5) */
+
+/** Where an item's uploaded copy waits on this server. */
+export function stagedPath(folderId: string, objectKey: string): string {
+  return join(siteStagingRoot(folderId), ...objectKey.split('/'));
+}
+
+/**
+ * The last byte of an image, slate or companion landed. Check it is the file
+ * that was accepted (its SHA-256), put the copy where the folder's ingest
+ * reads it, close the upload and take it in now. Never throws: the bytes
+ * are a copy, and the original is still at the site.
+ */
+export async function landSiteFile(uploadId: string, dataPath: string, sha: string): Promise<void> {
+  const s = await one<any>(`SELECT id, state FROM upload_sessions WHERE id = $1`, [uploadId]);
+  if (!s || s.state === 'complete') return;
+  const it = await one<any>(
+    `SELECT i.id, i.object_key, i.checksum, i.watchfolder_id FROM watchfolder_items i WHERE i.upload_session_id = $1`, [uploadId]);
+  const { removeStaged } = await import('../uploadStaging');
+  const close = async () => {
+    await query(`UPDATE upload_sessions SET state = 'complete', error = NULL, updated_at = now() WHERE id = $1`, [uploadId]);
+    await removeStaged(uploadId).catch(() => 0);
+  };
+  if (!it) { await close(); return; }
+  if (it.checksum && sha !== it.checksum) {
+    // Same rule as every other path: the row describes the file as it was
+    // classified. Changed content is a new item on the next pass.
+    await query(`UPDATE watchfolder_items SET status = 'failed', resolved_at = now(), reason = $2 WHERE id = $1 AND status = 'seen'`,
+      [it.id, `the file changed while it was uploading (was ${String(it.checksum).slice(0, 12)}, arrived ${sha.slice(0, 12)}); the new content will be picked up as a new item`]);
+    await close();
+    return;
+  }
+  const dest = stagedPath(it.watchfolder_id, it.object_key);
+  await mkdir(join(dest, '..'), { recursive: true });
+  try { await rename(dataPath, dest); }
+  catch { await copyFile(dataPath, dest); await unlink(dataPath).catch(() => {}); }
+  await close();
+  await ingestSiteFolder(it.watchfolder_id).catch((e) => console.warn('[site watch] ingest after an upload failed', it.watchfolder_id, e?.message ?? e));
+}
+
+/**
+ * Take in what has landed for one site folder, with the local-drop passes:
+ * images to the Image Library, slates to Loops & Fillers, companions to their
+ * video, typed images to their asset. Only files whose upload completed are
+ * considered.
+ *
+ * A COPY THAT IS NOT ON THIS SERVER IS ASKED FOR AGAIN. On AWS the upload may
+ * have landed on another task, or the disk was replaced: the upload is taken
+ * off the item, so the agent sends the file again on its next pass, rather
+ * than the item failing for a file the site still has.
+ */
+export async function ingestSiteFolder(folderId: string) {
+  const S = await import('../watchfolder/store');
+  const { ingestPending } = await import('../watchfolder/ingest');
+  const { ingestSlateItem } = await import('../watchfolder/slateIngest');
+  const { ingestCompanions } = await import('../watchfolder/companionIngest');
+  const { attachTypedImages } = await import('../watchfolder/imageAttach');
+  const f = await S.loadIngestFolder(folderId, true);
+  if (!f) return null;
+
+  const landed = await query<any>(
+    `SELECT i.id, i.object_key FROM watchfolder_items i JOIN upload_sessions u ON u.id = i.upload_session_id
+      WHERE i.watchfolder_id = $1 AND i.status = 'seen' AND u.state = 'complete' AND lower(i.target_kind) = ANY($2::text[])`,
+    [folderId, [...ingestableTargetKinds(), ...slateTargetKinds(), ...companionTargetKinds()]]);
+  let requeued = 0;
+  for (const r of landed) {
+    if (!(await stat(stagedPath(folderId, r.object_key)).catch(() => null))) {
+      await query(`UPDATE watchfolder_items SET upload_session_id = NULL WHERE id = $1 AND status = 'seen'`, [r.id]);
+      requeued++;
+    }
+  }
+
+  const images = await S.pendingItems(folderId, 200, ingestableTargetKinds(), true);
+  const summary = await ingestPending(f, images, S.pgIngestStore);
+  let slates = 0;
+  for (const item of await S.pendingItems(folderId, 200, slateTargetKinds(), true)) {
+    const o = await ingestSlateItem(f, item, S.pgSlateStore);
+    if (o.result === 'slate') slates++;
+  }
+  const q = await one<any>(`SELECT quarantine_path FROM watchfolders WHERE id = $1`, [folderId]);
+  const siteCompanions = { ...S.pgCompanionStore,
+    toReview: (cf: any, item: any, reason: string) => sendToReviewAtSite({ id: cf.id, quarantine_path: cf.quarantinePath }, Number(item.id), item.objectKey, reason) };
+  const companions = await ingestCompanions(
+    { id: f.id, accountId: f.accountId, path: f.path, quarantinePath: q?.quarantine_path || '_review', deleteAfterIngest: true },
+    await S.pendingCompanionItems(folderId, 200, true), siteCompanions);
+  const typed = await attachTypedImages({ id: f.id, accountId: f.accountId }, await S.waitingTypedImages(folderId, f.imageTypes ?? []), S.pgImageAttachStore);
+
+  // A copy that will not be taken in (failed) is not kept: the site has the original.
+  for (const o of [...summary.outcomes, ...companions]) {
+    if (o.result !== 'failed') continue;
+    const key = [...images, ...landed.map((r) => ({ id: r.id, objectKey: r.object_key }))].find((x) => String(x.id) === String(o.itemId))?.objectKey;
+    if (key) await unlink(stagedPath(folderId, key)).catch(() => {});
+  }
+  return {
+    requeued, ingested: summary.ingested, failed: summary.failed, slates,
+    attached: companions.filter((o) => o.result === 'attached').length,
+    waiting: companions.filter((o) => o.result === 'waiting').length,
+    review: companions.filter((o) => o.result === 'review').length,
+    typed: typed.filter((o) => o.result === 'typed').length,
+  };
 }

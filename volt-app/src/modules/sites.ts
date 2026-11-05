@@ -24,9 +24,11 @@
  *   POST   /api/site-agent/watchfolders/:id/known              { objectKey, checksum } -> { known }
  *   GET    /api/site-agent/watchfolders/:id/quarantine-keys    review folder names in use
  *   POST   /api/site-agent/watchfolders/:id/items              one decision (accepted, or refused and moved)
- *   GET    /api/site-agent/watchfolders/:id/uploads            accepted video still to upload, with its open upload
+ *   GET    /api/site-agent/watchfolders/:id/uploads            accepted files still to upload, with their open upload
  *   GET    /api/site-agent/watchfolders/:id/returns            refused files an operator sent back
  *   POST   /api/site-agent/watchfolders/:id/returns/:itemId    { ok, error } the file was moved back, or not
+ *   GET    /api/site-agent/watchfolders/:id/reviews            files the cloud sent to review, to move into the review folder (H2b-5)
+ *   POST   /api/site-agent/watchfolders/:id/reviews/:itemId    { ok, error } the file was moved to review, or not
  *   POST   /api/site-agent/watchfolders/:id/scanned            { error } a pass finished
  *   /api/site-agent/tus                                        the upload itself (modules/siteTus.ts)
  */
@@ -243,6 +245,16 @@ siteAgentRouter.get('/watchfolders/:id/returns', asyncHandler(async (req, res) =
 siteAgentRouter.post('/watchfolders/:id/returns/:itemId', asyncHandler(async (req, res) => {
   const p = await S.authenticateSite(req.headers.authorization);
   res.json(await W.returned(p, req.params.id, req.params.itemId, req.body?.ok !== false, req.body?.error ?? null));
+}));
+
+siteAgentRouter.get('/watchfolders/:id/reviews', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json({ items: await W.pendingReviews(p, req.params.id) });
+}));
+
+siteAgentRouter.post('/watchfolders/:id/reviews/:itemId', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await W.reviewed(p, req.params.id, req.params.itemId, req.body?.ok !== false, req.body?.error ?? null));
 }));
 
 siteAgentRouter.post('/watchfolders/:id/scanned', asyncHandler(async (req, res) => {

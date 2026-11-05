@@ -17,7 +17,7 @@ Sites is where you look after the Hybrid Sites add-on: your own locations, such 
 - **Adding servers:** a one-time enrolment token for each new server. The server reports what it has (processor cores, memory, graphics cards and how many encodes each can run at once, free disk) and then waits for you.
 - **Approving:** a server takes no work until an administrator approves it. Reject one you do not recognise.
 - **Health at a glance:** each site's health, the agent and encoder versions its servers run, and when each was last heard from.
-- **Watchfolders at the site:** folders on your own storage that the site's agent sorts with Volt's rules, uploading accepted video to Volt and keeping refused files at the site (see [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder)).
+- **Watchfolders at the site:** folders on your own storage that the site's agent sorts with Volt's rules, uploading accepted video, audio, images and captions to Volt and keeping refused files at the site (see [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder)).
 
 An administrator sets a site up once and comes back when a server is added, replaced or stops reporting.
 
@@ -87,7 +87,7 @@ Choose **Disable site**. Its servers are refused until you choose **Enable site*
 
 | Section | How it relates |
 |---|---|
-| [Watchfolders](watchfolders.md) | Folders at a site, watched by the site's agent with the folder's rules; accepted video is uploaded and encoded in Volt |
+| [Watchfolders](watchfolders.md) | Folders at a site, watched by the site's agent with the folder's rules; accepted files are uploaded and taken in by Volt |
 | [Storage](storage.md) | Copies of media kept at a site will show there beside the cloud copies (a later release of the add-on) |
 | [Workflows](workflows.md) | Work done at a site will appear on the map with its own success and error rates (a later release of the add-on) |
 | [Audit log](audit-log.md) | Sites, enrolment tokens, approvals, rejections and new credentials are recorded |

@@ -5,7 +5,7 @@
 //  Through the real API on a real database, with a real folder scanned:
 //    - a new folder starts with one ordinary rule per file type, images to the
 //      Image Library and video to the Media Library, at the bottom of the
-//      order; a site folder starts with the video rule only; a folder made
+//      order; a site folder gets the same five (H2b-5); a folder made
 //      with `defaultRules: false` starts with none;
 //    - the dry run shows them like any rule, and a file nothing recognises
 //      (a project file) still goes to review; audio goes to the Media
@@ -71,7 +71,7 @@ const check = (m: string, got: unknown, want: unknown) => {
   check('the first custom rule on a fresh folder is 10', D.customOrdinal([{ ordinal: 100000, builtin: 'images' }]), 10);
   check('a full gap halves', D.customOrdinal([{ ordinal: 10 }, { ordinal: 14, builtin: 'images' }]), 12);
   check('no gap at all goes to the end', D.customOrdinal([{ ordinal: 10 }, { ordinal: 11, builtin: 'images' }]), 21);
-  check('a site folder starts with the video rule only', D.defaultRulesFor('site').map((r) => r.builtin), ['video']);
+  check('a site folder starts with the same five (H2b-5: its agent carries every type)', D.defaultRulesFor('site').map((r) => r.builtin), ['images', 'video', 'audio', 'captions', 'sidecars']);
   check('local and bucket folders with images, video, audio, captions and sidecars', [D.defaultRulesFor('local'), D.defaultRulesFor('s3')].map((l) => l.map((r) => r.builtin)), [['images', 'video', 'audio', 'captions', 'sidecars'], ['images', 'video', 'audio', 'captions', 'sidecars']]);
 
   const tag = Date.now().toString(36);

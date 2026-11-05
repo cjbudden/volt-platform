@@ -3,7 +3,7 @@
 //
 //  Through the real API on a real database, with real folders scanned:
 //    - a new folder starts with caption and metadata rules as well, sending
-//      them to `companion`; a site folder still starts with video only;
+//      them to `companion`; a site folder gets them too (H2b-5);
 //    - a rule may send captions and sidecars only to `companion`, and nothing
 //      else may go there;
 //    - `Scrubs-s1-e1.mp4` then `Scrubs-s1-e1_en.vtt` gives one asset with its
@@ -68,7 +68,7 @@ const SRT = (text: string) => `1\n00:00:00,000 --> 00:00:00,800\n${text}\n`;
   check('the same subfolder first', C.bestMatch('b/Ep_en.vtt', [{ objectKey: 'a/Ep.mp4', assetId: 'x', seenAt: 9 }, { objectKey: 'b/Ep.mp4', assetId: 'y', seenAt: 1 }])?.assetId, 'y');
   check('a waiting video that fits better wins (the caption waits)', C.bestMatch('Show-e10_en.vtt', [{ objectKey: 'Show.mp4', assetId: 'a0' }, { objectKey: 'Show-e10.mp4', assetId: null }])?.assetId, null);
   check('local and bucket folders start with captions and sidecars too', D.defaultRulesFor('local').map((r) => r.builtin), ['images', 'video', 'audio', 'captions', 'sidecars']);
-  check('a site folder still starts with video only', D.defaultRulesFor('site').map((r) => r.builtin), ['video']);
+  check('a site folder gets the caption and sidecar defaults too (H2b-5)', D.defaultRulesFor('site').map((r) => r.builtin).filter((b) => b === 'captions' || b === 'sidecars'), ['captions', 'sidecars']);
 
   const tag = Date.now().toString(36);
   const acct = (await one<any>(`INSERT INTO accounts(name) VALUES ($1) RETURNING id`, [`wfc-${tag}`]))!.id;

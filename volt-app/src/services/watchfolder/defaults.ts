@@ -26,9 +26,10 @@
 //  path as a video, and the encode sees there is no picture and makes a
 //  sound-only rendition instead of a video ladder (vodEncode.ts).
 //
-//  WHAT IS NOT HERE YET, and why: a folder at a site gets the video rule only.
-//  The agent does not carry images, audio or companions across yet (H2b-5),
-//  and a rule there would accept files that are then refused.
+//  A FOLDER AT A SITE gets the same five (H2b-5): its agent uploads images,
+//  audio and companions as well as video, and the cloud takes them in with
+//  the same passes. Until then it had the video rule only. "Add default
+//  rules" adds the other four to a site folder made before.
 //
 //  `builtin` marks a row as one of these, so "Add default rules" on an older
 //  folder adds only the ones it lacks and the console can label them. Editing
@@ -109,8 +110,10 @@ const RULES: Record<'image' | 'video' | 'audio' | 'caption' | 'sidecar', Default
 };
 
 /** The defaults a folder of this kind starts with, in order. */
-export function defaultRulesFor(folderKind: string): DefaultRule[] {
-  return folderKind === 'site' ? [RULES.video] : [RULES.image, RULES.video, RULES.audio, RULES.caption, RULES.sidecar];
+// Every kind of folder (local, bucket, site) takes every type since H2b-5;
+// the kind is still passed so a kind that cannot may say so here.
+export function defaultRulesFor(_folderKind?: string): DefaultRule[] {
+  return [RULES.image, RULES.video, RULES.audio, RULES.caption, RULES.sidecar];
 }
 
 /** Where the defaults start. Far above any hand-made set, so custom rules fit below. */

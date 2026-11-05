@@ -15,13 +15,16 @@
 //      loses its state, resumes from the offset the cloud holds instead of
 //      sending the file again.
 //  When the last byte lands the normal upload path runs (landTus), then the
-//  item closes as a local drop does.
+//  item closes as a local drop does. An image, slate or companion (H2b-5) is
+//  an upload with no asset of its own (purpose 'site_file'): its copy is put
+//  where the folder's ingest reads it and taken in by the local-drop passes
+//  (siteWatchfolders.ts landSiteFile).
 // ============================================================================
 import { one, query } from '../db';
 import { createTusRouter, type TusInfo } from '../services/ingest/tus';
 import { openSession, MAX_UPLOAD_BYTES, abortSession, type UploadSession } from '../services/uploads';
 import { authenticateSite, type SitePrincipal } from '../services/sites/sites';
-import { itemForUpload, attachUpload, closeUploadedItem, requireApprovedHost } from '../services/sites/siteWatchfolders';
+import { itemForUpload, attachUpload, closeUploadedItem, requireApprovedHost, landSiteFile } from '../services/sites/siteWatchfolders';
 import { PgTusStore, landTus, toInfo } from './tus';
 
 interface SiteWho { accountId: string; userId: null; site: SitePrincipal }
@@ -36,7 +39,9 @@ class SiteTusStore extends PgTusStore {
     const base = String(item.object_key).split('/').pop() || 'upload.bin';
     const { session } = await openSession({
       accountId: who.accountId, openedBy: null,
-      purpose: target === 'loop' ? 'filler' : 'vod', fillerKind: 'loop',
+      // 'site_file': no Media Library or Loops & Fillers record is opened;
+      // the passes that take the file in make the record it becomes.
+      purpose: target === 'loop' ? 'filler' : target === 'file' ? 'site_file' : 'vod', fillerKind: target === 'file' ? undefined : 'loop',
       name: base.replace(/\.[^.]+$/, '').slice(0, 200), filename: base, contentType,
       totalBytes: Math.max(1, length), ladderGroupId: item.ladder_group_id ?? null,
       // The folder is the source, as for a local drop, so a source-rung
@@ -67,8 +72,10 @@ class SiteTusStore extends PgTusStore {
   }
 }
 
+const siteTusStore = new SiteTusStore();
+
 export const siteTusRouter = createTusRouter({
-  store: new SiteTusStore(),
+  store: siteTusStore,
   basePath: '/api/site-agent/tus',
   maxBytes: MAX_UPLOAD_BYTES,
   authorise: async (req) => {
@@ -77,6 +84,11 @@ export const siteTusRouter = createTusRouter({
     return { accountId: p.accountId, userId: null, site: p } as SiteWho;
   },
   onComplete: async (info, _who, sha) => {
+    const s = await one<any>(`SELECT purpose FROM upload_sessions WHERE id = $1`, [info.id]);
+    if (s?.purpose === 'site_file') {
+      await landSiteFile(info.id, siteTusStore.dataPath(info), sha);
+      return;
+    }
     await landTus(info, sha);
     await closeUploadedItem(info.id);
   },

@@ -41,7 +41,7 @@ import { ConfirmDialog } from '../listActions'
 
 /** Where an on-prem folder's work runs, in the console's words. */
 const PLACEMENT: Record<string, { label: string; help: string }> = {
-  upload_cloud: { label: 'Upload and encode in the cloud', help: 'The site agent uploads each accepted video file, resumable, and Volt encodes it like any upload. For sites without encoders.' },
+  upload_cloud: { label: 'Upload and encode in the cloud', help: 'The site agent uploads each accepted file, resumable: video and audio are encoded like any upload, images and captions are taken in as from a local folder. For sites without encoders.' },
   encode_site: { label: 'Encode at site', help: 'Encoded by encoders at the site; only the packaged output is uploaded. Arrives with site encoders.' },
 }
 
@@ -471,6 +471,11 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
               {it.site_action === 'return' && (
                 <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--brand,#3f7bff)' }}>
                   Waiting for the site agent to move it back into the folder.
+                </div>
+              )}
+              {it.site_action === 'review' && (
+                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--brand,#3f7bff)' }}>
+                  Waiting for the site agent to move it into the review folder.
                 </div>
               )}
             </div>

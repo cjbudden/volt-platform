@@ -904,7 +904,7 @@ export interface WatchfolderItem {
   reason: string | null
   quarantine_key: string | null
   /** 'return': Reprocess was pressed on a site folder's file; the site agent has yet to move it back. */
-  site_action?: 'return' | null
+  site_action?: 'return' | 'review' | null
   /** The Media Library record a file from a site became. */
   vod_asset_id?: string | null
   rule_name: string | null

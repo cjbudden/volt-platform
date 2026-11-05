@@ -24,7 +24,7 @@ import * as os from 'node:os';
 
 import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
 
-export const AGENT_VERSION = '0.3.0';
+export const AGENT_VERSION = '0.4.0';
 
 export interface SiteState {
   server: string;

@@ -11,8 +11,9 @@
 //      account cannot reach the folder or its uploads;
 //    - a pass: a refused file moved to the review folder ON SITE and listed
 //      in the console queue with its reason; an accepted video uploaded and
-//      in the Media Library with its encode queued; an image target refused
-//      with the reason; the quiet-file rule;
+//      in the Media Library with its encode queued; an image target uploaded
+//      and in the Image Library (H2b-5; site-watchfolder-files.check.ts has
+//      the rest of images, audio and companions); the quiet-file rule;
 //    - rules changed between the agent's copy and the cloud's: refused;
 //    - restart without re-upload: an upload cut off half way, a fresh agent
 //      with no memory resumes it from the cloud's offset; one upload, no
@@ -174,7 +175,7 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   const sess = await one<any>(`SELECT * FROM upload_sessions WHERE id = $1`, [show.upload_session_id]);
   ok(sess?.state === 'complete' && sess.source === fid && sess.relative_path === 'show.mp4' && sess.opened_by === null, 'one upload session, the folder as its source', sess && { state: sess.state, source: sess.source });
   const png = await one<any>(`SELECT * FROM watchfolder_items WHERE watchfolder_id = $1 AND object_key = 'poster.png'`, [fid]);
-  ok(png?.status === 'failed' && /Image Library/.test(png.reason) && existsSync(join(root, 'poster.png')), 'an image target is refused with the reason, the file left where it is', png?.reason);
+  ok(png?.status === 'ingested' && /^ingested to poster\//.test(png.reason) && png.media_file_id && existsSync(join(root, 'poster.png')), 'an image target is uploaded and in the Image Library (H2b-5), the original left at the site', png?.reason);
   const f1 = await one<any>(`SELECT last_scan_at, last_scan_error FROM watchfolders WHERE id = $1`, [fid]);
   ok(f1.last_scan_at && f1.last_scan_error === null, 'the folder shows when it was last scanned', f1);
 

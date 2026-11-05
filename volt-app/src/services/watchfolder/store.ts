@@ -22,6 +22,8 @@ import { realS3, type S3Api } from '../ingest/s3';
 import type { EventDeps } from './s3events';
 
 export function s3StagingRoot(folderId: string): string { return join(config.ingest.s3StagingDir, folderId); }
+/** Where an on-prem folder's uploaded images and companions wait to be taken in (H2b-5). */
+export function siteStagingRoot(folderId: string): string { return join(config.ingest.siteStagingDir, folderId); }
 
 let s3api: S3Api | null = null;
 export function setS3Api(a: S3Api | null) { s3api = a; }
@@ -363,13 +365,19 @@ export const pgIngestStore: IngestStore = {
  * stayed 'seen' for good (found by build queue 2.6).
  */
 function folderPath(f: { id: string; kind: string; config?: any }): string {
-  return f.kind === 's3' ? s3StagingRoot(f.id) : String(f.config?.path ?? '');
+  return f.kind === 's3' ? s3StagingRoot(f.id) : f.kind === 'site' ? siteStagingRoot(f.id) : String(f.config?.path ?? '');
 }
 
-export async function loadIngestFolder(id: string): Promise<IngestFolder | null> {
+/**
+ * `site`: also an on-prem folder, whose files here are the copies its agent
+ * uploaded (siteStagingRoot). Only the site ingest asks for that
+ * (siteWatchfolders.ts ingestSiteFolder); the server's own passes never do,
+ * because a site file is not here until its upload lands.
+ */
+export async function loadIngestFolder(id: string, site = false): Promise<IngestFolder | null> {
   const f = await one<any>(
     `SELECT id, account_id, kind, config, enabled FROM watchfolders WHERE id = $1`, [id]);
-  if (!f || !f.enabled || !['local', 's3'].includes(f.kind)) return null;
+  if (!f || !f.enabled || !(site ? ['site'] : ['local', 's3']).includes(f.kind)) return null;
   const path = folderPath(f);
   if (!path) return null;
   return {
@@ -381,7 +389,8 @@ export async function loadIngestFolder(id: string): Promise<IngestFolder | null>
     // is in the library the bucket still has the original, so the copy goes
     // rather than filling the task's disk. The walk and the drop queue both
     // know an ingested object and do not fetch it again.
-    deleteAfterIngest: f.kind === 's3' || !!f.config?.delete_after_ingest,
+    // A site folder's files here are copies too (the original stays at the site).
+    deleteAfterIngest: f.kind === 's3' || f.kind === 'site' || !!f.config?.delete_after_ingest,
     maxBytes: Number(f.config?.max_ingest_bytes ?? DEFAULT_MAX_INGEST_BYTES),
     imageTypes: await videoImageTypes(f.account_id),
   };
@@ -403,7 +412,13 @@ export async function videoImageTypes(accountId: string): Promise<TypeChoice[]> 
  * growing with the library and doing nothing with them. They stay `seen` for the
  * workflow that owns them, and this query simply does not ask for them.
  */
-export async function pendingItems(folderId: string, limit = 200, kinds: string[] = ingestableTargetKinds()): Promise<PendingItem[]> {
+/**
+ * ONLY WHAT HAS LANDED, for a site folder (H2b-5): its accepted files reach
+ * this server one upload at a time, and one not uploaded yet is not missing.
+ */
+const LANDED = `AND EXISTS (SELECT 1 FROM upload_sessions u WHERE u.id = i.upload_session_id AND u.state = 'complete')`;
+
+export async function pendingItems(folderId: string, limit = 200, kinds: string[] = ingestableTargetKinds(), landedOnly = false): Promise<PendingItem[]> {
   const rows = await query<any>(
     // The rule's image type (H2b-3) as it is now: a rule corrected before the
     // file is taken in applies to it.
@@ -417,6 +432,7 @@ export async function pendingItems(folderId: string, limit = 200, kinds: string[
         -- would immediately fail to claim.
         AND (i.resolved_at IS NULL OR i.resolved_at < now() - interval '10 minutes')
         AND lower(i.target_kind) = ANY($2::text[])
+        ${landedOnly ? LANDED : ''}
       ORDER BY i.seen_at LIMIT $3`,
     [folderId, kinds, limit]
   );
@@ -586,14 +602,15 @@ export const pgSlateStore: SlateStore = {
 };
 
 /** Companions (captions, sidecars) waiting to be attached to their video. */
-export async function pendingCompanionItems(folderId: string, limit = 200): Promise<(PendingItem & { seenAt: number })[]> {
+export async function pendingCompanionItems(folderId: string, limit = 200, landedOnly = false): Promise<(PendingItem & { seenAt: number })[]> {
   const rows = await query<any>(
-    `SELECT id, object_key, checksum, target_kind, workflow, seen_at
-       FROM watchfolder_items
-      WHERE watchfolder_id = $1 AND status = 'seen'
-        AND (resolved_at IS NULL OR resolved_at < now() - interval '10 minutes')
-        AND lower(target_kind) = ANY($2::text[])
-      ORDER BY seen_at LIMIT $3`,
+    `SELECT i.id, i.object_key, i.checksum, i.target_kind, i.workflow, i.seen_at
+       FROM watchfolder_items i
+      WHERE i.watchfolder_id = $1 AND i.status = 'seen'
+        AND (i.resolved_at IS NULL OR i.resolved_at < now() - interval '10 minutes')
+        AND lower(i.target_kind) = ANY($2::text[])
+        ${landedOnly ? LANDED : ''}
+      ORDER BY i.seen_at LIMIT $3`,
     [folderId, companionTargetKinds(), limit]);
   return rows.map((r) => ({ id: r.id, objectKey: r.object_key, checksum: r.checksum, targetKind: r.target_kind, workflow: r.workflow, seenAt: new Date(r.seen_at).getTime() }));
 }

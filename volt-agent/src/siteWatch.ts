@@ -13,9 +13,13 @@
 //       never leaves the site; an accepted file is reported to the cloud,
 //       which decides it again with its own copy of the rules.
 //    4. Placement "Upload and encode in the cloud": upload each accepted
-//       video file with tus. The cloud keeps the upload on the item and says
-//       how far it got, so after a restart the agent resumes from there; the
-//       state file only saves re-reading files that have not changed.
+//       file with tus (video and audio, and since H2b-5 images, slates and
+//       companions). The cloud keeps the upload on the item and says how far
+//       it got, so after a restart the agent resumes from there; the state
+//       file only saves re-reading files that have not changed.
+//    5. Move into the review folder the files the CLOUD sent to review (a
+//       caption with no video after 24 hours, one over 25 MB): it decided,
+//       but the file is here (H2b-5).
 //
 //  OUTBOUND ONLY, like the rest of the agent: every step is a call to the
 //  cloud with the host credential; nothing listens.
@@ -63,6 +67,8 @@ export interface FolderPass {
   folderId: string; name: string;
   scan?: ScanResult; error?: string;
   returned: number; uploaded: string[]; uploadErrors: { objectKey: string; error: string }[];
+  /** Files moved into the review folder because the cloud sent them there. */
+  reviewed: number;
 }
 
 class AgentHttpError extends Error { constructor(msg: string, public status: number, public code?: string) { super(msg); } }
@@ -136,7 +142,7 @@ export async function siteFolders(ctx: WatchCtx): Promise<SiteFolder[]> {
 export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<FolderPass> {
   const call = client(ctx);
   const log = ctx.log ?? ((s) => console.log(s));
-  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [] };
+  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0 };
   try {
     // 1. The outbox.
     const waiting = ctx.memory.outbox.filter((o) => o.folderId === folder.id);
@@ -185,6 +191,21 @@ export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<Fol
           out.uploadErrors.push({ objectKey: u.objectKey, error: String(e?.message ?? e) });
           log(`[watch] ${folder.name}: ${u.objectKey} upload stopped: ${e?.message ?? e} (resumes next pass)`);
         }
+      }
+    }
+
+    // 5. Files the cloud sent to review. A cloud from before H2b-5 has no
+    //    such list (404): nothing to do.
+    const toReview = (await call('GET', `/api/site-agent/watchfolders/${folder.id}/reviews`)
+      .catch((e) => { if (e instanceof AgentHttpError && e.status === 404) return null; throw e; }))?.items ?? [];
+    for (const r of toReview) {
+      try {
+        await moveToQuarantine(folder.path, r.objectKey, r.quarantineKey);
+        await call('POST', `/api/site-agent/watchfolders/${folder.id}/reviews/${r.itemId}`, { ok: true });
+        out.reviewed++;
+        log(`[watch] ${folder.name}: ${r.objectKey} sent to review by Volt, moved to ${r.quarantineKey}`);
+      } catch (e: any) {
+        await call('POST', `/api/site-agent/watchfolders/${folder.id}/reviews/${r.itemId}`, { ok: false, error: String(e?.message ?? e) }).catch(() => {});
       }
     }
 
