@@ -345,6 +345,12 @@ export interface IngestSummary {
   /** VOD files in the Media Library that the ingest rules held (duplicate,
    *  rejected, waiting for metadata), so no encode was queued. */
   held?: number;
+  /** Captions and sidecars attached to their video (build queue H2b-2). */
+  attached?: number;
+  /** Companions still waiting for their video (up to 24 hours). */
+  waiting?: number;
+  /** Companions sent to review (too big, unreadable, or no video in 24 hours). */
+  review?: number;
   outcomes: IngestOutcome[];
 }
 

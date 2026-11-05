@@ -51,6 +51,7 @@ import { loadFolder, pgItemStore, ingestFolder, syncS3, mirrorQuarantines } from
 import { scanFolder } from '../services/watchfolder/scanner';
 import { ingestableTargetKinds, libraryKindFor } from '../services/watchfolder/ingest';
 import { videoTargetKinds, videoTargetFor } from '../services/watchfolder/videoIngest';
+import { companionTargetKinds, isCompanionTarget } from '../services/watchfolder/companionIngest';
 import { hasLicence, requireLicence } from '../services/sites/licences';
 import { defaultRulesFor, typesOfPattern, customOrdinal, defaultOrdinals, type FileType } from '../services/watchfolder/defaults';
 import { PLACEMENTS, PLACEMENTS_BUILT } from '../services/sites/siteWatchfolders';
@@ -65,15 +66,17 @@ import { ApiError } from '../util/http';
  * keep in step. A refusing rule takes no kind into anything, so it is not
  * checked.
  */
-export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loops'; accepts: FileType[] }[] {
+export function targetKinds(): { kind: string; goesTo: 'images' | 'media' | 'loops' | 'companions'; accepts: FileType[] }[] {
   return [
     ...ingestableTargetKinds().map((kind) => ({ kind, goesTo: 'images' as const, accepts: ['image'] as FileType[] })),
     ...videoTargetKinds().map((kind) => ({ kind, goesTo: videoTargetFor(kind) === 'loop' ? 'loops' as const : 'media' as const, accepts: ['video'] as FileType[] })),
+    // Captions and metadata sidecars, attached by name to their video (H2b-2).
+    ...companionTargetKinds().map((kind) => ({ kind, goesTo: 'companions' as const, accepts: ['caption', 'sidecar'] as FileType[] })),
   ];
 }
 
 const TYPE_WORDS: Record<FileType, string> = { image: 'an image', video: 'a video', audio: 'an audio file', caption: 'a caption file', sidecar: 'a metadata file' };
-const GOES_TO_WORDS = { images: 'the Image Library', media: 'the Media Library', loops: 'Loops & Fillers' } as const;
+const GOES_TO_WORDS = { images: 'the Image Library', media: 'the Media Library', loops: 'Loops & Fillers', companions: 'their video in the Media Library' } as const;
 
 /**
  * WHERE A RULE MAY SEND EACH FILE TYPE (build queue H2b (d)). A rule whose
@@ -121,7 +124,7 @@ async function missingDefaults(folder: { id: string; kind: string }): Promise<st
 }
 
 function takesIn(kind: unknown): boolean {
-  return !!libraryKindFor(String(kind ?? '')) || !!videoTargetFor(String(kind ?? ''));
+  return !!libraryKindFor(String(kind ?? '')) || !!videoTargetFor(String(kind ?? '')) || isCompanionTarget(String(kind ?? ''));
 }
 
 function assertTargetKind(kind: unknown, what: string) {

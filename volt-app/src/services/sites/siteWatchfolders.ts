@@ -136,7 +136,8 @@ export async function recordDecision(p: SitePrincipal, folderId: string, raw: an
                 reason = $4
           WHERE watchfolder_id = $1 AND object_key = $2 AND checksum = $3 AND status = 'seen'`,
         [f.id, objectKey, checksum,
-         `"${d.targetKind}" goes to the Image Library, which an on-prem folder does not feed yet; only video (Media Library and Loops & Fillers) is taken in from a site`]);
+         // Companions (captions, sidecars) are not carried from a site yet either (H2b-4).
+         `"${d.targetKind}" goes to ${String(d.targetKind ?? '').toLowerCase() === 'companion' ? 'a video as a companion file' : 'the Image Library'}, which an on-prem folder does not feed yet; only video (Media Library and Loops & Fillers) is taken in from a site`]);
     }
   }
   const row = await one<any>(

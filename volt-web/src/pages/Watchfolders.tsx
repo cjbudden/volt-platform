@@ -46,7 +46,7 @@ const PLACEMENT: Record<string, { label: string; help: string }> = {
 }
 
 const STATUS: Record<string, { label: string; tone: string; help: string }> = {
-  seen:        { label: 'Waiting',     tone: 'var(--brand,#3f7bff)', help: 'Classified, waiting for the next ingest pass.' },
+  seen:        { label: 'Waiting',     tone: 'var(--brand,#3f7bff)', help: 'Classified, waiting for the next ingest pass. A caption or metadata file waits up to 24 hours for its video.' },
   ingested:    { label: 'In library',  tone: 'var(--ok,#4ade80)',    help: 'A library record was created for this file: Image Library, Media Library (a video shows its encode there) or Loops & Fillers.' },
   quarantined: { label: 'Needs review',tone: 'var(--warn,#fbbf24)',  help: 'No rule matched, or a rule refused it. The file is in the review folder.' },
   failed:      { label: 'Failed',      tone: 'var(--danger,#f87171)',help: 'It matched a rule, but the ingest itself did not complete.' },
@@ -298,7 +298,7 @@ function Rules({ folder, rules, kinds, defaultsMissing, reload }: {
             every matching file waiting for ever. */}
         <select style={box} aria-label="Target kind" value={draft.targetKind}
           onChange={e => setDraft({ ...draft, targetKind: e.target.value })}>
-          {(['images', 'media', 'loops'] as const).filter(g => offered.some(k => k.goesTo === g)).map(g => (
+          {(['images', 'media', 'loops', 'companions'] as const).filter(g => offered.some(k => k.goesTo === g)).map(g => (
             <optgroup key={g} label={GOES_TO[g]}>
               {offered.filter(k => k.goesTo === g).map(k => <option key={k.kind} value={k.kind}>{k.kind}</option>)}
             </optgroup>
@@ -654,9 +654,9 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
 /* ------------------------------------------------------------------ list ---- */
 
 /** Where an accepted file of each target kind goes, in the console's words. */
-const GOES_TO: Record<string, string> = { images: 'Image Library', media: 'Media Library', loops: 'Loops & Fillers' }
+const GOES_TO: Record<string, string> = { images: 'Image Library', media: 'Media Library', loops: 'Loops & Fillers', companions: 'Attach to its video' }
 
-type TargetKind = { kind: string; goesTo: 'images' | 'media' | 'loops'; accepts?: string[] }
+type TargetKind = { kind: string; goesTo: 'images' | 'media' | 'loops' | 'companions'; accepts?: string[] }
 
 /** The file types a pattern can only match, the same reading as the server's
  *  (services/watchfolder/defaults.ts typesOfPattern), so the destination list

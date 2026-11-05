@@ -127,6 +127,9 @@ import {
   ingestVideoItem, pgVideoIngestStore, videoTargetKinds,
   type VideoIngestFolder, type VideoOutcome,
 } from './videoIngest';
+import { quarantineKey } from './rules';
+import { moveToQuarantine } from './scanner';
+import { ingestCompanions, companionTargetKinds, type CompanionStore, type CompanionFolder } from './companionIngest';
 
 export const pgItemStore: ItemStore = {
   async isKnown(folderId, objectKey, checksum) {
@@ -465,8 +468,98 @@ export async function ingestFolder(folderId: string): Promise<IngestSummary | nu
       else summary.deferred++;
     }
   }
+  // COMPANIONS LAST (build queue H2b-2): a caption dropped beside its video
+  // attaches in the same pass, because the video above has just landed.
+  const cf = await loadIngestFolder(folderId);
+  if (cf) {
+    const q = await one<any>(`SELECT quarantine_path FROM watchfolders WHERE id = $1`, [folderId]);
+    const folder: CompanionFolder = { id: cf.id, accountId: cf.accountId, path: cf.path, quarantinePath: q?.quarantine_path || '_review', deleteAfterIngest: cf.deleteAfterIngest };
+    const outs = await ingestCompanions(folder, await pendingCompanionItems(folderId), pgCompanionStore);
+    const reviewed: { objectKey: string; quarantineKey: string }[] = [];
+    for (const o of outs) {
+      summary.outcomes.push(o as any);
+      if (o.result === 'attached') summary.attached = (summary.attached ?? 0) + 1;
+      else if (o.result === 'waiting') summary.waiting = (summary.waiting ?? 0) + 1;
+      else if (o.result === 'review') { summary.review = (summary.review ?? 0) + 1; reviewed.push(o); }
+      else if (o.result === 'failed') summary.failed++;
+      else summary.skipped++;
+    }
+    // A bucket folder's review files go back to the bucket's review prefix.
+    if (reviewed.length) await mirrorQuarantines(folderId, reviewed);
+  }
   return summary;
 }
+
+/** Companions (captions, sidecars) waiting to be attached to their video. */
+export async function pendingCompanionItems(folderId: string, limit = 200): Promise<(PendingItem & { seenAt: number })[]> {
+  const rows = await query<any>(
+    `SELECT id, object_key, checksum, target_kind, workflow, seen_at
+       FROM watchfolder_items
+      WHERE watchfolder_id = $1 AND status = 'seen'
+        AND (resolved_at IS NULL OR resolved_at < now() - interval '10 minutes')
+        AND lower(target_kind) = ANY($2::text[])
+      ORDER BY seen_at LIMIT $3`,
+    [folderId, companionTargetKinds(), limit]);
+  return rows.map((r) => ({ id: r.id, objectKey: r.object_key, checksum: r.checksum, targetKind: r.target_kind, workflow: r.workflow, seenAt: new Date(r.seen_at).getTime() }));
+}
+
+const VOD_ONLY = ['vod', 'video', 'programme', 'program', 'episode'];
+
+export const pgCompanionStore: CompanionStore = {
+  async candidates(folderId) {
+    // Videos this folder took into the Media Library (their asset still
+    // there), and videos it accepted that are still waiting to be taken in.
+    const rows = await query<any>(
+      `SELECT i.object_key, i.seen_at, CASE WHEN i.status = 'ingested' THEN v.id END AS asset_id
+         FROM watchfolder_items i
+         LEFT JOIN vod_assets v ON v.id = i.vod_asset_id
+        WHERE i.watchfolder_id = $1 AND lower(i.target_kind) = ANY($2::text[])
+          AND ((i.status = 'ingested' AND v.id IS NOT NULL) OR i.status = 'seen')`,
+      [folderId, VOD_ONLY]);
+    return rows.map((r) => ({ objectKey: r.object_key, assetId: r.asset_id ?? null, seenAt: new Date(r.seen_at).getTime() }));
+  },
+  async claim(itemId) {
+    const r = await one<any>(
+      `UPDATE watchfolder_items SET resolved_at = now()
+        WHERE id = $1 AND status = 'seen'
+          AND (resolved_at IS NULL OR resolved_at < now() - interval '10 minutes')
+        RETURNING id`, [itemId]);
+    return !!r;
+  },
+  async noteWaiting(itemId, reason) {
+    await query(`UPDATE watchfolder_items SET reason = $2 WHERE id = $1 AND status = 'seen' AND reason IS DISTINCT FROM $2`, [itemId, reason.slice(0, 500)]);
+  },
+  async attach(a) {
+    const { addFile } = await import('../companions/store');
+    const r = await addFile(a.assetId, a.accountId, { name: a.name, buf: a.buf, by: a.by, source: 'watchfolder' });
+    const t = await one<any>(`SELECT title FROM vod_assets WHERE id = $1`, [a.assetId]);
+    return { file: r.file, duplicate: r.duplicate, assetTitle: t?.title ?? 'the asset' };
+  },
+  async markAttached(itemId, assetId, note) {
+    await query(
+      `UPDATE watchfolder_items SET status = 'ingested', vod_asset_id = $2, reason = $3, resolved_at = now()
+        WHERE id = $1 AND status = 'seen'`, [itemId, assetId, note.slice(0, 500)]);
+  },
+  async toReview(f, item, reason) {
+    // Moved first, then recorded, as the scanner does: a row that says
+    // "in the review folder" while the file is still in the drop is the
+    // worse half to be left with.
+    const inUse = await pgItemStore.quarantineKeysInUse(f.id);
+    const root = (f.quarantinePath || '_review').replace(/^\/+|\/+$/g, '');
+    const qKey = quarantineKey(root, item.objectKey, inUse);
+    await moveToQuarantine(f.path, item.objectKey, qKey);
+    // resolved_at back to null: an open review item, as the scan leaves one.
+    await query(
+      `UPDATE watchfolder_items SET status = 'quarantined', reason = $2, quarantine_key = $3, resolved_at = NULL
+        WHERE id = $1`, [item.id, reason.slice(0, 500), qKey]);
+    return qKey;
+  },
+  async markFailed(itemId, reason) {
+    await query(
+      `UPDATE watchfolder_items SET status = 'failed', reason = $2, resolved_at = now()
+        WHERE id = $1 AND status = 'seen'`, [itemId, reason.slice(0, 500)]);
+  },
+};
 
 /**
  * Ingest every enabled local folder.

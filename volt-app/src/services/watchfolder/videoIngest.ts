@@ -102,7 +102,7 @@ export type VideoOutcome =
 export interface VideoIngestStore {
   claim(itemId: string | number): Promise<boolean>;
   /** The asset exists: close the item so no later pass makes another. */
-  markLanded(itemId: string | number, note: string): Promise<void>;
+  markLanded(itemId: string | number, note: string, assetId?: string): Promise<void>;
   markFailed(itemId: string | number, reason: string): Promise<void>;
   createVodAsset(a: {
     accountId: string; title: string; sourceKey: string; sourceBytes: number;
@@ -251,7 +251,7 @@ export async function ingestVideoItem(
     // A metadata gate holds the ingest, not the media: encode it now (as an upload).
     if (ing.status !== 'ingested' && ing.status !== 'awaiting_metadata') {
       // In the library with the reason on the asset; no encode, as an upload.
-      await store.markLanded(item.id, `in the Media Library as "${title}", held by the ingest rules (${ing.status.replace(/_/g, ' ')})`);
+      await store.markLanded(item.id, `in the Media Library as "${title}", held by the ingest rules (${ing.status.replace(/_/g, ' ')})`, asset.id);
       return { result: 'held', itemId: item.id, assetId: asset.id, target: 'vod', status: ing.status };
     }
 
@@ -263,7 +263,7 @@ export async function ingestVideoItem(
       // file into the same directory.
       dedupeKey: `vod.encode:${asset.id}`,
     });
-    await store.markLanded(item.id, `in the Media Library as "${title}", queued for encoding${ing.status === 'awaiting_metadata' ? ' (waiting for required metadata before it is ingested)' : ''}`);
+    await store.markLanded(item.id, `in the Media Library as "${title}", queued for encoding${ing.status === 'awaiting_metadata' ? ' (waiting for required metadata before it is ingested)' : ''}`, asset.id);
     return { result: 'queued', itemId: item.id, assetId: asset.id, jobId: job.id, target: 'vod' };
   } catch (e: any) {
     const why = String(e?.message ?? e).slice(0, 500);
@@ -294,15 +294,18 @@ export const pgVideoIngestStore: VideoIngestStore = {
         RETURNING id`, [itemId]);
     return !!r;
   },
-  async markLanded(itemId, note) {
+  async markLanded(itemId, note, assetId) {
     // 'ingested', NOT 'seen'. It used to stay 'seen' so the queue would not say
     // "in library" while the encode ran, but 'seen' is what the pending query
     // picks up again after ten minutes, so every drop became a new asset and a
     // new encode every ten minutes. The asset IS in the library now (its row
     // shows the encode's progress), and the note says it is still encoding.
     await query(
-      `UPDATE watchfolder_items SET status = 'ingested', reason = $2, resolved_at = now()
-        WHERE id = $1`, [itemId, note.slice(0, 500)]);
+      // The asset is kept on the item (build queue H2b-2), so a caption
+      // dropped later finds the video it belongs to by the item's file name.
+      `UPDATE watchfolder_items SET status = 'ingested', reason = $2, resolved_at = now(),
+              vod_asset_id = COALESCE($3::uuid, vod_asset_id)
+        WHERE id = $1`, [itemId, note.slice(0, 500), assetId ?? null]);
   },
   async markFailed(itemId, reason) {
     await query(
