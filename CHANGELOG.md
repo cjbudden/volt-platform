@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.57.0 (2026-11-06)
+
+### Product (in customer release notes)
+
+- added · Mirror and Archive: Archive copies can now go to an S3-compatible object store at your site, such as MinIO or NetApp StorageGRID, as well as to a folder or NAS share. The store's keys stay on your site's server and are never sent to Volt; every copy is read back from the store and checked against the original before it counts, and nothing in the store is ever overwritten.
+
+### Internal
+
+- added · Site agent: Site agent 0.6.0 writes to S3-compatible stores with its own Signature V4 signer (checked against the AWS SDK), single PUT or multipart, If-None-Match on every write; new check suite mirror-archive-s3 runs against moto with IAM auth when ARCHIVE_S3_TEST_ENDPOINT is set.
+
 ## 0.56.0 (2026-11-06)
 
 ### Product (in customer release notes)
