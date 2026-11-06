@@ -487,6 +487,78 @@
  },
  {
   "method": "GET",
+  "path": "/api/archive/copies",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "POST",
+  "path": "/api/archive/copies",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "GET",
+  "path": "/api/archive/copies/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "POST",
+  "path": "/api/archive/copies/:id/verify",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "GET",
+  "path": "/api/archive/targets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "POST",
+  "path": "/api/archive/targets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "GET",
+  "path": "/api/archive/targets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/archive/targets/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "GET",
   "path": "/api/audit",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

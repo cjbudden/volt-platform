@@ -2,6 +2,9 @@
  * HYBRID SITES (build queue H1, HYBRID_SITES.md). Licensed add-on
  * `hybrid_sites`, off by default: without the licence every route here
  * refuses with 403 `licence_required` and the console offers no Sites page.
+ * Mirror and Archive (`mirror_archive`, H3-2) runs on the same sites and
+ * agents, so either licence opens sites, hosts and the job lease; the
+ * on-prem watchfolder routes need `hybrid_sites` itself.
  *
  * Console (admin session or account secret key, account administrators):
  *   GET    /api/sites                                list, with health
@@ -48,14 +51,16 @@ import { requireMinRole } from '../auth/roles';
 import { asyncHandler, notFound, badRequest, conflict } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { writeAudit, actor, patchEntity } from '../services/audit';
-import { requireLicence } from '../services/sites/licences';
+import { licenceRequired, requireSiteLicence } from '../services/sites/licences';
 import * as S from '../services/sites/sites';
 import * as W from '../services/sites/siteWatchfolders';
 import * as J from '../services/sites/siteJobs';
 
 export const sitesRouter = Router();
+// Sites are shared by both site add-ons: Hybrid Sites, and Mirror and
+// Archive sold on its own (H3-2). Neither: 403 licence_required, as before.
 sitesRouter.use(requireAuth, requireMinRole('admin'), asyncHandler(async (req, _res, next) => {
-  await requireLicence(accountId(req), 'hybrid_sites');
+  await requireSiteLicence(accountId(req));
   next();
 }));
 
@@ -220,54 +225,60 @@ siteAgentRouter.get('/config', asyncHandler(async (req, res) => {
 
 // ---- on-prem watchfolders (H2) ----------------------------------------------------
 
+/** On-prem watchfolders are Hybrid Sites; a Mirror and Archive host alone is refused (H3-2). */
+function hybridOnly(p: S.SitePrincipal): S.SitePrincipal {
+  if (!p.licences.includes('hybrid_sites')) throw licenceRequired('hybrid_sites');
+  return p;
+}
+
 siteAgentRouter.get('/watchfolders', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   W.requireApprovedHost(p);
   res.json({ items: await W.foldersForSite(p) });
 }));
 
 siteAgentRouter.post('/watchfolders/:id/known', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json({ known: await W.isKnown(p, req.params.id, req.body?.objectKey, req.body?.checksum) });
 }));
 
 siteAgentRouter.get('/watchfolders/:id/quarantine-keys', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json({ items: await W.quarantineKeysInUse(p, req.params.id) });
 }));
 
 siteAgentRouter.post('/watchfolders/:id/items', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.status(201).json(await W.recordDecision(p, req.params.id, req.body ?? {}));
 }));
 
 siteAgentRouter.get('/watchfolders/:id/uploads', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json({ items: await W.pendingUploads(p, req.params.id) });
 }));
 
 siteAgentRouter.get('/watchfolders/:id/returns', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json({ items: await W.pendingReturns(p, req.params.id) });
 }));
 
 siteAgentRouter.post('/watchfolders/:id/returns/:itemId', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json(await W.returned(p, req.params.id, req.params.itemId, req.body?.ok !== false, req.body?.error ?? null));
 }));
 
 siteAgentRouter.get('/watchfolders/:id/reviews', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json({ items: await W.pendingReviews(p, req.params.id) });
 }));
 
 siteAgentRouter.post('/watchfolders/:id/reviews/:itemId', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json(await W.reviewed(p, req.params.id, req.params.itemId, req.body?.ok !== false, req.body?.error ?? null));
 }));
 
 siteAgentRouter.post('/watchfolders/:id/scanned', asyncHandler(async (req, res) => {
-  const p = await S.authenticateSite(req.headers.authorization);
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json(await W.scanReport(p, req.params.id, req.body?.error ?? null));
 }));
 

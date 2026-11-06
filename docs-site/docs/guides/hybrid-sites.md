@@ -18,12 +18,13 @@ Sites is where you look after the Hybrid Sites add-on: your own locations, such 
 - **Approving:** a server takes no work until an administrator approves it. Reject one you do not recognise.
 - **Health at a glance:** each site's health, the agent and encoder versions its servers run, and when each was last heard from.
 - **Watchfolders at the site:** folders on your own storage that the site's agent sorts with Volt's rules, uploading accepted video, audio, images and captions to Volt and keeping refused files at the site (see [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder)).
+- **Archive copies at the site:** with the Mirror and Archive add-on, copies of your originals on a folder or NAS share at the site, each one checked against the original (see [Keep archive copies at the site](#keep-archive-copies-at-the-site)).
 
 An administrator sets a site up once and comes back when a server is added, replaced or stops reporting.
 
 ## Before you start
 
-- **The Hybrid Sites add-on.** Sites appears under Admin only for an account that has it. Ask Volt to add it to your plan.
+- **The Hybrid Sites add-on, or Mirror and Archive.** Either add-on gives you sites and their servers. Sites appears under Admin for an account with Hybrid Sites; with Mirror and Archive alone, set sites up [through the API](#through-the-api) for now. Ask Volt to add the add-on to your plan.
 - **A server at the site** (Linux, a physical server or a virtual machine) that can reach your Volt address over HTTPS. The agent only calls out: open no inbound ports.
 - **The Volt site agent** installed on that server (Volt gives you the package with the add-on).
 - **Administrator access** (see [Who can do it](#who-can-do-it)).
@@ -90,6 +91,17 @@ Some work can be sent to a site instead of running in Volt's cloud (the copies a
 
 A server waiting for approval is given no work. Work for a disabled site waits until you enable it.
 
+### Keep archive copies at the site
+
+With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, or a NAS share mounted on it. In this release copies are made [through the API](#through-the-api); copy rules and the Storage page follow.
+
+1. Make a **storage target**: a name, the site, and the folder as the server sees it (for example `/mnt/nas/archive`). Give it a **bandwidth cap** if copies must leave room for live contribution.
+2. Ask for an asset's original to be copied there. An approved, **Online** server of the site downloads it through a link made for that one file, writes it into the folder and reads it back.
+3. The copy counts as **Verified** only when what the folder holds matches the original's checksum. A copy that does not match is removed from the folder and tried again; after its attempts it shows **Failed** with the reason.
+4. Check a copy again whenever you like. The same checksum keeps it verified with a new date; a changed file shows **Corrupt**, and a file that is gone **Missing**. Copy it again to replace it: the new copy is written beside the damaged file, never over it.
+
+Files are named after the original, with spaces and characters a storage device may not keep removed. A name already in the folder gets `-2`, `-3` added, so nothing at the target is ever overwritten.
+
 ### Switch a site off
 
 Choose **Disable site**. Its servers are refused until you choose **Enable site**; nothing is deleted.
@@ -112,6 +124,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | See the sites and their hosts | Account administrator (owner or admin) |
 | Create, rename, disable and enable sites | Account administrator |
 | Make and withdraw enrolment tokens, approve and reject servers, rotate credentials | Account administrator |
+| Make storage targets and archive copies, check copies (Mirror and Archive) | Account administrator |
 
 The page is not offered to other roles, and not at all without the Hybrid Sites add-on.
 
@@ -129,6 +142,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Make an enrolment token** is greyed out | The site is disabled | Choose **Enable site** first |
 | **A site with this name already exists** | Names are unique in the account, ignoring capitals | Choose another name |
 | Work for a site waits and does not start | No approved server of the site is **Online**, or the site is disabled | Start the agent on a server of the site, or choose **Enable site** |
+| An archive copy stays **Queued** with *the target folder is not there* | The folder is not on the server, or the NAS share is not mounted | Mount the share at the target's path; the copy is retried by itself |
+| An archive copy shows **Failed** with a checksum mismatch | What arrived at the folder did not match the original, on every attempt | Check the storage at the site, then copy it again |
+| An archive copy shows **Corrupt** or **Missing** | A check found the file changed or gone from the folder | Copy it again; look at what changes files on that storage |
 | An on-prem watchfolder's **Last pass** stays old | No approved server of the site is running the agent, or it cannot read the folder | Check the server here; the folder's page shows the agent's last error under **Last scan failed** |
 
 ## Through the API
@@ -140,8 +156,18 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `POST /api/sites/{id}/enrolment-tokens` | A one-time enrolment token, returned once |
 | `POST /api/sites/{id}/hosts/{hostId}/approve`, `.../reject` | Approves or rejects a server |
 | `POST /api/sites/{id}/hosts/{hostId}/rotate-credential` | A new credential, handed to the agent on its next heartbeat |
+| `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Storage targets for Mirror and Archive: lists, makes and changes them |
+| `POST /api/archive/copies` | Copies an asset's original to a target (`targetId`, `vodAssetId`) |
+| `GET /api/archive/copies`, `GET /api/archive/copies/{id}` | Every copy with its state, where it is and when it was last confirmed |
+| `POST /api/archive/copies/{id}/verify` | Checks a copy again now |
 
-Without the add-on these answer `403` with the code `licence_required`.
+Without either add-on the sites routes answer `403` with the code `licence_required`; the archive routes need Mirror and Archive.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Archive NAS", "siteId": "'$SITE_ID'", "path": "/mnt/nas/archive", "bandwidthMbps": 200}' \
+  "https://your-volt-host/api/archive/targets"
+```
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

@@ -1,5 +1,6 @@
 import { captionsSettingsRouter } from './modules/captionsSettings';
 import { sitesRouter, siteAgentRouter, siteTransferRouter } from './modules/sites';
+import { archiveRouter } from './modules/archive';
 import { reframeRouter, reframeSettingsRouter } from './modules/reframe';
 import { CAPTION_LANGUAGES } from './services/captionLanguages';
 import { accountSettingsRouter } from './modules/accountSettings';
@@ -477,6 +478,7 @@ export function createServer() {
   app.use('/api/watchfolders', watchfoldersRouter);  // ingest folders, rules, review queue
   app.use('/api/sites', sitesRouter);               // Hybrid Sites: sites, hosts, enrolment (licensed; HYBRID_SITES.md)
   app.use('/api/site-agent', siteAgentRouter);      // the site agent: enrol, heartbeat, config (host credential only)
+  app.use('/api/archive', archiveRouter);           // Mirror and Archive: storage targets and copies (licensed; H3-2)
   app.use('/api/encode-profiles', encodeProfilesRouter);  // renditions + ladder groups
   app.use('/api/engines', enginesRouter);           // encode engines: builtin + vendor adapters (ENGINES.md)
   app.use('/api/workflows', workflowsRouter);       // base workflow map, add-on runs, traces (WORKFLOWS.md)

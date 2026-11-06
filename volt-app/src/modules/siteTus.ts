@@ -24,6 +24,7 @@ import { one, query } from '../db';
 import { createTusRouter, type TusInfo } from '../services/ingest/tus';
 import { openSession, MAX_UPLOAD_BYTES, abortSession, type UploadSession } from '../services/uploads';
 import { authenticateSite, type SitePrincipal } from '../services/sites/sites';
+import { licenceRequired } from '../services/sites/licences';
 import { itemForUpload, attachUpload, closeUploadedItem, requireApprovedHost, landSiteFile } from '../services/sites/siteWatchfolders';
 import { PgTusStore, landTus, toInfo } from './tus';
 
@@ -81,6 +82,8 @@ export const siteTusRouter = createTusRouter({
   authorise: async (req) => {
     const p = await authenticateSite(req.headers.authorization);
     requireApprovedHost(p);
+    // Uploads from a site are Hybrid Sites (on-prem watchfolders), not Mirror and Archive.
+    if (!p.licences.includes('hybrid_sites')) throw licenceRequired('hybrid_sites');
     return { accountId: p.accountId, userId: null, site: p } as SiteWho;
   },
   onComplete: async (info, _who, sha) => {

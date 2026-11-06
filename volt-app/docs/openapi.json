@@ -49,6 +49,11 @@
    "description": "Apps are the players, websites and mobile apps that publish your content, and each one carries the publishable keys used in public API calls.\n\n**Use it to:**\n- Register an app and receive its publishable key (`pk_…`) with `POST /api/apps`\n- List and edit apps with `GET /api/apps` and `PUT /api/apps/{id}`\n- Issue or revoke keys with `POST /api/apps/{id}/keys` and `DELETE /api/apps/keys/{keyId}`\n- Issue an account secret key (`sk_live_…`) for your servers with `POST /api/apps/secret-keys`\n\n**Credential:** admin session (Bearer) or account secret key, with `apps: view` to read and `apps: manage` to change. Secret keys also need the admin tier.\n\n**Good to know:** keys are shown once, at creation. Never put a secret key in an app or web page."
   },
   {
+   "name": "Archive",
+   "x-displayName": "Mirror and Archive",
+   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules, object-store targets, restore to the cloud and a delete that waits for a confirmed copy come next."
+  },
+  {
    "name": "Audit",
    "x-displayName": "Audit log",
    "description": "The audit log records who did what in your account, including deletes, so you can review and export changes.\n\n**Use it to:**\n- Search the log by action, record type, person and date range with `GET /api/audit`\n- Fill filter menus from `GET /api/audit/facets`\n- Export matching rows as CSV with `GET /api/audit/export.csv`\n\n**Credential:** admin session (Bearer) or account secret key, any signed-in admin user.\n\n**Good to know:** the CSV export is capped at 50,000 rows, so narrow the date range for larger periods."
@@ -313,7 +318,7 @@
   {
    "name": "Sites",
    "x-displayName": "Sites",
-   "description": "Sites are your own locations running the Volt site agent, with the Hybrid Sites add-on: their servers (hosts), enrolment and health.\n\n**Use it to:**\n- Create and edit sites with `POST /api/sites` and `PATCH /api/sites/{id}`\n- Add a server with `POST /api/sites/{id}/enrolment-tokens`, then approve or reject it with `POST /api/sites/{id}/hosts/{hostId}/approve` or `.../reject`\n- Watch health and versions with `GET /api/sites` and `GET /api/sites/{id}`\n- Give a server a new credential with `POST /api/sites/{id}/hosts/{hostId}/rotate-credential`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Hybrid Sites add-on on the account.\n\n**Good to know:** a server waiting for approval takes no work and does not count towards a site's health."
+   "description": "Sites are your own locations running the Volt site agent, with the Hybrid Sites or the Mirror and Archive add-on: their servers (hosts), enrolment and health.\n\n**Use it to:**\n- Create and edit sites with `POST /api/sites` and `PATCH /api/sites/{id}`\n- Add a server with `POST /api/sites/{id}/enrolment-tokens`, then approve or reject it with `POST /api/sites/{id}/hosts/{hostId}/approve` or `.../reject`\n- Watch health and versions with `GET /api/sites` and `GET /api/sites/{id}`\n- Give a server a new credential with `POST /api/sites/{id}/hosts/{hostId}/rotate-credential`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Hybrid Sites or the Mirror and Archive add-on on the account.\n\n**Good to know:** a server waiting for approval takes no work and does not count towards a site's health."
   },
   {
    "name": "Social",
@@ -433,6 +438,7 @@
     "Account Settings",
     "Addons",
     "Apps",
+    "Archive",
     "Audit",
     "Channels",
     "Collections",
@@ -3326,6 +3332,482 @@
         }
        }
       }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/archive/copies": {
+   "get": {
+    "operationId": "getArchiveCopies",
+    "summary": "List archive copies",
+    "tags": [
+     "Archive"
+    ],
+    "description": "Every copy made to the account's storage targets, newest first; filter by `target_id`, `vod_asset_id` or `state`. `state` is `queued` (shown as `copying` while a site host runs it), `verified` (read back from the target and matched to the original's checksum), `failed` (no attempts left; `error` says why), `corrupt` (a re-check found it changed) or `missing` (a re-check found it gone). `verifiedAt` is when it was last confirmed. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `target_id`, `vod_asset_id`, `state`, `created_at`, `updated_at`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "target_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `target_id=value` (comma list = any of), or `target_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "vod_asset_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "the Media Library asset whose original was copied. Filter: `vod_asset_id=value` (comma list = any of), or `vod_asset_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "queued",
+        "copying",
+        "verified",
+        "failed",
+        "corrupt",
+        "missing"
+       ]
+      },
+      "description": "queued (shown as copying while a host runs it), verified, failed, corrupt, missing. Filter: `state=value` (comma list = any of), or `state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "created_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `created_at=value`, or `created_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "updated_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `updated_at=value`, or `updated_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "-created_at"
+      },
+      "description": "Comma list of: id, target_id, vod_asset_id, state, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 500,
+       "default": 100
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "x-volt-list": true
+   },
+   "post": {
+    "operationId": "postArchiveCopies",
+    "summary": "Copy an asset's original to a storage target",
+    "tags": [
+     "Archive"
+    ],
+    "description": "`targetId` and `vodAssetId`: the asset's original file is copied by the site agent into the target's folder (named after the original, spaces and unsupported characters removed, `-2`, `-3` added if the name is taken) and counts only once the checksum read back from the target matches the original's. 202 with the queued copy; asking again for a copy that is queued or verified answers 200 with it; one that failed, changed or went missing is copied afresh. 422 `no_source` when the asset keeps no original; 409 `target_disabled` or `site_disabled`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/archive/copies/{id}": {
+   "get": {
+    "operationId": "getArchiveCopiesByID",
+    "summary": "Get an archive copy",
+    "tags": [
+     "Archive"
+    ],
+    "description": "One archive copy: target, asset, `storedPath` in the target's folder, `bytes`, `sha256`, `state`, `error`, and when it was copied, last verified and last checked. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/archive/copies/{id}/verify": {
+   "post": {
+    "operationId": "postArchiveCopiesByIDVerify",
+    "summary": "Check an archive copy now",
+    "tags": [
+     "Archive"
+    ],
+    "description": "Queues a re-check: the site agent reads the copy back from the target. The same checksum keeps it `verified` with a new `verifiedAt`; a different one makes it `corrupt`, a file that is gone `missing`. 202 when queued, 200 when a check is already waiting; 409 `not_copied` for a copy that was never made. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/archive/targets": {
+   "get": {
+    "operationId": "getArchiveTargets",
+    "summary": "List storage targets",
+    "tags": [
+     "Archive"
+    ],
+    "description": "The account's Mirror and Archive storage targets: folders at one of its sites (on the site's server or a mounted NAS share) where the site agent keeps extra copies. Each has its `siteId`, `kind` (`path`), `path` on the site's server, optional `bandwidthMbps` cap and `status`. Needs the Mirror and Archive add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `site_id`, `kind`, `status`, `created_at`, `updated_at`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "parameters": [
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Search name. Every word must match, case-insensitive."
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "name",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `name=value` (comma list = any of), or `name[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "site_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "the site whose agent writes the copies. Filter: `site_id=value` (comma list = any of), or `site_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "path"
+       ]
+      },
+      "description": "path: a folder on the site's server or NAS. Filter: `kind=value` (comma list = any of), or `kind[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "active",
+        "disabled"
+       ]
+      },
+      "description": "Filter: `status=value` (comma list = any of), or `status[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "created_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `created_at=value`, or `created_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "updated_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `updated_at=value`, or `updated_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "name"
+      },
+      "description": "Comma list of: id, name, site_id, kind, status, created_at, updated_at. Prefix `-` for descending. Default `name`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 500,
+       "default": 100
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "x-volt-list": true
+   },
+   "post": {
+    "operationId": "postArchiveTargets",
+    "summary": "Create a storage target",
+    "tags": [
+     "Archive"
+    ],
+    "description": "`name` (unique in the account, ignoring case), `siteId` (one of your sites), `path` (an absolute folder on the site's server, such as `/mnt/nas/archive`, `D:\\\\Archive` or `\\\\\\\\nas\\\\archive`; no `.` or `..` segments) and an optional `bandwidthMbps` (1 to 100000; copies never go faster). Only folder targets (`kind` `path`) are available so far: another kind answers 422 `kind_not_available`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/archive/targets/{id}": {
+   "get": {
+    "operationId": "getArchiveTargetsByID",
+    "summary": "Get a storage target",
+    "tags": [
+     "Archive"
+    ],
+    "description": "One storage target of the account. Another account's target answers 404. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "patch": {
+    "operationId": "patchArchiveTargetsByID",
+    "summary": "Change a storage target",
+    "tags": [
+     "Archive"
+    ],
+    "description": "Change `name`, `path`, `bandwidthMbps` (null for no cap) or `status` (`active`, or `disabled`: no new copies are queued to it; copies already there are kept). A target that already holds copies keeps its folder: changing `path` answers 409 `target_in_use`. The answer lists what `changed`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
@@ -29653,7 +30135,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "The account's sites, each with its `health` (healthy, degraded, offline, no_hosts or disabled, from its approved hosts only), host counts, the agent and encoder versions its hosts run and when one was last heard from. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `status`, `created_at`, `updated_at`.",
+    "description": "The account's sites, each with its `health` (healthy, degraded, offline, no_hosts or disabled, from its approved hosts only), host counts, the agent and encoder versions its hosts run and when one was last heard from. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `status`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -29780,7 +30262,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "A location of yours that will run the Volt site agent: `name` (unique in the account, ignoring case) and an optional `description`. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "A location of yours that will run the Volt site agent: `name` (unique in the account, ignoring case) and an optional `description`. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -29806,7 +30288,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "The site with `hostList` (each host's standing, health and the facts it last reported), its unused enrolment tokens by prefix (never in clear) and the heartbeat timings. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "description": "The site with `hostList` (each host's standing, health and the facts it last reported), its unused enrolment tokens by prefix (never in clear) and the heartbeat timings. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
     "security": [
      {
       "adminBearer": []
@@ -29840,7 +30322,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "Rename, describe, or set `status` to `disabled` (its agents are refused) or `active`. Send the `version` you read to refuse a change made by someone else in between. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "Rename, describe, or set `status` to `disabled` (its agents are refused) or `active`. Send the `version` you read to refuse a change made by someone else in between. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -29876,7 +30358,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "A one-time token for the site agent (`volt-agent site enrol <server> <token>`), valid for `expiresInHours` (default 24, at most 168). The token is in this answer only. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "A one-time token for the site agent (`volt-agent site enrol <server> <token>`), valid for `expiresInHours` (default 24, at most 168). The token is in this answer only. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -29912,7 +30394,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "An unused token stops working. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "An unused token stops working. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -29956,7 +30438,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "The host may take work at this site. It learns of it on its next heartbeat. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "The host may take work at this site. It learns of it on its next heartbeat. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -30000,7 +30482,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "The host is refused and its credential stops working at once. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "The host is refused and its credential stops working at once. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -30044,7 +30526,7 @@
     "tags": [
      "Sites"
     ],
-    "description": "A new credential for the host, handed to its agent on the next heartbeat; the old one stops working the first time the new one is used. The new secret is never returned here. Needs the Hybrid Sites add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "description": "A new credential for the host, handed to its agent on the next heartbeat; the old one stops working the first time the new one is used. The new secret is never returned here. Needs the Hybrid Sites or the Mirror and Archive add-on: without either the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []

@@ -28,7 +28,7 @@ import type { PoolClient } from 'pg';
 import { query, one, tx } from '../../db';
 import { unauthorized, forbidden, badRequest, notFound } from '../../util/http';
 import { writeAudit } from '../audit';
-import { licenceRequired } from './licences';
+import { hasSiteLicence, licenceRequired } from './licences';
 
 /** How often an agent reports. */
 export const HEARTBEAT_SECONDS = 30;
@@ -177,7 +177,7 @@ export async function enrol(token: string, rawFacts: any) {
     if (!t || t.used_at || t.revoked_at || new Date(t.expires_at).getTime() <= Date.now()) {
       throw unauthorized('Enrolment token not valid: it may have been used already or expired. Create a new one in Admin, Sites.');
     }
-    if (!(t.licences ?? []).includes('hybrid_sites')) throw licenceRequired('hybrid_sites');
+    if (!hasSiteLicence(t.licences)) throw licenceRequired('hybrid_sites');
     if (t.site_status !== 'active') throw forbidden('This site is disabled');
     const host = (await c.query(
       `INSERT INTO site_hosts(site_id, account_id, hostname) VALUES ($1,$2,$3) RETURNING id, status`,
@@ -195,7 +195,11 @@ export async function enrol(token: string, rawFacts: any) {
   });
 }
 
-export interface SitePrincipal { credentialId: string; hostId: string; siteId: string; accountId: string; hostStatus: string; siteStatus: string; justActivated: boolean }
+export interface SitePrincipal {
+  credentialId: string; hostId: string; siteId: string; accountId: string; hostStatus: string; siteStatus: string; justActivated: boolean;
+  /** The account's add-ons as of this call: Hybrid Sites routes need `hybrid_sites`, archive jobs `mirror_archive` (H3-2). */
+  licences: string[];
+}
 
 /**
  * Who a host credential belongs to. Refuses unknown, revoked and rejected
@@ -212,7 +216,7 @@ export async function authenticateSite(header: string | undefined): Promise<Site
       WHERE c.secret_hash = $1`, [hash]);
   // Constant-time compare of the hashes, even though the lookup already matched.
   if (!r || !timingSafeEqual(Buffer.from(r.secret_hash), Buffer.from(hash)) || r.revoked_at) throw unauthorized('Site host credential not valid');
-  if (!(r.licences ?? []).includes('hybrid_sites')) throw licenceRequired('hybrid_sites');
+  if (!hasSiteLicence(r.licences)) throw licenceRequired('hybrid_sites');
   if (r.host_status === 'rejected') throw forbidden('This host was rejected in the console');
   if (r.site_status !== 'active') throw forbidden('This site is disabled');
   let justActivated = false;
@@ -226,7 +230,7 @@ export async function authenticateSite(header: string | undefined): Promise<Site
     justActivated = true;
   }
   await query(`UPDATE site_credentials SET last_used_at = now() WHERE id = $1`, [r.id]);
-  return { credentialId: r.id, hostId: r.host_id, siteId: r.site_id, accountId: r.account_id, hostStatus: r.host_status, siteStatus: r.site_status, justActivated };
+  return { credentialId: r.id, hostId: r.host_id, siteId: r.site_id, accountId: r.account_id, hostStatus: r.host_status, siteStatus: r.site_status, justActivated, licences: r.licences ?? [] };
 }
 
 /** A heartbeat: the host's latest facts; the answer says whether to pull config and hands over a rotated credential. */
@@ -272,11 +276,14 @@ export async function siteConfig(p: SitePrincipal) {
     // The site's on-prem watchfolders (H2), names and placements only: the
     // agent pulls each folder's rules every pass from /watchfolders, so a rule
     // edited in the console applies at the next pass without a config bump.
-    watchfolders: approved
+    // Only with Hybrid Sites: a Mirror and Archive host has no watchfolders.
+    watchfolders: approved && p.licences.includes('hybrid_sites')
       ? (await (await import('./siteWatchfolders')).foldersForSite(p)).map((f) => ({ id: f.id, name: f.name, path: f.path, placement: f.placement }))
       : [],
     // The pool this site's hosts lease work from (H3): POST /api/site-agent/jobs/lease.
     pools: approved ? [{ name: `site:${s.id}`, leaseSeconds: (await import('../jobs/queue')).LEASE_SECONDS }] : [],
+    // The add-ons this site runs, so the agent starts only the loops it needs (H3-2).
+    addOns: p.licences.filter((l) => l === 'hybrid_sites' || l === 'mirror_archive'),
     work: approved ? 'ready' : 'waiting_for_approval',
   };
 }

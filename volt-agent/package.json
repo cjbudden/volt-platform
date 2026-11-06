@@ -1,7 +1,7 @@
 {
   "name": "@volt/agent",
-  "version": "0.4.0",
-  "description": "Volt agent: watches folders, recognises cloud drive sync roots, uploads with tus or asks Volt to fetch cloud to cloud; on a Hybrid Site, enrols the host, sends heartbeats, pulls config and runs the site's on-prem watchfolders.",
+  "version": "0.5.0",
+  "description": "Volt agent: watches folders, recognises cloud drive sync roots, uploads with tus or asks Volt to fetch cloud to cloud; on a Hybrid Site, enrols the host, sends heartbeats, pulls config runs the site's on-prem watchfolders and its Mirror and Archive copies.",
   "license": "MIT",
   "bin": {
     "volt-agent": "dist/volt-agent/src/cli.js"

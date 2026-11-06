@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**892 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 694 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**900 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 702 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -313,6 +313,19 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/apps/keys` | admin session (Bearer) or account secret key | apps: view |  |
 | DELETE | `/api/apps/keys/:keyId` | admin session (Bearer) or account secret key | apps: manage |  |
 | POST | `/api/apps/secret-keys` | admin session (Bearer) or account secret key | apps: manage + admin tier |  |
+
+### `/api/archive`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/archive/copies` | admin session (Bearer) or account secret key | any signed-in admin user |  |
+| POST | `/api/archive/copies` | admin session (Bearer) or account secret key | operator tier or above |  |
+| GET | `/api/archive/copies/:id` | admin session (Bearer) or account secret key | any signed-in admin user |  |
+| POST | `/api/archive/copies/:id/verify` | admin session (Bearer) or account secret key | operator tier or above |  |
+| GET | `/api/archive/targets` | admin session (Bearer) or account secret key | any signed-in admin user |  |
+| POST | `/api/archive/targets` | admin session (Bearer) or account secret key | operator tier or above |  |
+| GET | `/api/archive/targets/:id` | admin session (Bearer) or account secret key | any signed-in admin user |  |
+| PATCH | `/api/archive/targets/:id` | admin session (Bearer) or account secret key | operator tier or above |  |
 
 ### `/api/audit`
 

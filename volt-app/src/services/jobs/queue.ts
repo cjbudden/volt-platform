@@ -115,9 +115,16 @@ export async function claim(types: string[], workerId: string): Promise<JobRow |
  * host, H3). `types` narrows it to what that worker can run; null takes any.
  * The lease, attempts, backoff and reaper are the same as for cloud work.
  */
-export async function claimInPool(pool: string, types: string[] | null, workerId: string): Promise<JobRow | null> {
+export async function claimInPool(pool: string, types: string[] | null, workerId: string, excludeTypes: string[] = []): Promise<JobRow | null> {
   if (!pool) throw new Error('claimInPool needs a pool; cloud work is claimed with claim()');
   if (types && !types.length) return null;
+  // excludeTypes: work this worker may not take (a site whose account lacks
+  // the add-on a job type belongs to, build queue H3-2).
+  if (excludeTypes.length) {
+    return types
+      ? claimWhere(`pool = $1 AND type = ANY($2) AND NOT (type = ANY($3))`, [pool, types, excludeTypes], workerId)
+      : claimWhere(`pool = $1 AND NOT (type = ANY($2))`, [pool, excludeTypes], workerId);
+  }
   return types
     ? claimWhere(`pool = $1 AND type = ANY($2)`, [pool, types], workerId)
     : claimWhere(`pool = $1`, [pool], workerId);

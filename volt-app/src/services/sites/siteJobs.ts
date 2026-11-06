@@ -36,6 +36,8 @@ import { claimInPool, fail, heartbeat, sitePool, succeed, LEASE_SECONDS, type Jo
 import { isS3Uri, mediaS3Client, parseS3Uri } from '../media/s3Driver';
 import type { SitePrincipal } from './sites';
 import { requireApprovedHost } from './siteWatchfolders';
+import { licenceRequired } from './licences';
+import { ARCHIVE_JOB_TYPES, attemptFailed, isArchiveJob, judge } from '../archive/archive';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LEASE_PREFIX = 'site-host:';
@@ -78,7 +80,14 @@ export async function lease(p: SitePrincipal, rawTypes: unknown) {
   }
   // One lease id per claim, naming the host so the jobs page shows who runs it.
   const leaseId = `${LEASE_PREFIX}${p.hostId}:${randomBytes(9).toString('base64url')}`;
-  const job = await claimInPool(sitePool(p.siteId), types, leaseId);
+  // Each add-on's work only for an account that holds it (H3-2): archive
+  // jobs need Mirror and Archive, everything else Hybrid Sites.
+  const archive = p.licences.includes('mirror_archive');
+  const hybrid = p.licences.includes('hybrid_sites');
+  let exclude: string[] = [];
+  if (!hybrid) types = (types ?? ARCHIVE_JOB_TYPES).filter(isArchiveJob);
+  if (!archive) exclude = ARCHIVE_JOB_TYPES;
+  const job = await claimInPool(sitePool(p.siteId), types, leaseId, exclude);
   if (!job) return null;
   await one(`UPDATE site_hosts SET last_heartbeat_at = now() WHERE id = $1 RETURNING id`, [p.hostId]);
   return leaseView(job);
@@ -97,6 +106,10 @@ async function heldJob(p: SitePrincipal, jobId: string, leaseId: unknown): Promi
   if (typeof leaseId !== 'string' || !leaseId) throw badRequest('leaseId is required');
   if (job.state !== 'running') throw leaseLost(job.state === 'cancelled' ? 'it was cancelled' : `it is ${job.state}`);
   if (job.claimed_by !== leaseId) throw leaseLost('its lease expired and it was handed out again');
+  // The add-on was withdrawn while the host held the job: stop here.
+  if (isArchiveJob(job.type) ? !p.licences.includes('mirror_archive') : !p.licences.includes('hybrid_sites')) {
+    throw licenceRequired(isArchiveJob(job.type) ? 'mirror_archive' : 'hybrid_sites');
+  }
   return job;
 }
 
@@ -114,7 +127,22 @@ export async function complete(p: SitePrincipal, jobId: string, b: any) {
   const job = await heldJob(p, jobId, b?.leaseId);
   const result = b?.result && typeof b.result === 'object' && !Array.isArray(b.result) ? b.result : {};
   if (JSON.stringify(result).length > 64 * 1024) throw badRequest('result is limited to 64 KB');
+  // ARCHIVE JOBS ARE JUDGED BEFORE THEY COUNT (H3-2): a copy whose checksum
+  // at the target does not match is a failed attempt, retried, never done.
+  let apply: (() => Promise<void>) | null = null;
+  if (isArchiveJob(job.type)) {
+    const v = await judge(job, result);
+    if (!v.ok) {
+      if (v.status === 400) throw Object.assign(badRequest(v.message), { code: v.code });
+      if (!(await fail(job.id, v.message, { code: v.code, permanent: v.permanent === true, workerId: job.claimed_by! }))) throw leaseLost('it changed hands');
+      const now = await one<JobRow>(`SELECT state, run_after FROM jobs WHERE id = $1`, [job.id]);
+      await attemptFailed(job, v.message, v.code, now?.state === 'failed');
+      throw Object.assign(new ApiError(v.status, v.message), { code: v.code, state: now?.state, retryAfter: now?.state === 'queued' ? now.run_after : null });
+    }
+    apply = v.apply;
+  }
   if (!(await succeed(job.id, result, job.claimed_by!))) throw leaseLost('it changed hands');
+  if (apply) await apply();
   return { ok: true, state: 'succeeded' };
 }
 
@@ -124,6 +152,7 @@ export async function failJob(p: SitePrincipal, jobId: string, b: any) {
   const code = typeof b?.code === 'string' && /^[a-z0-9_]{1,40}$/.test(b.code) ? b.code : 'site_error';
   if (!(await fail(job.id, message, { code, permanent: b?.permanent === true, workerId: job.claimed_by! }))) throw leaseLost('it changed hands');
   const now = await one<JobRow>(`SELECT state, run_after FROM jobs WHERE id = $1`, [job.id]);
+  if (isArchiveJob(job.type)) await attemptFailed(job, message, code, now?.state === 'failed');
   return { ok: true, state: now?.state, retryAfter: now?.state === 'queued' ? now.run_after : null };
 }
 

@@ -12,7 +12,8 @@
 //             approved, also watch the site's on-prem watchfolders and upload
 //             what they accept (siteWatch.ts, build queue H2), beside the
 //             heartbeat rather than inside it, so a long upload never makes
-//             the host look stale.
+//             the host look stale. And lease the site's Mirror and Archive
+//             jobs (siteArchive.ts, build queue H3-2) in a loop of their own.
 //
 //  OUTBOUND ONLY: the agent calls the cloud over HTTPS and listens on nothing.
 //  The credential lives in the state file, readable by its owner only.
@@ -23,8 +24,9 @@ import { dirname, join } from 'node:path';
 import * as os from 'node:os';
 
 import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
+import { archivePass } from './siteArchive';
 
-export const AGENT_VERSION = '0.4.0';
+export const AGENT_VERSION = '0.5.0';
 
 export interface SiteState {
   server: string;
@@ -133,7 +135,7 @@ export async function beat(state: SiteState, stateFile: string, facts?: HostFact
 }
 
 /** Heartbeat for ever. Network faults are logged and retried; a refusal stops the agent. */
-export async function runSite(stateFile: string, log: (s: string) => void = console.log, signal?: AbortSignal, opts: { watchEverySeconds?: number } = {}) {
+export async function runSite(stateFile: string, log: (s: string) => void = console.log, signal?: AbortSignal, opts: { watchEverySeconds?: number; archiveEverySeconds?: number } = {}) {
   const state = await loadSiteState(stateFile);
   if (!state) throw new Error(`No enrolment in ${stateFile}. Run: volt-agent site enrol <server> <token>`);
   let every = 30;
@@ -142,8 +144,10 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
   state.watch = state.watch ?? emptyMemory();
   let watching = false; let lastWatch = 0;
   const watchEvery = (opts.watchEverySeconds ?? 15) * 1000;
+  // A site with only Mirror and Archive has no watchfolders: do not ask.
+  const hybrid = () => !Array.isArray(state.config?.addOns) || state.config.addOns.includes('hybrid_sites');
   const watch = async () => {
-    if (watching || signal?.aborted || state.status !== 'approved' || Date.now() - lastWatch < watchEvery) return;
+    if (watching || signal?.aborted || state.status !== 'approved' || !hybrid() || Date.now() - lastWatch < watchEvery) return;
     watching = true; lastWatch = Date.now();
     try {
       await watchPass({ server: state.server, credential: () => state.credential, memory: state.watch!, log });
@@ -154,6 +158,22 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
   };
   const watchTimer = setInterval(() => { void watch(); }, Math.min(watchEvery, 5000));
   signal?.addEventListener('abort', () => clearInterval(watchTimer), { once: true });
+  // THE ARCHIVE LOOP (H3-2): lease and run the site's copy and check jobs.
+  // The cloud hands out only the work the account's add-ons cover, so a
+  // site without Mirror and Archive simply gets nothing (204).
+  let archiving = false; let lastArchive = 0;
+  const archiveEvery = (opts.archiveEverySeconds ?? 15) * 1000;
+  const archive = async () => {
+    if (archiving || signal?.aborted || state.status !== 'approved' || Date.now() - lastArchive < archiveEvery) return;
+    archiving = true; lastArchive = Date.now();
+    try {
+      await archivePass({ server: state.server, credential: () => state.credential, log });
+    } catch (e: any) {
+      log(`[archive] pass failed, retrying: ${e?.message ?? e}`);
+    } finally { archiving = false; lastArchive = Date.now(); }
+  };
+  const archiveTimer = setInterval(() => { void archive(); }, Math.min(archiveEvery, 5000));
+  signal?.addEventListener('abort', () => clearInterval(archiveTimer), { once: true });
   while (!signal?.aborted) {
     try {
       const r = await beat(state, stateFile);
@@ -161,10 +181,11 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
       log(`[site] ${state.siteName ?? state.siteId}: host ${r.status}${r.rotate ? ', credential rotated' : ''}${r.pullConfig ? `, config ${state.configVersion}` : ''}`);
       void watch();
     } catch (e: any) {
-      if (e.status === 401 || e.status === 403) { clearInterval(watchTimer); log(`[site] refused: ${e.message}`); throw e; }
+      if (e.status === 401 || e.status === 403) { clearInterval(watchTimer); clearInterval(archiveTimer); log(`[site] refused: ${e.message}`); throw e; }
       log(`[site] heartbeat failed, retrying: ${e.message}`);
     }
     await new Promise((res) => { const t = setTimeout(res, every * 1000); signal?.addEventListener('abort', () => { clearTimeout(t); res(null); }, { once: true }); });
   }
   clearInterval(watchTimer);
+  clearInterval(archiveTimer);
 }

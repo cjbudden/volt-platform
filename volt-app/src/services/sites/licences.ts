@@ -31,3 +31,20 @@ export function licenceRequired(licence: Licence): ApiError {
 export async function requireLicence(accountId: string, licence: Licence): Promise<void> {
   if (!(await hasLicence(accountId, licence))) throw licenceRequired(licence);
 }
+
+/**
+ * The add-ons that run on a site's agent. Mirror and Archive is sold on its
+ * own (HYBRID_SITES.md), so an account with only `mirror_archive` still has
+ * sites, hosts and the job lease; only the Hybrid Sites parts (on-prem
+ * watchfolders and their uploads) stay behind `hybrid_sites`.
+ */
+export const SITE_LICENCES: Licence[] = ['hybrid_sites', 'mirror_archive'];
+
+/** Either site add-on opens sites and their agents; neither: 403 naming Hybrid Sites, as before. */
+export function hasSiteLicence(licences: string[] | null | undefined): boolean {
+  return SITE_LICENCES.some((l) => (licences ?? []).includes(l));
+}
+
+export async function requireSiteLicence(accountId: string): Promise<void> {
+  if (!hasSiteLicence(await licencesOf(accountId))) throw licenceRequired('hybrid_sites');
+}
