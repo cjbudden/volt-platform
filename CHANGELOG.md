@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.56.0 (2026-11-06)
+
+### Product (in customer release notes)
+
+- added · VOD: With Mirror and Archive, publishing rules can now copy an item's original to your storage targets as soon as it is ingested or when it is published, optionally only inside an off-peak window. Each storage target also re-checks its copies on a schedule (every 30 days unless you choose otherwise), so a copy changed or removed at the site is found without anyone asking.
+
 ## 0.55.0 (2026-11-06)
 
 ### Product (in customer release notes)
