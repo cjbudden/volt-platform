@@ -13,7 +13,8 @@
 //             what they accept (siteWatch.ts, build queue H2), beside the
 //             heartbeat rather than inside it, so a long upload never makes
 //             the host look stale. And lease the site's Mirror and Archive
-//             jobs (siteArchive.ts, build queue H3-2) in a loop of their own.
+//             jobs (siteArchive.ts, build queue H3-2) in a loop of their own,
+//             into folders or S3-compatible stores (H3-4).
 //
 //  OUTBOUND ONLY: the agent calls the cloud over HTTPS and listens on nothing.
 //  The credential lives in the state file, readable by its owner only.
@@ -26,7 +27,7 @@ import * as os from 'node:os';
 import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
 import { archivePass } from './siteArchive';
 
-export const AGENT_VERSION = '0.5.0';
+export const AGENT_VERSION = '0.6.0';
 
 export interface SiteState {
   server: string;
@@ -167,7 +168,9 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
     if (archiving || signal?.aborted || state.status !== 'approved' || Date.now() - lastArchive < archiveEvery) return;
     archiving = true; lastArchive = Date.now();
     try {
-      await archivePass({ server: state.server, credential: () => state.credential, log });
+      // Keys of S3-compatible targets stay on this host, beside the state file
+      // (or where VOLT_ARCHIVE_KEYS says), readable by the owner only (H3-4).
+      await archivePass({ server: state.server, credential: () => state.credential, log, keysFile: process.env.VOLT_ARCHIVE_KEYS || join(dirname(stateFile), 'archive-keys.json') });
     } catch (e: any) {
       log(`[archive] pass failed, retrying: ${e?.message ?? e}`);
     } finally { archiving = false; lastArchive = Date.now(); }

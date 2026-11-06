@@ -4,7 +4,8 @@
 //  default.
 //
 //  An account names STORAGE TARGETS at its sites (a folder on the site's
-//  server or a mounted NAS share) and asks for a file to be copied there.
+//  server or a mounted NAS share, or an on-prem S3-compatible store such as
+//  MinIO, H3-4) and asks for a file to be copied there.
 //  The copy is a job in the site's pool (H3's lease): an approved host of the
 //  site leases it, downloads through a URL scoped to that one object, writes
 //  the file beside its final name, renames it in, READS IT BACK from the
@@ -35,7 +36,8 @@ export const ARCHIVE_VERIFY = 'archive.verify';
 export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY];
 export const isArchiveJob = (type: string) => ARCHIVE_JOB_TYPES.includes(type);
 
-export const TARGET_KINDS = ['path'] as const;
+/** path: a folder on the site's server or NAS. s3: an on-prem S3-compatible store (H3-4). */
+export const TARGET_KINDS = ['path', 's3'] as const;
 export const COPY_STATES = ['queued', 'copying', 'verified', 'failed', 'corrupt', 'missing'] as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,9 +61,59 @@ export function cleanTargetPath(raw: unknown): string {
   return p;
 }
 
+// ---- S3-compatible stores (H3-4) -------------------------------------------------------
+
+export interface StoreTarget { endpoint: string; bucket: string; prefix: string; region: string; pathStyle: boolean; credentialRef: string }
+
+const KEY_FIELDS = ['accessKeyId', 'secretAccessKey', 'secretKey', 'accessKey', 'sessionToken', 'password', 'secret'];
+
+/**
+ * Where an S3-compatible store is, as the site agent will reach it. Keys are
+ * REFUSED here: they stay on the agent host under `credentialRef`, so a
+ * leaked database or console session never hands out the customer's store.
+ * The endpoint is the site's view (it may be a LAN address the cloud cannot
+ * reach, which is the point); only its shape is checked.
+ */
+export function cleanStore(raw: any, prev?: StoreTarget | null): StoreTarget {
+  const b = raw && typeof raw === 'object' ? raw : {};
+  if (KEY_FIELDS.some((k) => b[k] !== undefined)) {
+    throw err(400, 'Keys for the store stay on the site\'s agent host and are never sent to Volt: name them with credentialRef', 'keys_stay_at_site');
+  }
+  const pick = <T>(k: string, d: T) => (b[k] === undefined ? (prev ? (prev as any)[k] : d) : b[k]);
+  let ep: URL;
+  try { ep = new URL(String(pick('endpoint', '') ?? '').trim()); } catch { throw badRequest('s3.endpoint must be the store\'s address, for example http://minio.local:9000'); }
+  if (!/^https?:$/.test(ep.protocol) || ep.username || ep.password || (ep.pathname !== '/' && ep.pathname !== '') || ep.search || ep.hash) {
+    throw badRequest('s3.endpoint must be http(s)://host[:port] with no path, user or query');
+  }
+  const bucket = String(pick('bucket', '') ?? '').trim();
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket) || bucket.includes('..')) throw badRequest('s3.bucket must be a bucket name (3 to 63 lower-case letters, digits, dots and hyphens)');
+  const prefix = String(pick('prefix', '') ?? '').trim().replace(/^\/+|\/+$/g, '');
+  if (prefix.length > 512 || (prefix && prefix.split('/').some((seg) => !/^[A-Za-z0-9._-]+$/.test(seg) || seg === '.' || seg === '..'))) {
+    throw badRequest('s3.prefix must be a folder in the bucket: letters, digits, . _ - between slashes, no . or .. (up to 512 characters)');
+  }
+  const region = String(pick('region', 'us-east-1') || 'us-east-1').trim();
+  if (!/^[a-z0-9-]{1,32}$/.test(region)) throw badRequest('s3.region must be a region name such as us-east-1 (most on-prem stores accept any)');
+  const pathStyle = pick('pathStyle', true);
+  if (typeof pathStyle !== 'boolean') throw badRequest('s3.pathStyle must be true or false');
+  const credentialRef = String(pick('credentialRef', 'default') || 'default').trim();
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(credentialRef)) throw badRequest('s3.credentialRef must be the name of the keys on the agent host (letters, digits, . _ -, up to 64)');
+  return { endpoint: ep.origin, bucket, prefix, region, pathStyle, credentialRef };
+}
+
+/** The place a store target shows as its path. */
+export const storePath = (s: StoreTarget) => `s3://${s.bucket}${s.prefix ? '/' + s.prefix : ''}`;
+/** Where copies land: the store, the bucket and the folder. Moving it would make every copy look missing. */
+const storeLocation = (s: StoreTarget | null | undefined) => (s ? `${s.endpoint}|${s.bucket}|${s.prefix}` : '');
+
+/** What the agent is told about a target: where, never how to sign in. */
+export function targetForAgent(t: any) {
+  return { id: t.id, kind: t.kind, path: t.path, bandwidthMbps: t.bandwidth_mbps ?? null, ...(t.kind === 's3' && t.s3 ? { s3: t.s3 } : {}) };
+}
+
 export function targetView(t: any) {
   return {
     id: t.id, name: t.name, siteId: t.site_id, siteName: t.site_name ?? undefined, kind: t.kind, path: t.path,
+    s3: t.kind === 's3' ? (t.s3 ?? null) : undefined,
     bandwidthMbps: t.bandwidth_mbps ?? null, recheckDays: t.recheck_days ?? null,
     status: t.status, createdAt: t.created_at, updatedAt: t.updated_at,
   };
@@ -95,8 +147,10 @@ export async function createTarget(accountId: string, userId: string | null, b: 
   const name = typeof b?.name === 'string' ? b.name.trim() : '';
   if (!name || name.length > 120) throw badRequest('name is required (up to 120 characters)');
   const kind = b?.kind ?? 'path';
-  if (!TARGET_KINDS.includes(kind)) throw err(422, 'Only folder targets (kind "path") are available so far', 'kind_not_available');
-  const path = cleanTargetPath(b?.path);
+  if (!TARGET_KINDS.includes(kind)) throw err(422, 'A storage target is a folder (kind "path") or an S3-compatible store (kind "s3")', 'kind_not_available');
+  const store = kind === 's3' ? cleanStore(b?.s3) : null;
+  if (kind !== 's3' && b?.s3 !== undefined) throw badRequest('s3 is only for targets of kind "s3"');
+  const path = store ? storePath(store) : cleanTargetPath(b?.path);
   const bandwidth = cleanBandwidth(b?.bandwidthMbps);
   const recheck = b?.recheckDays === undefined ? 30 : cleanRecheckDays(b.recheckDays);
   if (!UUID.test(String(b?.siteId))) throw badRequest('siteId is required');
@@ -106,9 +160,9 @@ export async function createTarget(accountId: string, userId: string | null, b: 
     throw conflict('A storage target with this name already exists');
   }
   const row = await one<any>(
-    `INSERT INTO archive_targets (account_id, site_id, name, kind, path, bandwidth_mbps, recheck_days, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT id FROM users WHERE id = $8)) RETURNING *`,
-    [accountId, site.id, name, kind, path, bandwidth, recheck, userId]);
+    `INSERT INTO archive_targets (account_id, site_id, name, kind, path, bandwidth_mbps, recheck_days, s3, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(SELECT id FROM users WHERE id = $9)) RETURNING *`,
+    [accountId, site.id, name, kind, path, bandwidth, recheck, store ? JSON.stringify(store) : null, userId]);
   return ownedTarget(accountId, row.id);
 }
 
@@ -126,7 +180,22 @@ export async function updateTarget(accountId: string, id: string, b: any) {
     }
     if (name !== t.name) set('name', 'name', name);
   }
-  if (b?.path !== undefined) {
+  if (b?.kind !== undefined && b.kind !== t.kind) throw badRequest('A target keeps its kind; make a new target for another kind of storage');
+  if (t.kind === 's3') {
+    if (b?.path !== undefined) throw badRequest('A store target\'s path follows its bucket and prefix; change s3 instead');
+    if (b?.s3 !== undefined) {
+      const store = cleanStore(b.s3, t.s3);
+      if (storeLocation(store) !== storeLocation(t.s3)
+        && await one(`SELECT 1 FROM archive_copies WHERE target_id = $1 AND stored_path IS NOT NULL LIMIT 1`, [t.id])) {
+        throw err(409, 'This target already holds copies; make a new target for another store, bucket or folder', 'target_in_use');
+      }
+      if (JSON.stringify(store) !== JSON.stringify(t.s3)) {
+        args.push(JSON.stringify(store)); sets.push(`s3 = $${args.length}`); changes.s3 = { from: t.s3, to: store };
+        if (storePath(store) !== t.path) set('path', 'path', storePath(store));
+      }
+    }
+  } else if (b?.s3 !== undefined) throw badRequest('s3 is only for targets of kind "s3"');
+  if (t.kind !== 's3' && b?.path !== undefined) {
     const path = cleanTargetPath(b.path);
     // Copies already made are recorded relative to the folder; moving the
     // folder under them would make every one of them look missing.
@@ -233,7 +302,7 @@ export async function requestCopy(accountId: string, userId: string | null, b: a
     runAfter: opts.runAfter ?? undefined,
     payload: {
       copyId: row.id, fileName,
-      target: { id: t.id, kind: t.kind, path: t.path, bandwidthMbps: t.bandwidth_mbps ?? null },
+      target: targetForAgent(t),
       transfers: [{ name: 'source', direction: 'download', uri: a.source_key, bytes, sha256: expected }],
     },
   });
@@ -249,7 +318,7 @@ export async function requestVerify(accountId: string, userId: string | null, id
   const t = await ownedTarget(accountId, c.target_id);
   const job = await enqueue({
     type: ARCHIVE_VERIFY, pool: sitePool(t.site_id), createdBy: userId, maxAttempts: 3,
-    payload: { copyId: c.id, storedPath: c.stored_path, sha256: c.sha256, target: { id: t.id, kind: t.kind, path: t.path } },
+    payload: { copyId: c.id, storedPath: c.stored_path, sha256: c.sha256, target: targetForAgent(t) },
   });
   await query(`UPDATE archive_copies SET verify_job_id = $2, updated_at = now() WHERE id = $1`, [c.id, job.id]);
   return { copy: await ownedCopy(accountId, c.id), created: true };

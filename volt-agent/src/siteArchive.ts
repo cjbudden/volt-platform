@@ -13,12 +13,19 @@
 //    archive.verify  read a copy back from the target again: present, its
 //                    checksum and size, or gone.
 //
+//  Two kinds of target: a FOLDER on the site's server or a mounted NAS share
+//  (`path`, H3-2), and an on-prem S3-COMPATIBLE STORE such as MinIO (`s3`,
+//  H3-4), written through its S3 API with keys that never leave this host
+//  (s3Target.ts). Both get the same promises below.
+//
 //  Safe by construction:
 //    - the file lands only inside the target's folder: the name is cleaned
 //      with the cloud's own rules (volt-app services/archive/naming.ts,
 //      compiled in from the same file) and the final path is checked to be
 //      inside the folder before anything is written;
-//    - an existing file is never overwritten: a taken name gets -2, -3;
+//    - an existing file is never overwritten: a taken name gets -2, -3 (in a
+//      store, also `If-None-Match: *` on the write, so a name taken between
+//      the look and the write answers 412 instead of being replaced);
 //    - a copy that does not read back as it was downloaded is removed and the
 //      attempt reported failed, so a half or damaged file never stays under
 //      a name that looks finished;
@@ -32,6 +39,7 @@ import { mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { freeName, safeFileName } from '../../volt-app/src/services/archive/naming';
+import * as S3 from './s3Target';
 
 export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify'];
 
@@ -45,6 +53,12 @@ export interface ArchiveCtx {
   maxJobs?: number;
   /** How often to report progress, which also extends the lease. */
   progressEveryMs?: number;
+  /**
+   * The owner-only file with the keys of S3-compatible targets (s3Target.ts),
+   * read on every job. Default: VOLT_ARCHIVE_KEYS, else none (environment
+   * variables only); `site run` passes archive-keys.json beside its state.
+   */
+  keysFile?: string;
 }
 
 class Refused extends Error { constructor(message: string, public code: string, public permanent = false) { super(message); } }
@@ -69,7 +83,7 @@ export async function hashFile(path: string): Promise<{ sha256: string; bytes: n
 /** The target's folder, as this host sees it. It must exist: an unmounted share is a retry, not a new folder. */
 async function targetRoot(job: any): Promise<string> {
   const raw = job?.payload?.target?.path;
-  if (job?.payload?.target?.kind !== 'path' || typeof raw !== 'string' || !isAbsolute(raw)) throw new Refused('This agent writes only to folder targets with an absolute path', 'target_not_supported', true);
+  if (job?.payload?.target?.kind !== 'path' || typeof raw !== 'string' || !isAbsolute(raw)) throw new Refused('A folder target needs an absolute path', 'target_not_supported', true);
   const root = resolve(raw);
   let s;
   try { s = await stat(root); } catch { throw new Refused(`The target folder ${root} is not there (is the share mounted?)`, 'target_unavailable'); }
@@ -85,13 +99,21 @@ export function insideTarget(root: string, rel: string): string {
   return p;
 }
 
-async function runCopy(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
-  const root = await targetRoot(job);
+/** A store target's client, with this host's keys for it. */
+function storeFor(ctx: ArchiveCtx, job: any): S3.S3Client {
+  const t = job?.payload?.target;
+  const keys = S3.keysFor(t?.s3?.credentialRef, ctx.keysFile ?? process.env.VOLT_ARCHIVE_KEYS);
+  return S3.clientFor(t?.s3, keys, ctx.fetch ?? fetch);
+}
+
+/**
+ * Stream the job's source from the cloud through `sink`, keeping the target's
+ * bandwidth cap and reporting progress (which keeps the lease). Returns what
+ * was downloaded: its size and checksum.
+ */
+async function pump(ctx: ArchiveCtx, job: any, sink: (chunk: Uint8Array) => Promise<void>): Promise<{ bytes: number; sha256: string; total: number }> {
   const transfer = (job.transfers ?? []).find((t: any) => t.name === 'source');
   if (!transfer) throw new Refused('The job lists no source to copy', 'no_source', true);
-  const name = freeName(safeFileName(job.payload?.fileName, 'source'), (n) => existsSync(join(root, n)));
-  const dest = insideTarget(root, name);
-
   const u = await call(ctx, `/api/site-agent/jobs/${job.id}/transfer-url`, { leaseId: job.leaseId, name: 'source' });
   if (u.status !== 200 || !u.body?.url) throw new Refused(u.body?.error ?? `transfer URL refused (HTTP ${u.status})`, u.body?.code ?? 'transfer_refused');
   const url = /^https?:\/\//.test(u.body.url) ? u.body.url : ctx.server.replace(/\/+$/, '') + u.body.url;
@@ -101,45 +123,56 @@ async function runCopy(ctx: ArchiveCtx, job: any): Promise<Record<string, unknow
 
   const total = Number(transfer.bytes ?? r.headers.get('content-length') ?? NaN);
   const capBps = Number(job.payload?.target?.bandwidthMbps) > 0 ? Number(job.payload.target.bandwidthMbps) * 1e6 / 8 : 0;
-  await mkdir(root, { recursive: true });
-  const part = `${dest}.part-${randomBytes(6).toString('hex')}`;
   const down = createHash('sha256');
   let bytes = 0; const t0 = Date.now(); let lastProgress = Date.now();
+  const reader = (r.body as any).getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    down.update(value); bytes += value.length;
+    await sink(value);
+    // THE BANDWIDTH CAP: never ahead of the target's rate.
+    if (capBps) {
+      const due = (bytes / capBps) * 1000 - (Date.now() - t0);
+      if (due > 5) await new Promise((res) => setTimeout(res, due));
+    }
+    if (Date.now() - lastProgress >= (ctx.progressEveryMs ?? 10_000)) {
+      lastProgress = Date.now();
+      const p = await call(ctx, `/api/site-agent/jobs/${job.id}/progress`, {
+        leaseId: job.leaseId, pct: Number.isFinite(total) && total > 0 ? Math.min(99, Math.floor((bytes / total) * 100)) : undefined, note: `${bytes} bytes copied`,
+      });
+      if (p.status === 409) throw new Refused('the lease was lost while copying', 'lease_lost');
+    }
+  }
+  return { bytes, sha256: down.digest('hex'), total };
+}
+
+async function runCopy(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  if (job?.payload?.target?.kind === 's3') return runCopyToStore(ctx, job);
+  const root = await targetRoot(job);
+  const name = freeName(safeFileName(job.payload?.fileName, 'source'), (n) => existsSync(join(root, n)));
+  const dest = insideTarget(root, name);
+
+  await mkdir(root, { recursive: true });
+  const part = `${dest}.part-${randomBytes(6).toString('hex')}`;
   const out = createWriteStream(part, { flags: 'wx' });
   const write = (chunk: Uint8Array) => new Promise<void>((res, rej) => out.write(chunk, (e) => (e ? rej(e) : res())));
+  let got: { bytes: number; sha256: string };
   try {
-    const reader = (r.body as any).getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      down.update(value); bytes += value.length;
-      await write(value);
-      // THE BANDWIDTH CAP: never ahead of the target's rate.
-      if (capBps) {
-        const due = (bytes / capBps) * 1000 - (Date.now() - t0);
-        if (due > 5) await new Promise((res) => setTimeout(res, due));
-      }
-      if (Date.now() - lastProgress >= (ctx.progressEveryMs ?? 10_000)) {
-        lastProgress = Date.now();
-        const p = await call(ctx, `/api/site-agent/jobs/${job.id}/progress`, {
-          leaseId: job.leaseId, pct: Number.isFinite(total) && total > 0 ? Math.min(99, Math.floor((bytes / total) * 100)) : undefined, note: `${bytes} bytes copied`,
-        });
-        if (p.status === 409) throw new Refused('the lease was lost while copying', 'lease_lost');
-      }
-    }
+    got = await pump(ctx, job, write);
     await new Promise<void>((res, rej) => out.end((e?: any) => (e ? rej(e) : res())));
   } catch (e) {
     out.destroy();
     await unlink(part).catch(() => {});
     throw e;
   }
+  const { bytes, sha256: downloadSha256 } = got;
   // Renamed in only when whole. If the name was taken meanwhile, take the next one.
   let final = dest;
   if (existsSync(final)) final = insideTarget(root, freeName(name, (n) => existsSync(join(root, n))));
   await rename(part, final);
   // READ IT BACK from the target: the checksum reported is what the target holds.
   const back = await hashFile(final);
-  const downloadSha256 = down.digest('hex');
   if (back.sha256 !== downloadSha256 || back.bytes !== bytes) {
     await unlink(final).catch(() => {});
     throw new Refused('The copy read back from the target does not match what was downloaded', 'checksum_mismatch');
@@ -147,7 +180,77 @@ async function runCopy(ctx: ArchiveCtx, job: any): Promise<Record<string, unknow
   return { storedPath: relative(root, final).split(sep).join('/'), bytes: back.bytes, sha256: back.sha256, downloadSha256 };
 }
 
-async function runVerify(_ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+/**
+ * A copy into an S3-compatible store (H3-4). Small files go up in one PUT;
+ * larger ones as a multipart upload, part by part as they download, so the
+ * host never holds more than one part. Every write says `If-None-Match: *`:
+ * nothing already in the store is ever replaced. Then the object is READ
+ * BACK from the store and that checksum is what the cloud judges.
+ */
+async function runCopyToStore(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  const c = storeFor(ctx, job);
+  const wanted = safeFileName(job.payload?.fileName, 'source');
+  const stem = wanted.lastIndexOf('.') > 0 ? wanted.slice(0, wanted.lastIndexOf('.')) : wanted;
+  const pick = async () => { const taken = await S3.namesLike(c, stem); return freeName(wanted, (n) => taken.has(n)); };
+  let name = await pick();
+  const transfer = (job.transfers ?? []).find((t: any) => t.name === 'source');
+  const partSize = S3.partSizeFor(Number(transfer?.bytes));
+
+  let buf: Buffer[] = []; let held = 0;
+  let uploadId: string | null = null; const etags: string[] = [];
+  const flushPart = async () => {
+    if (!uploadId) uploadId = await S3.startMultipart(c, S3.objectKey(c, name));
+    etags.push(await S3.uploadPart(c, S3.objectKey(c, name), uploadId, etags.length + 1, Buffer.concat(buf, held)));
+    buf = []; held = 0;
+  };
+  let got: { bytes: number; sha256: string };
+  try {
+    got = await pump(ctx, job, async (chunk) => {
+      buf.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)); held += chunk.byteLength;
+      if (held >= partSize) await flushPart();
+    });
+    if (!uploadId) {
+      // Small enough for one write. A name taken between the look and the
+      // write (412) takes the next free one, once.
+      const body = Buffer.concat(buf, held);
+      if (!(await S3.putNew(c, S3.objectKey(c, name), body))) {
+        name = await pick();
+        if (!(await S3.putNew(c, S3.objectKey(c, name), body))) throw new Refused('Another copy took this name at the same moment; it will be retried', 'name_taken');
+      }
+    } else {
+      if (held) await flushPart();
+      if (!(await S3.completeMultipart(c, S3.objectKey(c, name), uploadId, etags))) {
+        await S3.abortMultipart(c, S3.objectKey(c, name), uploadId);
+        throw new Refused('Another copy took this name while uploading; it will be retried under a free name', 'name_taken');
+      }
+      uploadId = null;
+    }
+  } catch (e) {
+    if (uploadId) await S3.abortMultipart(c, S3.objectKey(c, name), uploadId);
+    throw e;
+  }
+  const { bytes, sha256: downloadSha256 } = got;
+  const back = await S3.readBack(c, S3.objectKey(c, name));
+  if (!back || back.sha256 !== downloadSha256 || back.bytes !== bytes) {
+    if (back) await S3.removeOwn(c, S3.objectKey(c, name));
+    throw new Refused('The copy read back from the store does not match what was downloaded', 'checksum_mismatch');
+  }
+  return { storedPath: name, bytes: back.bytes, sha256: back.sha256, downloadSha256 };
+}
+
+/** The object key a reported path stands for in a store, checked like a folder path. */
+function storeKey(c: S3.S3Client, rel: unknown): string {
+  const r = String(rel ?? '');
+  if (!r || r.startsWith('/') || r.split('/').some((x) => !x || x === '.' || x === '..')) throw new Refused('That path is outside the target folder', 'outside_target', true);
+  return S3.objectKey(c, r);
+}
+
+async function runVerify(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  if (job?.payload?.target?.kind === 's3') {
+    const c = storeFor(ctx, job);
+    const back = await S3.readBack(c, storeKey(c, job.payload?.storedPath));
+    return back ? { present: true, sha256: back.sha256, bytes: back.bytes } : { present: false };
+  }
   const root = await targetRoot(job);
   const p = insideTarget(root, String(job.payload?.storedPath ?? ''));
   try { const s = await stat(p); if (!s.isFile()) return { present: false }; } catch { return { present: false }; }
@@ -174,7 +277,8 @@ export async function archivePass(ctx: ArchiveCtx): Promise<number> {
       if (c.status === 422 && job.type === 'archive.copy' && typeof result.storedPath === 'string') {
         // The cloud refused the copy (it does not match the original): remove
         // it, so only a verified copy ever stays at the target.
-        await unlink(insideTarget(await targetRoot(job), result.storedPath)).catch(() => {});
+        if (job.payload?.target?.kind === 's3') { const c = storeFor(ctx, job); await S3.removeOwn(c, storeKey(c, result.storedPath)); }
+        else await unlink(insideTarget(await targetRoot(job), result.storedPath)).catch(() => {});
         log(`[archive] ${job.type} ${job.id}: refused by the cloud (${c.body?.code ?? c.status}), copy removed; it will be retried`);
       } else if (c.status !== 200) {
         log(`[archive] ${job.type} ${job.id}: complete answered ${c.status} ${c.body?.code ?? ''}`);
@@ -182,10 +286,11 @@ export async function archivePass(ctx: ArchiveCtx): Promise<number> {
         log(`[archive] ${job.type} ${job.id}: done${result.storedPath ? ` (${result.storedPath})` : ''}`);
       }
     } catch (e: any) {
-      const code = e instanceof Refused ? e.code : 'site_error';
+      const refused = e instanceof Refused || e instanceof S3.S3Refused;
+      const code = refused ? e.code : 'site_error';
       log(`[archive] ${job.type} ${job.id} failed: ${e?.message ?? e}`);
       if (code !== 'lease_lost') {
-        await call(ctx, `/api/site-agent/jobs/${job.id}/fail`, { leaseId: job.leaseId, error: String(e?.message ?? e).slice(0, 2000), code, permanent: e instanceof Refused && e.permanent });
+        await call(ctx, `/api/site-agent/jobs/${job.id}/fail`, { leaseId: job.leaseId, error: String(e?.message ?? e).slice(0, 2000), code, permanent: refused && e.permanent });
       }
     }
   }

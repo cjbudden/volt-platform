@@ -390,7 +390,8 @@
    "kind": {
     "type": "enum",
     "values": [
-     "path"
+     "path",
+     "s3"
     ],
     "sort": true,
     "filter": true,
@@ -401,7 +402,7 @@
      "nin",
      "exists"
     ],
-    "doc": "path: a folder on the site's server or NAS"
+    "doc": "path: a folder on the site's server or NAS; s3: an S3-compatible store at the site (MinIO and similar), written by the agent"
    },
    "status": {
     "type": "enum",

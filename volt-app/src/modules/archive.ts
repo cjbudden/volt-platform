@@ -5,9 +5,12 @@
  *
  * Account administrators (admin session or account secret key):
  *   GET    /api/archive/targets              storage targets, list standard
- *   POST   /api/archive/targets              { name, siteId, path, bandwidthMbps? } a folder at a site
+ *   POST   /api/archive/targets              { name, siteId, path, bandwidthMbps?, recheckDays? } a folder at a site,
+ *                                            or { name, siteId, kind: 's3', s3: { endpoint, bucket, prefix?, region?,
+ *                                            pathStyle?, credentialRef? } } an S3-compatible store at a site (H3-4;
+ *                                            no keys: they stay on the agent host under credentialRef)
  *   GET    /api/archive/targets/:id
- *   PATCH  /api/archive/targets/:id          { name?, path?, bandwidthMbps?, status? }
+ *   PATCH  /api/archive/targets/:id          { name?, path?, s3?, bandwidthMbps?, recheckDays?, status? }
  *   GET    /api/archive/copies               archive copies, list standard (target_id, vod_asset_id, state)
  *   POST   /api/archive/copies               { targetId, vodAssetId } copy an asset's original to a target
  *   GET    /api/archive/copies/:id
@@ -39,7 +42,7 @@ const targetList = defineList({
     id: { sql: 't.id', type: 'uuid', notNull: true },
     name: { sql: 't.name', type: 'string', notNull: true },
     site_id: { sql: 't.site_id', type: 'uuid', notNull: true, doc: 'the site whose agent writes the copies' },
-    kind: { sql: 't.kind', type: 'enum', values: [...A.TARGET_KINDS], notNull: true, doc: 'path: a folder on the site\'s server or NAS' },
+    kind: { sql: 't.kind', type: 'enum', values: [...A.TARGET_KINDS], notNull: true, doc: 'path: a folder on the site\'s server or NAS; s3: an S3-compatible store at the site (MinIO and similar), written by the agent' },
     status: { sql: 't.status', type: 'enum', values: ['active', 'disabled'], notNull: true },
     created_at: { sql: 't.created_at', type: 'timestamp', notNull: true },
     updated_at: { sql: 't.updated_at', type: 'timestamp', notNull: true },
@@ -63,7 +66,7 @@ archiveRouter.post('/targets', asyncHandler(async (req, res) => {
   const who = actor(req);
   const t = await A.createTarget(accountId(req), who.userId, req.body ?? {});
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'create', entityType: 'archive_target', entityId: t.id,
-    snapshot: { name: t.name, siteId: t.site_id, kind: t.kind, path: t.path, bandwidthMbps: t.bandwidth_mbps } });
+    snapshot: { name: t.name, siteId: t.site_id, kind: t.kind, path: t.path, s3: t.s3 ?? undefined, bandwidthMbps: t.bandwidth_mbps } });
   res.status(201).json(A.targetView(t));
 }));
 

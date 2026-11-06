@@ -1,0 +1,14 @@
+-- ============================================================================
+--  0137: MIRROR AND ARCHIVE, on-prem S3-compatible targets (build queue H3-4,
+--  HYBRID_SITES.md: MinIO, NetApp StorageGRID, Dell ECS and similar, written
+--  by the site agent through the target's S3 API).
+--
+--  A target of kind 's3' keeps where the store is: { endpoint, bucket,
+--  prefix, region, pathStyle, credentialRef }. NO KEYS: the access key and
+--  secret live on the site's agent host, under the name `credentialRef`, and
+--  never reach the cloud. `path` keeps a readable s3://bucket/prefix so every
+--  target still has one place to show.
+--
+--  Add only (RELEASING.md "Schema: add only"): one nullable column.
+-- ============================================================================
+ALTER TABLE archive_targets ADD COLUMN IF NOT EXISTS s3 jsonb;
