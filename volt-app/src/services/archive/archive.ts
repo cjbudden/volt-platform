@@ -62,7 +62,8 @@ export function cleanTargetPath(raw: unknown): string {
 export function targetView(t: any) {
   return {
     id: t.id, name: t.name, siteId: t.site_id, siteName: t.site_name ?? undefined, kind: t.kind, path: t.path,
-    bandwidthMbps: t.bandwidth_mbps ?? null, status: t.status, createdAt: t.created_at, updatedAt: t.updated_at,
+    bandwidthMbps: t.bandwidth_mbps ?? null, recheckDays: t.recheck_days ?? null,
+    status: t.status, createdAt: t.created_at, updatedAt: t.updated_at,
   };
 }
 
@@ -82,6 +83,14 @@ function cleanBandwidth(v: unknown): number | null {
   return n;
 }
 
+/** How often verified copies are read back (H3-3). Null: only when asked. */
+function cleanRecheckDays(v: unknown): number | null {
+  if (v === null) return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 3650) throw badRequest('recheckDays must be a whole number of days, 1 to 3650, or null for no scheduled re-checks');
+  return n;
+}
+
 export async function createTarget(accountId: string, userId: string | null, b: any) {
   const name = typeof b?.name === 'string' ? b.name.trim() : '';
   if (!name || name.length > 120) throw badRequest('name is required (up to 120 characters)');
@@ -89,6 +98,7 @@ export async function createTarget(accountId: string, userId: string | null, b: 
   if (!TARGET_KINDS.includes(kind)) throw err(422, 'Only folder targets (kind "path") are available so far', 'kind_not_available');
   const path = cleanTargetPath(b?.path);
   const bandwidth = cleanBandwidth(b?.bandwidthMbps);
+  const recheck = b?.recheckDays === undefined ? 30 : cleanRecheckDays(b.recheckDays);
   if (!UUID.test(String(b?.siteId))) throw badRequest('siteId is required');
   const site = await one<any>(`SELECT id, status FROM sites WHERE id = $1 AND account_id = $2`, [b.siteId, accountId]);
   if (!site) throw notFound('site not found');
@@ -96,9 +106,9 @@ export async function createTarget(accountId: string, userId: string | null, b: 
     throw conflict('A storage target with this name already exists');
   }
   const row = await one<any>(
-    `INSERT INTO archive_targets (account_id, site_id, name, kind, path, bandwidth_mbps, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,(SELECT id FROM users WHERE id = $7)) RETURNING *`,
-    [accountId, site.id, name, kind, path, bandwidth, userId]);
+    `INSERT INTO archive_targets (account_id, site_id, name, kind, path, bandwidth_mbps, recheck_days, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT id FROM users WHERE id = $8)) RETURNING *`,
+    [accountId, site.id, name, kind, path, bandwidth, recheck, userId]);
   return ownedTarget(accountId, row.id);
 }
 
@@ -126,6 +136,7 @@ export async function updateTarget(accountId: string, id: string, b: any) {
     if (path !== t.path) set('path', 'path', path);
   }
   if (b?.bandwidthMbps !== undefined) { const v = cleanBandwidth(b.bandwidthMbps); if (v !== t.bandwidth_mbps) set('bandwidth_mbps', 'bandwidthMbps', v); }
+  if (b?.recheckDays !== undefined) { const v = cleanRecheckDays(b.recheckDays); if (v !== t.recheck_days) set('recheck_days', 'recheckDays', v); }
   if (b?.status !== undefined) {
     if (b.status !== 'active' && b.status !== 'disabled') throw badRequest('status is active or disabled');
     if (b.status !== t.status) set('status', 'status', b.status);
@@ -186,7 +197,7 @@ async function assetSource(accountId: string, assetId: string) {
  * asking again for a copy that is queued, running or verified returns it;
  * one that failed, changed or went missing is copied afresh.
  */
-export async function requestCopy(accountId: string, userId: string | null, b: any) {
+export async function requestCopy(accountId: string, userId: string | null, b: any, opts: { runAfter?: Date | null } = {}) {
   const t = await ownedTarget(accountId, b?.targetId);
   if (t.status !== 'active') throw err(409, 'This storage target is disabled', 'target_disabled');
   if (t.site_status !== 'active') throw err(409, 'The site of this storage target is disabled', 'site_disabled');
@@ -217,6 +228,9 @@ export async function requestCopy(accountId: string, userId: string | null, b: a
 
   const job = await enqueue({
     type: ARCHIVE_COPY, pool: sitePool(t.site_id), createdBy: userId, maxAttempts: 5,
+    // A copy rule's off-peak window holds the job back until the window
+    // opens (copyOnRule); a copy asked for by hand runs now.
+    runAfter: opts.runAfter ?? undefined,
     payload: {
       copyId: row.id, fileName,
       target: { id: t.id, kind: t.kind, path: t.path, bandwidthMbps: t.bandwidth_mbps ?? null },
@@ -239,6 +253,123 @@ export async function requestVerify(accountId: string, userId: string | null, id
   });
   await query(`UPDATE archive_copies SET verify_job_id = $2, updated_at = now() WHERE id = $1`, [c.id, job.id]);
   return { copy: await ownedCopy(accountId, c.id), created: true };
+}
+
+// ---- scheduled re-checks (H3-3) -----------------------------------------------------------
+
+/**
+ * Queue a re-check for every verified copy whose last check is older than its
+ * target's `recheck_days`. Run by the scheduler (orchestrator/index.ts) every
+ * half hour; bounded per pass so a target with a million copies spreads its
+ * checks out instead of handing the site a million jobs at once.
+ *
+ * Only verified copies: one already found corrupt or missing stays that way
+ * until it is copied again, and one still being copied has nothing to read.
+ * Only where the account holds the licence and the target and its site are
+ * active: withdrawing the add-on or disabling a target stops the checks too.
+ */
+export async function recheckDue(opts: { limit?: number; accountId?: string } = {}): Promise<{ queued: number }> {
+  const rows = await query<any>(
+    `SELECT c.id, c.account_id
+       FROM archive_copies c
+       JOIN archive_targets t ON t.id = c.target_id
+       JOIN sites s ON s.id = t.site_id
+       JOIN accounts a ON a.id = c.account_id
+       LEFT JOIN jobs vj ON vj.id = c.verify_job_id
+      WHERE c.state = 'verified' AND c.stored_path IS NOT NULL AND c.sha256 IS NOT NULL
+        AND t.status = 'active' AND s.status = 'active' AND t.recheck_days IS NOT NULL
+        AND 'mirror_archive' = ANY(COALESCE(a.licences, '{}'))
+        AND COALESCE(c.checked_at, c.verified_at, c.updated_at) < now() - make_interval(days => t.recheck_days)
+        AND (vj.id IS NULL OR vj.state NOT IN ('queued', 'running'))
+        AND ($2::uuid IS NULL OR c.account_id = $2)
+      ORDER BY COALESCE(c.checked_at, c.verified_at, c.updated_at)
+      LIMIT $1`, [opts.limit ?? 200, opts.accountId ?? null]);
+  let queued = 0;
+  for (const r of rows) {
+    try { if ((await requestVerify(r.account_id, null, r.id)).created) queued++; }
+    catch (e: any) { console.warn(`[archive] scheduled re-check not queued for ${r.id}:`, e?.message ?? e); }
+  }
+  return { queued };
+}
+
+// ---- copy rules (H3-3) ---------------------------------------------------------------
+
+export type CopyEvent = 'ingest' | 'publish';
+export interface OffPeak { from: string; to: string; timeZone?: string }
+export interface ArchiveRule { copies: { targetId: string; on: CopyEvent[] }[]; offPeak?: OffPeak | null }
+
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const minutesOf = (hhmm: string) => { const m = HHMM.exec(hhmm)!; return Number(m[1]) * 60 + Number(m[2]); };
+export const validTimeZone = (tz: string) => { try { new Intl.DateTimeFormat('en-GB', { timeZone: tz }); return true; } catch { return false; } };
+
+/** Minutes after midnight in a zone, for `at`. */
+function localMinutes(at: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0), m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  return (h % 24) * 60 + m;
+}
+
+/**
+ * When a copy under an off-peak window may start: null when `now` is inside
+ * the window (start now), otherwise the next time the window opens. The
+ * window is in the given zone (UTC when none) and may run over midnight
+ * (22:00 to 06:00). A window whose ends are equal is the whole day.
+ *
+ * Pure apart from Intl. Across a clock change the start can land up to an
+ * hour off; a copy then starts an hour early or late, never outside the
+ * day it was meant for.
+ */
+export function offPeakStart(now: Date, w: OffPeak | null | undefined): Date | null {
+  if (!w || !HHMM.test(w.from) || !HHMM.test(w.to)) return null;
+  const from = minutesOf(w.from), to = minutesOf(w.to);
+  if (from === to) return null;
+  const cur = localMinutes(now, w.timeZone && validTimeZone(w.timeZone) ? w.timeZone : 'UTC');
+  const inside = from < to ? cur >= from && cur < to : cur >= from || cur < to;
+  if (inside) return null;
+  const wait = (from - cur + 1440) % 1440;
+  const start = new Date(now.getTime() + wait * 60_000);
+  start.setUTCSeconds(0, 0);
+  return start;
+}
+
+/**
+ * Copy an asset's original to the targets its publishing rule names for this
+ * event (ingest: the original has landed; publish: the asset was published).
+ * The rule is read through the publishing ladder (account, content type,
+ * channel or event, the asset itself), so the most specific rung that says
+ * anything about archive copies decides.
+ *
+ * Never throws: a copy that cannot be queued (no original kept, a disabled
+ * target) is logged and skipped, and the ingest or publish that called this
+ * goes on as if nothing had been asked. Without the licence nothing happens.
+ */
+export async function copyOnRule(accountId: string, assetId: string, event: CopyEvent, now = new Date()): Promise<{ queued: string[]; skipped: { targetId: string; why: string }[] }> {
+  const out = { queued: [] as string[], skipped: [] as { targetId: string; why: string }[] };
+  try {
+    const { hasLicence } = await import('../sites/licences');
+    if (!(await hasLicence(accountId, 'mirror_archive'))) return out;
+    const { assetAccount } = await import('../availability');
+    const { resolveForAsset } = await import('../publishingRules');
+    const found = await assetAccount(assetId);
+    if (!found || found.accountId !== accountId) return out;
+    const rule = (await resolveForAsset(accountId, found.asset)).settings.archive as ArchiveRule | undefined;
+    const wanted = (rule?.copies ?? []).filter((c) => (c.on ?? []).includes(event));
+    if (!wanted.length) return out;
+    const runAfter = offPeakStart(now, rule?.offPeak ?? null);
+    for (const c of wanted) {
+      try {
+        const r = await requestCopy(accountId, null, { targetId: c.targetId, vodAssetId: assetId }, { runAfter });
+        if (r.created) out.queued.push(r.copy.id);
+        else out.skipped.push({ targetId: c.targetId, why: 'already_copied_or_queued' });
+      } catch (e: any) {
+        out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
+      }
+    }
+    if (out.queued.length) console.log(`[archive] ${event}: ${out.queued.length} copy rule(s) queued for asset ${assetId}${runAfter ? ` from ${runAfter.toISOString()}` : ''}`);
+  } catch (e: any) {
+    console.warn(`[archive] copy rules for asset ${assetId} (${event}) not applied:`, e?.message ?? e);
+  }
+  return out;
 }
 
 // ---- results from the site ------------------------------------------------------------

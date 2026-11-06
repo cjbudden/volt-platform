@@ -43,9 +43,18 @@ export interface RuleSettings {
    *  the simple geo / access / paywall fields are the fallback for content no
    *  rule matches. */
   accessRules?: AccessRule[];
+  /** COPY RULES (Mirror and Archive, build queue H3-3): copy the asset's
+   *  original to these storage targets when it lands or when it is
+   *  published, optionally only inside an off-peak window. Needs the
+   *  `mirror_archive` licence to be saved (modules/publishingRules.ts) and
+   *  to run (services/archive/archive.ts copyOnRule). */
+  archive?: {
+    copies: { targetId: string; on: ('ingest' | 'publish')[] }[];
+    offPeak?: { from: string; to: string; timeZone?: string } | null;
+  };
 }
 export type RuleKey = keyof RuleSettings;
-export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate', 'accessRules'];
+export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate', 'accessRules', 'archive'];
 
 /** The platform baseline under the account rung: catalogue only, manual, worldwide, free. */
 export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: RuleSettings['paywall'] } = {
@@ -58,6 +67,7 @@ export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: Rule
   paywall: null,
   gate: { requireReview: false, blockOnQcFail: false },
   accessRules: [],
+  archive: { copies: [], offPeak: null },
 };
 
 export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'asset';

@@ -60,6 +60,19 @@ export const settingsSchema = z.object({
       })).optional(),
     }),
   })).optional(),
+  // Copy rules (Mirror and Archive, H3-3). Checked against the account's
+  // licence and its own storage targets in cleanSettings.
+  archive: z.object({
+    copies: z.array(z.object({
+      targetId: z.string().uuid(),
+      on: z.array(z.enum(['ingest', 'publish'])).min(1),
+    }).strict()).max(20),
+    offPeak: z.object({
+      from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'from is HH:MM'),
+      to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'to is HH:MM'),
+      timeZone: z.string().max(64).optional(),
+    }).strict().nullable().optional(),
+  }).strict().optional(),
 }).strict();
 
 /** Clean a rung: validate targets against the account and drop unknown keys. */
@@ -67,9 +80,40 @@ export async function cleanSettings(account: string, raw: unknown): Promise<Rule
   const s = settingsSchema.parse(raw ?? {});
   try { s.targets = await validateTargets(account, s.targets); }
   catch (e: any) { throw badRequest(e.message); }
+  if (s.archive) s.archive = await cleanArchive(account, s.archive);
   const out: RuleSettings = {};
   for (const k of RULE_KEYS) if (s[k] !== undefined) (out as any)[k] = s[k];
   return out;
+}
+
+/**
+ * Copy rules name the account's own storage targets, and only an account
+ * with Mirror and Archive may save them: a rule that could never run would
+ * read like a policy. Saying nothing about copies (an empty list) is always
+ * allowed, so a rung can switch copies off below a rung that has them.
+ */
+async function cleanArchive(account: string, a: NonNullable<RuleSettings['archive']>): Promise<NonNullable<RuleSettings['archive']>> {
+  const copies: { targetId: string; on: ('ingest' | 'publish')[] }[] = [];
+  for (const c of a.copies) {
+    if (copies.some((x) => x.targetId === c.targetId)) throw badRequest('archive.copies names the same storage target twice');
+    copies.push({ targetId: c.targetId, on: [...new Set(c.on)] });
+  }
+  if (copies.length || a.offPeak) {
+    const { requireLicence } = await import('../services/sites/licences');
+    await requireLicence(account, 'mirror_archive');
+  }
+  if (copies.length) {
+    const owned = await query<any>(`SELECT id FROM archive_targets WHERE account_id = $1 AND id = ANY($2::uuid[])`, [account, copies.map((c) => c.targetId)]);
+    const missing = copies.find((c) => !owned.some((o) => o.id === c.targetId));
+    if (missing) throw badRequest(`archive.copies: storage target ${missing.targetId} not found`);
+  }
+  let offPeak = a.offPeak ?? null;
+  if (offPeak) {
+    const { validTimeZone } = await import('../services/archive/archive');
+    if (offPeak.timeZone && !validTimeZone(offPeak.timeZone)) throw badRequest(`archive.offPeak.timeZone "${offPeak.timeZone}" is not a time zone (for example Europe/London)`);
+    if (offPeak.from === offPeak.to) offPeak = null;   // the whole day: no window
+  }
+  return { copies, offPeak };
 }
 
 const SCOPES = ['account', 'schema', 'owner'] as const;

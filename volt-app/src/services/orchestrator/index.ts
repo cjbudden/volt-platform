@@ -115,6 +115,17 @@ export function startScheduler(): () => void {
   );
   avail.unref?.();
 
+  // MIRROR AND ARCHIVE RE-CHECKS (build queue H3-3): read verified archive
+  // copies back on each target's cadence (recheck_days), a bounded batch
+  // every half hour. Licensed accounts only; nothing runs without the add-on.
+  const archiveChecks = setInterval(
+    () => import('../archive/archive').then((m) => m.recheckDue())
+      .then((r) => { if (r.queued) console.log(`[archive] queued ${r.queued} scheduled re-check(s)`); })
+      .catch((e) => console.error('[archive] re-check pass error', e)),
+    30 * 60_000
+  );
+  archiveChecks.unref?.();
+
   // FAST LINEUPS: keep every active lineup's guide (and its breaks) a week
   // ahead. Deterministic, so a top-up only appends what comes next.
   const fast = setInterval(
@@ -314,7 +325,7 @@ export function startScheduler(): () => void {
   console.log(`[orchestrator] scheduler up (tick ${o.tickSeconds}s, retention sweep ${o.retentionSweepSeconds}s, fleet ${o.fleetTickSeconds}s, auto-connect ${o.resumeEnabled ? `${o.resumeRetrySeconds}s x${o.resumeMaxAttempts}` : 'off'}, launcher=${o.launcher})`);
   return () => {
     clearInterval(tick);
-    clearInterval(sweep); clearInterval(avail);
+    clearInterval(sweep); clearInterval(avail); clearInterval(archiveChecks);
     clearInterval(fleet);
     clearInterval(prune);
     if (edgeRights) clearInterval(edgeRights);

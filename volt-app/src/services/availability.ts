@@ -160,6 +160,8 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
        published = true, portal_visible = $7, updated_at = now()
      WHERE id = $1 RETURNING *`,
     [assetId, JSON.stringify({ ...s, targets }), JSON.stringify(plan.sources), state, from, until, portal]);
+  // COPY RULES for publish (Mirror and Archive, H3-3). Never fails the publish.
+  await (await import('./archive/archive')).copyOnRule(accountId, assetId, 'publish');
   return { asset: updated, plan, publications: pubs, state };
 }
 

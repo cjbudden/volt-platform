@@ -51,7 +51,7 @@
   {
    "name": "Archive",
    "x-displayName": "Mirror and Archive",
-   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules, object-store targets, restore to the cloud and a delete that waits for a confirmed copy come next."
+   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules in the publishing rules (`archive`) copy originals on ingest or publish, optionally in an off-peak window, and every target re-checks its verified copies on its own cadence (`recheckDays`). Object-store targets, recordings, restore to the cloud and a delete that waits for a confirmed copy come next."
   },
   {
    "name": "Audit",
@@ -270,7 +270,7 @@
   {
    "name": "Publishing Rules",
    "x-displayName": "Publishing rules",
-   "description": "Publishing rules set what an asset gets by default (where it is published and on what terms), from account level down to content type or owner.\n\n**Use it to:**\n- List every rule with `GET /api/publishing-rules` and your publishing points with `GET /api/publishing-rules/points`\n- Create or replace the rule for one level with `PUT /api/publishing-rules/{scopeKind}/{scopeId}`\n- See what an asset would get, and from which rule, with `GET /api/publishing-rules/resolve`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** the account rule always exists and cannot be deleted. More specific rules override it."
+   "description": "Publishing rules set what an asset gets by default (where it is published and on what terms), from account level down to content type or owner.\n\n**Use it to:**\n- List every rule with `GET /api/publishing-rules` and your publishing points with `GET /api/publishing-rules/points`\n- Create or replace the rule for one level with `PUT /api/publishing-rules/{scopeKind}/{scopeId}`\n- See what an asset would get, and from which rule, with `GET /api/publishing-rules/resolve`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** the account rule always exists and cannot be deleted. More specific rules override it. With the Mirror and Archive add-on a rule can also hold copy rules (`archive`: `copies` of `{ targetId, on: [\"ingest\", \"publish\"] }` and an optional `offPeak` `{ from, to, timeZone }` window) that copy an asset's original to your storage targets."
   },
   {
    "name": "Radio",
@@ -3580,7 +3580,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "The account's Mirror and Archive storage targets: folders at one of its sites (on the site's server or a mounted NAS share) where the site agent keeps extra copies. Each has its `siteId`, `kind` (`path`), `path` on the site's server, optional `bandwidthMbps` cap and `status`. Needs the Mirror and Archive add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `site_id`, `kind`, `status`, `created_at`, `updated_at`.",
+    "description": "The account's Mirror and Archive storage targets: folders at one of its sites (on the site's server or a mounted NAS share) where the site agent keeps extra copies. Each has its `siteId`, `kind` (`path`), `path` on the site's server, optional `bandwidthMbps` cap, `recheckDays` (how often its verified copies are read back again; null: only when asked) and `status`. Needs the Mirror and Archive add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `site_id`, `kind`, `status`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -3729,7 +3729,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "`name` (unique in the account, ignoring case), `siteId` (one of your sites), `path` (an absolute folder on the site's server, such as `/mnt/nas/archive`, `D:\\\\Archive` or `\\\\\\\\nas\\\\archive`; no `.` or `..` segments) and an optional `bandwidthMbps` (1 to 100000; copies never go faster). Only folder targets (`kind` `path`) are available so far: another kind answers 422 `kind_not_available`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "`name` (unique in the account, ignoring case), `siteId` (one of your sites), `path` (an absolute folder on the site's server, such as `/mnt/nas/archive`, `D:\\\\Archive` or `\\\\\\\\nas\\\\archive`; no `.` or `..` segments) an optional `bandwidthMbps` (1 to 100000; copies never go faster) and an optional `recheckDays` (how often verified copies are read back again, 1 to 3650 days; 30 when not given, null for no scheduled re-checks). Only folder targets (`kind` `path`) are available so far: another kind answers 422 `kind_not_available`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
     "security": [
      {
       "adminBearer": []
@@ -3789,7 +3789,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "Change `name`, `path`, `bandwidthMbps` (null for no cap) or `status` (`active`, or `disabled`: no new copies are queued to it; copies already there are kept). A target that already holds copies keeps its folder: changing `path` answers 409 `target_in_use`. The answer lists what `changed`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "Change `name`, `path`, `bandwidthMbps` (null for no cap), `recheckDays` (null for no scheduled re-checks) or `status` (`active`, or `disabled`: no new copies are queued to it; copies already there are kept). A target that already holds copies keeps its folder: changing `path` answers 409 `target_in_use`. The answer lists what `changed`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
     "security": [
      {
       "adminBearer": []

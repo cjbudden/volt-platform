@@ -93,7 +93,7 @@ A server waiting for approval is given no work. Work for a disabled site waits u
 
 ### Keep archive copies at the site
 
-With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, or a NAS share mounted on it. In this release copies are made [through the API](#through-the-api); copy rules and the Storage page follow.
+With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, or a NAS share mounted on it. In this release copies are made [through the API](#through-the-api), by hand or by a copy rule; the Storage page follows.
 
 1. Make a **storage target**: a name, the site, and the folder as the server sees it (for example `/mnt/nas/archive`). Give it a **bandwidth cap** if copies must leave room for live contribution.
 2. Ask for an asset's original to be copied there. An approved, **Online** server of the site downloads it through a link made for that one file, writes it into the folder and reads it back.
@@ -101,6 +101,19 @@ With the **Mirror and Archive** add-on, the site's servers keep extra copies of 
 4. Check a copy again whenever you like. The same checksum keeps it verified with a new date; a changed file shows **Corrupt**, and a file that is gone **Missing**. Copy it again to replace it: the new copy is written beside the damaged file, never over it.
 
 Files are named after the original, with spaces and characters a storage device may not keep removed. A name already in the folder gets `-2`, `-3` added, so nothing at the target is ever overwritten.
+
+#### Copy by rule
+
+A **copy rule** copies originals without anyone asking. It lives in the [publishing rules](publishing-rules.md), so it can be set for the whole account, a content type, a channel, event or station, or one item, and the most specific level that says anything about copies decides.
+
+- **Where and when:** each copy names a storage target and the moments to copy: **on ingest** (as soon as an upload or watch folder file has landed) and **on publish** (when the item is published).
+- **Off-peak window:** optionally, a window such as 22:00 to 06:00 in a time zone you choose. A copy asked for outside it waits until the window opens, so archive traffic stays out of busy hours.
+- **Once per target:** an original already copied, or waiting to be, is not copied again. A level that sets no copies switches copies off below a level that has them.
+- **What is skipped, and why:** an item with no original kept, or a disabled target or site, is skipped; the ingest or publish itself carries on.
+
+#### Re-checks on a schedule
+
+Every storage target reads its verified copies back on a cadence: every **30 days** unless you choose another (1 to 3650 days), or never on a schedule. A copy that still matches is confirmed again with today's date; one that changed shows **Corrupt** and one that is gone **Missing**, and neither is re-checked again until it is copied afresh. Disabling the target, or the site, pauses its re-checks.
 
 ### Switch a site off
 
@@ -156,7 +169,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `POST /api/sites/{id}/enrolment-tokens` | A one-time enrolment token, returned once |
 | `POST /api/sites/{id}/hosts/{hostId}/approve`, `.../reject` | Approves or rejects a server |
 | `POST /api/sites/{id}/hosts/{hostId}/rotate-credential` | A new credential, handed to the agent on its next heartbeat |
-| `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Storage targets for Mirror and Archive: lists, makes and changes them |
+| `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Storage targets for Mirror and Archive: lists, makes and changes them (`recheckDays` sets the re-check cadence) |
+| `PUT /api/publishing-rules/{scopeKind}/{scopeId}` with `archive` | A copy rule: `copies` of `{ "targetId", "on": ["ingest", "publish"] }` and an optional `offPeak` window |
 | `POST /api/archive/copies` | Copies an asset's original to a target (`targetId`, `vodAssetId`) |
 | `GET /api/archive/copies`, `GET /api/archive/copies/{id}` | Every copy with its state, where it is and when it was last confirmed |
 | `POST /api/archive/copies/{id}/verify` | Checks a copy again now |
@@ -167,6 +181,12 @@ Without either add-on the sites routes answer `403` with the code `licence_requi
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Archive NAS", "siteId": "'$SITE_ID'", "path": "/mnt/nas/archive", "bandwidthMbps": 200}' \
   "https://your-volt-host/api/archive/targets"
+```
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"settings": {"archive": {"copies": [{"targetId": "'$TARGET_ID'", "on": ["ingest"]}], "offPeak": {"from": "22:00", "to": "06:00", "timeZone": "Europe/London"}}}}' \
+  "https://your-volt-host/api/publishing-rules/account"
 ```
 
 ```bash

@@ -142,6 +142,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `DELETE /api/publishing-rules/{scopeKind}/{scopeId}` | Removes a content type or stream rung; the account default cannot be removed |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | A single asset's own rung |
 
+With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest or on publish, and an optional off-peak window. See [Copy by rule](hybrid-sites.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
+
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"settings": {"targets": [{"kind": "portal"}], "expire": {"mode": "days", "days": 30}}}' \

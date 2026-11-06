@@ -313,6 +313,16 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     } catch (e) { console.warn('[ingest] the original could not be landed in the bucket; it stays on this task', e); }
   }
 
+  // COPY RULES (Mirror and Archive, build queue H3-3): an original that has
+  // landed (and is where it will stay, bucket or disk) is copied to the
+  // storage targets its publishing rule names for ingest. After the landing
+  // above, so the copy reads the original from its final address. A skipped
+  // duplicate is not a new original. Never fails the ingest.
+  if (status !== 'rejected' && duplicate.outcome !== 'skip') {
+    const { copyOnRule } = await import('../archive/archive');
+    await copyOnRule(f.accountId, f.assetId, 'ingest');
+  }
+
   return { resolved, naming, duplicate, extracted, metadata: merged.metadata, missing, path: finalPath, payload, status };
 }
 
