@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.55.0 (2026-11-06)
+
+### Product (in customer release notes)
+
+- added · Sites: Mirror and Archive (add-on): keep a copy of an asset's original on a folder or NAS share at one of your sites. Each copy counts only once the checksum read back from your storage matches the original, and a check finds a copy that later changed or went missing. Set up through the API for now.
+- changed · Sites: Sites and their servers are now available with either the Hybrid Sites or the Mirror and Archive add-on; on-prem watchfolders still need Hybrid Sites.
+
+### Internal
+
+- added · Tests: mirror-archive check suite: licences, targets, copies through the real site agent code, checksum refusal, re-checks, bandwidth cap, file names.
+
 ## 0.54.0 (2026-11-05)
 
 ### Product (in customer release notes)
