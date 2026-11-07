@@ -2252,7 +2252,7 @@ What: an account administrator with the Mirror and Archive add-on now runs it fr
 - **Seen, not caused here**: `retention-bin` 39/41 in this container (the sprite sheet not over a clip stays), with volt-app code identical to HEAD; 41/41 on 6 Nov. Looks date or environment dependent.
 - **Not done**: H3-7 (recordings, clips and packaged outputs as copy sources, on recording close and on a schedule, mirror mode, consolidated recordings). H3-5 still needs Christian's input.
 
-### C1 Rule-based collections (8 Nov 2026, )
+### C1 Rule-based collections (8 Nov 2026, v0.59.0)
 
 Collections are the one editorial grouping. A collection's members are what its rules match, plus what a person added, minus what a person took out. Design: Publishing Policies doc, "Collections, packages and apps".
 
