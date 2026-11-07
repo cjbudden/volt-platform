@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.58.0 (2026-11-07)
+
+### Product (in customer release notes)
+
+- added · Account: Mirror and Archive is now in the console: the Storage page lists your storage targets at your sites and every copy with its state, why a copy is waiting and what to do, and you can add or change a target and check a copy again with one click.
+- added · VOD: Publishing rules have an Archive copies field for accounts with Mirror and Archive: choose which storage targets an original is copied to, when it lands or when it is published, and an optional off-peak window.
+- improved · Account: Sites is in the menu for accounts with Mirror and Archive alone, and Volt can switch the add-on on for an account in System Admin.
+
+### Internal
+
+- added · Tests: Browser walk of the Mirror and Archive console (volt-web/test/mirror-archive-console.browser.mjs) and Mirror and Archive data in the docs seed.
+
 ## 0.57.0 (2026-11-06)
 
 ### Product (in customer release notes)
