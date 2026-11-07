@@ -50,9 +50,13 @@ export interface RuleSettings {
    *  governs, one file per programme or hour as each closes
    *  (services/archive/recordings.ts). Needs the
    *  `mirror_archive` licence to be saved (modules/publishingRules.ts) and
-   *  to run (services/archive/archive.ts copyOnRule). */
+   *  to run (services/archive/archive.ts copyOnRule). `schedule` (H3-8)
+   *  copies nightly what the target does not hold yet, and `what` picks the
+   *  original, its sidecars (metadata JSON, captions, companion files,
+   *  poster; services/archive/sidecars.ts) or both; the original alone when
+   *  unsaid. */
   archive?: {
-    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording')[] }[];
+    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars')[] }[];
     offPeak?: { from: string; to: string; timeZone?: string } | null;
   };
 }

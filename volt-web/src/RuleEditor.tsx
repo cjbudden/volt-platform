@@ -32,16 +32,18 @@ const KEY_LABEL: Record<RuleKey, string> = {
 // never lost when someone without the add-on view saves it.
 const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'accessRules', 'geo', 'access', 'paywall', 'gate', 'archive']
 
-const ON_LABEL = { ingest: 'when it lands', publish: 'when it is published', recording: 'recordings as each programme or hour ends' } as const
+const ON_LABEL = { ingest: 'when it lands', publish: 'when it is published', recording: 'recordings as each programme or hour ends', schedule: 'nightly, what it does not hold yet' } as const
+type CopyWhat = 'source' | 'sidecars'
+const WHAT_LABEL: Record<CopyWhat, string> = { source: 'original', sidecars: 'sidecars' }
 type CopyOn = keyof typeof ON_LABEL
 
 function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTargets: ArchiveTarget[] = []): string {
   if (v === undefined) return '—'
   switch (k) {
     case 'archive': {
-      const copies: { targetId: string; on: CopyOn[] }[] = v?.copies ?? []
+      const copies: { targetId: string; on: CopyOn[]; what?: CopyWhat[] }[] = v?.copies ?? []
       if (!copies.length) return 'no copies'
-      const list = copies.map(c => `${archiveTargets.find(t => t.id === c.targetId)?.name ?? c.targetId.slice(0, 8)} ${c.on.map(o => ON_LABEL[o]).join(' and ')}`).join('; ')
+      const list = copies.map(c => `${archiveTargets.find(t => t.id === c.targetId)?.name ?? c.targetId.slice(0, 8)}${c.what?.length ? ` (${c.what.map(w => WHAT_LABEL[w]).join(' and ')})` : ''} ${c.on.map(o => ON_LABEL[o]).join(' and ')}`).join('; ')
       return v.offPeak ? `${list}; only between ${v.offPeak.from} and ${v.offPeak.to}${v.offPeak.timeZone ? ` (${v.offPeak.timeZone})` : ' (UTC)'}` : list
     }
     case 'targets': {
@@ -296,7 +298,7 @@ function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = 
  * so the box is not offered there.
  */
 function ArchiveControl({ value, targets, onChange, recordings = false }: { value: any; targets: ArchiveTarget[]; onChange: (v: any) => void; recordings?: boolean }) {
-  const copies: { targetId: string; on: CopyOn[] }[] = value?.copies ?? []
+  const copies: { targetId: string; on: CopyOn[]; what?: CopyWhat[] }[] = value?.copies ?? []
   const offPeak: { from: string; to: string; timeZone?: string } | null = value?.offPeak ?? null
   const put = (c: typeof copies, o: typeof offPeak) => onChange({ copies: c, offPeak: o })
   const setOn = (targetId: string, when: CopyOn, yes: boolean) => {
@@ -304,9 +306,23 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
     const on = new Set(cur?.on ?? [])
     if (yes) on.add(when); else on.delete(when)
     const rest = copies.filter(c => c.targetId !== targetId)
-    // Order kept as ingest, publish, recording, so the saved rule reads the
-    // same way the form does; a target with none ticked is not copied to.
-    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish', 'recording'] as const).filter(w => on.has(w)) }] : rest, offPeak)
+    // Order kept as ingest, publish, recording, nightly, so the saved rule
+    // reads the same way the form does; a target with none ticked is not
+    // copied to. What it takes (H3-8) stays as it was.
+    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish', 'recording', 'schedule'] as const).filter(w => on.has(w)), ...(cur?.what ? { what: cur.what } : {}) }] : rest, offPeak)
+  }
+  // What an asset copy takes (H3-8): the original, its sidecars, or both.
+  // Unsaid means the original alone, so that is what the boxes show then;
+  // at least one stays ticked.
+  const setWhat = (targetId: string, w: CopyWhat, yes: boolean) => {
+    const cur = copies.find(c => c.targetId === targetId)
+    if (!cur) return
+    const set = new Set<CopyWhat>(cur.what?.length ? cur.what : ['source'])
+    if (yes) set.add(w); else set.delete(w)
+    if (!set.size) return
+    const what = (['source', 'sidecars'] as const).filter(x => set.has(x))
+    const next = { targetId, on: cur.on, ...(what.length === 1 && what[0] === 'source' ? {} : { what }) }
+    put(copies.map(c => c.targetId === targetId ? next : c), offPeak)
   }
   const unknown = copies.filter(c => !targets.some(t => t.id === c.targetId))
   const zone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' } })()
@@ -325,6 +341,12 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('ingest')} onChange={e => setOn(t.id, 'ingest', e.target.checked)} />When it lands</label>
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('publish')} onChange={e => setOn(t.id, 'publish', e.target.checked)} />When it is published</label>
             {(recordings || cur?.on.includes('recording')) && <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="One file per programme, or per hour without a guide, from the top rendition, with a metadata file beside it"><input type="checkbox" checked={!!cur?.on.includes('recording')} onChange={e => setOn(t.id, 'recording', e.target.checked)} />Recordings</label>}
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="Once a day, copy anything this rule covers that the target does not hold yet, such as files from before the rule existed"><input type="checkbox" checked={!!cur?.on.includes('schedule')} onChange={e => setOn(t.id, 'schedule', e.target.checked)} />Nightly</label>
+            {cur && cur.on.some(o => o !== 'recording') && <span style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--muted)' }} data-archive-what>
+              Copy:
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!cur.what?.length || cur.what.includes('source')} onChange={e => setWhat(t.id, 'source', e.target.checked)} />Original</label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="A metadata file, the caption files, any other files that came with it, and the poster, named after the original"><input type="checkbox" checked={!!cur.what?.includes('sidecars')} onChange={e => setWhat(t.id, 'sidecars', e.target.checked)} />Sidecars</label>
+            </span>}
             <span style={{ color: 'var(--faint)' }}>{t.siteName ? `at ${t.siteName}` : ''}{t.status === 'active' ? '' : ', disabled: no new copies'}</span>
           </div>
         )
@@ -343,7 +365,7 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
         </>}
       </div>
       <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>
-        The original file is copied once per target.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
+        The original file is copied once per target. Sidecars are a metadata file, the caption files, other files that came with the asset, and its poster. Nightly copies anything the target does not hold yet.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
       </div>
     </div>
   )

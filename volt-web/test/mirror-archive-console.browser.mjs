@@ -12,6 +12,7 @@
 //     a disabled target greyed, saving a change
 //   Without the add-on: no section, no field; Sites for either add-on only
 //   System Admin: the Mirror and Archive switch saves with the account
+//   H3-8: Nightly on each target, Original and Sidecars on a target copied to
 //   PLAYWRIGHT=<playwright index.mjs> CHROMIUM=<chrome> OUT=<dir> node volt-web/test/mirror-archive-console.browser.mjs
 const { chromium } = await import(process.env.PLAYWRIGHT);
 const B = 'http://127.0.0.1:5173', OUT = process.env.OUT || '/tmp';
@@ -158,6 +159,29 @@ ok('saving sends the store with all three moments, in order: ' + JSON.stringify(
 await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
 ok('and it is still ticked when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="On-site object store"] label:has-text("When it lands") input').isChecked()
   && await page.locator('[data-archive-control] [data-archive-target="On-site object store"] label:has-text("Recordings") input').isChecked())
+// H3-8: Nightly and what a copy takes (Original, Sidecars).
+{
+  const row = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
+  ok('each target offers Nightly', await row.locator('label:has-text("Nightly") input').count() === 1 && !(await row.locator('label:has-text("Nightly") input').isChecked()))
+  ok('a target copied to offers Original (ticked) and Sidecars', await row.locator('[data-archive-what] label:has-text("Original") input').isChecked() && !(await row.locator('[data-archive-what] label:has-text("Sidecars") input').isChecked()))
+  ok('a target not copied to offers no choice of what', await page.locator('[data-archive-control] [data-archive-target="Edit suite disk"] [data-archive-what]').count() === 0)
+  // click, not uncheck: uncheck throws when the box (rightly) stays ticked
+  await row.locator('[data-archive-what] label:has-text("Original") input').click()
+  ok('the last thing copied cannot be unticked', await row.locator('[data-archive-what] label:has-text("Original") input').isChecked())
+  await row.locator('label:has-text("Nightly") input').check()
+  await row.locator('[data-archive-what] label:has-text("Sidecars") input').check()
+  ok('the field says what sidecars and nightly mean', /Sidecars are a metadata file, the caption files/.test(await page.locator('[data-archive-control]').first().innerText()) && /Nightly copies anything the target does not hold yet/.test(await page.locator('[data-archive-control]').first().innerText()))
+  await row.scrollIntoViewIfNeeded(); await page.screenshot({ path: OUT + '/ma-publishing-sidecars.png' })
+  const resp2 = page.waitForResponse(r => /\/api\/publishing-rules/.test(r.url()) && r.request().method() === 'PUT', { timeout: 10000 }).catch(() => null)
+  await page.locator('button:has-text("Save publishing rule")').first().click()
+  const sr2 = await resp2
+  const sent2 = sr2 ? JSON.parse(sr2.request().postData() || '{}') : {}
+  const st2 = (sent2.settings?.archive?.copies ?? sent2.archive?.copies ?? []).find(c => c.targetId === storeId)
+  ok('saving sends Nightly last and the original with its sidecars: ' + JSON.stringify(st2), !!sr2 && sr2.ok() && JSON.stringify(st2?.on) === '["ingest","publish","recording","schedule"]' && JSON.stringify(st2?.what) === '["source","sidecars"]')
+  await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
+  const row2 = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
+  ok('and both are still ticked when the page is opened again', await row2.locator('label:has-text("Nightly") input').isChecked() && await row2.locator('[data-archive-what] label:has-text("Sidecars") input').isChecked())
+}
 ok('Sites is in the menu for this account', await navHas(page, 'Sites'))
 await ctx.close()
 

@@ -153,6 +153,16 @@ export function startScheduler(): () => void {
     5 * 60_000
   );
   archiveRecordings.unref?.();
+  // MIRROR AND ARCHIVE NIGHTLY COPIES (build queue H3-8): a bounded step of
+  // each licensed account's daily walk every half hour, copying what a rule
+  // with the `schedule` moment governs and the target does not hold yet.
+  const archiveSweep = setInterval(
+    () => import('../archive/sidecars').then((m) => m.scheduledSweep())
+      .then((r) => { if (r.queued) console.log(`[archive] nightly: queued ${r.queued} copy job(s) over ${r.assets} asset(s)`); })
+      .catch((e) => console.error('[archive] nightly pass error', e)),
+    30 * 60_000
+  );
+  archiveSweep.unref?.();
 
   // FAST LINEUPS: keep every active lineup's guide (and its breaks) a week
   // ahead. Deterministic, so a top-up only appends what comes next.

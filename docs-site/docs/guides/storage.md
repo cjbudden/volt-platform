@@ -150,7 +150,7 @@ Under **Copies**, every copy is listed with its target, its **State**, its size 
 
 A copy of a recording says which channel and which programme or hour it is (**Recording of** the channel, from when to when) with **Open the recording**, and its metadata file says **Metadata of the recording of** the channel. A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
 
-What is copied, and when, is set by copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage): originals when they land or are published, and recordings as each programme or hour ends.
+What is copied, and when, is set by copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage): originals and their sidecars (metadata, captions, poster) when they land, when they are published or nightly, and recordings as each programme or hour ends.
 
 ## How it connects
 

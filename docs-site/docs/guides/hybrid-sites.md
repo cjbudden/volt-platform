@@ -125,9 +125,10 @@ As with a folder, every copy is read back from the store and matched against the
 
 A **copy rule** copies originals without anyone asking. It lives in the [publishing rules](publishing-rules.md), so it can be set for the whole account, a content type, a channel, event or station, or one item, and the most specific level that says anything about copies decides.
 
-- **Where and when:** each copy names a storage target and the moments to copy: **on ingest** (as soon as an upload or watch folder file has landed), **on publish** (when the item is published) and **recordings** (as each programme or hour of a channel's or event's recording ends; see below).
+- **Where and when:** each copy names a storage target and the moments to copy: **on ingest** (as soon as an upload or watch folder file has landed), **on publish** (when the item is published), **nightly** (once a day, anything the rule covers that the target does not hold yet, older items included) and **recordings** (as each programme or hour of a channel's or event's recording ends; see below).
+- **What:** the **original**, its **sidecars**, or both (the original alone unless you say otherwise). Sidecars sit beside the original under its name: `<name>.json` with the item's details and metadata, each caption file as it was delivered (`<name>.en.srt`, `<name>.fr.vtt`), any other file that came with the item (`<name>.news.xml`) and the poster (`<name>.jpg`). Each is copied and read back like the original.
 - **Off-peak window:** optionally, a window such as 22:00 to 06:00 in a time zone you choose. A copy asked for outside it waits until the window opens, so archive traffic stays out of busy hours.
-- **Once per target:** an original already copied, or waiting to be, is not copied again. A level that sets no copies switches copies off below a level that has them.
+- **Once per target:** an original or sidecar already copied, or waiting to be, is not copied again. Copies are kept, never replaced or deleted by Volt (keeping a target in step with deletes is mirror mode, not available yet). A level that sets no copies switches copies off below a level that has them.
 - **What is skipped, and why:** an item with no original kept, or a disabled target or site, is skipped; the ingest or publish itself carries on.
 
 #### Recordings in the archive

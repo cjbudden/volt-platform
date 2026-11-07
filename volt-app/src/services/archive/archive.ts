@@ -381,11 +381,14 @@ export async function recheckDue(opts: { limit?: number; accountId?: string } = 
 
 // ---- copy rules (H3-3) ---------------------------------------------------------------
 
-export type CopyEvent = 'ingest' | 'publish';
+/** An asset event, or (H3-8) the nightly pass over what a target does not hold yet. */
+export type CopyEvent = 'ingest' | 'publish' | 'schedule';
 /** When a copy rule fires: an asset event, or (H3-7) a stretch of recording closing. */
 export type CopyMoment = CopyEvent | 'recording';
+/** What an asset copy takes (H3-8): the original, its sidecars, or both. Original only when unsaid. */
+export type CopyWhat = 'source' | 'sidecars';
 export interface OffPeak { from: string; to: string; timeZone?: string }
-export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[] }[]; offPeak?: OffPeak | null }
+export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[]; what?: CopyWhat[] }[]; offPeak?: OffPeak | null }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const minutesOf = (hhmm: string) => { const m = HHMM.exec(hhmm)!; return Number(m[1]) * 60 + Number(m[2]); };
@@ -422,8 +425,10 @@ export function offPeakStart(now: Date, w: OffPeak | null | undefined): Date | n
 }
 
 /**
- * Copy an asset's original to the targets its publishing rule names for this
- * event (ingest: the original has landed; publish: the asset was published).
+ * Copy an asset's original (and, when the rule says `what: ['sidecars']`,
+ * its sidecars, H3-8) to the targets its publishing rule names for this
+ * event (ingest: the original has landed; publish: the asset was published;
+ * schedule: the nightly pass, sidecars.ts scheduledSweep).
  * The rule is read through the publishing ladder (account, content type,
  * channel or event, the asset itself), so the most specific rung that says
  * anything about archive copies decides.
@@ -446,12 +451,25 @@ export async function copyOnRule(accountId: string, assetId: string, event: Copy
     if (!wanted.length) return out;
     const runAfter = offPeakStart(now, rule?.offPeak ?? null);
     for (const c of wanted) {
-      try {
-        const r = await requestCopy(accountId, null, { targetId: c.targetId, vodAssetId: assetId }, { runAfter });
-        if (r.created) out.queued.push(r.copy.id);
-        else out.skipped.push({ targetId: c.targetId, why: 'already_copied_or_queued' });
-      } catch (e: any) {
-        out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
+      const whats = c.what?.length ? c.what : ['source'];
+      if (whats.includes('source')) {
+        try {
+          const r = await requestCopy(accountId, null, { targetId: c.targetId, vodAssetId: assetId }, { runAfter });
+          if (r.created) out.queued.push(r.copy.id);
+          else out.skipped.push({ targetId: c.targetId, why: 'already_copied_or_queued' });
+        } catch (e: any) {
+          out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
+        }
+      }
+      if (whats.includes('sidecars')) {
+        try {
+          const { requestSidecarCopies } = await import('./sidecars');
+          const r = await requestSidecarCopies(accountId, c.targetId, assetId, { runAfter });
+          out.queued.push(...r.queued);
+          if (!r.queued.length) out.skipped.push({ targetId: c.targetId, why: 'sidecars_already_copied_or_queued' });
+        } catch (e: any) {
+          out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
+        }
       }
     }
     if (out.queued.length) console.log(`[archive] ${event}: ${out.queued.length} copy rule(s) queued for asset ${assetId}${runAfter ? ` from ${runAfter.toISOString()}` : ''}`);
@@ -522,9 +540,11 @@ export async function judge(job: JobRow, result: any): Promise<Verdict> {
       `UPDATE archive_copies SET state = 'verified', stored_path = $2, bytes = $3, sha256 = $4,
               copied_at = now(), verified_at = now(), checked_at = now(), error = NULL, error_code = NULL, updated_at = now()
         WHERE id = $1`, [c.id, stored, bytes, sha]);
-    // A recording file was made only to be copied (H3-7): once every target
-    // holds a verified copy, the cloud's own file is not needed.
-    if (c.stream_id) await (await import('./recordings')).releaseBuilt(c.source_uri).catch(() => {});
+    // A recording file (H3-7) or an asset sidecar (H3-8) was made only to be
+    // copied: once every target holds a verified copy, the cloud's own file
+    // is not needed. releaseBuilt touches only files under the build folder,
+    // so an asset's original is never removed here.
+    await (await import('./recordings')).releaseBuilt(c.source_uri).catch(() => {});
   } };
 }
 
