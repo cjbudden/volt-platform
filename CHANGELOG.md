@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.62.0 (2026-11-07)
+
+### Product (in customer release notes)
+
+- added · Mirror and Archive: Copy rules can now copy clips cut from a recording (clips, full-event replays and exports): tick Clips on a storage target and each clip's file goes there exactly as Volt made it, with a metadata file beside it, named Title-Channel-date-time, when the clip is made, when it is published or nightly.
+- added · Image Library: Rename an image from the Image Library: open it and choose Rename. Everything that uses it, such as channel slates and asset posters, follows the new name, and links to the old name keep working.
+- fixed · API: Renaming or moving an image with PATCH /api/files/{id} now updates everything that uses it and keeps its old address working, and renames all files of a video item together.
+
+### Internal
+
+- added · Mirror and Archive: mirror-archive-clips check suite (37 checks with the real site agent); mirror-archive-console browser walk extended to 66.
+
 ## 0.61.0 (2026-11-07)
 
 ### Product (in customer release notes)
