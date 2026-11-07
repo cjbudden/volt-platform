@@ -24,7 +24,7 @@ An administrator sets a site up once and comes back when a server is added, repl
 
 ## Before you start
 
-- **The Hybrid Sites add-on, or Mirror and Archive.** Either add-on gives you sites and their servers. Sites appears under Admin for an account with Hybrid Sites; with Mirror and Archive alone, set sites up [through the API](#through-the-api) for now. Ask Volt to add the add-on to your plan.
+- **The Hybrid Sites add-on, or Mirror and Archive.** Either add-on gives you sites and their servers. Sites appears under Admin for an account with either one. Ask Volt to add the add-on to your plan.
 - **A server at the site** (Linux, a physical server or a virtual machine) that can reach your Volt address over HTTPS. The agent only calls out: open no inbound ports.
 - **The Volt site agent** installed on that server (Volt gives you the package with the add-on).
 - **Administrator access** (see [Who can do it](#who-can-do-it)).
@@ -93,12 +93,12 @@ A server waiting for approval is given no work. Work for a disabled site waits u
 
 ### Keep archive copies at the site
 
-With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, a NAS share mounted on it, or an S3-compatible object store on your network (MinIO, NetApp StorageGRID and similar). In this release copies are made [through the API](#through-the-api), by hand or by a copy rule; the Storage page follows.
+With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, a NAS share mounted on it, or an S3-compatible object store on your network (MinIO, NetApp StorageGRID and similar). Storage targets and copies are on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page, and copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage).
 
-1. Make a **storage target**: a name, the site, and the folder as the server sees it (for example `/mnt/nas/archive`), or an object store (see [Copies to an object store](#copies-to-an-object-store)). Give it a **bandwidth cap** if copies must leave room for live contribution.
-2. Ask for an asset's original to be copied there. An approved, **Online** server of the site downloads it through a link made for that one file, writes it into the folder and reads it back.
+1. On the **Storage** page, under **Mirror and Archive**, choose **Add a storage target**: a name, the site, and the folder as the server sees it (for example `/mnt/nas/archive`), or an object store (see [Copies to an object store](#copies-to-an-object-store)). Give it a **bandwidth cap** if copies must leave room for live contribution.
+2. Copy rules (or the API) ask for an asset's original to be copied there. An approved, **Online** server of the site downloads it through a link made for that one file, writes it into the folder and reads it back.
 3. The copy counts as **Verified** only when what the folder holds matches the original's checksum. A copy that does not match is removed from the folder and tried again; after its attempts it shows **Failed** with the reason.
-4. Check a copy again whenever you like. The same checksum keeps it verified with a new date; a changed file shows **Corrupt**, and a file that is gone **Missing**. Copy it again to replace it: the new copy is written beside the damaged file, never over it.
+4. Choose **Check now** on a copy to check it again whenever you like. The same checksum keeps it verified with a new date; a changed file shows **Corrupt**, and a file that is gone **Missing**. Copy it again to replace it: the new copy is written beside the damaged file, never over it.
 
 Files are named after the original, with spaces and characters a storage device may not keep removed. A name already in the folder gets `-2`, `-3` added, so nothing at the target is ever overwritten.
 
@@ -143,7 +143,8 @@ Choose **Disable site**. Its servers are refused until you choose **Enable site*
 | Section | How it relates |
 |---|---|
 | [Watchfolders](watchfolders.md) | Folders at a site, watched by the site's agent with the folder's rules; accepted files are uploaded and taken in by Volt |
-| [Storage](storage.md) | Copies of media kept at a site will show there beside the cloud copies (a later release of the add-on) |
+| [Storage](storage.md) | Mirror and Archive storage targets at a site, and the copies kept on them, with their state |
+| [Publishing Rules](publishing-rules.md) | Copy rules decide what is copied to a site's storage, and when |
 | [Workflows](workflows.md) | Work done at a site will appear on the map with its own success and error rates (a later release of the add-on) |
 | [Audit log](audit-log.md) | Sites, enrolment tokens, approvals, rejections and new credentials are recorded |
 
@@ -158,7 +159,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Make and withdraw enrolment tokens, approve and reject servers, rotate credentials | Account administrator |
 | Make storage targets and archive copies, check copies (Mirror and Archive) | Account administrator |
 
-The page is not offered to other roles, and not at all without the Hybrid Sites add-on.
+The page is not offered to other roles, and not at all without the Hybrid Sites or Mirror and Archive add-on.
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -166,7 +167,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | You see | What it means | What to do |
 |---|---|---|
-| No **Sites** under Admin | The account does not have the Hybrid Sites add-on, or you are not an administrator | Ask Volt about the add-on, or an administrator for access |
+| No **Sites** under Admin | The account has neither the Hybrid Sites nor the Mirror and Archive add-on, or you are not an administrator | Ask Volt about the add-on, or an administrator for access |
 | The agent says the enrolment token is not valid | The token was used, withdrawn or is more than 24 hours old | Make a new one with **Make an enrolment token** |
 | The agent says the site is disabled | The site was switched off | Choose **Enable site** |
 | A server shows **Stale** or **Offline** | It has not reported for 90 seconds, or 10 minutes | Check the server is on, the agent is running and it can reach your Volt address over HTTPS |

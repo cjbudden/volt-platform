@@ -5,6 +5,7 @@ import {
 } from '../api'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import { RetentionList, RestoreBin } from './StorageRetention'
+import { MirrorArchive } from './StorageArchive'
 import { useAccess } from '../access'
 
 /* ============================================================================
@@ -401,7 +402,10 @@ function EventRetention() {
 export default function StoragePage() {
   // The storage driver is the deployment's business: whoever runs Volt sees it
   // (and the setup hint); an account user sees the tiers it offers (1.14-G3a-2).
-  const { seesServerSetup } = useAccess()
+  const { seesServerSetup, isAdminTier, me } = useAccess()
+  // Mirror and Archive (build queue H3-6): its targets and copies, for account
+  // administrators of an account with the add-on, the same people its API serves.
+  const mirrorArchive = isAdminTier && !!me?.account?.licences?.includes('mirror_archive')
   const [caps, setCaps] = useState<StorageCapabilities | null>(null)
   const [rules, setRules] = useState<RetentionRuleRow[]>([])
   const [objects, setObjects] = useState<MediaObjectRow[]>([])
@@ -518,6 +522,8 @@ export default function StoragePage() {
       {/* WHAT GOES NEXT, AND WHAT CAN STILL COME BACK (docs/RETENTION.md). */}
       <RetentionList />
       <RestoreBin />
+
+      {mirrorArchive && <MirrorArchive />}
 
       <div className="card">
         <div className="flex items-center gap-2" style={{ padding: '12px 14px 0' }}>

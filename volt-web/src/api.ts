@@ -1241,6 +1241,21 @@ export const api = {
     req(`/sites/${encodeURIComponent(id)}/hosts/${encodeURIComponent(hostId)}/${verb}`, { method: 'POST', body: '{}' }),
   rotateHostCredential: (id: string, hostId: string): Promise<{ id: string; prefix: string; pending: boolean }> =>
     req(`/sites/${encodeURIComponent(id)}/hosts/${encodeURIComponent(hostId)}/rotate-credential`, { method: 'POST', body: '{}' }),
+  /** Storage > Mirror and Archive (volt-app modules/archive.ts, build queue H3-6): storage
+   *  targets at the account's sites and the copies kept on them. Account administrators of an
+   *  account with the `mirror_archive` add-on; everyone else gets 403. */
+  archiveTargets: (): Promise<{ items: ArchiveTarget[] }> => req('/archive/targets?limit=500'),
+  createArchiveTarget: (b: ArchiveTargetInput): Promise<ArchiveTarget> => req('/archive/targets', { method: 'POST', body: JSON.stringify(b) }),
+  patchArchiveTarget: (id: string, b: Partial<ArchiveTargetInput> & { status?: 'active' | 'disabled' }): Promise<ArchiveTarget & { changed: string[] }> =>
+    req(`/archive/targets/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(b) }),
+  archiveCopies: (q: { targetId?: string; state?: string; q?: string } = {}): Promise<{ items: ArchiveCopy[] }> => {
+    const p = new URLSearchParams({ limit: '200' })
+    if (q.targetId) p.set('target_id', q.targetId)
+    if (q.state) p.set('state', q.state)
+    if (q.q) p.set('q', q.q)
+    return req(`/archive/copies?${p}`)
+  },
+  verifyArchiveCopy: (id: string): Promise<ArchiveCopy> => req(`/archive/copies/${encodeURIComponent(id)}/verify`, { method: 'POST', body: '{}' }),
   /** Admin > Captions (modules/captionsSettings.ts). */
   captionsSettings: (): Promise<CaptionsSettings> => req('/account-settings/captions'),
   patchCaptionsProvider: (provider: CaptionsProvider): Promise<CaptionsSettings> =>
@@ -2343,6 +2358,28 @@ export interface SecuritySummary {
 /** Hybrid Sites (volt-app services/sites/sites.ts). */
 export type SiteHealth = 'disabled' | 'no_hosts' | 'healthy' | 'degraded' | 'offline'
 export type HostHealth = 'never' | 'online' | 'stale' | 'offline'
+/** A place at one of the account's sites where Mirror and Archive keeps copies (H3-2, H3-4). */
+export interface ArchiveTarget {
+  id: string; name: string; siteId: string; siteName?: string
+  /** path: a folder on the site's server or a NAS share mounted on it; s3: an S3-compatible store at the site. */
+  kind: 'path' | 's3'; path: string
+  s3?: { endpoint: string; bucket: string; prefix?: string | null; region?: string | null; pathStyle?: boolean; credentialRef?: string | null } | null
+  bandwidthMbps: number | null; recheckDays: number | null
+  status: 'active' | 'disabled'; createdAt: string; updatedAt: string
+}
+export interface ArchiveTargetInput {
+  name: string; siteId: string; kind?: 'path' | 's3'; path?: string
+  s3?: { endpoint: string; bucket: string; prefix?: string; region?: string; pathStyle?: boolean; credentialRef?: string }
+  bandwidthMbps?: number | null; recheckDays?: number | null
+}
+export type ArchiveCopyState = 'queued' | 'copying' | 'verified' | 'failed' | 'corrupt' | 'missing'
+export interface ArchiveCopy {
+  id: string; targetId: string; targetName?: string; vodAssetId: string | null; what: string
+  fileName: string; storedPath: string | null; bytes: number | null; sha256: string | null
+  state: ArchiveCopyState; busy: boolean; checking: boolean
+  error: string | null; errorCode: string | null; attempts: number | null
+  copiedAt: string | null; verifiedAt: string | null; checkedAt: string | null; createdAt: string; updatedAt: string
+}
 export interface SiteRow {
   id: string; name: string; description: string | null; status: 'active' | 'disabled'; version: number; configVersion: number
   health: SiteHealth
@@ -3435,6 +3472,9 @@ export interface RuleSettings {
   gate?: { requireReview: boolean; blockOnQcFail: boolean }
   /** FOR / IF / THEN / TERMS: decides access for the content it governs; the simple fields are the fallback. */
   accessRules?: AccessRule[]
+  /** Copy rules (Mirror and Archive, H3-3): copy the original to these storage targets when it
+   *  lands or is published, optionally only inside an off-peak window. Needs `mirror_archive`. */
+  archive?: { copies: { targetId: string; on: ('ingest' | 'publish')[] }[]; offPeak?: { from: string; to: string; timeZone?: string } | null }
 }
 export type ForScope = 'this' | 'live' | 'ondemand'
 export interface AccessTerm {

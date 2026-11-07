@@ -308,6 +308,26 @@
       "alt": "The Storage page: what this service can do at the top, the retention ladder, event data retention, the dry run, and the list of media with its state, tier and size"
     },
     {
+      "name": "storage-mirror-archive",
+      "guide": "guides/storage.md",
+      "path": "/storage",
+      "customerView": true,
+      "waitFor": "[data-mirror-archive] [data-copy]",
+      "clip": "[data-mirror-archive]",
+      "remove": [".topbar"],
+      "settleMs": 1000,
+      "alt": "The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies with their state, the reason a copy waits and what to do about it"
+    },
+    {
+      "name": "publishing-archive-copies",
+      "guide": "guides/publishing-rules.md",
+      "path": "/publishing",
+      "waitFor": "[data-archive-control] [data-archive-target]",
+      "clip": "div:has(> div > [data-archive-control])",
+      "settleMs": 1000,
+      "alt": "The Archive copies field of the account default: a NAS copied to when files land and an object store copied to when they are published, only between 22:00 and 06:00 in Sydney time"
+    },
+    {
       "name": "sites",
       "guide": "guides/hybrid-sites.md",
       "path": "/sites",

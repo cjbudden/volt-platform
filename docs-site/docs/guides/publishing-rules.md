@@ -58,6 +58,7 @@ Administrators set the default; the people who run a channel, an event or the li
    | **Access** | **Free**, **Entitlement required** or **Paid (paywall)** |
    | **Paywall** | Tick **Paywall**, then a tier, a price in cents and a three-letter currency |
    | **Publish gate** | **Require an approved review before publishing** and **Block publishing while QC has failed** |
+   | **Archive copies** | With the Mirror and Archive add-on, for account administrators: which storage targets the original is copied to, and when. See [Copy originals to your own storage](#copy-originals-to-your-own-storage) |
 
 2. Choose **Save publishing rule**. **Saved.** appears beside the button.
 
@@ -89,6 +90,18 @@ Rules are read from the top: the first rule that covers the content and matches 
 
 Each premium term is kept in step with your products for payments when the rule is saved.
 
+### Copy originals to your own storage
+
+With the **Mirror and Archive** add-on, every rung has an **Archive copies** field, shown to account administrators. It copies an item's original file to the storage targets at your sites (made on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page), without anyone asking.
+
+![The Archive copies field of the account default: a NAS copied to when files land and an object store copied to when they are published, only between 22:00 and 06:00 in Sydney time](/img/screens/publishing-archive-copies.png)
+
+1. Under **Archive copies** (tick it first on a rung other than the account default), each storage target is listed. Tick **When it lands** to copy the original as soon as an upload or watch folder file has landed, **When it is published** to copy it on publishing, or both.
+2. Optionally tick **Copy only between** and set a start and end time and a time zone, for example 22:00 to 06:00 in `Australia/Sydney`. A copy asked for outside the window waits for it to open.
+3. Choose **Save publishing rule**.
+
+Each original is copied once per target. A rung that ticks no target switches copies off for everything beneath it. A disabled target is shown greyed and gets no new copies; a target that no longer exists is pointed out with **Drop now**. Without the add-on the field is not shown, and copies a rung already holds are kept when it is saved.
+
 ## How it connects
 
 | Section | How it relates |
@@ -98,6 +111,7 @@ Each premium term is kept in step with your products for payments when the rule 
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each stream can have its own rung, on the **Access** tab of its settings; it applies to what is recorded or cut from it |
 | [Review](review.md) | **Require an approved review before publishing** waits for an approval there |
 | [API Keys & Apps](api-keys-and-apps.md) | Registered apps are the publishing points you can choose |
+| [Storage](storage.md) | Copy rules name the Mirror and Archive storage targets made there, and its copies show what the rules did |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -110,6 +124,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | See a channel, event or station's rule (its **Access** tab) | View on that kind of stream (TV channels, Radio stations, Events or FAST channels), or Account settings: View |
 | Change a channel, event or station's rule | Manage on that kind of stream (an Event Manager sets their events' rules, a Radio Manager their stations'), or Account settings: Manage |
 | Change a single asset's rule | Media library & publishing: Manage |
+| See and set **Archive copies** | Account administrator (owner or admin), with the Mirror and Archive add-on |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -128,6 +143,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A stream's **Access** tab shows a message about your role instead of the rule | Your role cannot see that kind of stream's rule | Ask an administrator for View (to read) or Manage (to change) on that kind of stream |
 | A country you typed disappears from **Geo access** | Only two-letter codes are kept | Use codes such as `AU`, `NZ`, `GB` |
 | Viewers are told "Not available in your region." | Access rules cover the content, but none matches the viewer's country | Add a rule for that country, or a last rule for **WORLD** |
+| **Archive copies** says **No storage targets yet.** | No storage target has been made | Add one on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page |
 | Publishing an asset is refused because of the publish gate | **Publish gate** requires an approved review, or QC has failed | See [Review](review.md), or change the gate |
 
 ## Through the API

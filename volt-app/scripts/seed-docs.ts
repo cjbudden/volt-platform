@@ -627,6 +627,54 @@ async function seedG8Sections() {
        ON CONFLICT (id) DO UPDATE SET last_heartbeat_at = EXCLUDED.last_heartbeat_at`,
       [id, SITE, ACCOUNT, hostname, status, cores, memGb * 2 ** 30, JSON.stringify(gpus), free, total, arch, ago]);
   }
+
+  // Mirror and Archive (build queue H3-6): the add-on, a NAS folder and an
+  // S3-compatible store at the site, copies of the library's originals in
+  // the states the guide explains (verified, queued for missing keys, failed
+  // on a checksum mismatch, missing from the target), and a copy rule on the account default, so the
+  // Storage page and the publishing rule editor show the real thing.
+  await query(`UPDATE accounts SET licences = ARRAY(SELECT DISTINCT unnest(licences || '{mirror_archive}'::text[])) WHERE id = $1`, [ACCOUNT]);
+  const NAS = '8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c61', OBJ = '8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c62';
+  await query(
+    `INSERT INTO archive_targets(id, account_id, site_id, name, kind, path, bandwidth_mbps, recheck_days, created_by)
+     VALUES ($1,$2,$3,'Machine room NAS','path','/mnt/nas/volt-archive',200,30,$4)
+     ON CONFLICT (id) DO NOTHING`, [NAS, ACCOUNT, SITE, ADMIN]);
+  await query(
+    `INSERT INTO archive_targets(id, account_id, site_id, name, kind, path, s3, bandwidth_mbps, recheck_days, created_by)
+     VALUES ($1,$2,$3,'On-site object store','s3','s3://volt-archive/originals',
+             '{"endpoint":"https://objects.example.com:9000","bucket":"volt-archive","prefix":"originals","region":"us-east-1","pathStyle":true,"credentialRef":"objects1"}'::jsonb,
+             NULL,90,$4)
+     ON CONFLICT (id) DO NOTHING`, [OBJ, ACCOUNT, SITE, ADMIN]);
+  const originals = await query<{ id: string; title: string; source_key: string | null }>(
+    `SELECT v.id, v.title, v.source_key FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN events e ON e.id = v.event_id
+       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE COALESCE(g.account_id, v.account_id) = $1 ORDER BY v.title LIMIT 5`, [ACCOUNT]);
+  const copyPlan: [string, string, string | null, string | null, string, string][] = [
+    // target, state, error code, error, verified ago, checked ago
+    [NAS, 'verified', null, null, '6 days', '2 hours'],
+    [NAS, 'failed', 'checksum_mismatch', 'The copy read back from the target does not match what was downloaded', '0 seconds', '0 seconds'],
+    [NAS, 'missing', 'missing', 'The copy is no longer at the target', '20 days', '1 hour'],
+    [OBJ, 'verified', null, null, '3 days', '3 days'],
+    [OBJ, 'queued', 'keys_missing', 'No keys named objects1 on this server', '0 seconds', '0 seconds'],
+  ];
+  for (let i = 0; i < Math.min(originals.length, copyPlan.length); i++) {
+    const a = originals[i], [target, state, code, error, vAgo, cAgo] = copyPlan[i];
+    const file = `${String(a.title).replace(/[^A-Za-z0-9]+/g, '')}.mp4`;
+    const done = state === 'verified' || state === 'missing';
+    await query(
+      `INSERT INTO archive_copies(account_id, target_id, vod_asset_id, what, source_uri, file_name, stored_path, bytes, expected_sha256, sha256,
+                                  state, error, error_code, copied_at, verified_at, checked_at, created_by, created_at)
+       VALUES ($1,$2,$3,'source',$4,$5,$6,$7,$8,$8,$9,$10,$11,
+               CASE WHEN $12 THEN now() - $13::interval END, CASE WHEN $12 THEN now() - $13::interval END,
+               CASE WHEN $12 THEN now() - $14::interval END, $15, now() - $13::interval)
+       ON CONFLICT (target_id, vod_asset_id, what) DO NOTHING`,
+      [ACCOUNT, target, a.id, a.source_key ?? `s3://volt-media/originals/${a.id}.mp4`, file, done ? file : null,
+       180_000_000 + i * 37_000_000, done ? 'a3f1'.repeat(16) : null, state, error, code, done, vAgo, cAgo, ADMIN]);
+  }
+  const rule = { copies: [{ targetId: NAS, on: ['ingest'] }, { targetId: OBJ, on: ['publish'] }], offPeak: { from: '22:00', to: '06:00', timeZone: 'Australia/Sydney' } };
+  const upd = await query(`UPDATE publishing_rules SET settings = settings || jsonb_build_object('archive', $2::jsonb) WHERE account_id = $1 AND scope_kind = 'account' RETURNING id`, [ACCOUNT, JSON.stringify(rule)]);
+  if (!upd.length) await query(`INSERT INTO publishing_rules(account_id, scope_kind, scope_id, settings) VALUES ($1,'account',NULL,jsonb_build_object('archive', $2::jsonb))`, [ACCOUNT, JSON.stringify(rule)]);
 }
 
 /**

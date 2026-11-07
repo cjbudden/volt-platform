@@ -16,6 +16,7 @@ Storage shows what recorded media your account holds, where it is kept, and what
 - **Set how long media is kept.** The retention ladder is a short list of rungs, each an age in days and an action: keep, move to cheaper storage, archive or delete.
 - **See it before it happens.** A dry run says how many pieces of media the next sweep would move, archive or delete.
 - **Look after one piece of media.** Every recorded run and export is listed with its state, where its copies are, and its history. You can put one on hold so retention never touches it, or ask for an archived one to be restored.
+- **Keep copies on your own storage.** With the Mirror and Archive add-on, extra copies of your originals are kept on a folder, a NAS share or an S3-compatible store at your own sites, and you can see here whether each one still matches.
 - **Keep viewer data for as long as you need.** Raw viewing sessions and the reports made from them have different lifetimes, set here too.
 
 Account administrators and whoever looks after storage costs or legal holds use it.
@@ -116,6 +117,41 @@ A Media Library asset deleted from its **Metadata** tab lands here ([Media Libra
 
 Reports stay after the raw sessions they were made from are pruned.
 
+### Keep copies at your own sites (Mirror and Archive)
+
+With the **Mirror and Archive** add-on, account administrators see a **Mirror and Archive** section on this page. Copies are written by a server at one of your [sites](hybrid-sites.md), so make a site and add a server first; the section links to **Sites** until there is one.
+
+![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies with their state, the reason a copy waits and what to do about it](/img/screens/storage-mirror-archive.png)
+
+**Add a storage target**
+
+1. Choose **Add a storage target**.
+2. Give it a **Name** and choose the **Site** whose servers write the copies.
+3. Choose the **Kind**:
+   - **A folder or NAS share**: the **Folder on the site's server**, as that server sees it, for example `/mnt/nas/archive`.
+   - **An S3-compatible store (MinIO and similar)**: the **Store address** as the site's server reaches it, the **Bucket**, optionally a **Folder in the bucket** and a **Region**, and the **Key name**. The store's keys are never typed into Volt: they stay on the site's server under that name (see [Copies to an object store](hybrid-sites.md#copies-to-an-object-store)).
+4. Optionally set a **Speed cap (Mbit/s)** so copies leave room for live contribution, and how often copies are **read back** (every 30 days unless you change it; empty means only when you ask).
+5. Choose **Add target**.
+
+To change a target, choose **Change** on its row. A target that holds copies keeps its folder, or its store, bucket and folder; make a new target to write somewhere else. Set **Status** to **Disabled** to stop new copies while keeping the ones it has.
+
+**Check the copies**
+
+Under **Copies**, every copy is listed with its target, its **State**, its size and when it was **Last confirmed**. Filter by target or state with the two lists above it.
+
+| State | Means |
+|---|---|
+| **Queued** | Waiting for a server at the site, or for the off-peak window |
+| **Copying** | A server at the site is making the copy now |
+| **Verified** | Read back from the target and matched the original |
+| **Failed** | Could not be made after every retry |
+| **Corrupt** | A check found the copy changed since it was made |
+| **Missing** | A check found the copy gone from the target |
+
+A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
+
+What is copied, and when, is set by copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage).
+
 ## How it connects
 
 | Section | How it relates |
@@ -124,6 +160,8 @@ Reports stay after the raw sessions they were made from are pruned.
 | [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each sets its own **Keep recordings for**, which applies alongside the ladder |
 | [Media Library](media-library.md) | Clips and exports made from recordings are tracked here too |
 | [Analytics](analytics.md) | Reports are built from the viewer data that **Event data** keeps |
+| [Sites](hybrid-sites.md) | Mirror and Archive copies are written by the servers at your sites |
+| [Publishing Rules](publishing-rules.md) | Copy rules decide which originals are copied to which storage target, and when |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -135,6 +173,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Save the ladder, run a dry run, hold, release or restore media | Files, uploads & storage: Manage |
 | See event data retention | Analytics & reports: View |
 | Change event data retention, **Seal and prune now** | Analytics & reports: Manage |
+| See and change Mirror and Archive storage targets, check copies | Account administrator (owner or admin), with the Mirror and Archive add-on |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -153,6 +192,11 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **This media is still being recorded.** | The recording is open | Wait until it closes |
 | **Couldn't load event data retention.** | Your role cannot see analytics, or the request failed | Choose **Retry**, or ask for Analytics & reports access |
 | **Couldn't load storage.** | The page could not be read | Choose **Retry** or **Refresh** |
+| No **Mirror and Archive** section | The account does not have the add-on, or you are not an account administrator | Ask Volt about the add-on, or an administrator for access |
+| **Add a storage target** is missing and the section points to **Sites** | No site exists yet | Create a site and add a server in [Sites](hybrid-sites.md) |
+| A copy stays **Queued** with *No keys named ...* | The site's server has no keys under the target's key name | Add them on every server of the site ([how](hybrid-sites.md#copies-to-an-object-store)); the copy retries by itself |
+| A copy stays **Queued** with *is not there (is the share mounted?)* | The folder is not on the site's server, or the share is not mounted | Mount it at the target's folder; the copy retries by itself |
+| A copy shows **Corrupt** or **Missing** | A check found it changed or gone at the target | Find what changed it at the site; copy it again |
 
 ## Through the API
 
@@ -168,6 +212,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PUT /api/storage/retention` | Saves a rule; add `channelId` or `eventId` for a rule that applies to one stream only |
 | `POST /api/storage/retention/preview` | The dry run |
 | `GET /api/analytics/retention`, `PUT /api/analytics/retention` | Event data retention |
+| `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Mirror and Archive storage targets |
+| `GET /api/archive/copies`, `POST /api/archive/copies/{id}/verify` | The copies with their state; checks one again now |
 
 A rule for one channel or event replaces the account ladder for that stream completely; the console sets the account ladder only.
 

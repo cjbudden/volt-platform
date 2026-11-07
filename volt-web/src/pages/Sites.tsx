@@ -3,7 +3,9 @@
 //
 //  The Hybrid Sites add-on: customer locations running the Volt site agent.
 //  Shown only to account administrators of an account licensed for
-//  `hybrid_sites` (App.tsx); the API refuses everyone else the same way.
+//  `hybrid_sites` or `mirror_archive` (App.tsx, build queue H3-6: a Mirror and
+//  Archive account needs sites for the servers that write its copies); the
+//  API refuses everyone else the same way.
 //
 //  Per site: its health (from its APPROVED hosts only: a host waiting for
 //  approval does no work, so it neither makes a site healthy nor drags it

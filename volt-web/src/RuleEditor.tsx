@@ -13,7 +13,8 @@
 //  else is offered, and the API refuses anything else.
 // ============================================================================
 import { useEffect, useMemo, useState } from 'react'
-import { api, type RuleSettings, type RuleKey, type ResolvedRules, type PublishingPoints, type PublishTarget, type Rung } from './api'
+import { api, type RuleSettings, type RuleKey, type ResolvedRules, type PublishingPoints, type PublishTarget, type Rung, type ArchiveTarget } from './api'
+import { useAccess } from './access'
 import { navigate } from './router'
 import { AccessRulesEditor } from './AccessRulesEditor'
 
@@ -23,12 +24,25 @@ const RUNG_LABEL: Record<Rung, string> = {
 const KEY_LABEL: Record<RuleKey, string> = {
   targets: 'Publish to', autoPublish: 'Auto-publish', availableFrom: 'Available from', expire: 'Expires',
   geo: 'Geo access', access: 'Access', paywall: 'Paywall', gate: 'Publish gate', accessRules: 'Access rules',
+  archive: 'Archive copies',
 }
-const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'accessRules', 'geo', 'access', 'paywall', 'gate']
+// Every key a rung can hold. Archive copies (Mirror and Archive, build queue
+// H3-6) are offered only to an account with the add-on (SHOWN below); the
+// inheritance arithmetic still covers them, so a rung's stored copies are
+// never lost when someone without the add-on view saves it.
+const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'accessRules', 'geo', 'access', 'paywall', 'gate', 'archive']
 
-function describe(k: RuleKey, v: any, points: PublishingPoints | null): string {
+const ON_LABEL = { ingest: 'when it lands', publish: 'when it is published' } as const
+
+function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTargets: ArchiveTarget[] = []): string {
   if (v === undefined) return '—'
   switch (k) {
+    case 'archive': {
+      const copies: { targetId: string; on: ('ingest' | 'publish')[] }[] = v?.copies ?? []
+      if (!copies.length) return 'no copies'
+      const list = copies.map(c => `${archiveTargets.find(t => t.id === c.targetId)?.name ?? c.targetId.slice(0, 8)} ${c.on.map(o => ON_LABEL[o]).join(' and ')}`).join('; ')
+      return v.offPeak ? `${list}; only between ${v.offPeak.from} and ${v.offPeak.to}${v.offPeak.timeZone ? ` (${v.offPeak.timeZone})` : ' (UTC)'}` : list
+    }
     case 'targets': {
       const t: PublishTarget[] = v ?? []
       if (!t.length) return 'nowhere (publishing is a no-op)'
@@ -63,6 +77,13 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  // Archive copies need the Mirror and Archive add-on and an administrator
+  // (the storage targets they name are read through /api/archive).
+  const { isAdminTier, me } = useAccess()
+  const archiveOn = isAdminTier && !!me?.account?.licences?.includes('mirror_archive')
+  const [archiveTargets, setArchiveTargets] = useState<ArchiveTarget[]>([])
+  useEffect(() => { if (archiveOn) api.archiveTargets().then(r => setArchiveTargets(r.items)).catch(() => setArchiveTargets([])) }, [archiveOn])
+  const SHOWN = archiveOn ? KEYS : KEYS.filter(k => k !== 'archive')
 
   async function load() {
     try {
@@ -113,7 +134,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
   }
 
   if (!inherited || !points) return <div className="loading">{err || 'Loading publishing rules…'}</div>
-  const overrides = KEYS.filter(overriding).length
+  const overrides = SHOWN.filter(overriding).length
   return (
     <div>
       {title && <div className="sec-label">{title}</div>}
@@ -124,7 +145,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
         {overrides > 0 && <span> · {overrides} field{overrides === 1 ? '' : 's'} set here</span>}
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
-        {KEYS.map(k => {
+        {SHOWN.map(k => {
           const on = overriding(k)
           const inhV = inherited.settings[k], inhSrc = inherited.sources[k]
           return (
@@ -143,9 +164,9 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
               <div>
                 {(on || scopeKind === 'account') ? (
                   <FieldControl k={k} value={scopeKind === 'account' ? (own[k] ?? inhV ?? DEFAULTS[k]) : own[k]} points={points} scopeKind={scopeKind}
-                    onChange={v => setKey(k, v)} />
+                    archiveTargets={archiveTargets} onChange={v => setKey(k, v)} />
                 ) : (
-                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{describe(k, inhV, points)}</div>
+                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{describe(k, inhV, points, archiveTargets)}</div>
                 )}
               </div>
             </div>
@@ -174,11 +195,14 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
 const DEFAULTS: Record<RuleKey, any> = {
   targets: [{ kind: 'portal' }], autoPublish: false, availableFrom: { mode: 'publish' }, expire: { mode: 'never' },
   geo: { mode: 'worldwide', countries: [] }, access: 'free', paywall: null, gate: { requireReview: false, blockOnQcFail: false }, accessRules: [],
+  archive: { copies: [], offPeak: null },
 }
 
-function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; value: any; points: PublishingPoints; onChange: (v: any) => void; scopeKind: 'account' | 'schema' | 'owner' | 'asset' }) {
+function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = [] }: { k: RuleKey; value: any; points: PublishingPoints; onChange: (v: any) => void; scopeKind: 'account' | 'schema' | 'owner' | 'asset'; archiveTargets?: ArchiveTarget[] }) {
   const inp = { className: 'inp', style: { fontSize: 'var(--fs-sm)', padding: '5px 8px' } as any }
   switch (k) {
+    case 'archive':
+      return <ArchiveControl value={value} targets={archiveTargets} onChange={onChange} />
     case 'accessRules':
       return <AccessRulesEditor value={value ?? []} onChange={onChange} scopeKind={scopeKind} />
     case 'targets': {
@@ -257,4 +281,65 @@ function FieldControl({ k, value, points, onChange, scopeKind }: { k: RuleKey; v
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={!!value?.blockOnQcFail} onChange={e => onChange({ requireReview: !!value?.requireReview, blockOnQcFail: e.target.checked })} />Block publishing while QC has failed</label>
         </div>)
   }
+}
+
+/**
+ * Archive copies (Mirror and Archive, build queue H3-3 rules, H3-6 console):
+ * for each storage target, whether the original is copied there when it lands,
+ * when it is published, or both, and optionally only inside an off-peak window
+ * so copies never compete with live contribution. An empty list at this rung
+ * switches copies off for everything beneath it that would otherwise inherit
+ * them.
+ */
+function ArchiveControl({ value, targets, onChange }: { value: any; targets: ArchiveTarget[]; onChange: (v: any) => void }) {
+  const copies: { targetId: string; on: ('ingest' | 'publish')[] }[] = value?.copies ?? []
+  const offPeak: { from: string; to: string; timeZone?: string } | null = value?.offPeak ?? null
+  const put = (c: typeof copies, o: typeof offPeak) => onChange({ copies: c, offPeak: o })
+  const setOn = (targetId: string, when: 'ingest' | 'publish', yes: boolean) => {
+    const cur = copies.find(c => c.targetId === targetId)
+    const on = new Set(cur?.on ?? [])
+    if (yes) on.add(when); else on.delete(when)
+    const rest = copies.filter(c => c.targetId !== targetId)
+    // Order kept as ingest, publish, so the saved rule reads the same way the
+    // form does; a target with neither ticked is not copied to at all.
+    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish'] as const).filter(w => on.has(w)) }] : rest, offPeak)
+  }
+  const unknown = copies.filter(c => !targets.some(t => t.id === c.targetId))
+  const zone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' } })()
+  const small = { fontSize: 'var(--fs-sm)', padding: '5px 8px' }
+  return (
+    <div style={{ display: 'grid', gap: 6, fontSize: 'var(--fs-sm)' }} data-archive-control>
+      {targets.length === 0 && (
+        <div style={{ color: 'var(--faint)' }}>No storage targets yet. Add one on the{' '}
+          <a href="/storage" onClick={e => { e.preventDefault(); navigate('/storage') }}>Storage</a> page, under Mirror and Archive.</div>
+      )}
+      {targets.map(t => {
+        const cur = copies.find(c => c.targetId === t.id)
+        return (
+          <div key={t.id} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', opacity: t.status === 'active' ? 1 : .6 }} data-archive-target={t.name}>
+            <b style={{ minWidth: 140 }}>{t.name}</b>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('ingest')} onChange={e => setOn(t.id, 'ingest', e.target.checked)} />When it lands</label>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('publish')} onChange={e => setOn(t.id, 'publish', e.target.checked)} />When it is published</label>
+            <span style={{ color: 'var(--faint)' }}>{t.siteName ? `at ${t.siteName}` : ''}{t.status === 'active' ? '' : ', disabled: no new copies'}</span>
+          </div>
+        )
+      })}
+      {unknown.length > 0 && <div style={{ color: 'var(--warn)' }}>{unknown.length} storage target{unknown.length === 1 ? '' : 's'} in this rule no longer exist{unknown.length === 1 ? 's' : ''}; saving drops {unknown.length === 1 ? 'it' : 'them'}.
+        <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => put(copies.filter(c => targets.some(t => t.id === c.targetId)), offPeak)}>Drop now</button></div>}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={!!offPeak} onChange={e => put(copies, e.target.checked ? { from: '22:00', to: '06:00', timeZone: zone } : null)} />Copy only between
+        </label>
+        {offPeak && <>
+          <input className="inp" type="time" aria-label="Copies start at" style={{ ...small, width: 110 }} value={offPeak.from} onChange={e => put(copies, { ...offPeak, from: e.target.value })} />
+          <span>and</span>
+          <input className="inp" type="time" aria-label="Copies stop at" style={{ ...small, width: 110 }} value={offPeak.to} onChange={e => put(copies, { ...offPeak, to: e.target.value })} />
+          <input className="inp" aria-label="Time zone of the window" placeholder="Europe/London" style={{ ...small, width: 170 }} value={offPeak.timeZone ?? ''} onChange={e => put(copies, { ...offPeak, timeZone: e.target.value || undefined })} />
+        </>}
+      </div>
+      <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>
+        The original file is copied once per target. Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
+      </div>
+    </div>
+  )
 }

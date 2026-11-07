@@ -406,9 +406,10 @@ export default function App() {
     if (key === 'system') return !!me.platformRole
     // The audit log is for account administrators (owner, admin).
     if (key === 'audit') return access.isAdminTier
-    // Hybrid Sites is a licensed add-on (build queue H1): no page at all for an
-    // account without the licence, and for administrators only.
-    if (key === 'sites') return access.isAdminTier && !!me.account?.licences?.includes('hybrid_sites')
+    // Sites belong to two licensed add-ons (build queue H1, H3-6): Hybrid Sites,
+    // and Mirror and Archive, whose copies are written by a site's servers. No
+    // page at all for an account with neither, and for administrators only.
+    if (key === 'sites') return access.isAdminTier && !!me.account?.licences?.some(l => l === 'hybrid_sites' || l === 'mirror_archive')
     // Social accounts sits with the settings, but its list is read through
     // /api/social, which is Media library & publishing. Offer it only to whom
     // both answer, or a settings-only role opens a page that cannot load

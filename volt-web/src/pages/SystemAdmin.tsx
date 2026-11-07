@@ -295,6 +295,15 @@ function AccountDrawer({ account, onClose, onDone }: {
                   className={`sw ${licences.includes('hybrid_sites') ? '' : 'off'}`} style={{ border: 0 }}
                   onClick={() => setLicences(l => l.includes('hybrid_sites') ? l.filter(x => x !== 'hybrid_sites') : [...l, 'hybrid_sites'])}><i /></button>
               </div>
+              <div className="toggle-row">
+                <div>
+                  <div className="tt">Mirror and Archive</div>
+                  <div className="td">Copies of the client's originals on storage they own at their sites (a folder, a NAS share or an S3-compatible store), each checked against the original. Gives them Sites too, without Hybrid Sites. Saved with the account.</div>
+                </div>
+                <button type="button" role="switch" aria-checked={licences.includes('mirror_archive')} aria-label="Mirror and Archive add-on"
+                  className={`sw ${licences.includes('mirror_archive') ? '' : 'off'}`} style={{ border: 0 }}
+                  onClick={() => setLicences(l => l.includes('mirror_archive') ? l.filter(x => x !== 'mirror_archive') : [...l, 'mirror_archive'])}><i /></button>
+              </div>
             </>
           )}
 
