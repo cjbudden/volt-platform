@@ -2375,6 +2375,8 @@ export interface ArchiveTargetInput {
 export type ArchiveCopyState = 'queued' | 'copying' | 'verified' | 'failed' | 'corrupt' | 'missing'
 export interface ArchiveCopy {
   id: string; targetId: string; targetName?: string; vodAssetId: string | null; what: string
+  /** Recording copies (H3-7): the channel or event, and the stretch of it. */
+  streamId?: string | null; streamName?: string | null; rangeStart?: string | null; rangeEnd?: string | null; title?: string | null
   fileName: string; storedPath: string | null; bytes: number | null; sha256: string | null
   state: ArchiveCopyState; busy: boolean; checking: boolean
   error: string | null; errorCode: string | null; attempts: number | null

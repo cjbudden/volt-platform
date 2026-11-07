@@ -32,13 +32,14 @@ const KEY_LABEL: Record<RuleKey, string> = {
 // never lost when someone without the add-on view saves it.
 const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'accessRules', 'geo', 'access', 'paywall', 'gate', 'archive']
 
-const ON_LABEL = { ingest: 'when it lands', publish: 'when it is published' } as const
+const ON_LABEL = { ingest: 'when it lands', publish: 'when it is published', recording: 'recordings as each programme or hour ends' } as const
+type CopyOn = keyof typeof ON_LABEL
 
 function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTargets: ArchiveTarget[] = []): string {
   if (v === undefined) return '—'
   switch (k) {
     case 'archive': {
-      const copies: { targetId: string; on: ('ingest' | 'publish')[] }[] = v?.copies ?? []
+      const copies: { targetId: string; on: CopyOn[] }[] = v?.copies ?? []
       if (!copies.length) return 'no copies'
       const list = copies.map(c => `${archiveTargets.find(t => t.id === c.targetId)?.name ?? c.targetId.slice(0, 8)} ${c.on.map(o => ON_LABEL[o]).join(' and ')}`).join('; ')
       return v.offPeak ? `${list}; only between ${v.offPeak.from} and ${v.offPeak.to}${v.offPeak.timeZone ? ` (${v.offPeak.timeZone})` : ' (UTC)'}` : list
@@ -202,7 +203,7 @@ function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = 
   const inp = { className: 'inp', style: { fontSize: 'var(--fs-sm)', padding: '5px 8px' } as any }
   switch (k) {
     case 'archive':
-      return <ArchiveControl value={value} targets={archiveTargets} onChange={onChange} />
+      return <ArchiveControl value={value} targets={archiveTargets} onChange={onChange} recordings={scopeKind === 'account' || scopeKind === 'owner'} />
     case 'accessRules':
       return <AccessRulesEditor value={value ?? []} onChange={onChange} scopeKind={scopeKind} />
     case 'targets': {
@@ -289,20 +290,23 @@ function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = 
  * when it is published, or both, and optionally only inside an off-peak window
  * so copies never compete with live contribution. An empty list at this rung
  * switches copies off for everything beneath it that would otherwise inherit
- * them.
+ * them. On the account and a channel's or event's own rung, "Recordings" (H3-7)
+ * archives the recording itself: one file per programme (or per hour without
+ * a guide) as each ends; a content type or a single asset has no recording,
+ * so the box is not offered there.
  */
-function ArchiveControl({ value, targets, onChange }: { value: any; targets: ArchiveTarget[]; onChange: (v: any) => void }) {
-  const copies: { targetId: string; on: ('ingest' | 'publish')[] }[] = value?.copies ?? []
+function ArchiveControl({ value, targets, onChange, recordings = false }: { value: any; targets: ArchiveTarget[]; onChange: (v: any) => void; recordings?: boolean }) {
+  const copies: { targetId: string; on: CopyOn[] }[] = value?.copies ?? []
   const offPeak: { from: string; to: string; timeZone?: string } | null = value?.offPeak ?? null
   const put = (c: typeof copies, o: typeof offPeak) => onChange({ copies: c, offPeak: o })
-  const setOn = (targetId: string, when: 'ingest' | 'publish', yes: boolean) => {
+  const setOn = (targetId: string, when: CopyOn, yes: boolean) => {
     const cur = copies.find(c => c.targetId === targetId)
     const on = new Set(cur?.on ?? [])
     if (yes) on.add(when); else on.delete(when)
     const rest = copies.filter(c => c.targetId !== targetId)
-    // Order kept as ingest, publish, so the saved rule reads the same way the
-    // form does; a target with neither ticked is not copied to at all.
-    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish'] as const).filter(w => on.has(w)) }] : rest, offPeak)
+    // Order kept as ingest, publish, recording, so the saved rule reads the
+    // same way the form does; a target with none ticked is not copied to.
+    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish', 'recording'] as const).filter(w => on.has(w)) }] : rest, offPeak)
   }
   const unknown = copies.filter(c => !targets.some(t => t.id === c.targetId))
   const zone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' } })()
@@ -320,6 +324,7 @@ function ArchiveControl({ value, targets, onChange }: { value: any; targets: Arc
             <b style={{ minWidth: 140 }}>{t.name}</b>
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('ingest')} onChange={e => setOn(t.id, 'ingest', e.target.checked)} />When it lands</label>
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('publish')} onChange={e => setOn(t.id, 'publish', e.target.checked)} />When it is published</label>
+            {(recordings || cur?.on.includes('recording')) && <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="One file per programme, or per hour without a guide, from the top rendition, with a metadata file beside it"><input type="checkbox" checked={!!cur?.on.includes('recording')} onChange={e => setOn(t.id, 'recording', e.target.checked)} />Recordings</label>}
             <span style={{ color: 'var(--faint)' }}>{t.siteName ? `at ${t.siteName}` : ''}{t.status === 'active' ? '' : ', disabled: no new copies'}</span>
           </div>
         )
@@ -338,7 +343,7 @@ function ArchiveControl({ value, targets, onChange }: { value: any; targets: Arc
         </>}
       </div>
       <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>
-        The original file is copied once per target. Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
+        The original file is copied once per target.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
       </div>
     </div>
   )

@@ -222,6 +222,9 @@ export function copyView(c: any) {
   const state = c.state === 'queued' && c.job_state === 'running' ? 'copying' : c.state;
   return {
     id: c.id, targetId: c.target_id, targetName: c.target_name ?? undefined, vodAssetId: c.vod_asset_id, what: c.what,
+    // A recording copy (H3-7) is of a stretch of a channel or event, not of an asset.
+    streamId: c.stream_id ?? null, streamName: c.stream_name ?? null,
+    rangeStart: c.range_start ?? null, rangeEnd: c.range_end ?? null, title: c.title ?? null,
     fileName: c.file_name, storedPath: c.stored_path, bytes: c.bytes === null || c.bytes === undefined ? null : Number(c.bytes),
     sha256: c.sha256, state, busy: running,
     checking: c.verify_job_state === 'queued' || c.verify_job_state === 'running',
@@ -233,11 +236,14 @@ export function copyView(c: any) {
 }
 
 export const COPY_SELECT = `
-  SELECT c.*, t.name AS target_name, j.state AS job_state, j.attempts AS job_attempts, vj.state AS verify_job_state
+  SELECT c.*, t.name AS target_name, j.state AS job_state, j.attempts AS job_attempts, vj.state AS verify_job_state,
+         COALESCE(sch.name, sev.name) AS stream_name
     FROM archive_copies c
     JOIN archive_targets t ON t.id = c.target_id
     LEFT JOIN jobs j ON j.id = c.job_id
-    LEFT JOIN jobs vj ON vj.id = c.verify_job_id`;
+    LEFT JOIN jobs vj ON vj.id = c.verify_job_id
+    LEFT JOIN channels sch ON sch.id = c.stream_id
+    LEFT JOIN events sev ON sev.id = c.stream_id`;
 
 export async function ownedCopy(accountId: string, id: string) {
   if (!UUID.test(String(id))) throw notFound('archive copy not found');
@@ -295,19 +301,31 @@ export async function requestCopy(accountId: string, userId: string | null, b: a
        VALUES ($1,$2,$3,'source',$4,$5,$6,(SELECT id FROM users WHERE id = $7)) RETURNING *`,
       [accountId, t.id, a.id, a.source_key, fileName, expected, userId]);
 
+  await queueCopyJob(t, row.id, { fileName, uri: a.source_key, bytes, sha256: expected }, userId, opts.runAfter ?? null);
+  return { copy: await ownedCopy(accountId, row.id), created: true };
+}
+
+/**
+ * Hand one copy to the target's site: an `archive.copy` job in the site's
+ * pool naming the one file to fetch. Shared by copies of originals and of
+ * recordings (H3-7), so the agent sees one kind of copy job whatever the
+ * file is.
+ */
+export async function queueCopyJob(t: any, copyId: string, src: { fileName: string; uri: string; bytes: number | null; sha256: string | null },
+  userId: string | null, runAfter: Date | null): Promise<string> {
   const job = await enqueue({
     type: ARCHIVE_COPY, pool: sitePool(t.site_id), createdBy: userId, maxAttempts: 5,
     // A copy rule's off-peak window holds the job back until the window
     // opens (copyOnRule); a copy asked for by hand runs now.
-    runAfter: opts.runAfter ?? undefined,
+    runAfter: runAfter ?? undefined,
     payload: {
-      copyId: row.id, fileName,
+      copyId, fileName: src.fileName,
       target: targetForAgent(t),
-      transfers: [{ name: 'source', direction: 'download', uri: a.source_key, bytes, sha256: expected }],
+      transfers: [{ name: 'source', direction: 'download', uri: src.uri, bytes: src.bytes, sha256: src.sha256 }],
     },
   });
-  await query(`UPDATE archive_copies SET job_id = $2 WHERE id = $1`, [row.id, job.id]);
-  return { copy: await ownedCopy(accountId, row.id), created: true };
+  await query(`UPDATE archive_copies SET job_id = $2 WHERE id = $1`, [copyId, job.id]);
+  return job.id;
 }
 
 /** Read a copy back from its target now (also what the scheduled re-checks will queue). */
@@ -364,8 +382,10 @@ export async function recheckDue(opts: { limit?: number; accountId?: string } = 
 // ---- copy rules (H3-3) ---------------------------------------------------------------
 
 export type CopyEvent = 'ingest' | 'publish';
+/** When a copy rule fires: an asset event, or (H3-7) a stretch of recording closing. */
+export type CopyMoment = CopyEvent | 'recording';
 export interface OffPeak { from: string; to: string; timeZone?: string }
-export interface ArchiveRule { copies: { targetId: string; on: CopyEvent[] }[]; offPeak?: OffPeak | null }
+export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[] }[]; offPeak?: OffPeak | null }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const minutesOf = (hhmm: string) => { const m = HHMM.exec(hhmm)!; return Number(m[1]) * 60 + Number(m[2]); };
@@ -422,7 +442,7 @@ export async function copyOnRule(accountId: string, assetId: string, event: Copy
     const found = await assetAccount(assetId);
     if (!found || found.accountId !== accountId) return out;
     const rule = (await resolveForAsset(accountId, found.asset)).settings.archive as ArchiveRule | undefined;
-    const wanted = (rule?.copies ?? []).filter((c) => (c.on ?? []).includes(event));
+    const wanted = (rule?.copies ?? []).filter((c) => ((c.on ?? []) as CopyMoment[]).includes(event));
     if (!wanted.length) return out;
     const runAfter = offPeakStart(now, rule?.offPeak ?? null);
     for (const c of wanted) {
@@ -497,10 +517,15 @@ export async function judge(job: JobRow, result: any): Promise<Verdict> {
   if (Number.isFinite(t?.bytes) && t.bytes !== null && t.bytes !== bytes) {
     return { ok: false, status: 422, code: 'size_mismatch', message: `The copy at the target is ${bytes} bytes; the original is ${t.bytes}` };
   }
-  return { ok: true, apply: async () => { await query(
-    `UPDATE archive_copies SET state = 'verified', stored_path = $2, bytes = $3, sha256 = $4,
-            copied_at = now(), verified_at = now(), checked_at = now(), error = NULL, error_code = NULL, updated_at = now()
-      WHERE id = $1`, [c.id, stored, bytes, sha]); } };
+  return { ok: true, apply: async () => {
+    await query(
+      `UPDATE archive_copies SET state = 'verified', stored_path = $2, bytes = $3, sha256 = $4,
+              copied_at = now(), verified_at = now(), checked_at = now(), error = NULL, error_code = NULL, updated_at = now()
+        WHERE id = $1`, [c.id, stored, bytes, sha]);
+    // A recording file was made only to be copied (H3-7): once every target
+    // holds a verified copy, the cloud's own file is not needed.
+    if (c.stream_id) await (await import('./recordings')).releaseBuilt(c.source_uri).catch(() => {});
+  } };
 }
 
 /**

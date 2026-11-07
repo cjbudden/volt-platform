@@ -1,7 +1,8 @@
 // Browser walk for build queue H3-6 (f), the Mirror and Archive console, at
 // 1440x900 against the docs seed (volt-app scripts/seed-docs.ts: the account
 // has hybrid_sites and mirror_archive, a NAS folder and an S3-compatible store
-// at its site, five copies and a copy rule on the account default), served as
+// at its site, five copies of originals, a recording and its sidecar (H3-7), and a
+// copy rule on the account default), served as
 // the screenshot script expects (API on :8080 with VOLT_DEPLOYMENT=saas, vite
 // on :5173). Run it on a fresh seed: it adds a target and changes the rule.
 //   Storage page: targets (the store in words, never its keys), copies with
@@ -55,9 +56,9 @@ const storeText = await store.innerText().catch(() => '')
 ok('the store is described in words (bucket, folder, address): ' + JSON.stringify(storeText), /Bucket volt-archive, folder originals at https:\/\/objects\.example\.com:9000/.test(storeText) && !/s3:\/\//.test(storeText))
 ok('the store names its key name on the site\'s server, and shows no keys', /keys "objects1" on the site's server/.test(storeText) && /Every 90 days/.test(storeText) && /No cap/.test(storeText))
 const copyRows = sec.locator('tr[data-copy]')
-ok('all five seeded copies are listed', await copyRows.count() === 5)
+ok('all seven seeded copies are listed (five originals, a recording and its sidecar)', await copyRows.count() === 7)
 const states = await sec.locator('tr[data-copy] td:nth-child(3) .tag').allTextContents()
-ok('copies show their states in words: ' + JSON.stringify(states), ['Verified', 'Failed', 'Missing', 'Queued'].every(s => states.includes(s)) && states.filter(s => s === 'Verified').length === 2)
+ok('copies show their states in words: ' + JSON.stringify(states), ['Verified', 'Failed', 'Missing', 'Queued'].every(s => states.includes(s)) && states.filter(s => s === 'Verified').length === 4)
 const queued = sec.locator('tr[data-copy]:has(.tag:text-is("Queued"))')
 const qText = await queued.innerText().catch(() => '')
 ok('a copy waiting for keys shows the agent\'s reason: ' + JSON.stringify(qText), /No keys named objects1 on this server/.test(qText))
@@ -67,19 +68,25 @@ ok('a failed copy shows its reason and what to do: ' + JSON.stringify(fText), /d
 const mText = await sec.locator('tr[data-copy]:has(.tag:text-is("Missing"))').innerText().catch(() => '')
 ok('a missing copy says what to do', /What to do: Find out what removed it at the site/.test(mText))
 const checkBtns = await sec.locator('tr[data-copy] button:has-text("Check now")').count()
-ok('Check now is offered on the verified and missing copies only (3): ' + checkBtns, checkBtns === 3 && await queued.locator('button:has-text("Check now")').count() === 0)
-ok('the counts line adds up', /2 verified/.test(await sec.innerText()) && /1 queued/.test(await sec.innerText()))
+ok('Check now is offered on the verified and missing copies only (5): ' + checkBtns, checkBtns === 5 && await queued.locator('button:has-text("Check now")').count() === 0)
+ok('the counts line adds up', /4 verified/.test(await sec.innerText()) && /1 queued/.test(await sec.innerText()))
+// A recording copy (H3-7) says which channel and stretch it is, and links to the recording.
+const recRow = sec.locator('tr[data-copy$=".mp4"]:has([data-copy-recording])')
+const recText = await recRow.innerText().catch(() => '')
+ok('a recording copy says it is the recording of a channel, from when, and links to it: ' + JSON.stringify(recText), await recRow.count() === 1 && /^EveningNews-/.test(await recRow.getAttribute('data-copy')) && /Recording of .+, .+ to /.test(recText) && await recRow.locator('a:has-text("Open the recording")').count() === 1)
+ok('its sidecar says it is the metadata of that recording', /Metadata of the recording of/.test(await sec.locator('tr[data-copy$=".json"]').innerText().catch(() => '')))
+ok('neither offers to open an asset', await sec.locator('tr:has([data-copy-recording]) a:has-text("Open the asset")').count() === 0)
 await page.screenshot({ path: OUT + '/ma-storage.png', fullPage: true })
 
 // filters
 await sec.locator('select[aria-label="Show copies that are"]').selectOption('verified'); await page.waitForTimeout(1200)
-ok('filtering by Verified shows the two verified copies', await copyRows.count() === 2)
+ok('filtering by Verified shows the four verified copies', await copyRows.count() === 4)
 await sec.locator('select[aria-label="Show copies that are"]').selectOption(''); await page.waitForTimeout(400)
 const storeId = await sec.locator('select[aria-label="Show copies on"] option:text-is("On-site object store")').getAttribute('value')
 await sec.locator('select[aria-label="Show copies on"]').selectOption(storeId); await page.waitForTimeout(1200)
 ok('filtering by the store shows its two copies', await copyRows.count() === 2)
 await sec.locator('select[aria-label="Show copies on"]').selectOption(''); await page.waitForTimeout(1200)
-ok('clearing the filters shows all five again', await copyRows.count() === 5)
+ok('clearing the filters shows all seven again', await copyRows.count() === 7)
 
 // Check now
 const firstVerified = sec.locator('tr[data-copy]:has(.tag:text-is("Verified"))').first()
@@ -130,6 +137,8 @@ ok('the account default has an Archive copies field', await ctl.isVisible() && a
 const rowNas = ctl.locator('[data-archive-target="Machine room NAS"]'), rowStore = ctl.locator('[data-archive-target="On-site object store"]'), rowEdit = ctl.locator('[data-archive-target="Edit suite disk"]')
 ok('the NAS is copied to when files land', await rowNas.locator('label:has-text("When it lands") input').isChecked() && !(await rowNas.locator('label:has-text("When it is published") input').isChecked()))
 ok('the store when they are published', await rowStore.locator('label:has-text("When it is published") input').isChecked() && !(await rowStore.locator('label:has-text("When it lands") input').isChecked()))
+ok('the account default offers Recordings on every target, ticked for the NAS only', await rowNas.locator('label:has-text("Recordings") input').isChecked() && await rowStore.locator('label:has-text("Recordings") input').count() === 1 && !(await rowStore.locator('label:has-text("Recordings") input').isChecked()))
+ok('and says what recordings means', /Recordings are copied as each programme ends \(each hour without a guide\)/.test(await ctl.innerText()))
 ok('the off-peak window reads 22:00 to 06:00 in Sydney', await ctl.locator('label:has-text("Copy only between") input').isChecked()
   && await ctl.locator('input[aria-label="Copies start at"]').inputValue() === '22:00' && await ctl.locator('input[aria-label="Copies stop at"]').inputValue() === '06:00'
   && await ctl.locator('input[aria-label="Time zone of the window"]').inputValue() === 'Australia/Sydney')
@@ -139,14 +148,16 @@ ok('the time inputs are sized to a time, not the whole row: ' + Math.round(tw), 
 await page.locator('[data-archive-control]').first().scrollIntoViewIfNeeded()
 await page.screenshot({ path: OUT + '/ma-publishing.png' })
 await rowStore.locator('label:has-text("When it lands") input').check()
+await rowStore.locator('label:has-text("Recordings") input').check()
 const saveResp = page.waitForResponse(r => /\/api\/publishing-rules/.test(r.url()) && r.request().method() === 'PUT', { timeout: 10000 }).catch(() => null)
 await page.locator('button:has-text("Save publishing rule")').first().click()
 const sr = await saveResp
 const sent = sr ? JSON.parse(sr.request().postData() || '{}') : {}
 const sentStore = (sent.settings?.archive?.copies ?? sent.archive?.copies ?? []).find(c => c.targetId === storeId)
-ok('saving sends the store with both moments, in order: ' + JSON.stringify(sentStore), !!sr && sr.ok() && JSON.stringify(sentStore?.on) === '["ingest","publish"]')
+ok('saving sends the store with all three moments, in order: ' + JSON.stringify(sentStore), !!sr && sr.ok() && JSON.stringify(sentStore?.on) === '["ingest","publish","recording"]')
 await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
-ok('and it is still ticked when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="On-site object store"] label:has-text("When it lands") input').isChecked())
+ok('and it is still ticked when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="On-site object store"] label:has-text("When it lands") input').isChecked()
+  && await page.locator('[data-archive-control] [data-archive-target="On-site object store"] label:has-text("Recordings") input').isChecked())
 ok('Sites is in the menu for this account', await navHas(page, 'Sites'))
 await ctx.close()
 

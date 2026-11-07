@@ -121,7 +121,7 @@ Reports stay after the raw sessions they were made from are pruned.
 
 With the **Mirror and Archive** add-on, account administrators see a **Mirror and Archive** section on this page. Copies are written by a server at one of your [sites](hybrid-sites.md), so make a site and add a server first; the section links to **Sites** until there is one.
 
-![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies with their state, the reason a copy waits and what to do about it](/img/screens/storage-mirror-archive.png)
+![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it](/img/screens/storage-mirror-archive.png)
 
 **Add a storage target**
 
@@ -148,9 +148,9 @@ Under **Copies**, every copy is listed with its target, its **State**, its size 
 | **Corrupt** | A check found the copy changed since it was made |
 | **Missing** | A check found the copy gone from the target |
 
-A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
+A copy of a recording says which channel and which programme or hour it is (**Recording of** the channel, from when to when) with **Open the recording**, and its metadata file says **Metadata of the recording of** the channel. A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
 
-What is copied, and when, is set by copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage).
+What is copied, and when, is set by copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage): originals when they land or are published, and recordings as each programme or hour ends.
 
 ## How it connects
 

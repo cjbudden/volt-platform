@@ -143,6 +143,16 @@ export function startScheduler(): () => void {
     30 * 60_000
   );
   archiveChecks.unref?.();
+  // MIRROR AND ARCHIVE RECORDINGS (build queue H3-7): every five minutes, cut
+  // the stretches of recording that closed (a programme, or an hour without a
+  // guide) into files for the targets whose copy rule archives recordings.
+  const archiveRecordings = setInterval(
+    () => import('../archive/recordings').then((m) => m.recordingPass())
+      .then((r) => { if (r.queued) console.log(`[archive] queued ${r.queued} recording file(s) on ${r.streams} stream(s)`); })
+      .catch((e) => console.error('[archive] recording pass error', e)),
+    5 * 60_000
+  );
+  archiveRecordings.unref?.();
 
   // FAST LINEUPS: keep every active lineup's guide (and its breaks) a week
   // ahead. Deterministic, so a top-up only appends what comes next.
@@ -343,7 +353,7 @@ export function startScheduler(): () => void {
   console.log(`[orchestrator] scheduler up (tick ${o.tickSeconds}s, retention sweep ${o.retentionSweepSeconds}s, fleet ${o.fleetTickSeconds}s, auto-connect ${o.resumeEnabled ? `${o.resumeRetrySeconds}s x${o.resumeMaxAttempts}` : 'off'}, launcher=${o.launcher})`);
   return () => {
     clearInterval(tick);
-    clearInterval(sweep); clearInterval(avail); clearInterval(archiveChecks);
+    clearInterval(sweep); clearInterval(avail); clearInterval(archiveChecks); clearInterval(archiveRecordings);
     clearInterval(fleet);
     clearInterval(prune);
     if (edgeRights) clearInterval(edgeRights);

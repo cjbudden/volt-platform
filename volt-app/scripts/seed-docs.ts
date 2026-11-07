@@ -673,7 +673,25 @@ async function seedG8Sections() {
       [ACCOUNT, target, a.id, a.source_key ?? `s3://volt-media/originals/${a.id}.mp4`, file, done ? file : null,
        180_000_000 + i * 37_000_000, done ? 'a3f1'.repeat(16) : null, state, error, code, done, vAgo, cAgo, ADMIN]);
   }
-  const rule = { copies: [{ targetId: NAS, on: ['ingest'] }, { targetId: OBJ, on: ['publish'] }], offPeak: { from: '22:00', to: '06:00', timeZone: 'Australia/Sydney' } };
+  // A recording archived by the rule (H3-7): yesterday's evening news on the
+  // NAS, the file and its metadata sidecar, both verified.
+  const tv = await one<{ id: string; name: string }>(
+    `SELECT c.id, c.name FROM channels c JOIN groups g ON g.id = c.group_id
+      WHERE g.account_id = $1 AND c.kind IS DISTINCT FROM 'radio' AND c.origin = 'live' AND c.recording_enabled ORDER BY c.name LIMIT 1`, [ACCOUNT]);
+  if (tv) {
+    const day = new Date(Date.now() - 24 * 3600_000); day.setUTCHours(7, 0, 0, 0);   // 18:00 to 18:30 in Sydney (summer time, UTC+11)
+    const end = new Date(day.getTime() + 30 * 60_000);
+    const base = `EveningNews-${tv.name.replace(/[^A-Za-z0-9]+/g, '')}-${day.toISOString().slice(0, 10).replace(/-/g, '')}-1800`;
+    for (const [what, file, bytes] of [['recording', `${base}.mp4`, 1_620_000_000], ['recording-sidecar', `${base}.json`, 1_400]] as const) {
+      await query(
+        `INSERT INTO archive_copies(account_id, target_id, stream_id, range_start, range_end, title, what, source_uri, file_name, stored_path, bytes,
+                                    expected_sha256, sha256, state, copied_at, verified_at, checked_at, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,'Evening News',$6,$7,$8,$8,$9,$10,$10,'verified',now() - interval '20 hours',now() - interval '20 hours',now() - interval '20 hours',$11,now() - interval '20 hours')
+         ON CONFLICT DO NOTHING`,
+        [ACCOUNT, NAS, tv.id, day, end, what, `/srv/volt/archive-build/${file}`, file, bytes, 'b7e2'.repeat(16), ADMIN]);
+    }
+  }
+  const rule = { copies: [{ targetId: NAS, on: ['ingest', 'recording'] }, { targetId: OBJ, on: ['publish'] }], offPeak: { from: '22:00', to: '06:00', timeZone: 'Australia/Sydney' } };
   const upd = await query(`UPDATE publishing_rules SET settings = settings || jsonb_build_object('archive', $2::jsonb) WHERE account_id = $1 AND scope_kind = 'account' RETURNING id`, [ACCOUNT, JSON.stringify(rule)]);
   if (!upd.length) await query(`INSERT INTO publishing_rules(account_id, scope_kind, scope_id, settings) VALUES ($1,'account',NULL,jsonb_build_object('archive', $2::jsonb))`, [ACCOUNT, JSON.stringify(rule)]);
 }

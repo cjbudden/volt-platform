@@ -286,6 +286,37 @@
     ],
     "doc": "the Media Library asset whose original was copied"
    },
+   "stream_id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "the channel or event whose recording was copied (recording copies)"
+   },
+   "what": {
+    "type": "enum",
+    "values": [
+     "source",
+     "recording",
+     "recording-sidecar"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "source (an asset's original), recording (a programme's or an hour's recording, one file) or recording-sidecar (its metadata)"
+   },
    "state": {
     "type": "enum",
     "values": [

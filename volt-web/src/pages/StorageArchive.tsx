@@ -229,7 +229,7 @@ export function MirrorArchive() {
         {targets && sites.length > 0 && <button className="btn" onClick={() => setForm('new')} disabled={!!form}>{IC.plus} Add a storage target</button>}
       </div>
       <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 6 }}>
-        Extra copies of your originals on storage you own at your sites. A copy counts as verified only once a server at the site has read it back and it matched the original. Copy rules in{' '}
+        Extra copies of your originals and recordings on storage you own at your sites. A copy counts as verified only once a server at the site has read it back and it matched what Volt sent. Copy rules in{' '}
         <a href="/publishing" onClick={e => { e.preventDefault(); navigate('/publishing') }}>Publishing Rules</a> decide what is copied and when.
       </p>
       {err && <FormStatus error={err} />}
@@ -294,7 +294,10 @@ export function MirrorArchive() {
                     return (
                       <tr key={c.id} data-copy={c.fileName} style={{ cursor: 'default' }}>
                         <td><div className="mono" style={{ fontSize: 'var(--fs-sm)', overflowWrap: 'anywhere' }}>{c.storedPath ?? c.fileName}</div>
-                          {c.vodAssetId && <a className="hintxt" style={{ margin: 0 }} href={`/vod?asset=${c.vodAssetId}`} onClick={e => { e.preventDefault(); navigate(`/vod?asset=${c.vodAssetId}`) }}>Open the asset</a>}</td>
+                          {c.vodAssetId && <a className="hintxt" style={{ margin: 0 }} href={`/vod?asset=${c.vodAssetId}`} onClick={e => { e.preventDefault(); navigate(`/vod?asset=${c.vodAssetId}`) }}>Open the asset</a>}
+                          {c.streamId && <div className="hintxt" style={{ margin: 0 }} data-copy-recording>
+                            {c.what === 'recording-sidecar' ? 'Metadata of the recording of ' : 'Recording of '}{c.streamName ?? 'a deleted stream'}{c.rangeStart && c.rangeEnd ? `, ${new Date(c.rangeStart).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} to ${new Date(c.rangeEnd).toLocaleTimeString([], { timeStyle: 'short' })}` : ''}{' '}
+                            {c.streamName && <a href={`/recordings/source/${c.streamId}`} onClick={e => { e.preventDefault(); navigate(`/recordings/source/${c.streamId}`) }}>Open the recording</a>}</div>}</td>
                         <td>{c.targetName ?? '–'}</td>
                         <td><span className={`tag ${st.cls}`} title={st.about}>{st.label}</span>
                           {c.checking && <div className="hintxt" style={{ margin: 0 }}>Being read back now</div>}

@@ -94,13 +94,14 @@ Each premium term is kept in step with your products for payments when the rule 
 
 With the **Mirror and Archive** add-on, every rung has an **Archive copies** field, shown to account administrators. It copies an item's original file to the storage targets at your sites (made on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page), without anyone asking.
 
-![The Archive copies field of the account default: a NAS copied to when files land and an object store copied to when they are published, only between 22:00 and 06:00 in Sydney time](/img/screens/publishing-archive-copies.png)
+![The Archive copies field of the account default: a NAS copied to when files land and with every recording, an object store copied to when they are published, only between 22:00 and 06:00 in Sydney time](/img/screens/publishing-archive-copies.png)
 
 1. Under **Archive copies** (tick it first on a rung other than the account default), each storage target is listed. Tick **When it lands** to copy the original as soon as an upload or watch folder file has landed, **When it is published** to copy it on publishing, or both.
+   On the account default and on a channel's, station's or event's own rung there is also **Recordings**: tick it to archive the recording itself. Each programme becomes one file when it ends (each clock hour, in the channel's time zone, when the channel has no guide), taken from the top rendition and joined without re-encoding, with a metadata file of the same name beside it. See [Recordings in the archive](hybrid-sites.md#recordings-in-the-archive).
 2. Optionally tick **Copy only between** and set a start and end time and a time zone, for example 22:00 to 06:00 in `Australia/Sydney`. A copy asked for outside the window waits for it to open.
 3. Choose **Save publishing rule**.
 
-Each original is copied once per target. A rung that ticks no target switches copies off for everything beneath it. A disabled target is shown greyed and gets no new copies; a target that no longer exists is pointed out with **Drop now**. Without the add-on the field is not shown, and copies a rung already holds are kept when it is saved.
+Each original, and each programme or hour of recording, is copied once per target. Ticking **Recordings** starts from the next programme or hour that ends: recordings already kept are not copied. A rung that ticks no target switches copies off for everything beneath it. A disabled target is shown greyed and gets no new copies; a target that no longer exists is pointed out with **Drop now**. Without the add-on the field is not shown, and copies a rung already holds are kept when it is saved.
 
 ## How it connects
 
@@ -158,7 +159,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `DELETE /api/publishing-rules/{scopeKind}/{scopeId}` | Removes a content type or stream rung; the account default cannot be removed |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | A single asset's own rung |
 
-With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest or on publish, and an optional off-peak window. See [Copy by rule](hybrid-sites.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
+With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest or on publish, whether recordings are archived (`recording`), and an optional off-peak window. See [Copy by rule](hybrid-sites.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
 
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

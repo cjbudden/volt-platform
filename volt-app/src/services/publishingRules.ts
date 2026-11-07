@@ -45,11 +45,14 @@ export interface RuleSettings {
   accessRules?: AccessRule[];
   /** COPY RULES (Mirror and Archive, build queue H3-3): copy the asset's
    *  original to these storage targets when it lands or when it is
-   *  published, optionally only inside an off-peak window. Needs the
+   *  published, optionally only inside an off-peak window. `recording`
+   *  (H3-7) archives the recordings of the channels and events the rule
+   *  governs, one file per programme or hour as each closes
+   *  (services/archive/recordings.ts). Needs the
    *  `mirror_archive` licence to be saved (modules/publishingRules.ts) and
    *  to run (services/archive/archive.ts copyOnRule). */
   archive?: {
-    copies: { targetId: string; on: ('ingest' | 'publish')[] }[];
+    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording')[] }[];
     offPeak?: { from: string; to: string; timeZone?: string } | null;
   };
 }

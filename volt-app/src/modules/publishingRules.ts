@@ -65,7 +65,7 @@ export const settingsSchema = z.object({
   archive: z.object({
     copies: z.array(z.object({
       targetId: z.string().uuid(),
-      on: z.array(z.enum(['ingest', 'publish'])).min(1),
+      on: z.array(z.enum(['ingest', 'publish', 'recording'])).min(1),
     }).strict()).max(20),
     offPeak: z.object({
       from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'from is HH:MM'),
@@ -93,7 +93,7 @@ export async function cleanSettings(account: string, raw: unknown): Promise<Rule
  * allowed, so a rung can switch copies off below a rung that has them.
  */
 async function cleanArchive(account: string, a: NonNullable<RuleSettings['archive']>): Promise<NonNullable<RuleSettings['archive']>> {
-  const copies: { targetId: string; on: ('ingest' | 'publish')[] }[] = [];
+  const copies: { targetId: string; on: ('ingest' | 'publish' | 'recording')[] }[] = [];
   for (const c of a.copies) {
     if (copies.some((x) => x.targetId === c.targetId)) throw badRequest('archive.copies names the same storage target twice');
     copies.push({ targetId: c.targetId, on: [...new Set(c.on)] });

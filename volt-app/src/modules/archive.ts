@@ -89,6 +89,8 @@ const copyList = defineList({
     id: { sql: 'c.id', type: 'uuid', notNull: true },
     target_id: { sql: 'c.target_id', type: 'uuid', notNull: true },
     vod_asset_id: { sql: 'c.vod_asset_id', type: 'uuid', doc: 'the Media Library asset whose original was copied' },
+    stream_id: { sql: 'c.stream_id', type: 'uuid', doc: 'the channel or event whose recording was copied (recording copies)' },
+    what: { sql: 'c.what', type: 'enum', values: ['source', 'recording', 'recording-sidecar'], notNull: true, doc: "source (an asset's original), recording (a programme's or an hour's recording, one file) or recording-sidecar (its metadata)" },
     state: { sql: 'c.state', type: 'enum', values: [...A.COPY_STATES], notNull: true, doc: 'queued (shown as copying while a host runs it), verified, failed, corrupt, missing' },
     created_at: { sql: 'c.created_at', type: 'timestamp', notNull: true },
     updated_at: { sql: 'c.updated_at', type: 'timestamp', notNull: true },

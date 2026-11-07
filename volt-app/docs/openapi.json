@@ -51,7 +51,7 @@
   {
    "name": "Archive",
    "x-displayName": "Mirror and Archive",
-   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, or an S3-compatible object store such as MinIO, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules in the publishing rules (`archive`) copy originals on ingest or publish, optionally in an off-peak window, and every target re-checks its verified copies on its own cadence (`recheckDays`). An object-store target names its keys with `credentialRef`; the keys themselves stay on the site's agent host and are never sent to Volt. Recordings, restore to the cloud and a delete that waits for a confirmed copy come next."
+   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, or an S3-compatible object store such as MinIO, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules in the publishing rules (`archive`) copy originals on ingest or publish and recordings as each programme or hour ends (copies with `what` `recording` and `recording-sidecar`, naming `streamId`, `rangeStart`, `rangeEnd` and the programme `title`), optionally in an off-peak window, and every target re-checks its verified copies on its own cadence (`recheckDays`). An object-store target names its keys with `credentialRef`; the keys themselves stay on the site's agent host and are never sent to Volt. Restore to the cloud and a delete that waits for a confirmed copy come next."
   },
   {
    "name": "Audit",
@@ -270,7 +270,7 @@
   {
    "name": "Publishing Rules",
    "x-displayName": "Publishing rules",
-   "description": "Publishing rules set what an asset gets by default (where it is published and on what terms), from account level down to content type or owner.\n\n**Use it to:**\n- List every rule with `GET /api/publishing-rules` and your publishing points with `GET /api/publishing-rules/points`\n- Create or replace the rule for one level with `PUT /api/publishing-rules/{scopeKind}/{scopeId}`\n- See what an asset would get, and from which rule, with `GET /api/publishing-rules/resolve`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** the account rule always exists and cannot be deleted. More specific rules override it. With the Mirror and Archive add-on a rule can also hold copy rules (`archive`: `copies` of `{ targetId, on: [\"ingest\", \"publish\"] }` and an optional `offPeak` `{ from, to, timeZone }` window) that copy an asset's original to your storage targets."
+   "description": "Publishing rules set what an asset gets by default (where it is published and on what terms), from account level down to content type or owner.\n\n**Use it to:**\n- List every rule with `GET /api/publishing-rules` and your publishing points with `GET /api/publishing-rules/points`\n- Create or replace the rule for one level with `PUT /api/publishing-rules/{scopeKind}/{scopeId}`\n- See what an asset would get, and from which rule, with `GET /api/publishing-rules/resolve`\n\n**Credential:** admin session (Bearer) or account secret key, with `settings: view` to read and `settings: manage` to change.\n\n**Good to know:** the account rule always exists and cannot be deleted. More specific rules override it. With the Mirror and Archive add-on a rule can also hold copy rules (`archive`: `copies` of `{ targetId, on: [\"ingest\", \"publish\"] }` and an optional `offPeak` `{ from, to, timeZone }` window) that copy an asset's original to your storage targets, and with `\"recording\"` in `on` archive the recordings of the channels and events the rule covers (one file per programme, or per clock hour without a guide, from the top rendition without re-encoding, with a JSON metadata file beside it)."
   },
   {
    "name": "Radio",
@@ -3349,7 +3349,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "Every copy made to the account's storage targets, newest first; filter by `target_id`, `vod_asset_id` or `state`. `state` is `queued` (shown as `copying` while a site host runs it), `verified` (read back from the target and matched to the original's checksum), `failed` (no attempts left; `error` says why), `corrupt` (a re-check found it changed) or `missing` (a re-check found it gone). `verifiedAt` is when it was last confirmed. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `target_id`, `vod_asset_id`, `state`, `created_at`, `updated_at`.",
+    "description": "Every copy made to the account's storage targets, newest first; filter by `target_id`, `vod_asset_id` or `state`. `state` is `queued` (shown as `copying` while a site host runs it), `verified` (read back from the target and matched to the original's checksum), `failed` (no attempts left; `error` says why), `corrupt` (a re-check found it changed) or `missing` (a re-check found it gone). `verifiedAt` is when it was last confirmed. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `target_id`, `vod_asset_id`, `stream_id`, `what`, `state`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -3398,6 +3398,30 @@
       "description": "the Media Library asset whose original was copied. Filter: `vod_asset_id=value` (comma list = any of), or `vod_asset_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
      },
      {
+      "name": "stream_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "the channel or event whose recording was copied (recording copies). Filter: `stream_id=value` (comma list = any of), or `stream_id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "what",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "source",
+        "recording",
+        "recording-sidecar"
+       ]
+      },
+      "description": "source (an asset's original), recording (a programme's or an hour's recording, one file) or recording-sidecar (its metadata). Filter: `what=value` (comma list = any of), or `what[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
       "name": "state",
       "in": "query",
       "required": false,
@@ -3442,7 +3466,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, target_id, vod_asset_id, state, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, target_id, vod_asset_id, stream_id, what, state, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",

@@ -316,7 +316,7 @@
       "clip": "[data-mirror-archive]",
       "remove": [".topbar"],
       "settleMs": 1000,
-      "alt": "The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies with their state, the reason a copy waits and what to do about it"
+      "alt": "The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it"
     },
     {
       "name": "publishing-archive-copies",
@@ -325,7 +325,7 @@
       "waitFor": "[data-archive-control] [data-archive-target]",
       "clip": "div:has(> div > [data-archive-control])",
       "settleMs": 1000,
-      "alt": "The Archive copies field of the account default: a NAS copied to when files land and an object store copied to when they are published, only between 22:00 and 06:00 in Sydney time"
+      "alt": "The Archive copies field of the account default: a NAS copied to when files land and with every recording, an object store copied to when they are published, only between 22:00 and 06:00 in Sydney time"
     },
     {
       "name": "sites",

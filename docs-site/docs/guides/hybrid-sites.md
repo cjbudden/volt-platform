@@ -125,10 +125,21 @@ As with a folder, every copy is read back from the store and matched against the
 
 A **copy rule** copies originals without anyone asking. It lives in the [publishing rules](publishing-rules.md), so it can be set for the whole account, a content type, a channel, event or station, or one item, and the most specific level that says anything about copies decides.
 
-- **Where and when:** each copy names a storage target and the moments to copy: **on ingest** (as soon as an upload or watch folder file has landed) and **on publish** (when the item is published).
+- **Where and when:** each copy names a storage target and the moments to copy: **on ingest** (as soon as an upload or watch folder file has landed), **on publish** (when the item is published) and **recordings** (as each programme or hour of a channel's or event's recording ends; see below).
 - **Off-peak window:** optionally, a window such as 22:00 to 06:00 in a time zone you choose. A copy asked for outside it waits until the window opens, so archive traffic stays out of busy hours.
 - **Once per target:** an original already copied, or waiting to be, is not copied again. A level that sets no copies switches copies off below a level that has them.
 - **What is skipped, and why:** an item with no original kept, or a disabled target or site, is skipped; the ingest or publish itself carries on.
+
+#### Recordings in the archive
+
+With **Recordings** ticked for a target, the recordings of the channels, stations and events the rule covers are archived as files your archive or MAM can take in without Volt:
+
+- **One file per programme** when the channel has a guide, cut at the programme's start and end (as aired, when the as-run times are known). **One file per clock hour** in the channel's time zone when it has none (events use UTC). A programme or hour with nothing recorded makes no file.
+- **The top rendition only, joined without re-encoding**: the picture and sound exactly as recorded. Cuts fall on the recording's segments, so a file starts and ends within about two seconds of the programme's edge.
+- **Named** `Title-Channel-YYYYMMDD-HHMM.mp4` (an hour: `Channel-YYYYMMDD-HHMM.mp4`; a station: `.m4a`), in the channel's time zone. A name already taken at the target, such as the hour that repeats when the clocks go back, gets `-2`.
+- **A metadata file beside it**, `<same name>.json`: the channel, the programme and its description, the start and end, the time zone, the file's size and SHA-256.
+- **When:** a few minutes after the programme or hour ends, inside the rule's off-peak window if it has one. Both files are copied and checked like any other copy, and Volt's own working file is removed once every target holds a verified copy.
+- **From when:** ticking **Recordings** starts with the next programme or hour that ends; recordings already kept are not copied.
 
 #### Re-checks on a schedule
 

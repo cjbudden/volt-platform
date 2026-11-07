@@ -131,6 +131,7 @@ boot().then(async () => {
     registerRemoteIngestHandlers();
     (await import('./services/jobs/handlers/frameIndex')).registerFrameIndexHandlers();
     (await import('./services/jobs/handlers/trickPlay')).registerTrickPlayHandlers();
+    (await import('./services/archive/recordings')).registerArchiveRecordingHandlers();
     (await import('./services/workflows/runs')).registerAddonHandlers();
     await registerFillerHandlers();
     await (await import('./services/social')).registerSocialHandlers();
