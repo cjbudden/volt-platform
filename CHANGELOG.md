@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.60.0 (2026-11-07)
+
+### Product (in customer release notes)
+
+- added · Recordings: With the Mirror and Archive add-on, copy rules can now archive your recordings to storage at your own sites: one file per programme (or per hour when a channel has no guide), picture and sound exactly as recorded, with a metadata file beside it. Tick Recordings under Archive copies in Publishing Rules.
+
+### Internal
+
+- added: Check suite mirror-archive-recordings and a longer Mirror and Archive console browser walk.
+
 ## 0.59.0 (2026-11-07)
 
 ### Product (in customer release notes)
