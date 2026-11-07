@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.61.0 (2026-11-07)
+
+### Product (in customer release notes)
+
+- added · Mirror and Archive: A new Nightly option on each storage target copies, once a day, anything the rule covers that the target does not hold yet, including items that came in before the rule existed. Nightly copies wait for the off-peak window.
+- added · Mirror and Archive: Copy rules can now copy an item's sidecars beside its original: a metadata file, the caption files as they were delivered, other files that came with it, and its poster, each named after the original. Tick Sidecars under Copy for a storage target in the Archive copies field.
+
+### Internal
+
+- added · Tests: New mirror-archive-sidecars check suite (36 checks with the real site agent) and seven more steps in the Mirror and Archive console browser walk.
+
 ## 0.60.0 (2026-11-07)
 
 ### Product (in customer release notes)

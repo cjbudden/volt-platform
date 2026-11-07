@@ -1,6 +1,6 @@
 {
   "_comment": "Migrations and boot schema statements that have shipped (build queue D2). check-migrations.mjs does not judge them again but refuses an edit or removal. release.mjs adds each release's files; nothing else should change this file.",
-  "release": "0.60.0",
+  "release": "0.61.0",
   "migrations": {
     "0001_init.sql": "0c5653a0d33cd6f7e0bc826365d65f4779430f01c74274f4379697d45edfd0fc",
     "0002_jobs.sql": "6b3d27e80a234d1d568bf2391823fa7d87e5da1673582d78ff34c53052244d3c",
@@ -128,7 +128,8 @@
     "0138_rule_collections.sql": "3064141a35209f17b4f029ccb9c2b3d091d632757bb0e4f7d21b2da033fda268",
     "0139_rule_collections_index.sql": "4e5f1e1b8c88ef6c785debece9ff72ed3a3a840588dc15239de05a1a4b687e0d",
     "0140_archive_recordings.sql": "a3cef9d390f6387a35517f8e8fd2613e9e4e8f31d4991aa38c18850851c8d82e",
-    "0141_archive_recordings_index.sql": "b58ee6cd274251b75ebd799c2bb34de58a6f104f91bd48e486e8a184abf2dd8e"
+    "0141_archive_recordings_index.sql": "b58ee6cd274251b75ebd799c2bb34de58a6f104f91bd48e486e8a184abf2dd8e",
+    "0142_archive_sweeps.sql": "3b40a4bb6d1398dc92f9feb9283f222fcd78b7237b659958f55405f1be9842a4"
   },
   "bootSchema": [
     "0443d7e75c3053e006f05e5c5a4f98cceb18844321c9eb5fec2840994b46b008",
