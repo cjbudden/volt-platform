@@ -36,12 +36,12 @@ import { mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { one, query } from '../../db';
 import { imageStore } from '../imageStore';
-import { ownedTarget, queueCopyJob } from './archive';
+import { ownedTarget, queueCopyJob, validTimeZone } from './archive';
 import { buildDir, sha256File } from './recordings';
-import { nameValue, safeFileName } from './naming';
+import { nameValue, safeFileName, recordingFileName } from './naming';
 
-/** What a copy rule can copy for an asset. */
-export const COPY_WHATS = ['source', 'sidecars'] as const;
+/** What a copy rule can copy for an asset (clips: H3-9, services/archive/clips.ts). */
+export const COPY_WHATS = ['source', 'sidecars', 'clips'] as const;
 export type CopyWhat = typeof COPY_WHATS[number];
 
 /** One sidecar file of an asset, before it is made. */
@@ -54,6 +54,47 @@ export function baseNameFor(a: { source_key?: string | null; title?: string | nu
   const src = a.source_key ? safeFileName(basename(String(a.source_key).replace(/^s3:\/\/[^/]+\//, '')), a.title || 'asset') : '';
   const base = src ? src.replace(/\.[a-z0-9]{1,10}$/, '') : nameValue(a.title);
   return base || 'asset';
+}
+
+// ---- clips (H3-9) -----------------------------------------------------------------
+
+/**
+ * A clip is an asset cut from a recording (a clip, a full-event replay or an
+ * export): it has no original of its own, only the file clip.extract made
+ * under `/clips/<asset id>/`. An upload or a watch folder file is never one.
+ */
+export const isClipAsset = (a: any) => !!a && !a.source_key && (a.source_kind ?? 'recording') === 'recording';
+
+/**
+ * The clip's single file as made: the MP4, or for an audio clip the M4A or
+ * MP3, relative to the clips folder. Null while it is being built, when the
+ * build failed, or when only the HLS package was asked for (packaged outputs
+ * are a copy source of their own). Pure.
+ */
+export function clipFileOf(a: any): { rel: string; ext: string } | null {
+  if (!isClipAsset(a)) return null;
+  for (const k of [a.progressive_key, a.export_mp4_key, a.export_m4a_key, a.export_mp3_key]) {
+    const m = typeof k === 'string' ? /^\/clips\/([0-9a-f-]{36})\/([A-Za-z0-9._-]+)$/i.exec(k) : null;
+    if (m && m[1].toLowerCase() === String(a.id).toLowerCase()) return { rel: `${m[1]}/${m[2]}`, ext: extOf(m[2]) || 'mp4' };
+  }
+  return null;
+}
+
+/**
+ * A clip's name at the target follows Christian's rule for recordings,
+ * `Title-Channel-YYYYMMDD-HHMM` in the channel's time zone, from where the
+ * clip starts: two clips with the same title stay apart, and a clip sorts
+ * beside the programme file it was cut from.
+ */
+export async function clipBaseName(a: any): Promise<string> {
+  const s = await one<any>(
+    `SELECT name, tz FROM channels WHERE id = $1 UNION ALL SELECT name, NULL::text AS tz FROM events WHERE id = $2 LIMIT 1`,
+    [a.channel_id ?? null, a.event_id ?? null]).catch(() => null);
+  const name = recordingFileName({
+    title: a.title, channel: s?.name ?? '', start: Number(a.start_epoch_ms) || 0,
+    timeZone: s?.tz && validTimeZone(s.tz) ? s.tz : 'UTC', ext: 'x',
+  }).replace(/\.x$/, '');
+  return name || baseNameFor(a);
 }
 
 /** The metadata sidecar: what the asset is, in words that need no Volt to read. */
@@ -69,6 +110,13 @@ export function assetSidecar(a: any, files: any[], baseName: string) {
       createdAt: a.created_at ? new Date(a.created_at).toISOString() : null,
       original: a.source_key ? { fileName: safeFileName(basename(String(a.source_key).replace(/^s3:\/\/[^/]+\//, '')), a.title || 'asset'), sha256: a.sha256 ?? null } : null,
     },
+    // A clip (H3-9) says which file it describes and where it was cut from.
+    ...(clipFileOf(a) ? { clip: {
+      fileName: `${baseName}.${clipFileOf(a)!.ext}`,
+      stream: a.channel_id ? { kind: 'channel', id: a.channel_id } : a.event_id ? { kind: 'event', id: a.event_id } : null,
+      from: Number.isFinite(Number(a.start_epoch_ms)) && Number(a.start_epoch_ms) > 0 ? new Date(Number(a.start_epoch_ms)).toISOString() : null,
+      to: Number.isFinite(Number(a.end_epoch_ms)) && Number(a.end_epoch_ms) > 0 ? new Date(Number(a.end_epoch_ms)).toISOString() : null,
+    } } : {}),
     metadata: md,
     captions: files.filter((f) => f.kind === 'captions').map((f) => ({
       fileName: captionName(baseName, f), language: f.language ?? null, label: f.label ?? null, format: f.format,
@@ -93,7 +141,8 @@ function captionName(base: string, f: any): string {
  * database reads; nothing is written until `make` is called.
  */
 export async function planSidecars(a: any): Promise<SidecarPlan[]> {
-  const base = baseNameFor(a);
+  // A clip's sidecars are named after the clip's file (H3-9), so they sort together.
+  const base = clipFileOf(a) ? await clipBaseName(a) : baseNameFor(a);
   const files = await query<any>(
     `SELECT id, kind, format, name, store_key, language, label, is_default, forced, sdh, offset_ms
        FROM vod_asset_files WHERE asset_id = $1 ORDER BY created_at, id`, [a.id]).catch(() => [] as any[]);
@@ -122,7 +171,7 @@ export async function planSidecars(a: any): Promise<SidecarPlan[]> {
   return plans;
 }
 
-async function ownedAsset(accountId: string, assetId: string) {
+export async function ownedAsset(accountId: string, assetId: string) {
   if (!UUID.test(String(assetId))) return null;
   return one<any>(
     `SELECT v.*
@@ -138,7 +187,7 @@ async function ownedAsset(accountId: string, assetId: string) {
  * or on its way, is left alone; one that failed, changed or went missing is
  * made and copied afresh. Returns the copies queued and the ones skipped.
  */
-export async function requestSidecarCopies(accountId: string, targetId: string, assetId: string, opts: { runAfter?: Date | null; userId?: string | null } = {}) {
+export async function requestSidecarCopies(accountId: string, targetId: string, assetId: string, opts: { runAfter?: Date | null; userId?: string | null; only?: string[] } = {}) {
   const t = await ownedTarget(accountId, targetId);
   if (t.status !== 'active') throw Object.assign(new Error('This storage target is disabled'), { code: 'target_disabled' });
   if (t.site_status !== 'active') throw Object.assign(new Error('The site of this storage target is disabled'), { code: 'site_disabled' });
@@ -148,6 +197,8 @@ export async function requestSidecarCopies(accountId: string, targetId: string, 
   const queued: string[] = [], kept: string[] = [];
   const dir = join(buildDir(), 'assets', a.id);
   for (const p of await planSidecars(a)) {
+    // A clip copy (H3-9) brings only its metadata file; the rest is "sidecars".
+    if (opts.only && !opts.only.includes(p.what)) continue;
     const existing = await one<any>(
       `SELECT c.id, c.state, j.state AS job_state FROM archive_copies c LEFT JOIN jobs j ON j.id = c.job_id
         WHERE c.target_id = $1 AND c.vod_asset_id = $2 AND c.what = $3`, [t.id, a.id, p.what]);

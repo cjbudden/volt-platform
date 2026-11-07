@@ -274,6 +274,11 @@ async function buildClip(ctx: JobContext): Promise<Record<string, unknown>> {
   // Social formats: follow what is in the picture (tracking only; cheap). Volt/REFRAME.md.
   await (await import('./reframe')).queueReframeAnalysis(p.vodAssetId);
 
+  // ARCHIVE COPIES (Mirror and Archive, H3-9): the clip's file now exists,
+  // so a copy rule's "when it lands" moment runs for it, as for an upload.
+  // Never throws; without the add-on it does nothing.
+  await (await import('../../archive/clips')).copyClipOnReady(p.vodAssetId);
+
   // THE RULES MAY PUBLISH IT NOW. After the files and the ladder are in
   // place; a rule that says manual, or a gate that says no, simply leaves it.
   const auto = await import('../../availability').then((m) => m.autoPublishOnBuild(p.vodAssetId)).catch((e) => {

@@ -385,8 +385,8 @@ export async function recheckDue(opts: { limit?: number; accountId?: string } = 
 export type CopyEvent = 'ingest' | 'publish' | 'schedule';
 /** When a copy rule fires: an asset event, or (H3-7) a stretch of recording closing. */
 export type CopyMoment = CopyEvent | 'recording';
-/** What an asset copy takes (H3-8): the original, its sidecars, or both. Original only when unsaid. */
-export type CopyWhat = 'source' | 'sidecars';
+/** What an asset copy takes (H3-8): the original, its sidecars, (H3-9) a clip's file. Original only when unsaid. */
+export type CopyWhat = 'source' | 'sidecars' | 'clips';
 export interface OffPeak { from: string; to: string; timeZone?: string }
 export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[]; what?: CopyWhat[] }[]; offPeak?: OffPeak | null }
 
@@ -426,7 +426,7 @@ export function offPeakStart(now: Date, w: OffPeak | null | undefined): Date | n
 
 /**
  * Copy an asset's original (and, when the rule says `what: ['sidecars']`,
- * its sidecars, H3-8) to the targets its publishing rule names for this
+ * its sidecars, H3-8; `what: ['clips']`, a clip's file as made, H3-9) to the targets its publishing rule names for this
  * event (ingest: the original has landed; publish: the asset was published;
  * schedule: the nightly pass, sidecars.ts scheduledSweep).
  * The rule is read through the publishing ladder (account, content type,
@@ -457,6 +457,18 @@ export async function copyOnRule(accountId: string, assetId: string, event: Copy
           const r = await requestCopy(accountId, null, { targetId: c.targetId, vodAssetId: assetId }, { runAfter });
           if (r.created) out.queued.push(r.copy.id);
           else out.skipped.push({ targetId: c.targetId, why: 'already_copied_or_queued' });
+        } catch (e: any) {
+          out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
+        }
+      }
+      // A clip's file as made and its metadata file (H3-9, clips.ts). An
+      // asset that is not a clip, or a clip not made yet, is skipped quietly.
+      if (whats.includes('clips')) {
+        try {
+          const { requestClipCopy } = await import('./clips');
+          const r = await requestClipCopy(accountId, c.targetId, assetId, { runAfter });
+          out.queued.push(...r.queued);
+          if (!r.queued.length) out.skipped.push({ targetId: c.targetId, why: 'clip_already_copied_or_queued' });
         } catch (e: any) {
           out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
         }

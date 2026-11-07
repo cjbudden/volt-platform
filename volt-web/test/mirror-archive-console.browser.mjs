@@ -13,6 +13,7 @@
 //   Without the add-on: no section, no field; Sites for either add-on only
 //   System Admin: the Mirror and Archive switch saves with the account
 //   H3-8: Nightly on each target, Original and Sidecars on a target copied to
+//   H3-9: Clips beside them, saved in order, alone allowed, the last kept
 //   PLAYWRIGHT=<playwright index.mjs> CHROMIUM=<chrome> OUT=<dir> node volt-web/test/mirror-archive-console.browser.mjs
 const { chromium } = await import(process.env.PLAYWRIGHT);
 const B = 'http://127.0.0.1:5173', OUT = process.env.OUT || '/tmp';
@@ -181,6 +182,28 @@ ok('and it is still ticked when the page is opened again', await page.locator('[
   await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
   const row2 = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
   ok('and both are still ticked when the page is opened again', await row2.locator('label:has-text("Nightly") input').isChecked() && await row2.locator('[data-archive-what] label:has-text("Sidecars") input').isChecked())
+}
+// H3-9: Clips as a third thing a copy takes.
+{
+  const row = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
+  ok('a target copied to offers Clips, unticked', await row.locator('[data-archive-what] label:has-text("Clips") input').count() === 1 && !(await row.locator('[data-archive-what] label:has-text("Clips") input').isChecked()))
+  await row.locator('[data-archive-what] label:has-text("Clips") input').check()
+  ok('the field says what clips means', /Clips are clips cut from a recording: the clip's file as made, named Title-Channel-date-time/.test(await page.locator('[data-archive-control]').first().innerText()))
+  await row.scrollIntoViewIfNeeded(); await page.screenshot({ path: OUT + '/ma-publishing-clips.png' })
+  const resp3 = page.waitForResponse(r => /\/api\/publishing-rules/.test(r.url()) && r.request().method() === 'PUT', { timeout: 10000 }).catch(() => null)
+  await page.locator('button:has-text("Save publishing rule")').first().click()
+  const sr3 = await resp3
+  const sent3 = sr3 ? JSON.parse(sr3.request().postData() || '{}') : {}
+  const st3 = (sent3.settings?.archive?.copies ?? sent3.archive?.copies ?? []).find(c => c.targetId === storeId)
+  ok('saving sends the original, sidecars and clips in that order: ' + JSON.stringify(st3?.what), !!sr3 && sr3.ok() && JSON.stringify(st3?.what) === '["source","sidecars","clips"]')
+  await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
+  const row3 = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
+  ok('and Clips is still ticked when the page is opened again', await row3.locator('[data-archive-what] label:has-text("Clips") input').isChecked())
+  await row3.locator('[data-archive-what] label:has-text("Original") input').click()
+  await row3.locator('[data-archive-what] label:has-text("Sidecars") input').click()
+  ok('clips alone can be left ticked', await row3.locator('[data-archive-what] label:has-text("Clips") input').isChecked() && !(await row3.locator('[data-archive-what] label:has-text("Original") input').isChecked()))
+  await row3.locator('[data-archive-what] label:has-text("Clips") input').click()
+  ok('but not unticked when it is the last', await row3.locator('[data-archive-what] label:has-text("Clips") input').isChecked())
 }
 ok('Sites is in the menu for this account', await navHas(page, 'Sites'))
 await ctx.close()

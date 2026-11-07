@@ -66,8 +66,8 @@ export const settingsSchema = z.object({
     copies: z.array(z.object({
       targetId: z.string().uuid(),
       on: z.array(z.enum(['ingest', 'publish', 'recording', 'schedule'])).min(1),
-      // What an asset copy takes (H3-8); the original alone when unsaid.
-      what: z.array(z.enum(['source', 'sidecars'])).min(1).optional(),
+      // What an asset copy takes (H3-8, clips H3-9); the original alone when unsaid.
+      what: z.array(z.enum(['source', 'sidecars', 'clips'])).min(1).optional(),
     }).strict()).max(20),
     offPeak: z.object({
       from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'from is HH:MM'),

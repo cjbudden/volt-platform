@@ -56,7 +56,7 @@ export interface RuleSettings {
    *  poster; services/archive/sidecars.ts) or both; the original alone when
    *  unsaid. */
   archive?: {
-    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars')[] }[];
+    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars' | 'clips')[] }[];
     offPeak?: { from: string; to: string; timeZone?: string } | null;
   };
 }

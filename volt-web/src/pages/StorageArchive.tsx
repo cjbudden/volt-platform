@@ -294,7 +294,8 @@ export function MirrorArchive() {
                     return (
                       <tr key={c.id} data-copy={c.fileName} style={{ cursor: 'default' }}>
                         <td><div className="mono" style={{ fontSize: 'var(--fs-sm)', overflowWrap: 'anywhere' }}>{c.storedPath ?? c.fileName}</div>
-                          {c.vodAssetId && c.what && c.what !== 'source' && <div className="hintxt" style={{ margin: 0 }} data-copy-sidecar>{c.what === 'metadata' ? 'Metadata file' : c.what === 'poster' ? 'Poster' : c.what.startsWith('captions:') ? 'Caption file' : 'File that came with the asset'}, beside the original</div>}
+                          {c.vodAssetId && c.what === 'clip' && <div className="hintxt" style={{ margin: 0 }} data-copy-clip>Clip file, as made</div>}
+                          {c.vodAssetId && c.what && c.what !== 'source' && c.what !== 'clip' && <div className="hintxt" style={{ margin: 0 }} data-copy-sidecar>{c.what === 'metadata' ? 'Metadata file' : c.what === 'poster' ? 'Poster' : c.what.startsWith('captions:') ? 'Caption file' : 'File that came with the asset'}, beside the original</div>}
                           {c.vodAssetId && <a className="hintxt" style={{ margin: 0 }} href={`/vod?asset=${c.vodAssetId}`} onClick={e => { e.preventDefault(); navigate(`/vod?asset=${c.vodAssetId}`) }}>Open the asset</a>}
                           {c.streamId && <div className="hintxt" style={{ margin: 0 }} data-copy-recording>
                             {c.what === 'recording-sidecar' ? 'Metadata of the recording of ' : 'Recording of '}{c.streamName ?? 'a deleted stream'}{c.rangeStart && c.rangeEnd ? `, ${new Date(c.rangeStart).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} to ${new Date(c.rangeEnd).toLocaleTimeString([], { timeStyle: 'short' })}` : ''}{' '}
