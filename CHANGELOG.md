@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.59.0 (2026-11-07)
+
+### Product (in customer release notes)
+
+- added · Collections: A rule collection keeps what people add by hand, and leaves out what people take out until someone lets it back in. Any collection can now be ordered by hand or by a field: title, newest or oldest, first aired, or length.
+- added · Collections: Rule-based collections. Give a collection rules (for example: genre is Sport and first aired in the last two weeks) and it keeps itself up to date: new and changed media joins or leaves within seconds, and every rule collection is checked in full each night. Rules test title, genre, tags, length, content type, rights profile, provider, dates and your content types' own fields, with all or any and groups, and show how many titles match as you write them.
+
+### Internal
+
+- added · Tests: collection-rules suite: every operator of every field type, groups, manual and left-out media, re-matching on change, the nightly and stale re-checks, and a timed full match over 100,000 assets.
+
 ## 0.58.0 (2026-11-07)
 
 ### Product (in customer release notes)
