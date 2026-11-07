@@ -163,6 +163,24 @@ export default function ImageLibrary() {
     catch (e: any) { setFolderErr(e.message) }
   }
 
+  // Rename (the base name only: the extension is the image's own and the API keeps it).
+  // Everything that uses the image follows it, and its old address keeps working.
+  const [renaming, setRenaming] = useState<{ id: string; base: string; err?: string; busy?: boolean } | null>(null)
+  const splitName = (n: string) => { const m = n.match(/^(.*?)(\.[A-Za-z0-9]{1,10})?$/); return { base: m?.[1] || n, ext: m?.[2] ?? '' } }
+  async function saveRename(f: MediaFile) {
+    if (!renaming || renaming.id !== f.id) return
+    const base = renaming.base.trim()
+    if (!base) { setRenaming({ ...renaming, err: 'A name is required' }); return }
+    if (base + splitName(f.name).ext === f.name) { setRenaming(null); return }
+    setRenaming({ ...renaming, busy: true, err: undefined })
+    try {
+      const updated: any = await api.patchFile(f.id, { name: base + splitName(f.name).ext, version: f.version })
+      setRenaming(null); setPreview(updated); await load()
+      const n = Object.values(updated.references ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0)
+      flash(`Renamed to ${updated.name}${n ? `. ${n} place${n === 1 ? '' : 's'} using it now point${n === 1 ? 's' : ''} to the new name` : ''}. The old address keeps working.`)
+    } catch (e: any) { setRenaming({ ...renaming, busy: false, err: e.message }) }
+  }
+
   async function changeKind(f: MediaFile, newKind: string) {
     setKindErr(null)
     try { const updated = await api.patchFile(f.id, { kind: newKind, version: f.version }); setPreview(updated); await load() }
@@ -410,12 +428,26 @@ export default function ImageLibrary() {
             </div>
             <div style={{ padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)' }}>{preview.name}</div>
-                <span className="spacer" style={{ flex: 1 }} />
-                {movable(preview) && <button className="btn ghost sm" onClick={() => { setMoving([preview]); setPreview(null) }}>Move…</button>}
+                {renaming?.id === preview.id ? (
+                  <form style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }} data-rename
+                    onSubmit={e => { e.preventDefault(); saveRename(preview) }}>
+                    <input className="inp" autoFocus aria-label="New name" value={renaming.base} disabled={renaming.busy} style={{ flex: 1, minWidth: 0 }}
+                      onChange={e => setRenaming({ ...renaming, base: e.target.value, err: undefined })}
+                      onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setRenaming(null) } }} />
+                    <span className="mono" style={{ color: 'var(--faint)' }}>{splitName(preview.name).ext}</span>
+                    <button className="btn primary sm" type="submit" disabled={renaming.busy}>{renaming.busy ? 'Saving…' : 'Save'}</button>
+                    <button className="btn ghost sm" type="button" onClick={() => setRenaming(null)}>Cancel</button>
+                  </form>
+                ) : <>
+                  <div style={{ fontWeight: 700, fontSize: 'var(--fs-h2)', overflowWrap: 'anywhere' }}>{preview.name}</div>
+                  <span className="spacer" style={{ flex: 1 }} />
+                  {movable(preview) && <button className="btn ghost sm" onClick={() => setRenaming({ id: preview.id, base: splitName(preview.name).base })}>Rename…</button>}
+                </>}
+                {renaming?.id !== preview.id && movable(preview) && <button className="btn ghost sm" onClick={() => { setMoving([preview]); setPreview(null) }}>Move…</button>}
                 {movable(preview) && <button className="btn ghost sm" onClick={() => { setReplacing([preview]); setPreview(null) }} title="A duplicate, a better version, or a broken image: everything that uses this image uses the one you choose">Replace with…</button>}
                 <button className="xbtn" title="Delete" onClick={() => setConfirm({ file: preview })}>🗑</button>
               </div>
+              {renaming?.id === preview.id && renaming.err && <div style={{ color: 'var(--down)', fontSize: 'var(--fs-sm)', marginTop: 4 }} data-rename-error>{renaming.err}</div>}
               <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)', margin: '2px 0 12px' }}>{preview.folder ? preview.folder + '/' : '(root)'} · {preview.width && preview.height ? `${preview.width}×${preview.height}` : 'unknown size'} · {human(preview.size_bytes)} · {preview.content_type}</div>
               <MetadataPanel file={preview} onRefreshed={f => { setPreview(f); load() }}
                 onNear={(lat, lng) => { setPreview(null); setQ(''); setFolder(''); setSource('all'); setNear(`${lat.toFixed(5)},${lng.toFixed(5)},5`) }} />

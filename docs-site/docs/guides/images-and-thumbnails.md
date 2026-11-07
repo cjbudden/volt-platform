@@ -61,6 +61,14 @@ Channel operators, designers and anyone who looks after branding use it.
 
 Originals keep their GPS position. For anything public, share a URL from the URL builder, which removes it.
 
+### Rename an image
+
+1. Click the image, then choose **Rename…** beside its name.
+2. Type the new name. The extension (for example `.png`) is shown beside the field and stays as it is, so a rename never changes what kind of file it is.
+3. Choose **Save**, or press Enter. Press Escape or choose **Cancel** to keep the old name.
+
+Everything that uses the image follows the new name: channel slates, watermarks, asset posters, guides and graphics. Links to the old name, including image URLs already shared, keep working. A name that another image in the same folder already has is refused; choose another or move one of them. Stills from your streams keep their names.
+
 ### Make a URL at the size you need
 
 1. Click an image and choose **URL builder…**.
@@ -142,6 +150,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **The file carries no camera, place or caption metadata.** | The file has no embedded details | Nothing to do, or choose **Re-read** if you replaced the file |
 | The URL field says **Loading the signing key…** | The key that signs URLs has not arrived | Wait a moment, or close the builder and open it again |
 | **Couldn't load the image library.** | The library could not be read | Choose **Retry** |
+| **An image called … is already in …** when renaming | Another image in that folder has that name | Choose another name, or move one of the two images to another folder |
 | **In use as a slate by** channels when deleting | Channels still fall back on this image | Give those channels another slate first, or **Force delete** |
 
 ## Through the API
@@ -152,7 +161,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/files/folders?parent={path}` | The folders inside one folder |
 | `POST /api/files/folders` | Creates a folder (`{"path": "slates/news"}`) |
 | `POST /api/files` | Uploads an image (`folder`, `name`, `kind`, `contentType`, `dataBase64`) |
-| `GET /api/files/{id}`, `PATCH /api/files/{id}` | One image; changes its usage type |
+| `GET /api/files/{id}`, `PATCH /api/files/{id}` | One image; renames it (`{"name": "Be right back"}`, the extension kept), moves it (`folder`) or changes its usage type (`kind`). A rename answers `409` when the name is taken in the folder; send `version` to refuse a change made since you read it |
 | `DELETE /api/files/{id}?confirm=true` | Deletes it; add `&force=true` when channels still use it as a slate |
 | `POST /api/images/sign` | Signs an image URL |
 | `GET /api/images/signing-key` | Your account's key for signing URLs yourself |

@@ -377,7 +377,29 @@ const patchSchema = z.object({
   tags: z.array(z.string()).optional(),
   version: z.number().int().optional(),
 });
-/** Rename / move / re-tag. Moving in the DB also moves the object in the store. */
+/**
+ * The name an image is renamed to. The extension is the image's own and stays: a
+ * rename changes what people call the file, never what kind of file it is, so a
+ * typed extension that differs is replaced and a missing one is added back.
+ * Slashes become `_` (a name is never a path), and the name is trimmed.
+ */
+export function renamedTo(current: string, wanted: string): string {
+  const ext = current.match(/\.[A-Za-z0-9]{1,10}$/)?.[0] ?? '';
+  let base = String(wanted ?? '').trim().replace(/[/\\]/g, '_');
+  if (ext && base.toLowerCase().endsWith(ext.toLowerCase())) base = base.slice(0, -ext.length);
+  else base = base.replace(/\.(jpe?g|png|gif|webp|avif|svg|bmp|tiff?|heic|webm|mov|mp4)$/i, '');
+  base = base.trim().replace(/[.\s]+$/, '');
+  if (!base) throw badRequest('A name is required');
+  if (base.length > 200) throw badRequest('A name can be up to 200 characters');
+  return base + ext;
+}
+
+/**
+ * Rename / move / re-tag. A new name or folder goes through the same path as Move
+ * (services/media/libraryMoves.ts relocate): every file of the item moves together,
+ * everything that uses the image is pointed at its new address, and the old address
+ * keeps forwarding, so a rename never breaks a slate, a guide or a published link.
+ */
 mediaFilesRouter.patch('/:id', asyncHandler(async (req, res) => {
   const acc = accountId(req);
   const b = patchSchema.parse(req.body);
@@ -387,35 +409,30 @@ mediaFilesRouter.patch('/:id', asyncHandler(async (req, res) => {
   const expected = im ? parseInt(im.replace(/"/g, ''), 10) : (b.version ?? null);
   if (expected != null && Number(cur.version) !== Number(expected)) throw new VersionConflict(cur.version);
 
-  const name = (b.name ?? cur.name).replace(/[/\\]/g, '_');
+  const name = b.name !== undefined ? renamedTo(cur.name, b.name) : cur.name;
   const folder = b.folder !== undefined ? cleanPath(b.folder) : cur.folder;
   const path = folder ? `${folder}/${name}` : name;
-  const moved = path !== cur.path;
-  const newKey = storeKeyFor(acc, path);
   const who = actor(req);
-  try {
-    const row = await tx(async (c) => {
-      if (moved) {
-        const clash = (await c.query('SELECT id FROM media_files WHERE account_id=$1 AND path=$2 AND id<>$3', [acc, path, cur.id])).rows[0];
-        if (clash) throw conflict(`An image already exists at ${path}`);
-        await imageStore().move(cur.store_key, newKey);
-      }
-      return (await c.query(
-        `UPDATE media_files SET name=$1, folder=$2, path=$3, store_key=$4, kind=$5, tags=$6,
-           version=version+1, updated_by=$7, updated_at=now() WHERE id=$8 RETURNING *`,
-        [name, folder, path, newKey, b.kind ?? cur.kind, b.tags ?? cur.tags, who.userId, cur.id]
-      )).rows[0];
-    });
-    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
-      action: 'update', entityType: 'media_file', entityId: cur.id,
-      snapshot: { from: cur.path, to: path, kind: row.kind } });
-    // A moved image keeps working wherever it is used: references rewritten, old key forwards.
-    if (moved) await (await import('../services/media/libraryMoves')).afterSingleMove(acc, cur.store_key, newKey, cur.path, path)
-      .catch((e) => console.warn(`[files] references after moving ${cur.path} not all updated:`, e));
-    res.set('ETag', String(row.version));
-    delete row.search;
-    res.json({ ...row, url: urlFor(row.store_key) });
-  } catch (e) { if ((e as any)?.status) throw e; throw e; }
+  let references: Record<string, number> = {};
+  if (path !== cur.path) {
+    if (cur.source === 'encoder') throw conflict('Encoder thumbnails keep their names and stay in their channel\'s dated folders');
+    const r = await (await import('../services/media/libraryMoves')).relocate(acc, [{ id: cur.id, folder, name }], who);
+    const skip = r.skipped.find((x) => x.id === cur.id);
+    if (skip) {
+      if (/already in/.test(skip.reason)) throw conflict(`An image called ${name} is already in ${folder || 'the top level'}`);
+      throw conflict(`The image could not be renamed: ${skip.reason}`);
+    }
+    references = r.references;
+  }
+  const row = await one<any>(
+    `UPDATE media_files SET kind=$1, tags=$2, version=version+1, updated_by=$3, updated_at=now() WHERE id=$4 RETURNING *`,
+    [b.kind ?? cur.kind, b.tags ?? cur.tags, who.userId, cur.id]);
+  await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
+    action: 'update', entityType: 'media_file', entityId: cur.id,
+    snapshot: { from: cur.path, to: row.path, kind: row.kind } });
+  res.set('ETag', String(row.version));
+  delete row.search;
+  res.json({ ...row, url: urlFor(row.store_key), references });
 }));
 
 /** Guarded delete: requires explicit confirmation and refuses while the image is in
