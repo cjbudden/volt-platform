@@ -1207,6 +1207,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/collections/:id/exclusions",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "POST",
+  "path": "/api/collections/:id/exclusions/remove",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "GET",
   "path": "/api/collections/:id/items",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -1242,11 +1260,38 @@
   "group": "/api/collections"
  },
  {
+  "method": "POST",
+  "path": "/api/collections/:id/recheck",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
   "method": "GET",
   "path": "/api/collections/memberships",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "GET",
+  "path": "/api/collections/rules/fields",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "POST",
+  "path": "/api/collections/rules/preview",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
   "viewerTier": false,
   "group": "/api/collections"
  },

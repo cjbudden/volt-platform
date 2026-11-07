@@ -441,7 +441,7 @@
     },
     "Collections": {
       "displayName": "Collections",
-      "description": "Your own nested groupings of library media: a collection per channel or show, with sub-collections for each week's playlist. Media can be in any number of collections, each collection keeps its own order, and removing a collection never removes media.\n\n**Use it to:**\n- List the tree with `GET /api/collections` (flat, with counts and durations; build the tree from `parentId`)\n- Make, rename, recolour or move one with `POST /api/collections` and `PATCH /api/collections/{id}`\n- Add or take out media with `POST /api/collections/{id}/items` and `POST /api/collections/{id}/items/remove`, and order it with `PUT /api/collections/{id}/items/order`\n- Read a collection in its order with `GET /api/collections/{id}/items` (`deep=true` adds its sub-collections)\n- Filter the library to a collection with `GET /api/vod?collection={id}&collection_deep=true`\n\n**Credential:** admin session or account secret key (Media library: view to read, manage to change).\n\n**Good to know:** collections nest at most 6 levels deep, and a name is unique within its level."
+      "description": "Your own nested groupings of library media: a collection per channel or show, with sub-collections for each week's playlist. Media can be in any number of collections, each collection keeps its own order, and removing a collection never removes media.\n\n**Use it to:**\n- List the tree with `GET /api/collections` (flat, with counts and durations; build the tree from `parentId`)\n- Make, rename, recolour or move one with `POST /api/collections` and `PATCH /api/collections/{id}`\n- Add or take out media with `POST /api/collections/{id}/items` and `POST /api/collections/{id}/items/remove`, and order it with `PUT /api/collections/{id}/items/order`\n- Read a collection in its order with `GET /api/collections/{id}/items` (`deep=true` adds its sub-collections)\n- Filter the library to a collection with `GET /api/vod?collection={id}&collection_deep=true`\n\n- Give a collection rules with `PATCH /api/collections/{id}` (`rules`), preview them with `POST /api/collections/rules/preview`, and list the fields with `GET /api/collections/rules/fields`; members are rule matches plus titles added by hand, minus titles people left out\n\n**Credential:** admin session or account secret key (Media library: view to read, manage to change).\n\n**Good to know:** collections nest at most 6 levels deep, and a name is unique within its level."
     },
     "Metadata Lists": {
       "hidden": true,
@@ -684,7 +684,7 @@
   "PATCH /api/collections/:id": {
     "tag": "Collections",
     "summary": "Change a collection",
-    "description": "Rename, describe, recolour, reorder, or move it (`parentId`). It can't move inside itself."
+    "description": "Rename, describe, recolour, reorder, or move it (`parentId`). It can't move inside itself. Also takes `rules` (a tree: `{ match: all|any, conditions: [ {field, op, value} | group ] }`, or `null` to turn rules off) and `orderBy` (`manual`, `title`, `-created_at`, `-first_aired_at`, `-duration` and others from `GET /api/collections/rules/fields`). Saving rules matches the whole library at once."
   },
   "DELETE /api/collections/:id": {
     "tag": "Collections",
@@ -922,5 +922,30 @@
   "POST /api/archive/copies/:id/verify": {
     "summary": "Check an archive copy now",
     "description": "Queues a re-check: the site agent reads the copy back from the target. The same checksum keeps it `verified` with a new `verifiedAt`; a different one makes it `corrupt`, a file that is gone `missing`. 202 when queued, 200 when a check is already waiting; 409 `not_copied` for a copy that was never made. Needs the Mirror and Archive add-on."
+  },
+  "GET /api/collections/rules/fields": {
+    "tag": "Collections",
+    "summary": "Fields rules can use",
+    "description": "The fields a collection rule can test (title, genre, tags, length, content type, rights profile, provider, dates, and the account's content type fields as `meta:<key>`), each with its type; the operators for each type; the choices for lists and references; and the orders a collection can have."
+  },
+  "POST /api/collections/rules/preview": {
+    "tag": "Collections",
+    "summary": "Preview rules",
+    "description": "`{ \"rules\" }`: how many of the account's titles the rules match now (`count`), with a few of them (`sample`). Nothing is saved."
+  },
+  "POST /api/collections/:id/recheck": {
+    "tag": "Collections",
+    "summary": "Match a collection's rules now",
+    "description": "Matches the rules over the whole library at once and returns what was `added` and `removed`. Rules also run within seconds of any title changing, and in full every night."
+  },
+  "GET /api/collections/:id/exclusions": {
+    "tag": "Collections",
+    "summary": "Titles left out of a rule collection",
+    "description": "What people took out of a rule collection. The rules leave these out until they are let back in."
+  },
+  "POST /api/collections/:id/exclusions/remove": {
+    "tag": "Collections",
+    "summary": "Let titles back in",
+    "description": "`{ \"assetIds\" }`: removes them from the left-out list and lets the rules decide again at once."
   }
 }

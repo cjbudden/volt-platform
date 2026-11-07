@@ -468,6 +468,13 @@
       "alt": "The Collections page: the tree of collections on the left, and a sub-collection open on the right with its name, description, colour and parent, then its media in order"
     },
     {
+      "name": "collections-rules",
+      "guide": "guides/collections.md",
+      "path": "/collections/7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a04",
+      "waitFor": ".crb-preview b",
+      "alt": "A rule-based collection: the Rules card with two conditions and the live count, the order, and its media marked Rule or Added"
+    },
+    {
       "name": "encoding-queue",
       "guide": "guides/encoding-queue.md",
       "path": "/encode-jobs",

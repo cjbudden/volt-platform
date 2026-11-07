@@ -81,7 +81,7 @@
   {
    "name": "Collections",
    "x-displayName": "Collections",
-   "description": "Your own nested groupings of library media: a collection per channel or show, with sub-collections for each week's playlist. Media can be in any number of collections, each collection keeps its own order, and removing a collection never removes media.\n\n**Use it to:**\n- List the tree with `GET /api/collections` (flat, with counts and durations; build the tree from `parentId`)\n- Make, rename, recolour or move one with `POST /api/collections` and `PATCH /api/collections/{id}`\n- Add or take out media with `POST /api/collections/{id}/items` and `POST /api/collections/{id}/items/remove`, and order it with `PUT /api/collections/{id}/items/order`\n- Read a collection in its order with `GET /api/collections/{id}/items` (`deep=true` adds its sub-collections)\n- Filter the library to a collection with `GET /api/vod?collection={id}&collection_deep=true`\n\n**Credential:** admin session or account secret key (Media library: view to read, manage to change).\n\n**Good to know:** collections nest at most 6 levels deep, and a name is unique within its level."
+   "description": "Your own nested groupings of library media: a collection per channel or show, with sub-collections for each week's playlist. Media can be in any number of collections, each collection keeps its own order, and removing a collection never removes media.\n\n**Use it to:**\n- List the tree with `GET /api/collections` (flat, with counts and durations; build the tree from `parentId`)\n- Make, rename, recolour or move one with `POST /api/collections` and `PATCH /api/collections/{id}`\n- Add or take out media with `POST /api/collections/{id}/items` and `POST /api/collections/{id}/items/remove`, and order it with `PUT /api/collections/{id}/items/order`\n- Read a collection in its order with `GET /api/collections/{id}/items` (`deep=true` adds its sub-collections)\n- Filter the library to a collection with `GET /api/vod?collection={id}&collection_deep=true`\n\n- Give a collection rules with `PATCH /api/collections/{id}` (`rules`), preview them with `POST /api/collections/rules/preview`, and list the fields with `GET /api/collections/rules/fields`; members are rule matches plus titles added by hand, minus titles people left out\n\n**Credential:** admin session or account secret key (Media library: view to read, manage to change).\n\n**Good to know:** collections nest at most 6 levels deep, and a name is unique within its level."
   },
   {
    "name": "Daypart Presets",
@@ -8761,7 +8761,79 @@
     "tags": [
      "Collections"
     ],
-    "description": "Rename, describe, recolour, reorder, or move it (`parentId`). It can't move inside itself.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "description": "Rename, describe, recolour, reorder, or move it (`parentId`). It can't move inside itself. Also takes `rules` (a tree: `{ match: all|any, conditions: [ {field, op, value} | group ] }`, or `null` to turn rules off) and `orderBy` (`manual`, `title`, `-created_at`, `-first_aired_at`, `-duration` and others from `GET /api/collections/rules/fields`). Saving rules matches the whole library at once.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/collections/{id}/exclusions": {
+   "get": {
+    "operationId": "getCollectionsByIDExclusions",
+    "summary": "Titles left out of a rule collection",
+    "tags": [
+     "Collections"
+    ],
+    "description": "What people took out of a rule collection. The rules leave these out until they are let back in.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/collections/{id}/exclusions/remove": {
+   "post": {
+    "operationId": "postCollectionsByIDExclusionsRemove",
+    "summary": "Let titles back in",
+    "tags": [
+     "Collections"
+    ],
+    "description": "`{ \"assetIds\" }`: removes them from the left-out list and lets the rules decide again at once.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []
@@ -8932,6 +9004,42 @@
     }
    }
   },
+  "/api/collections/{id}/recheck": {
+   "post": {
+    "operationId": "postCollectionsByIDRecheck",
+    "summary": "Match a collection's rules now",
+    "tags": [
+     "Collections"
+    ],
+    "description": "Matches the rules over the whole library at once and returns what was `added` and `removed`. Rules also run within seconds of any title changing, and in full every night.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/collections/memberships": {
    "get": {
     "operationId": "getCollectionsMemberships",
@@ -8940,6 +9048,58 @@
      "Collections"
     ],
     "description": "`assetIds` comma separated. Returns the collection ids for each asset.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/collections/rules/fields": {
+   "get": {
+    "operationId": "getCollectionsRulesFields",
+    "summary": "Fields rules can use",
+    "tags": [
+     "Collections"
+    ],
+    "description": "The fields a collection rule can test (title, genre, tags, length, content type, rights profile, provider, dates, and the account's content type fields as `meta:<key>`), each with its type; the operators for each type; the choices for lists and references; and the orders a collection can have.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/collections/rules/preview": {
+   "post": {
+    "operationId": "postCollectionsRulesPreview",
+    "summary": "Preview rules",
+    "tags": [
+     "Collections"
+    ],
+    "description": "`{ \"rules\" }`: how many of the account's titles the rules match now (`count`), with a few of them (`sample`). Nothing is saved.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []

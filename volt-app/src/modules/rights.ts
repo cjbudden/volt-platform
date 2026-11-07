@@ -206,6 +206,10 @@ rightsRouter.put('/profiles/:id', asyncHandler(async (req, res) => {
     `UPDATE rights_profiles SET ${COLS.map((k, i) => `${k} = $${i + 3}`).join(', ')}, updated_at = now() WHERE id = $1 AND account_id = $2 RETURNING *`,
     [p.id, acct, ...COLS.map((k) => (c as any)[k])]);
   invalidateRights(p.id);
+  // Rule collections that read the provider or the profile are matched again soon (build queue C1).
+  if ((p.provider ?? null) !== (row.provider ?? null)) {
+    await import('../services/collectionRules').then((m) => m.markStale(acct, ['provider'])).catch(() => {});
+  }
   const before = profileView(p), after = profileView(row);
   const changes: Record<string, { from: any; to: any }> = {};
   for (const k of Object.keys(after) as (keyof typeof after)[]) {

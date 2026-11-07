@@ -18,8 +18,13 @@ import './collections.css'
 export interface Collection {
   id: string; parentId: string | null; name: string; description: string | null; color: string | null; sortOrder: number
   itemCount: number; totalCount: number; durationMs: number; createdAt?: string; updatedAt?: string
+
+  /** Rule-based (build queue C1) and how its media is ordered. */
+  hasRules?: boolean; orderBy?: string
 }
-export interface CollectionItem { id: string; title: string | null; durationMs: number; posterKey: string | null; series: string | null; genre: string | null; collectionId: string; position: number }
+export interface CollectionItem { id: string; title: string | null; durationMs: number; posterKey: string | null; series: string | null; genre: string | null; collectionId: string; position: number
+  /** 'rule': the collection's rules put it here; 'manual': a person did (build queue C1). */
+  source?: 'rule' | 'manual' }
 export interface TreeNode extends Collection { children: TreeNode[]; depth: number }
 
 const J = (b: unknown) => ({ body: JSON.stringify(b) })

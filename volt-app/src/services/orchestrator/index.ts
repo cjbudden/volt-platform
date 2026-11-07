@@ -115,6 +115,24 @@ export function startScheduler(): () => void {
   );
   avail.unref?.();
 
+  // RULE-BASED COLLECTIONS (build queue C1, services/collectionRules.ts):
+  // re-match changed assets every few seconds (the vod_assets trigger queues
+  // them), and match every rule collection in full once a day or when marked
+  // stale. Each task takes its own batch, so several tasks never clash.
+  const colQueue = setInterval(
+    () => import('../collectionRules').then((m) => m.drainRechecks())
+      .catch((e) => console.error('[collections] queue pass error', e)),
+    5_000
+  );
+  colQueue.unref?.();
+  const colFull = setInterval(
+    () => import('../collectionRules').then((m) => m.recheckStale())
+      .then((r) => { if (r.checked) console.log(`[collections] matched ${r.checked} rule collection(s) in full (${r.ms} ms)`); })
+      .catch((e) => console.error('[collections] full re-check error', e)),
+    10 * 60_000
+  );
+  colFull.unref?.();
+
   // MIRROR AND ARCHIVE RE-CHECKS (build queue H3-3): read verified archive
   // copies back on each target's cadence (recheck_days), a bounded batch
   // every half hour. Licensed accounts only; nothing runs without the add-on.

@@ -63,3 +63,27 @@
 .colp-sw button.on{border-color:var(--text)}
 .colp-sw button.none{background:var(--panel-3);color:var(--faint);font-size:12px;line-height:18px}
 .colp-subs{display:flex;flex-wrap:wrap;gap:6px}
+
+/* Rules on a collection (build queue C1) */
+.col-rule{display:inline-flex;vertical-align:-1px;margin-right:4px;color:var(--brand)}
+.col-src{display:inline-block;font-size:var(--fs-xs);font-weight:600;padding:1px 7px;border-radius:999px;background:var(--panel-3);color:var(--muted);margin-right:6px}
+.col-src.rule{background:var(--brand-dim);color:#9db9ff}
+.crb-group{display:flex;flex-direction:column;gap:8px}
+.crb-group.nested{padding:10px 12px;border-radius:var(--radius-sm);background:var(--panel-2);border:1px solid var(--border)}
+.crb-match{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:var(--muted);font-size:var(--fs-sm)}
+.crb-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.crb-row .inp{width:auto}
+.crb-field{min-width:190px}
+.crb-op{min-width:140px}
+.crb-val{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;flex:1 1 200px}
+.crb-val .inp{min-width:120px}
+.crb-and,.crb-unit{color:var(--muted);font-size:var(--fs-sm)}
+.crb-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 10px;border-radius:999px;background:var(--panel-3);font-size:var(--fs-sm)}
+.crb-chip button{background:transparent;border:0;color:var(--muted);cursor:pointer;display:inline-flex;padding:2px}
+.crb-del{margin-left:auto}
+.crb-adds{display:flex;gap:8px}
+.crb-preview{margin-top:12px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--panel-2);display:flex;flex-direction:column;gap:2px}
+.crb-sample{color:var(--muted);font-size:var(--fs-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crb-foot{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-top:1px solid var(--border)}
+.crb-out{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border)}
+.crb-out .t{flex:1 1 200px;font-weight:600}

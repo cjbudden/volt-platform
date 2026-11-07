@@ -16,7 +16,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { query, pool } from '../src/db';
+import { query, one, pool } from '../src/db';
 import { writeAudit } from '../src/services/audit';
 import { fillerPath } from '../src/services/uploads';
 import { imageStore } from '../src/services/imageStore';
@@ -172,6 +172,7 @@ async function main() {
   await seedFrames();
   await seedG8Sections();
   await seedRights();
+  await seedRuleCollection();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -719,6 +720,37 @@ async function seedRights() {
       [assets[i].id, plan[i], i < 2 ? 'watchfolder' : i < 5 ? 'chosen at upload' : `set by ${DOCS_LOGIN.email}`]);
   }
   if (assets[0]) await query(`UPDATE vod_assets SET rights_narrow = '{"territories":["AU","NZ"]}'::jsonb WHERE id = $1`, [assets[0].id]);
+}
+
+/**
+ * A RULE-BASED COLLECTION (build queue C1): short titles added this year,
+ * plus one added by hand and one left out, so the Collections guide shows
+ * rules, the live count, Rule and Added items and the left-out list.
+ */
+async function seedRuleCollection() {
+  const ID = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a04';
+  const rules = { match: 'all', conditions: [
+    { field: 'created_at', op: 'within_last', value: { count: 12, unit: 'month' } },
+    { field: 'duration_min', op: 'lt', value: 60 },
+  ] };
+  await query(
+    `INSERT INTO collections(id, account_id, name, description, color, created_by, rules, order_by) VALUES ($1,$2,'Short and new','Everything under an hour added this year, kept up to date by rules','#3f7bff',$3,$4::jsonb,'-created_at')
+     ON CONFLICT (id) DO UPDATE SET rules = EXCLUDED.rules, order_by = EXCLUDED.order_by, description = EXCLUDED.description`, [ID, ACCOUNT, ADMIN, JSON.stringify(rules)]);
+  const { recompute } = await import('../src/services/collectionRules');
+  await recompute(ID);
+  // The station promo added by hand: it stays whatever the rules say.
+  await query(`INSERT INTO collection_items(collection_id, vod_asset_id, position, added_by, source)
+               SELECT $1, $2, 0, $3, 'manual' WHERE EXISTS (SELECT 1 FROM vod_assets WHERE id = $2)
+               ON CONFLICT (collection_id, vod_asset_id) DO UPDATE SET source = 'manual'`, [ID, '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01', ADMIN]);
+  // One left out by a person, so the guide can show the left-out list.
+  const first = await one<{ vod_asset_id: string }>(`SELECT vod_asset_id FROM collection_items WHERE collection_id = $1 AND source = 'rule' ORDER BY position LIMIT 1`, [ID])
+    .then((r) => r).catch(() => null);
+  // Once: a rerun of the seed leaves the same one out, not another.
+  const already = await one(`SELECT 1 FROM collection_exclusions WHERE collection_id = $1 LIMIT 1`, [ID]);
+  if (first && !already) {
+    await query(`DELETE FROM collection_items WHERE collection_id = $1 AND vod_asset_id = $2`, [ID, first.vod_asset_id]);
+    await query(`INSERT INTO collection_exclusions(collection_id, vod_asset_id, excluded_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [ID, first.vod_asset_id, ADMIN]);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

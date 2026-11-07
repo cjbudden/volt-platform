@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**900 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 702 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**905 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 707 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -408,11 +408,16 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/collections/:id` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/collections/:id` | admin session (Bearer) or account secret key | vod: view |  |
 | PATCH | `/api/collections/:id` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/collections/:id/exclusions` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/collections/:id/exclusions/remove` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/collections/:id/items` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/collections/:id/items` | admin session (Bearer) or account secret key | vod: manage |  |
 | PUT | `/api/collections/:id/items/order` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/collections/:id/items/remove` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/collections/:id/recheck` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/collections/memberships` | admin session (Bearer) or account secret key | vod: view |  |
+| GET | `/api/collections/rules/fields` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/collections/rules/preview` | admin session (Bearer) or account secret key | vod: manage |  |
 
 ### `/api/daypart-presets`
 
