@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**905 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 707 · Platform API: 32 · Machine-to-machine: 36 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**906 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 707 · Platform API: 32 · Machine-to-machine: 37 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1393,6 +1393,7 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | POST | `/api/site-agent/heartbeat` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/jobs/:id/complete` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/jobs/:id/fail` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/jobs/:id/outputs` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/jobs/:id/progress` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/jobs/:id/transfer-url` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/jobs/lease` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |

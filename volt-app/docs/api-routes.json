@@ -5716,6 +5716,15 @@
  },
  {
   "method": "POST",
+  "path": "/api/site-agent/jobs/:id/outputs",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
   "path": "/api/site-agent/jobs/:id/progress",
   "api": "machine",
   "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",

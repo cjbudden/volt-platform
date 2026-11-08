@@ -107,6 +107,94 @@ export async function probeSource(sourcePath: string, onLine: (s: string) => voi
   }
 }
 
+/** What an encode will do: the ladder fitted to the probed source. */
+export interface EncodePlan {
+  ladder: Awaited<ReturnType<typeof loadLadder>>;
+  fit: ReturnType<typeof fitToSource>;
+  audioOnly: boolean;
+  summary: string;
+}
+
+/** The fields of a plan the plan step needs from the payload. */
+export type PlanInput = Pick<VodEncodePayload, 'accountId' | 'ladderGroupId' | 'segmentSeconds' | 'loudnorm'>;
+
+/**
+ * THE PLAN HALF OF vod.encode (build queue H4, HYBRID_SITES.md "One handler,
+ * two halves"): from the probe, decide what is encoded. It always runs in the
+ * cloud, so the upscale policy and the ladder choice stay in one place whether
+ * the encode itself runs here or at a customer's site. In the cloud both
+ * halves still run in the same job, so its behaviour and outputs are unchanged.
+ */
+export async function planEncode(p: PlanInput, probe: SourceProbe, log: Pick<JobLog, 'step'>, ctx?: Pick<JobContext, 'progress'>): Promise<EncodePlan> {
+  // A FILE WITH NO PICTURE IS AN AUDIO ASSET (build queue H2b-4), not a failed
+  // encode. It used to be refused here ("no video track"), so a dropped mp3
+  // could only go to review. Now it takes the sound-only path: one AAC
+  // rendition on the same encoder contract as every other encode's sound
+  // (ladder_args.py audio_track_args), packaged HLS and DASH like a video, and
+  // the library and the player know it is audio from the probe's hasVideo.
+  // A file with neither picture nor sound has nothing to encode.
+  const audioOnly = probe.hasVideo === false;
+  if (audioOnly && probe.hasAudio === false) {
+    throw new PermanentError('this file has neither picture nor sound, so there is nothing to encode', 'no_media');
+  }
+  if (audioOnly) log.step('no picture in this file: encoding it as an audio asset (sound only)');
+
+  await ctx?.progress(6, 'choosing the ladder');
+  let ladder;
+  try {
+    ladder = p.ladderGroupId
+      ? await loadLadder(p.ladderGroupId, p.accountId)
+      : await resolveLadderFor(p.accountId, null);
+  } catch (e: any) {
+    // A missing or empty ladder is a configuration fact, not a transient one.
+    if (e instanceof NoLadderError || /no rungs|no renditions|not found/.test(String(e?.message))) {
+      throw new PermanentError(String(e?.message ?? e), 'no_ladder');
+    }
+    throw e;
+  }
+
+  // Sound only: no rungs to fit. The ladder still gives the segment length
+  // and the packaging, so an audio asset cuts and packages like the rest.
+  const fit: ReturnType<typeof fitToSource> = audioOnly
+    ? { ...fitToSource(ladder, { height: 1080 }), kept: [], dropped: [], adapted: [], notes: ['sound only: one AAC rendition, 128 kb/s stereo 48 kHz'] } as any
+    : fitToSource(ladder, probe);
+  const summary = audioOnly ? 'sound only, AAC 128 kb/s' : describeFit(fit);
+  if (!audioOnly && !fit.kept.length) {
+    // fitToSource is written so this cannot happen; if it ever does, refusing is
+    // far better than an encode that produces nothing and reports success.
+    throw new PermanentError('the ladder fitted no rungs to this source', 'empty_ladder');
+  }
+  log.step(`ladder "${ladder.groupName}": ${summary}`);
+  for (const n of fit.notes ?? []) log.step(`  ${n}`);
+  if (fit.dropped.length) log.step(`  dropped: ${fit.dropped.map((r) => `${r.height}p (${r.why})`).join(', ')}`);
+  return { ladder, fit, audioOnly, summary };
+}
+
+/**
+ * The encoder's job file without the paths, which belong to whoever runs it:
+ * this box (input, out_dir, work_dir under clips/vod) or a site worker (its
+ * own scratch folder). Both run vod_encoder.py with the same settings, so a
+ * site encode packages exactly as a cloud one does.
+ */
+export function encoderJobFor(plan: EncodePlan, p: PlanInput, probe: SourceProbe & { durationMs?: number | null }): Record<string, unknown> {
+  const { ladder, fit, audioOnly } = plan;
+  return {
+    segment_seconds: p.segmentSeconds ?? ladder.segmentSeconds,
+    fps: fit.fps,
+    loudnorm: !!p.loudnorm,
+    gpu: ladder.codecBackend === 'nvenc',
+    packaging: ladder.packaging,
+    has_audio: probe.hasAudio !== false,
+    // no video outputs at all (vod_encoder.py): the asset is its sound
+    audio_only: audioOnly,
+    // a fixed-size ladder (frame_mode 'box'): every rung in its 16:9 box (vod_encoder.py box_filter)
+    ...(fit.boxed ? { fit: 'box' } : {}),
+    ladder: fit.kept,
+    // For the script's "progress encode N%" lines.
+    duration_sec: probe.durationMs ? probe.durationMs / 1000 : null,
+  };
+}
+
 /** What happened to each output beyond the renditions, for the Encoding queue's job view. */
 type StepOutcome = { state: 'ok' | 'failed' | 'skipped'; count?: number; detail?: string; error?: string };
 
@@ -159,47 +247,8 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     throw new PermanentError(
       `the source could not be read (${probe.error ?? 'no reason given'})`, 'unreadable_source');
   }
-  // A FILE WITH NO PICTURE IS AN AUDIO ASSET (build queue H2b-4), not a failed
-  // encode. It used to be refused here ("no video track"), so a dropped mp3
-  // could only go to review. Now it takes the sound-only path: one AAC
-  // rendition on the same encoder contract as every other encode's sound
-  // (ladder_args.py audio_track_args), packaged HLS and DASH like a video, and
-  // the library and the player know it is audio from the probe's hasVideo.
-  // A file with neither picture nor sound has nothing to encode.
-  const audioOnly = probe.hasVideo === false;
-  if (audioOnly && probe.hasAudio === false) {
-    throw new PermanentError('this file has neither picture nor sound, so there is nothing to encode', 'no_media');
-  }
-  if (audioOnly) log.step('no picture in this file: encoding it as an audio asset (sound only)');
-
-  await ctx.progress(6, 'choosing the ladder');
-  let ladder;
-  try {
-    ladder = p.ladderGroupId
-      ? await loadLadder(p.ladderGroupId, p.accountId)
-      : await resolveLadderFor(p.accountId, null);
-  } catch (e: any) {
-    // A missing or empty ladder is a configuration fact, not a transient one.
-    if (e instanceof NoLadderError || /no rungs|no renditions|not found/.test(String(e?.message))) {
-      throw new PermanentError(String(e?.message ?? e), 'no_ladder');
-    }
-    throw e;
-  }
-
-  // Sound only: no rungs to fit. The ladder still gives the segment length
-  // and the packaging, so an audio asset cuts and packages like the rest.
-  const fit: ReturnType<typeof fitToSource> = audioOnly
-    ? { ...fitToSource(ladder, { height: 1080 }), kept: [], dropped: [], adapted: [], notes: ['sound only: one AAC rendition, 128 kb/s stereo 48 kHz'] } as any
-    : fitToSource(ladder, probe);
-  const summary = audioOnly ? 'sound only, AAC 128 kb/s' : describeFit(fit);
-  if (!audioOnly && !fit.kept.length) {
-    // fitToSource is written so this cannot happen; if it ever does, refusing is
-    // far better than an encode that produces nothing and reports success.
-    throw new PermanentError('the ladder fitted no rungs to this source', 'empty_ladder');
-  }
-  log.step(`ladder "${ladder.groupName}": ${summary}`);
-  for (const n of fit.notes ?? []) log.step(`  ${n}`);
-  if (fit.dropped.length) log.step(`  dropped: ${fit.dropped.map((r) => `${r.height}p (${r.why})`).join(', ')}`);
+  const plan = await planEncode(p, probe, log, ctx);
+  const { ladder, fit, audioOnly, summary } = plan;
   await ctx.progress(10, `encoding ${summary}`);
 
   const outDir = outDirFor(p.vodAssetId);
@@ -209,19 +258,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     input: p.sourcePath,
     out_dir: outDir,
     work_dir: join(outDir, '.enc'),
-    segment_seconds: p.segmentSeconds ?? ladder.segmentSeconds,
-    fps: fit.fps,
-    loudnorm: !!p.loudnorm,
-    gpu: ladder.codecBackend === 'nvenc',
-    packaging: ladder.packaging,
-    has_audio: probe.hasAudio !== false,
-    // no video outputs at all (vod_encoder.py): the asset is its sound
-    audio_only: audioOnly,
-    // a fixed-size ladder (frame_mode 'box'): every rung in its 16:9 box (vod_encoder.py box_filter)
-    ...(fit.boxed ? { fit: 'box' } : {}),
-    ladder: fit.kept,
-    // For the script's "progress encode N%" lines.
-    duration_sec: probe.durationMs ? probe.durationMs / 1000 : null,
+    ...encoderJobFor(plan, p, probe),
   }, null, 1));
 
   // THE LEASE IS 120 s AND AN ENCODE IS NOT. Two things keep it: a timer that beats
@@ -274,6 +311,38 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   }
   log.step(`packaged: ${[master ? 'HLS master.m3u8' : null, mpd ? 'DASH manifest.mpd' : null].filter(Boolean).join(', ')}`);
 
+  return finishEncode(ctx, log, { p, probe, plan, master, mpd, outDir, sourcePath: p.sourcePath, srcBytes, result });
+}
+
+/** What the execute half produced, for the finish. */
+export interface EncodeOutcome {
+  p: Pick<VodEncodePayload, 'vodAssetId' | 'accountId' | 'segmentSeconds'>;
+  probe: SourceProbe & Record<string, any>;
+  plan: EncodePlan;
+  master: string | null;
+  mpd: string | null;
+  outDir: string;
+  /** The source on this box; null when it stayed at a site (H4). */
+  sourcePath: string | null;
+  srcBytes: number | null;
+  /** vod_encoder.py's JSON result line (zero_start, loudnorm). */
+  result: any;
+}
+
+/**
+ * THE FINISH OF vod.encode: record what was produced on the asset, make the
+ * MP4 when the source allows, push to the origin bucket, then the stills,
+ * sprite sheets and follow-up jobs. Shared by the cloud encode and a site
+ * encode whose package the cloud has verified (services/sites/siteEncode.ts),
+ * so an asset encoded at a site is recorded exactly as one encoded here.
+ */
+export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLog, o: EncodeOutcome): Promise<Record<string, unknown>> {
+  const { p, probe, plan: { ladder, fit, audioOnly, summary }, master, mpd, outDir, srcBytes, result } = o;
+  const sourcePath = o.sourcePath;
+  // The stills and sprite sheets read the picture from the source; a site
+  // encode's source is not here, so they read the packaged master instead
+  // (ffmpeg takes the top rendition), which is the picture viewers get.
+  const pictureSource = sourcePath ?? join(outDir, 'master.m3u8');
   await ctx.progress(95, 'recording what was produced');
   // WHAT THE FILES CARRY, read back from the packaged init segments while they
   // are still on this disk (services/media/mediaFacts.ts): the real profile and
@@ -347,11 +416,16 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     const okAudio = probe.hasAudio === false || !probe.audioTracks?.length || ac === 'aac' || ac === 'mp4a';
     if (audioOnly) {
       log.step('MP4: none for a sound-only asset; HLS and DASH');
-    } else if (/\.(mp4|m4v|mov)$/i.test(p.sourcePath) && okVideo && okAudio) {
+    } else if (!sourcePath) {
+      // A SITE ENCODE (H4): the source stayed at the customer's site, so there is
+      // nothing here to repackage. HLS and DASH only, as for a source browsers
+      // cannot play.
+      log.step('MP4: not made, the source is at the site; HLS and DASH only, no MP4 to download');
+    } else if (/\.(mp4|m4v|mov)$/i.test(sourcePath) && okVideo && okAudio) {
       await ctx.progress(96, 'making the MP4');
       const target = join(outDir, 'file.mp4');
       const r = await new Promise<{ code: number | null; err: string }>((resolve) => {
-        const ch = spawn(config.clips.ffmpegBin, ['-y', '-v', 'error', '-i', p.sourcePath, '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-dn', '-sn', '-movflags', '+faststart', target]);
+        const ch = spawn(config.clips.ffmpegBin, ['-y', '-v', 'error', '-i', sourcePath, '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-dn', '-sn', '-movflags', '+faststart', target]);
         let err = ''; ch.stderr.on('data', (d) => { err += String(d); });
         ch.on('error', (e) => resolve({ code: -1, err: String(e?.message ?? e) }));
         ch.on('close', (code) => resolve({ code, err }));
@@ -365,9 +439,9 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   // THE SOURCE'S FACTS, read fresh for the asset page (resolution, bitrates,
   // codecs, profile, colour), so files uploaded before the probe recorded them
   // show them too.
-  try {
+  if (sourcePath) try {
     const { probeFileFacts } = await import('../../ingest/metadata');
-    const facts = await probeFileFacts(p.sourcePath);
+    const facts = await probeFileFacts(sourcePath);
     if (facts) await query(`UPDATE vod_assets SET ingest = jsonb_set(COALESCE(ingest, '{}'::jsonb), '{probe}', $2::jsonb) WHERE id = $1`, [p.vodAssetId, JSON.stringify(facts)]);
   } catch (e: any) { log.warn(`source facts not refreshed: ${String(e?.message ?? e).slice(0, 200)}`); }
 
@@ -438,7 +512,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     try {
       await ctx.progress(98, 'choosing a thumbnail');
       const { extractFrames } = await import('../../media/assetImage');
-      const c = await extractFrames(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+      const c = await extractFrames(p.vodAssetId, p.accountId, pictureSource, probe.durationMs ?? null);
       outputs.thumbnails = { state: c.length ? 'ok' : 'failed', count: c.length, ...(c.length ? {} : { error: 'no frames could be read' }) };
       log[c.length ? 'step' : 'warn'](`thumbnails: ${c.length} candidate stills`);
     } catch (e: any) {
@@ -447,7 +521,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     }
     try {
       await ctx.progress(99, 'building the sprite sheets');
-      const sp = await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, p.sourcePath, probe.durationMs ?? null);
+      const sp = await (await import('../../thumbnails/fileSprites')).buildFileSprites(p.vodAssetId, p.accountId, pictureSource, probe.durationMs ?? null);
       if (sp) {
         const tiles = sp.sheets.reduce((a, s) => a + s.tiles, 0);
         outputs.sprites = { state: 'ok', count: sp.sheets.length, detail: `${tiles} previews, one every ${sp.intervalMs / 1000} s` };

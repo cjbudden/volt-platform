@@ -24,6 +24,7 @@
 //  of its own site did not hand it.
 // ============================================================================
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import { createReadStream, createWriteStream, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -38,6 +39,7 @@ import type { SitePrincipal } from './sites';
 import { requireApprovedHost } from './siteWatchfolders';
 import { licenceRequired } from './licences';
 import { ARCHIVE_JOB_TYPES, attemptFailed, isArchiveJob, judge } from '../archive/archive';
+import { declareOutputs, isSiteEncodeJob, judgeSiteEncode, siteEncodeAttemptFailed } from './siteEncode';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LEASE_PREFIX = 'site-host:';
@@ -129,14 +131,18 @@ export async function complete(p: SitePrincipal, jobId: string, b: any) {
   if (JSON.stringify(result).length > 64 * 1024) throw badRequest('result is limited to 64 KB');
   // ARCHIVE JOBS ARE JUDGED BEFORE THEY COUNT (H3-2): a copy whose checksum
   // at the target does not match is a failed attempt, retried, never done.
+  // So are site encodes (H4): a probe the ladder cannot be fitted to, or a
+  // package that does not verify, is a failed attempt.
   let apply: (() => Promise<void>) | null = null;
-  if (isArchiveJob(job.type)) {
-    const v = await judge(job, result);
+  const judged = isArchiveJob(job.type) || isSiteEncodeJob(job.type);
+  if (judged) {
+    const v = isArchiveJob(job.type) ? await judge(job, result) : await judgeSiteEncode(job, result);
     if (!v.ok) {
       if (v.status === 400) throw Object.assign(badRequest(v.message), { code: v.code });
       if (!(await fail(job.id, v.message, { code: v.code, permanent: v.permanent === true, workerId: job.claimed_by! }))) throw leaseLost('it changed hands');
       const now = await one<JobRow>(`SELECT state, run_after FROM jobs WHERE id = $1`, [job.id]);
-      await attemptFailed(job, v.message, v.code, now?.state === 'failed');
+      if (isArchiveJob(job.type)) await attemptFailed(job, v.message, v.code, now?.state === 'failed');
+      else await siteEncodeAttemptFailed(job, v.message, v.code, now?.state === 'failed');
       throw Object.assign(new ApiError(v.status, v.message), { code: v.code, state: now?.state, retryAfter: now?.state === 'queued' ? now.run_after : null });
     }
     apply = v.apply;
@@ -153,7 +159,28 @@ export async function failJob(p: SitePrincipal, jobId: string, b: any) {
   if (!(await fail(job.id, message, { code, permanent: b?.permanent === true, workerId: job.claimed_by! }))) throw leaseLost('it changed hands');
   const now = await one<JobRow>(`SELECT state, run_after FROM jobs WHERE id = $1`, [job.id]);
   if (isArchiveJob(job.type)) await attemptFailed(job, message, code, now?.state === 'failed');
+  if (isSiteEncodeJob(job.type)) await siteEncodeAttemptFailed(job, message, code, now?.state === 'failed');
   return { ok: true, state: now?.state, retryAfter: now?.state === 'queued' ? now.run_after : null };
+}
+
+/**
+ * A site encode says what it produced (H4): each file becomes one upload
+ * transfer of this job, into a staging folder of this attempt, held to the
+ * declared checksum. The host still names no path of its own on this side.
+ */
+export async function outputs(p: SitePrincipal, jobId: string, b: any) {
+  const job = await heldJob(p, jobId, b?.leaseId);
+  const { declared, transfers, staging } = declareOutputs(job, b?.files, b?.append === true);
+  const kept = transfersOf(job).filter((t) => !t.name.startsWith('out/'));
+  const r = await one<any>(
+    `UPDATE jobs SET payload = payload || jsonb_build_object('declared', $2::jsonb, 'transfers', $3::jsonb, 'staging', $5::text)
+      WHERE id = $1 AND state = 'running' AND claimed_by = $4 RETURNING id`,
+    [job.id, JSON.stringify(declared), JSON.stringify([...kept, ...transfers]), job.claimed_by, staging]);
+  if (!r) throw leaseLost('it changed hands');
+  // An earlier attempt's upload (its lease was reaped mid-upload) is not kept.
+  const before = job.payload?.staging;
+  if (typeof before === 'string' && before !== staging) await rm(before, { recursive: true, force: true }).catch(() => {});
+  return { ok: true, files: declared.length, bytes: declared.reduce((a, d) => a + d.bytes, 0), transfers: transfers.map((t) => ({ name: t.name, direction: t.direction, bytes: t.bytes, sha256: t.sha256 })) };
 }
 
 // ---- transfer URLs -------------------------------------------------------------

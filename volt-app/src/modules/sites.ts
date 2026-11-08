@@ -41,6 +41,7 @@
  *   POST   /api/site-agent/jobs/:id/complete           { leaseId, result? }
  *   POST   /api/site-agent/jobs/:id/fail               { leaseId, error, code?, permanent? } retried with backoff unless permanent
  *   POST   /api/site-agent/jobs/:id/transfer-url       { leaseId, name } one URL for one object the job lists
+ *   POST   /api/site-agent/jobs/:id/outputs            { leaseId, files: [{ path, bytes, sha256 }] } a site encode's package (H4)
  *   GET|PUT /api/site-agent/transfers/:token           a signed transfer of a file on this server (no credential: the URL is it)
  */
 import { Router } from 'express';
@@ -309,6 +310,12 @@ siteAgentRouter.post('/jobs/:id/fail', asyncHandler(async (req, res) => {
 siteAgentRouter.post('/jobs/:id/transfer-url', asyncHandler(async (req, res) => {
   const p = await S.authenticateSite(req.headers.authorization);
   res.json(await J.transferUrl(p, req.params.id, req.body ?? {}));
+}));
+
+// A site encode declares its package; each file becomes an upload transfer of the job (H4).
+siteAgentRouter.post('/jobs/:id/outputs', asyncHandler(async (req, res) => {
+  const p = await S.authenticateSite(req.headers.authorization);
+  res.json(await J.outputs(p, req.params.id, req.body ?? {}));
 }));
 
 /**
