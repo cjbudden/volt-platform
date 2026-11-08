@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.66.0 (2026-11-08)
+
+### Product (in customer release notes)
+
+- added · Sites: Site servers can now be made ready to encode at a Hybrid Site: started with the Volt encoder image, the agent runs the encoder in Docker on the server where the file sits and sends only the finished streams to Volt, which checks every file before the video plays. Encodes planned for an NVIDIA graphics card go only to servers that have one. Choosing Encode at site on an on-prem watchfolder follows in a later release.
+
+### Internal
+
+- added · Sites: Site encode jobs whose server stops reporting drop their half upload, and on the last attempt the asset says why; new site-encode-worker suite runs the real agent worker against the API.
+
 ## 0.65.0 (2026-11-08)
 
 ### Internal
