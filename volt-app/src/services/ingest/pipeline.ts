@@ -14,7 +14,7 @@ import { resolveEffectiveFields } from '../../modules/metadataSchemas';
 import { resolveIngest, kindOf, type IngestRule, type FileFacts, type IngestSettings, type Resolved } from './rules';
 import { applyNaming, type NamingResult } from './naming';
 import { findMatch, decideDuplicate, type Decision } from './duplicates';
-import { extract, candidates, mergeMetadata, missingRequired, type Extracted } from './metadata';
+import { extract, extractFromFacts, candidates, mergeMetadata, missingRequired, type Extracted } from './metadata';
 import { typeForIngest, ingestFill, afterIngest, loadSettings, type Reading } from './filenameApply';
 import { buildPayload, sidecarKey, toXml, signWebhook, type IngestPayload } from './payload';
 import { config } from '../../config';
@@ -120,7 +120,18 @@ export interface LandedFile {
    *  asset when it is a real title, see givenTitle(). */
   givenName?: string | null;
   item?: IngestSettings | null;
+  /**
+   * THE FILE IS AT A SITE, NOT HERE (build queue H4-3, Encode at site). The
+   * same rules, naming, duplicate check and metadata run on the facts the site
+   * agent sent (the start of the file and the site's probe); nothing is moved,
+   * written beside it, landed in the bucket or copied by a rule, because the
+   * original stays on the customer's storage. `path` is the site's path.
+   */
+  atSite?: SiteSource & { head: Buffer; probe?: unknown } | null;
 }
+
+/** Where an Encode at site original is kept: recorded on the asset as `ingest.siteSource`. */
+export interface SiteSource { siteId: string; folderId: string; itemId: number; sitePath: string; objectKey: string }
 
 /**
  * The upload's own name, when it is a title someone chose. The console opens an
@@ -160,7 +171,12 @@ export interface IngestOutcome {
  */
 export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   const all = await loadRules(f.accountId);
-  const extracted = await extract(f.path, { originalName: f.originalName, bytes: f.bytes, sha256: f.sha256, sourcePath: f.relativePath ?? null }, f.declaredMime);
+  const fileFacts = { originalName: f.originalName, bytes: f.bytes, sha256: f.sha256, sourcePath: f.relativePath ?? null };
+  const extracted = f.atSite
+    ? extractFromFacts(f.atSite.head, fileFacts, f.declaredMime, f.atSite.probe)
+    : await extract(f.path, fileFacts, f.declaredMime);
+  const siteSource: SiteSource | null = f.atSite
+    ? { siteId: f.atSite.siteId, folderId: f.atSite.folderId, itemId: f.atSite.itemId, sitePath: f.atSite.sitePath, objectKey: f.atSite.objectKey } : null;
   const facts: FileFacts = {
     name: f.originalName, relativePath: f.relativePath, bytes: f.bytes, mime: extracted.type.mime, kind: extracted.type.kind,
     durationSec: extracted.probe?.durationSec ?? null, height: extracted.probe?.video?.height ?? null, hasTags: !!(extracted.id3 && Object.keys(extracted.id3).length > 1),
@@ -227,7 +243,7 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   else if (duplicate.outcome === 'skip' || duplicate.outcome === 'ask') status = 'duplicate';
   else if (missing.length) status = 'awaiting_metadata';
 
-  if (status !== 'rejected' && duplicate.outcome !== 'skip') {
+  if (status !== 'rejected' && duplicate.outcome !== 'skip' && !siteSource) {
     const root = dirname(f.path);
     const key = duplicate.outcome === 'version' || duplicate.outcome === 'rename' ? (naming.dir ? `${naming.dir}/${duplicate.name}` : duplicate.name) : naming.key;
     const target = join(root, key);
@@ -243,7 +259,7 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   // the destination the object and its sidecar go there too and the library
   // records the S3 uri as the object key.
   let store = 'local'; let objectUri: string | null = null;
-  const dest = status === 'ingested' || status === 'awaiting_metadata' ? await objectDestination().catch(() => null) : null;
+  const dest = !siteSource && (status === 'ingested' || status === 'awaiting_metadata') ? await objectDestination().catch(() => null) : null;
   if (dest) {
     try { const put = await dest.put(finalPath, `${f.accountId}/${naming.key}`, extracted.type.mime); objectUri = put.uri; store = dest.store; }
     catch (e) { console.warn('[ingest] destination put failed, object stays local', e); }
@@ -271,11 +287,11 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
             source_key = $10, awaiting_metadata = $11, updated_at = now()
       WHERE id = $1`,
     [f.assetId, f.originalName, f.relativePath ?? null, f.sha256, extracted.type.mime,
-     JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store }),
-     JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, finalPath, missing.length ? missing : null]);
+     JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store, ...(siteSource ? { siteSource } : {}) }),
+     JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, siteSource ? null : finalPath, missing.length ? missing : null]);
 
   let sidecarPath: string | null = null;
-  if (status !== 'rejected' && duplicate.outcome !== 'skip' && s.sidecar !== 'none') {
+  if (status !== 'rejected' && duplicate.outcome !== 'skip' && s.sidecar !== 'none' && !siteSource) {
     const text = s.sidecar === 'xml' ? toXml(payload) : JSON.stringify(payload, null, 2);
     try {
       const sc = join(dirname(finalPath), sidecarKey(finalPath.split('/').pop()!, s.sidecar));
@@ -302,7 +318,7 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   // rejected file is quarantined where it is. Locally this changes nothing.
   // If the bucket refuses, the file stays on this disk and the encode still
   // works when this task takes it; the warning says why another task cannot.
-  if (status !== 'rejected') {
+  if (status !== 'rejected' && !siteSource) {
     try {
       const { landVodSource, vodSourceDriver } = await import('../media/vodSource');
       if (vodSourceDriver() === 's3') {
@@ -318,7 +334,7 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
   // storage targets its publishing rule names for ingest. After the landing
   // above, so the copy reads the original from its final address. A skipped
   // duplicate is not a new original. Never fails the ingest.
-  if (status !== 'rejected' && duplicate.outcome !== 'skip') {
+  if (status !== 'rejected' && duplicate.outcome !== 'skip' && !siteSource) {
     const { copyOnRule } = await import('../archive/archive');
     await copyOnRule(f.accountId, f.assetId, 'ingest');
   }
@@ -350,8 +366,16 @@ export async function deliverWebhooks(accountId: string, payload: IngestPayload,
 
 /** Queue the encode for an asset whose ingest is now complete. Idempotent by dedupe key. */
 export async function queueEncodeFor(assetId: string): Promise<string | null> {
-  const a = await one<any>(`SELECT v.id, v.account_id, v.source_key, v.ladder_group_id, v.encode_job_id, j.state AS job_state
+  const a = await one<any>(`SELECT v.id, v.account_id, v.source_key, v.ladder_group_id, v.encode_job_id, v.ingest->'siteSource' AS site_source, j.state AS job_state
                               FROM vod_assets v LEFT JOIN jobs j ON j.id = v.encode_job_id WHERE v.id = $1`, [assetId]);
+  // An original kept at a site (Encode at site, H4-3) is encoded there: the
+  // same queue a registration starts, never a cloud encode with no source.
+  if (!a?.source_key && a?.site_source?.siteId) {
+    if (a.encode_job_id && ['queued', 'running', 'succeeded'].includes(String(a.job_state))) return a.encode_job_id;
+    const { requestSiteEncode } = await import('../sites/siteEncode');
+    const job = await requestSiteEncode({ vodAssetId: a.id, accountId: a.account_id, siteId: a.site_source.siteId, sitePath: a.site_source.sitePath, ladderGroupId: a.ladder_group_id ?? null });
+    return job.id;
+  }
   if (!a?.source_key) return null;
   // Encoded (or encoding) already, because the metadata gate no longer holds the
   // media: filling the field later must not encode the same file twice.

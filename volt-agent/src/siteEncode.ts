@@ -165,6 +165,31 @@ export function encoderRunner(env: NodeJS.ProcessEnv = process.env): EncoderRunn
   };
 }
 
+/**
+ * A probe of one file for its REGISTRATION (Encode at site, build queue
+ * H4-3): the same vod_encoder.py probe the probe job gives, so the ingest
+ * rules in the cloud see the duration and picture size before the file is
+ * registered. Null when this host has no encoder or the probe gives no answer:
+ * the file is still registered, on its name and its first bytes.
+ */
+export function siteProbe(opts: { runner?: EncoderRunner; scratchDir?: string; timeoutMs?: number } = {}) {
+  return async (abs: string): Promise<Record<string, unknown> | null> => {
+    const runner = opts.runner ?? encoderRunner();
+    const scratch = join(opts.scratchDir ?? process.env.VOLT_SITE_SCRATCH ?? join(os.homedir(), '.volt-agent', 'encode'), `probe-${process.pid}-${Date.now().toString(36)}`);
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), opts.timeoutMs ?? 120_000);
+    try {
+      await mkdir(scratch, { recursive: true });
+      const r = await runner.run({ input: abs, out_dir: join(scratch, 'out'), probe_only: true }, { sourceDir: dirname(abs), scratch, onLine: () => {}, signal: abort.signal });
+      const probe = lastJson(r.stdout);
+      return probe && typeof probe === 'object' ? probe : null;
+    } catch { return null; } finally {
+      clearTimeout(timer);
+      await rm(scratch, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+}
+
 /* ------------------------------------------------------------- the jobs */
 
 /** The source at the site, or why not. A missing share is a retry; a missing file is not. */

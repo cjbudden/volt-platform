@@ -84,7 +84,7 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   const site2 = (await api('POST', '/api/sites', { name: 'Edit suite' })).body.id;
   const siteB = (await api('POST', '/api/sites', { name: 'Theirs' }, tokB)).body.id;
   r = await api('GET', '/api/watchfolders/site-options');
-  ok(r.body.licensed === true && r.body.sites.length === 2 && r.body.placements.find((p: any) => p.placement === 'encode_site')?.available === false, 'the form lists the sites; Encode at site not yet available', r.body);
+  ok(r.body.licensed === true && r.body.sites.length === 2 && r.body.placements.find((p: any) => p.placement === 'encode_site')?.available === true, 'the form lists the sites; Encode at site available (H4-3)', r.body);
   const root = mkdtempSync(join(tmpdir(), 'site-nas-'));
   const cv0 = (await one<any>(`SELECT config_version FROM sites WHERE id = $1`, [site]))!.config_version;
   r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', config: { path: root } });
@@ -93,8 +93,8 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   ok(r.status === 400, "another account's site: refused", r);
   r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, config: {} });
   ok(r.status === 400, 'no path: refused', r);
-  r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, placement: 'encode_site', config: { path: root } });
-  ok(r.status === 422 && r.body?.code === 'placement_not_available', 'Encode at site refused until site encoders', r);
+  r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, placement: 'gpu_farm', config: { path: root } });
+  ok(r.status === 400, 'a placement that does not exist is refused', r);
   // Without the default rules by type (H2b): this suite writes its own rules,
   // and its "rules changed" case needs a .mov that no rule takes in.
   r = await api('POST', '/api/watchfolders', { name: 'NAS drop', kind: 'site', siteId: site, config: { path: root, min_age_ms: 10000 }, defaultRules: false });
@@ -110,7 +110,8 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   r = await api('POST', `/api/watchfolders/${fid}/scan`, {});
   ok(r.status === 409 && r.body?.code === 'scanned_at_site', 'Scan now refused: the agent scans it', r);
   r = await api('PATCH', `/api/watchfolders/${fid}`, { placement: 'encode_site' });
-  ok(r.status === 422, 'placement cannot be moved to Encode at site yet', r.status);
+  const back = await api('PATCH', `/api/watchfolders/${fid}`, { placement: 'upload_cloud' });
+  ok(r.status === 200 && r.body.placement === 'encode_site' && back.status === 200 && back.body.placement === 'upload_cloud', 'placement moves to Encode at site and back (H4-3)', [r.status, back.status]);
   r = await api('PATCH', `/api/watchfolders/${localId}`, { placement: 'upload_cloud' });
   ok(r.status === 400, 'a local folder has no placement', r.status);
 

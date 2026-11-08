@@ -160,6 +160,47 @@ export async function extract(path: string, file: Extracted['file'], declaredMim
   return out;
 }
 
+/**
+ * THE SAME FACTS FOR A FILE THAT IS NOT HERE (build queue H4-3, Encode at
+ * site). The source stays on the customer's storage, so the site agent sends
+ * the start of the file (the type is sniffed from it and ID3 tags read from
+ * it, by the same code as above) and the probe `vod_encoder.py` gave at the
+ * site, the one a site encode is planned from. Nothing here reads a disk.
+ */
+export function extractFromFacts(head: Buffer, file: Extracted['file'], declaredMime: string | null | undefined, siteProbe: any): Extracted {
+  const s = sniff(head.subarray(0, SNIFF_BYTES), file.originalName);
+  const ext = /\.([a-z0-9]+)$/i.exec(file.originalName)?.[1]?.toLowerCase() ?? '';
+  const out: Extracted = {
+    file,
+    type: { ...s, kind: kindFromMime(s.mime), declaredMime: declaredMime ?? null, extensionMismatch: mismatch(ext, s) },
+    probe: null, id3: null, image: null,
+  };
+  // A tag longer than what was sent is left out rather than read half.
+  if (s.id3Bytes && head.length >= s.id3Bytes) out.id3 = readId3v2(head);
+  out.probe = probeFromSite(siteProbe);
+  return out;
+}
+
+/** vod_encoder.py's probe (width, height, fps, durationMs, codecs, tracks) in the shape ffprobe's facts take here. */
+export function probeFromSite(p: any): Extracted['probe'] {
+  if (!p || typeof p !== 'object' || p.ok === false) return null;
+  const n = (v: any) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+  const tracks = Array.isArray(p.audioTracks) ? p.audioTracks.slice(0, 32) : [];
+  const hasVideo = p.hasVideo === undefined ? n(p.width) != null : !!p.hasVideo;
+  return {
+    durationSec: n(p.durationMs) != null ? n(p.durationMs)! / 1000 : null,
+    hasVideo, hasAudio: p.hasAudio === undefined ? tracks.length > 0 : !!p.hasAudio,
+    video: hasVideo ? {
+      codec: typeof p.videoCodec === 'string' ? p.videoCodec : undefined,
+      width: n(p.width) ?? undefined, height: n(p.height) ?? undefined, fps: n(p.fps),
+      profile: typeof p.videoProfile === 'string' ? p.videoProfile : null,
+    } : null,
+    audio: p.hasAudio || tracks.length ? { codec: typeof p.audioCodec === 'string' ? p.audioCodec : undefined, count: tracks.length || 1 } : null,
+    audioTracks: tracks.map((t: any) => ({ codec: typeof t?.codec === 'string' ? t.codec : undefined, channels: n(t?.channels) ?? undefined, language: typeof t?.language === 'string' ? t.language : null })),
+    subtitles: Array.isArray(p.subtitleTracks) ? p.subtitleTracks.slice(0, 32).map((t: any) => ({ codec: typeof t?.codec === 'string' ? t.codec : undefined, language: typeof t?.language === 'string' ? t.language : null })) : [],
+  };
+}
+
 /* ---------------------------------------------------------------------------
  *  MAPPING INTO A CONTENT TYPE
  * ------------------------------------------------------------------------ */

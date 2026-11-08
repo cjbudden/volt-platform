@@ -42,7 +42,7 @@ import { ConfirmDialog } from '../listActions'
 /** Where an on-prem folder's work runs, in the console's words. */
 const PLACEMENT: Record<string, { label: string; help: string }> = {
   upload_cloud: { label: 'Upload and encode in the cloud', help: 'The site agent uploads each accepted file, resumable: video and audio are encoded like any upload, images and captions are taken in as from a local folder. For sites without encoders.' },
-  encode_site: { label: 'Encode at site', help: 'Encoded by encoders at the site; only the packaged output is uploaded. Arrives with site encoders.' },
+  encode_site: { label: 'Encode at site', help: 'Video and audio are encoded by the site agent at the site and only the packaged output is uploaded; the original stays on your storage. Images, captions and loops are uploaded as usual.' },
 }
 
 const STATUS: Record<string, { label: string; tone: string; help: string }> = {
@@ -632,7 +632,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
                 catch (er: any) { setErr(String(er?.message ?? er)) }
               }}>
               <option value="upload_cloud">{PLACEMENT.upload_cloud.label}</option>
-              <option value="encode_site" disabled>{PLACEMENT.encode_site.label} (with site encoders, not yet available)</option>
+              <option value="encode_site">{PLACEMENT.encode_site.label}</option>
             </select>
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
               {PLACEMENT[folder.placement ?? 'upload_cloud']?.help}

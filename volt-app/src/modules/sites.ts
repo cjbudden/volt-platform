@@ -28,6 +28,8 @@
  *   GET    /api/site-agent/watchfolders/:id/quarantine-keys    review folder names in use
  *   POST   /api/site-agent/watchfolders/:id/items              one decision (accepted, or refused and moved)
  *   GET    /api/site-agent/watchfolders/:id/uploads            accepted files still to upload, with their open upload
+ *   GET    /api/site-agent/watchfolders/:id/registrations      Encode at site: accepted video and audio still to register (H4-3)
+ *   POST   /api/site-agent/watchfolders/:id/registrations/:itemId  { sizeBytes, checksum, head, probe } register one; the file stays at the site
  *   GET    /api/site-agent/watchfolders/:id/returns            refused files an operator sent back
  *   POST   /api/site-agent/watchfolders/:id/returns/:itemId    { ok, error } the file was moved back, or not
  *   GET    /api/site-agent/watchfolders/:id/reviews            files the cloud sent to review, to move into the review folder (H2b-5)
@@ -256,6 +258,16 @@ siteAgentRouter.post('/watchfolders/:id/items', asyncHandler(async (req, res) =>
 siteAgentRouter.get('/watchfolders/:id/uploads', asyncHandler(async (req, res) => {
   const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.json({ items: await W.pendingUploads(p, req.params.id) });
+}));
+
+siteAgentRouter.get('/watchfolders/:id/registrations', asyncHandler(async (req, res) => {
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
+  res.json({ items: await W.pendingRegistrations(p, req.params.id) });
+}));
+
+siteAgentRouter.post('/watchfolders/:id/registrations/:itemId', asyncHandler(async (req, res) => {
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
+  res.status(201).json(await W.registerSiteItem(p, req.params.id, req.params.itemId, req.body ?? {}));
 }));
 
 siteAgentRouter.get('/watchfolders/:id/returns', asyncHandler(async (req, res) => {

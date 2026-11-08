@@ -17,6 +17,11 @@
 //       companions). The cloud keeps the upload on the item and says how far
 //       it got, so after a restart the agent resumes from there; the state
 //       file only saves re-reading files that have not changed.
+//    4b. Placement "Encode at site" (H4-3): a video or audio file is not
+//       uploaded. The agent REGISTERS it: size, checksum, the first bytes
+//       and the encoder's probe. The cloud runs the ingest on those facts and
+//       queues the encode at this site; the original stays where it is.
+//       Images, captions, slates and loops still upload as in step 4.
 //    5. Move into the review folder the files the CLOUD sent to review (a
 //       caption with no video after 24 hours, one over 25 MB): it decided,
 //       but the file is here (H2b-5).
@@ -24,7 +29,7 @@
 //  OUTBOUND ONLY, like the rest of the agent: every step is a call to the
 //  cloud with the host credential; nothing listens.
 // ============================================================================
-import { stat } from 'node:fs/promises';
+import { stat, open } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import {
   scanFolder, checksumFile, moveToQuarantine,
@@ -45,6 +50,20 @@ export interface WatchCtx {
   now?: () => number;
   chunkBytes?: number;
   retries?: number;
+  /** The encoder's probe of a file to register (siteEncode.ts siteProbe); none: registered without one. */
+  probe?: (abs: string) => Promise<Record<string, unknown> | null>;
+}
+
+/** How much of the file's start a registration carries (the cloud takes up to 192 KiB). */
+export const REGISTER_HEAD_BYTES = 192 * 1024;
+
+async function headOf(abs: string, n: number): Promise<Buffer> {
+  const fh = await open(abs, 'r');
+  try {
+    const buf = Buffer.alloc(n);
+    const { bytesRead } = await fh.read(buf, 0, n, 0);
+    return buf.subarray(0, bytesRead);
+  } finally { await fh.close(); }
 }
 
 /**
@@ -67,6 +86,8 @@ export interface FolderPass {
   folderId: string; name: string;
   scan?: ScanResult; error?: string;
   returned: number; uploaded: string[]; uploadErrors: { objectKey: string; error: string }[];
+  /** Encode at site: files registered this pass (they stay here). */
+  registered: string[];
   /** Files moved into the review folder because the cloud sent them there. */
   reviewed: number;
 }
@@ -142,7 +163,7 @@ export async function siteFolders(ctx: WatchCtx): Promise<SiteFolder[]> {
 export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<FolderPass> {
   const call = client(ctx);
   const log = ctx.log ?? ((s) => console.log(s));
-  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0 };
+  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0, registered: [] };
   try {
     // 1. The outbox.
     const waiting = ctx.memory.outbox.filter((o) => o.folderId === folder.id);
@@ -171,8 +192,31 @@ export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<Fol
     for (const q of scan.quarantined) log(`[watch] ${folder.name}: ${q.objectKey} refused, moved to ${q.quarantineKey} (${q.reason})`);
     for (const a of scan.accepted) log(`[watch] ${folder.name}: ${a.objectKey} accepted as ${a.targetKind}`);
 
-    // 4. Uploads.
-    if (folder.placement === 'upload_cloud') {
+    // 4b. Registrations (Encode at site): the file stays here.
+    if (folder.placement === 'encode_site') {
+      const regs = (await call('GET', `/api/site-agent/watchfolders/${folder.id}/registrations`))?.items ?? [];
+      for (const r of regs) {
+        const abs = join(folder.path, String(r.objectKey).split('/').join(sep));
+        try {
+          const st = await stat(abs).catch(() => null);
+          if (!st) throw new Error('the file is no longer in the folder');
+          if (st.size !== r.sizeBytes) throw new Error('the file changed after it was accepted; the next pass decides it again');
+          const head = await headOf(abs, REGISTER_HEAD_BYTES);
+          const probe = ctx.probe ? await ctx.probe(abs).catch(() => null) : null;
+          const done = await call('POST', `/api/site-agent/watchfolders/${folder.id}/registrations/${r.itemId}`,
+            { sizeBytes: r.sizeBytes, checksum: r.checksum, head: head.toString('base64'), probe });
+          out.registered.push(r.objectKey);
+          log(`[watch] ${folder.name}: ${r.objectKey} registered${done?.asset?.title ? ` as "${done.asset.title}"` : ''}, encoded here`);
+        } catch (e: any) {
+          out.uploadErrors.push({ objectKey: r.objectKey, error: String(e?.message ?? e) });
+          log(`[watch] ${folder.name}: ${r.objectKey} not registered: ${e?.message ?? e} (tried again next pass)`);
+        }
+      }
+    }
+
+    // 4. Uploads. In an Encode at site folder the cloud lists only what is
+    //    still uploaded there (images, captions, slates, loops).
+    {
       const pending = (await call('GET', `/api/site-agent/watchfolders/${folder.id}/uploads`))?.items ?? [];
       for (const u of pending) {
         const abs = join(folder.path, String(u.objectKey).split('/').join(sep));

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**906 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 707 · Platform API: 32 · Machine-to-machine: 37 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**910 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 709 · Platform API: 32 · Machine-to-machine: 39 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1048,6 +1048,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/storage/reconcile` | admin session (Bearer) or account secret key | media: manage |  |
 | PATCH | `/api/storage/recordings/:id/expiry` | admin session (Bearer) or account secret key | media: manage |  |
 | POST | `/api/storage/recordings/:id/hold` | admin session (Bearer) or account secret key | media: manage |  |
+| GET | `/api/storage/removals` | admin session (Bearer) or account secret key | media: view |  |
 | GET | `/api/storage/retention` | admin session (Bearer) or account secret key | media: view |  |
 | PUT | `/api/storage/retention` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/storage/retention/effective` | admin session (Bearer) or account secret key | media: view |  |
@@ -1187,6 +1188,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/vod/:id/provenance` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/publish` | admin session (Bearer) or account secret key | vod: operate |  |
 | POST | `/api/vod/:id/qc` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/qc/findings/:findingId/review` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/rebuild` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/reframe` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/reframe/analyse` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -1407,6 +1409,8 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | POST | `/api/site-agent/watchfolders/:id/items` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/watchfolders/:id/known` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | GET | `/api/site-agent/watchfolders/:id/quarantine-keys` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| GET | `/api/site-agent/watchfolders/:id/registrations` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/watchfolders/:id/registrations/:itemId` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | GET | `/api/site-agent/watchfolders/:id/returns` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/watchfolders/:id/returns/:itemId` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | GET | `/api/site-agent/watchfolders/:id/reviews` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |

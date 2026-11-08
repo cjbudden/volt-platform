@@ -39,9 +39,17 @@
 //  folder AT THE SITE by the agent (`site_action = 'review'`), never here.
 //  Audio is a Media Library target like video, so it crosses with it.
 //
+//  PLACEMENT 'encode_site' (build queue H4-3): a video or audio file the
+//  folder accepts is REGISTERED, not uploaded. The agent sends its facts
+//  (size, checksum, the start of the file and the probe the site's encoder
+//  gave) and the cloud runs the same ingest as an upload (rules, naming,
+//  duplicate check, metadata, holds) on those facts, creates the asset, keeps
+//  the original's place at the site on it (`ingest.siteSource`) and queues the
+//  encode at that site (siteEncode.ts). The original never crosses; only the
+//  package does. Images, slates, companions and loops in such a folder still
+//  upload as above: they are small, and Volt keeps them itself.
+//
 //  A HOST WAITING FOR APPROVAL DOES NO WORK: every route here refuses it.
-//  Placement 'encode_site' is H4; such a folder is scanned but nothing is
-//  uploaded (the API does not yet accept it).
 // ============================================================================
 import { mkdir, rename, copyFile, unlink, stat } from 'node:fs/promises';
 import { join, sep, extname } from 'node:path';
@@ -57,8 +65,13 @@ import type { SitePrincipal } from './sites';
 
 export const PLACEMENTS = ['upload_cloud', 'encode_site'] as const;
 export type Placement = typeof PLACEMENTS[number];
-/** Placements a folder may be given today. 'encode_site' arrives with site encoders (H4). */
-export const PLACEMENTS_BUILT: readonly Placement[] = ['upload_cloud'];
+/** Placements a folder may be given today (Encode at site since H4-3). */
+export const PLACEMENTS_BUILT: readonly Placement[] = ['upload_cloud', 'encode_site'];
+
+/** In an Encode at site folder, is this accepted file registered (encoded at the site) rather than uploaded? */
+export function registersAtSite(placement: string | null | undefined, targetKind: string | null | undefined): boolean {
+  return placement === 'encode_site' && siteTargetFor(targetKind) === 'vod';
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -222,7 +235,9 @@ export async function quarantineKeysInUse(p: SitePrincipal, folderId: string) {
 export async function pendingUploads(p: SitePrincipal, folderId: string) {
   requireApprovedHost(p);
   const f = await siteFolder(p, folderId);
-  if ((f.placement ?? 'upload_cloud') !== 'upload_cloud') return [];
+  // An Encode at site folder uploads everything except what it registers.
+  const kinds = (f.placement ?? 'upload_cloud') === 'encode_site'
+    ? siteTargetKinds().filter((k) => !registersAtSite('encode_site', k)) : siteTargetKinds();
   const rows = await query<any>(
     `SELECT i.id, i.object_key, i.checksum, i.size_bytes, i.target_kind,
             u.id AS upload_id, u.state AS upload_state, u.received_bytes
@@ -231,7 +246,7 @@ export async function pendingUploads(p: SitePrincipal, folderId: string) {
       WHERE i.watchfolder_id = $1 AND i.status = 'seen' AND i.site_action IS NULL
         AND lower(i.target_kind) = ANY($2::text[])
         AND (u.id IS NULL OR u.state <> 'complete')
-      ORDER BY i.seen_at LIMIT 50`, [f.id, siteTargetKinds()]);
+      ORDER BY i.seen_at LIMIT 50`, [f.id, kinds]);
   return rows.map((r) => ({
     itemId: Number(r.id), objectKey: r.object_key, checksum: r.checksum, sizeBytes: Number(r.size_bytes),
     targetKind: r.target_kind,
@@ -349,7 +364,7 @@ export async function itemForUpload(p: SitePrincipal, itemId: unknown, length: n
        LEFT JOIN upload_sessions u ON u.id = i.upload_session_id
       WHERE i.id = $1 AND w.account_id = $2 AND w.kind = 'site' AND w.site_id = $3`, [id, p.accountId, p.siteId]);
   if (!r) throw notFound('item not found');
-  if ((r.placement ?? 'upload_cloud') !== 'upload_cloud') throw conflict('This folder encodes at the site; its files are not uploaded');
+  if (registersAtSite(r.placement, r.target_kind)) throw conflict('This folder encodes at the site; its video and audio files are registered, not uploaded');
   if (r.status !== 'seen') throw conflict(`This file is ${r.status === 'ingested' ? 'already in the library' : r.status}; there is nothing to upload`);
   const target = siteTargetFor(r.target_kind);
   if (!target) throw conflict(`"${r.target_kind}" is not something a site uploads`);
@@ -499,5 +514,140 @@ export async function ingestSiteFolder(folderId: string) {
     waiting: companions.filter((o) => o.result === 'waiting').length,
     review: companions.filter((o) => o.result === 'review').length,
     typed: typed.filter((o) => o.result === 'typed').length,
+  };
+}
+
+/* ------------------------------------ Encode at site: registration (H4-3) */
+
+/** The most of the file's start the agent sends: enough to sniff the type and read an ID3 tag without cover art. */
+export const SITE_HEAD_MAX_BYTES = 192 * 1024;
+
+/**
+ * Accepted video and audio files of an Encode at site folder that are not
+ * registered yet, oldest first.
+ */
+export async function pendingRegistrations(p: SitePrincipal, folderId: string) {
+  requireApprovedHost(p);
+  const f = await siteFolder(p, folderId);
+  if ((f.placement ?? 'upload_cloud') !== 'encode_site') return [];
+  const rows = await query<any>(
+    `SELECT id, object_key, checksum, size_bytes, target_kind FROM watchfolder_items
+      WHERE watchfolder_id = $1 AND status = 'seen' AND site_action IS NULL AND vod_asset_id IS NULL
+        AND lower(target_kind) = ANY($2::text[])
+      ORDER BY seen_at LIMIT 50`, [f.id, siteTargetKinds().filter((k) => registersAtSite('encode_site', k))]);
+  return rows.map((r) => ({ itemId: Number(r.id), objectKey: r.object_key, checksum: r.checksum, sizeBytes: Number(r.size_bytes), targetKind: r.target_kind }));
+}
+
+/** The original's absolute path at the site: the folder's path and the key, as the agent joins them. */
+export function sitePathOf(folderPath: string, objectKey: string): string {
+  const root = String(folderPath).replace(/[\\/]+$/, '');
+  const winLike = /^[A-Za-z]:[\\/]|^\\\\/.test(root);
+  return root + (winLike ? '\\' : '/') + objectKey.split('/').join(winLike ? '\\' : '/');
+}
+
+/**
+ * REGISTER ONE FILE (HYBRID_SITES.md "The on-prem flow", step 2). The file
+ * stays at the site. The asset is made as for an upload from this folder and
+ * the same ingest runs on the facts the agent sent; then, unless the rules
+ * held it as a duplicate or refused it, the encode is queued at the site and
+ * the asset reads Processing until the package is verified.
+ *
+ * Registering twice returns the first registration: the item keeps the asset
+ * it was registered as, and a second asset made by a racing call is removed.
+ */
+export async function registerSiteItem(p: SitePrincipal, folderId: string, itemId: unknown, raw: any) {
+  requireApprovedHost(p);
+  const f = await siteFolder(p, folderId);
+  const id = Number(itemId);
+  if (!Number.isSafeInteger(id)) throw notFound('item not found');
+  const it = await one<any>(`SELECT * FROM watchfolder_items WHERE id = $1 AND watchfolder_id = $2`, [id, f.id]);
+  if (!it) throw notFound('item not found');
+  if (it.vod_asset_id) return registrationOf(it);
+  if ((f.placement ?? 'upload_cloud') !== 'encode_site') throw conflict('This folder uploads its files; nothing is registered');
+  if (!registersAtSite('encode_site', it.target_kind)) throw conflict(`"${it.target_kind}" is uploaded from the site, not registered`);
+  if (it.status !== 'seen') throw conflict(`This file is ${it.status}; there is nothing to register`);
+  if (it.site_action) throw conflict('This file is waiting for the site agent to move it');
+  // THE ROW DESCRIBES THE FILE AS IT WAS CLASSIFIED, as for an upload: changed
+  // content is a new item on the next pass, never registered under this one.
+  if (Number(raw?.sizeBytes) !== Number(it.size_bytes) || String(raw?.checksum ?? '').toLowerCase() !== String(it.checksum).toLowerCase()) {
+    throw conflict(`The file has changed since it was accepted (it was ${it.size_bytes} bytes, ${String(it.checksum).slice(0, 12)}); it will be decided again as a new file`);
+  }
+  let head: Buffer;
+  try { head = Buffer.from(String(raw?.head ?? ''), 'base64'); } catch { throw badRequest('head must be the start of the file in base64'); }
+  if (!head.length && Number(it.size_bytes) > 0) throw badRequest('head must be the start of the file in base64');
+  if (head.length > SITE_HEAD_MAX_BYTES) throw badRequest(`head is limited to ${SITE_HEAD_MAX_BYTES} bytes`);
+  const probe = raw?.probe && typeof raw.probe === 'object' && !Array.isArray(raw.probe) && JSON.stringify(raw.probe).length <= 32 * 1024 ? raw.probe : null;
+
+  const name = String(it.object_key).split('/').pop() || 'file';
+  const sitePath = sitePathOf(String(f.config?.path ?? ''), String(it.object_key));
+  const created = await one<any>(
+    `INSERT INTO vod_assets
+       (account_id, source_kind, kind, title, source_bytes, ladder_group_id,
+        start_epoch_ms, end_epoch_ms, duration_ms, thumb_status, rights_profile_id, rights_set_by)
+     VALUES ($1,'watchfolder','clip',$2,$3,$4,0,0,0,'processing',
+             (SELECT id FROM rights_profiles WHERE id = $5 AND account_id = $1), CASE WHEN $5::uuid IS NULL THEN NULL ELSE 'watchfolder' END)
+     RETURNING id`,
+    [f.account_id, name.replace(/\.[^.]+$/, '').slice(0, 200), Number(it.size_bytes), f.ladder_group_id ?? null, f.rights_profile_id ?? null]);
+  const won = await one<any>(
+    `UPDATE watchfolder_items SET vod_asset_id = $2 WHERE id = $1 AND vod_asset_id IS NULL AND status = 'seen' RETURNING id`, [id, created.id]);
+  if (!won) {
+    await query(`DELETE FROM vod_assets WHERE id = $1`, [created.id]);
+    const again = await one<any>(`SELECT * FROM watchfolder_items WHERE id = $1`, [id]);
+    if (again?.vod_asset_id) return registrationOf(again);
+    throw conflict('This file was dealt with while it was being registered');
+  }
+  const assetId = String(created.id);
+
+  let status = 'ingested';
+  try {
+    const { ingestLanded } = await import('../ingest/pipeline');
+    const out = await ingestLanded({
+      accountId: f.account_id, assetId, path: sitePath, originalName: name, relativePath: it.object_key,
+      bytes: Number(it.size_bytes), sha256: String(it.checksum).toLowerCase(), declaredMime: mediaTypeOf(name),
+      source: f.id, sessionId: null, uploadedBy: null,
+      atSite: { siteId: p.siteId, folderId: f.id, itemId: id, sitePath, objectKey: it.object_key, head, probe },
+    });
+    status = out.status;
+  } catch (e: any) {
+    // The same contract as an upload: rules that cannot run are recorded, the
+    // file is not lost over them. The place at the site is still recorded so
+    // the encode can find it.
+    console.warn('[site watch] ingest rules could not run for a registration', assetId, e?.message ?? e);
+    await query(
+      `UPDATE vod_assets SET original_filename = $2, original_path = $3, sha256 = $4,
+              ingest = COALESCE(ingest, '{}'::jsonb) || $5::jsonb, updated_at = now() WHERE id = $1`,
+      [assetId, name, it.object_key, String(it.checksum).toLowerCase(),
+       JSON.stringify({ status: 'ingested', error: `ingest rules could not run: ${String(e?.message ?? e)}`.slice(0, 500), siteSource: { siteId: p.siteId, folderId: f.id, itemId: id, sitePath, objectKey: it.object_key } })]);
+  }
+
+  let note: string;
+  const title = (await one<any>(`SELECT title FROM vod_assets WHERE id = $1`, [assetId]))?.title ?? name;
+  if (status === 'ingested' || status === 'awaiting_metadata') {
+    try {
+      const { requestSiteEncode } = await import('./siteEncode');
+      await requestSiteEncode({ vodAssetId: assetId, accountId: f.account_id, siteId: p.siteId, sitePath, ladderGroupId: f.ladder_group_id ?? null, sourceBytes: Number(it.size_bytes) });
+      note = `registered at the site; in the Media Library as "${title}", encoding at the site${status === 'awaiting_metadata' ? ' (waiting for required metadata before it is ingested)' : ''}`;
+    } catch (e: any) {
+      // Registered, but the encode cannot be queued (the site was disabled, or
+      // this server keeps packages in a bucket, H4-4): the asset says why.
+      const msg = String(e?.message ?? e).slice(0, 500);
+      await query(
+        `UPDATE vod_assets SET media_state = 'failed', media_error = $2, media_error_code = $3, media_state_at = now(), updated_at = now() WHERE id = $1`,
+        [assetId, `the encode at the site could not be queued: ${msg}`, String(e?.code ?? 'site_encode_not_queued').slice(0, 60)]);
+      note = `registered at the site; in the Media Library as "${title}", but the encode at the site could not be queued (${msg})`;
+    }
+  } else {
+    note = `registered at the site; in the Media Library as "${title}", held by the ingest rules (${status.replace(/_/g, ' ')})`;
+  }
+  const done = await one<any>(
+    `UPDATE watchfolder_items SET status = 'ingested', resolved_at = now(), reason = $2 WHERE id = $1 RETURNING *`, [id, note.slice(0, 500)]);
+  return registrationOf(done);
+}
+
+async function registrationOf(it: any) {
+  const a = await one<any>(`SELECT id, title, media_state, encode_job_id, ingest->>'status' AS ingest_status FROM vod_assets WHERE id = $1`, [it.vod_asset_id]);
+  return {
+    itemId: Number(it.id), status: it.status, reason: it.reason, vodAssetId: it.vod_asset_id,
+    asset: a ? { id: a.id, title: a.title, mediaState: a.media_state, ingest: a.ingest_status, encodeJobId: a.encode_job_id } : null,
   };
 }

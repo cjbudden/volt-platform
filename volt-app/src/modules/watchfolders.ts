@@ -173,7 +173,7 @@ async function ownRightsProfile(acct: string, id: unknown): Promise<string | nul
   return p.id;
 }
 
-/** A placement this release can run; 'encode_site' is refused until site encoders (H4). */
+/** A placement this release can run (both since H4-3; the check stays for the next one). */
 function assertPlacement(v: unknown) {
   if (!(PLACEMENTS as readonly string[]).includes(String(v))) throw badRequest(`placement must be one of ${PLACEMENTS.join(', ')}`);
   if (!(PLACEMENTS_BUILT as readonly string[]).includes(String(v))) {

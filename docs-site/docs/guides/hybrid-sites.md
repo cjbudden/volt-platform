@@ -95,7 +95,15 @@ A server waiting for approval is given no work. Work for a disabled site waits u
 
 With Hybrid Sites, a file can be encoded on a server of the site, so the original never leaves your network and only the finished streams come to Volt. Volt still decides how it is encoded: the server looks at the file, Volt picks the renditions, and the server encodes with exactly those settings. Volt checks every file of the result (each rendition, playlist and segment, at the size the server reported) before the video is ready; a result that does not check out is thrown away and encoded again.
 
-Choosing **Encode at site** on an on-prem watchfolder comes in a later release. To get a server ready now, start the agent with the Volt encoder image it should use:
+To have a watchfolder's videos encoded at the site, open the on-prem watchfolder in [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder) and set **Where it is encoded** to **Encode at site**. Then, for each video or audio file the folder accepts:
+
+1. The agent sends Volt the file's facts, not the file: its name, size and checksum, its first bytes and what the site's encoder read from it (length, picture size).
+2. Volt runs your [Ingest Rules](ingest-rules.md) on those facts (duplicates, holds, required metadata), makes the item in the Media Library and records where the original is: the site and its path there. The item reads **Processing** while the site encodes it.
+3. A server of the site encodes it and sends only the finished streams. When Volt has checked them, the video is ready to play.
+
+The original stays in the watchfolder at the site; Volt keeps no copy of it. A held duplicate is not encoded until someone chooses to keep it; it is then encoded at the site too. Images, captions, slates and loops in the same folder are still uploaded, as with **Upload and encode in the cloud**.
+
+Start the agent with the Volt encoder image it should use:
 
 ```
 VOLT_ENCODER_IMAGE=volt-encoder:<version> volt-agent site run

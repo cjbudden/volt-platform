@@ -5842,6 +5842,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/site-agent/watchfolders/:id/registrations",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "POST",
+  "path": "/api/site-agent/watchfolders/:id/registrations/:itemId",
+  "api": "machine",
+  "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
+  "access": "callback",
+  "viewerTier": false,
+  "group": "/api/site-agent"
+ },
+ {
+  "method": "GET",
   "path": "/api/site-agent/watchfolders/:id/returns",
   "api": "machine",
   "credential": "site host credential (Bearer vsite_...); enrol takes a one-time enrolment token",
@@ -6422,6 +6440,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/removals",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
   "viewerTier": false,
   "group": "/api/storage"
  },
@@ -7292,6 +7319,15 @@
  {
   "method": "POST",
   "path": "/api/vod/:id/qc",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/qc/findings/:findingId/review",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: manage",

@@ -29,9 +29,9 @@ import * as os from 'node:os';
 
 import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
 import { archivePass } from './siteArchive';
-import { encodePass } from './siteEncode';
+import { encodePass, siteProbe } from './siteEncode';
 
-export const AGENT_VERSION = '0.7.0';
+export const AGENT_VERSION = '0.8.0';
 
 export interface SiteState {
   server: string;
@@ -155,7 +155,7 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
     if (watching || signal?.aborted || state.status !== 'approved' || !hybrid() || Date.now() - lastWatch < watchEvery) return;
     watching = true; lastWatch = Date.now();
     try {
-      await watchPass({ server: state.server, credential: () => state.credential, memory: state.watch!, log });
+      await watchPass({ server: state.server, credential: () => state.credential, memory: state.watch!, log, probe: siteProbe() });
       await saveSiteState(stateFile, state);
     } catch (e: any) {
       log(`[watch] pass failed, retrying: ${e?.message ?? e}`);
