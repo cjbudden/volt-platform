@@ -11,7 +11,7 @@
 #   1. Checks the app is present
 #   2. Checks Docker is RUNNING, and starts it if it is not
 #   3. Makes sure a Postgres is running (uses Docker if it has to start one)
-#   4. Loads the exact database snapshot from Claude's test (same 2 channels)
+#   4. Loads the exact database snapshot from the reference test run (same 2 channels)
 #   5. Starts the control-plane API on :8080 and the React app on :5173
 #      (no Icecast relay: stations write HLS and DASH, build queue 2.1c-2)
 #
@@ -160,7 +160,7 @@ load_file() {
   if [ "$USE_DOCKER" = "1" ]; then docker exec -i volt-pg psql -U volt -d volt -v ON_ERROR_STOP=1 -q < "$1";
   else PGPASSWORD=volt psql -U volt -h localhost -d volt -v ON_ERROR_STOP=1 -q -f "$1"; fi
 }
-if [ ! -f "$SNAP" ]; then echo "    Snapshot $SNAP not found. Tell Claude."; exit 1; fi
+if [ ! -f "$SNAP" ]; then echo "    Snapshot $SNAP not found. Re-export the demo snapshot."; exit 1; fi
 # Persist test data across runs: only load the demo snapshot on a FRESH database
 # (or when RESET_DB=1 is set). If the schema already exists, keep whatever you
 # entered during testing so you can build up real test data build-to-build.

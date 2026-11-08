@@ -130,3 +130,7 @@ _xfer3/
 docs.patch
 /*.tgz
 /*.bundle
+
+# Local design links (kept out of the repo)
+design-links.local.md
+.claude/settings.local.json

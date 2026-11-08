@@ -203,7 +203,7 @@ const RECORDINGS_LIST = defineList({
   },
   defaultSort: '-start_epoch_ms',
   aliases: { channelId: 'channel_id' },
-  extraParams: ['sourceId'],
+  extraParams: ['sourceId', 'includeRemoved'],
   unpagedLimit: 1000,
 });
 
@@ -218,6 +218,10 @@ recordingsRouter.get(
     // event. The caller should not have to know which column applies.
     const sourceId = typeof req.query.sourceId === 'string' ? req.query.sourceId : null;
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    // A recording retention has REMOVED is not something to open, so it leaves
+    // the list. Its record stays in the removal log (GET /api/storage/removals)
+    // and the audit log. includeRemoved=1 shows them, for an operator checking history.
+    const removedSql = req.query.includeRemoved === '1' ? '' : ` AND r.storage_state IS DISTINCT FROM 'deleted'`;
     const params: unknown[] = [accountId(req), q || null, sourceId];
     const pl = parseList(RECORDINGS_LIST, { ...req.query, q: undefined }, params);
     // With a search term, a recording matches when its own title/source matches,
@@ -244,7 +248,7 @@ recordingsRouter.get(
                    ELSE NULL END AS matched_by
        ${OWNED}
        WHERE g.account_id = $1
-         AND ($3::uuid IS NULL OR r.channel_id = $3 OR r.event_id = $3)${whereSql(pl)}
+         AND ($3::uuid IS NULL OR r.channel_id = $3 OR r.event_id = $3)${removedSql}${whereSql(pl)}
        ORDER BY ${pl.orderBy} LIMIT ${q ? RECORDINGS_Q_WINDOW : pl.limit + 1}`,
       params
     );
@@ -252,7 +256,7 @@ recordingsRouter.get(
       const total = pl.count
         ? Number((await one<any>(`SELECT count(*)::int AS n ${OWNED} WHERE g.account_id = $1
              AND ($2::text IS NULL OR $2::text IS NOT NULL)
-             AND ($3::uuid IS NULL OR r.channel_id = $3 OR r.event_id = $3)${countWhereSql(pl)}`, countParams(pl, params)))?.n ?? 0)  // totals ignore the cursor
+             AND ($3::uuid IS NULL OR r.channel_id = $3 OR r.event_id = $3)${removedSql}${countWhereSql(pl)}`, countParams(pl, params)))?.n ?? 0)  // totals ignore the cursor
         : undefined;
       return res.json(finishPage(req, res, pl, rows, total));
     }
@@ -434,9 +438,12 @@ recordingsRouter.get(
               min(r.expires_at) FILTER (WHERE r.expires_at IS NOT NULL) AS next_expiry
          FROM src s
          JOIN groups g ON g.id = s.group_id
+         -- Removed recordings do not count: a source whose every recording has
+         -- been removed by retention drops out of this list.
          LEFT JOIN recordings r
-                ON (s.owner_kind = 'channel' AND r.channel_id = s.id)
-                OR (s.owner_kind = 'event'   AND r.event_id   = s.id)
+                ON ((s.owner_kind = 'channel' AND r.channel_id = s.id)
+                 OR (s.owner_kind = 'event'   AND r.event_id   = s.id))
+               AND r.storage_state IS DISTINCT FROM 'deleted'
         WHERE g.account_id = $1
           -- THE SEARCH BOX MATCHES WHAT AIRED, not only the source's name: a
           -- programme in the guide or a title in a station's now-playing log
@@ -446,8 +453,9 @@ recordingsRouter.get(
           -- no recording under it is not a hit: there is nothing to open.
           AND ($2::text IS NULL OR s.name ILIKE '%'||$2||'%' OR EXISTS (
                 SELECT 1 FROM programmes p JOIN recordings r2
-                    ON (s.owner_kind = 'channel' AND r2.channel_id = s.id)
-                    OR (s.owner_kind = 'event'   AND r2.event_id   = s.id)
+                    ON ((s.owner_kind = 'channel' AND r2.channel_id = s.id)
+                     OR (s.owner_kind = 'event'   AND r2.event_id   = s.id))
+                   AND r2.storage_state IS DISTINCT FROM 'deleted'
                  WHERE ((s.owner_kind = 'channel' AND p.channel_id = s.id)
                      OR (s.owner_kind = 'event'   AND p.event_id   = s.id))
                    AND p.title ILIKE '%'||$2||'%'
@@ -584,7 +592,7 @@ recordingsRouter.get(
               min(r.expires_at) FILTER (WHERE r.expires_at IS NOT NULL) AS next_expiry
          FROM channels c
          JOIN groups g ON g.id = c.group_id
-         LEFT JOIN recordings r ON r.channel_id = c.id
+         LEFT JOIN recordings r ON r.channel_id = c.id AND r.storage_state IS DISTINCT FROM 'deleted'
         WHERE g.account_id = $1
         GROUP BY c.id, c.name, c.recording_retention_days
        HAVING count(r.id) > 0

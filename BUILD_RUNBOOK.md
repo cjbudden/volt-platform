@@ -22,7 +22,7 @@ release. Written 22 Oct 2026 from what worked in practice.
 
 ## 1. Start
 
-1. `git log --oneline -5` and `git status --short`. Another Claude session or
+1. `git log --oneline -5` and `git status --short`. Another build session or
    Christian may be working in the same tree (see project memory
    `concurrent_sessions.md`). Note which uncommitted files are NOT yours; never
    commit or overwrite them.
@@ -145,11 +145,9 @@ than the version line, commit the committed routes back (the previous
 commit's file with the new version) with `--no-verify`, then copy the other
 session's working copy back so its work stays uncommitted (2 Nov 2026).
 
-Every commit message ends with:
-
-```
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-```
+Commit messages carry no AI attribution: no `Co-Authored-By` trailer for an assistant,
+no "Generated with" line, no session links. Design links live in the gitignored
+`design-links.local.md`, never in committed files.
 
 **Never** push, deploy to AWS, run `terraform apply`, touch credentials or
 secrets, or delete user data. Christian pushes and deploys.

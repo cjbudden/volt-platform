@@ -1,10 +1,10 @@
 # Volt Streaming brand assets
 
-Source files for the Volt Streaming brand. The live brand book (logo, colour, type, icons, diagrams, marketing) is the **Volt Streaming** design system artifact in Claude. A copy of its text is in `guide/`.
+Source files for the Volt Streaming brand. The live brand book (logo, colour, type, icons, diagrams, marketing) is the online **Volt Streaming** design system. A copy of its text is in `guide/`.
 
 | Folder | What | Use it for |
 | --- | --- | --- |
-| `guide` | `Volt_Brand_Guidelines.pdf` and the brand book as Markdown | The rules. The live version is the Volt Streaming design system in Claude. |
+| `guide` | `Volt_Brand_Guidelines.pdf` and the brand book as Markdown | The rules. The live version is the online Volt Streaming design system. |
 | `templates` | PowerPoint template (`.potx`) and sample deck, the brand style guide deck, Word template (`.dotx`) and sample document, one-pager | Starting points for any new deck or Paper document. |
 | `templates/html` | Briefing sheet and Report templates (HTML, print to A4 PDF from Chrome: margins none, background graphics on) | The two richer document styles for prospects and partners. |
 | `logos/svg`, `logos/eps`, `logos/pdf` | Lockups, short lockups, marks, flat tile. Colour (Volt blend), solid, white and ink | Web, print, design tools, agencies. |

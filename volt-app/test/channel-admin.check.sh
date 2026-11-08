@@ -115,10 +115,10 @@ ok "facets list the actions" '[ "$(echo "$R" | jget "sorted(a[\"action\"] for a 
 ok "facets list the people" '[ "$(echo "$R" | jget "len(d[\"users\"])")" = 2 ]'
 ok "another account sees none of it" '[ "$(curl -s "$B/audit" -H "$O" | jget "d[\"total\"]")" = 0 ]'
 q "INSERT INTO audit_log(account_id,action,entity_type,detail) VALUES ('$ACC','update','channel','{\"actor\":\"=HYPERLINK(1)\"}')" >/dev/null
-H=$(curl -s -D - -o /tmp/claude-0/audit.csv "$B/audit/export.csv" -H "$A")
+H=$(curl -s -D - -o ${TMPDIR:-/tmp}/audit.csv "$B/audit/export.csv" -H "$A")
 ok "CSV export is a download" '[[ "$H" == *"text/csv"* && "$H" == *"attachment; filename=\"audit-log-"* ]]'
-ok "CSV has the header row" '[ "$(head -1 /tmp/claude-0/audit.csv | tr -d "\r")" = "created_at,action,entity_type,entity_id,name,user_email,actor,detail" ]'
-ok "CSV defuses spreadsheet formulas" 'grep -q "'"'"'=HYPERLINK(1)" /tmp/claude-0/audit.csv'
+ok "CSV has the header row" '[ "$(head -1 ${TMPDIR:-/tmp}/audit.csv | tr -d "\r")" = "created_at,action,entity_type,entity_id,name,user_email,actor,detail" ]'
+ok "CSV defuses spreadsheet formulas" 'grep -q "'"'"'=HYPERLINK(1)" ${TMPDIR:-/tmp}/audit.csv'
 ok "operators cannot export (403)" '[ "$(code "$B/audit/export.csv" -H "$P")" = 403 ]'
 
 echo; echo "channel-admin: $pass passed, $fail failed"

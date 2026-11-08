@@ -209,3 +209,97 @@ export function RestoreBin() {
     </div>
   )
 }
+
+/* ----------------------------------------------------------------------------
+   REMOVAL LOG: the record of every recording retention removed, or tried to.
+   Once removed, a recording leaves the Recordings tables; this is where it
+   stays on record: which source, the time it covered, when it expired, the
+   rule or date that removed it, whether it worked and what was taken.
+   Server: GET /api/storage/removals (services/media/removalLog.ts).
+   ------------------------------------------------------------------------- */
+interface Removal {
+  id: string; recordingId: string; source: { id: string | null; name: string | null; type: string | null }; title: string | null
+  startMs: number | null; endMs: number | null; durationMs: number | null; expiredAt: string | null
+  trigger: 'rule' | 'manual' | 'legacy'; ruleName: string | null; reason: string | null
+  outcome: 'removed' | 'kept_for_clips' | 'failed'
+  removed: { segments?: number; keptSegments?: number; clips?: number; stills?: number; spriteSheets?: number; mediaObjects?: number; bytes?: number; binIds?: string[] }
+  error: string | null; actor: string | null; at: string
+}
+
+const OUTCOME: Record<Removal['outcome'], { text: string; color: string }> = {
+  removed: { text: 'Removed', color: 'var(--ok,#4ade80)' },
+  kept_for_clips: { text: 'Removed, clip sources kept', color: 'var(--muted)' },
+  failed: { text: 'Removal failed', color: 'var(--danger,#f87171)' },
+}
+
+function whatWasTaken(r: Removal): string {
+  const m = r.removed ?? {}
+  const parts: string[] = []
+  if (m.segments) parts.push(`${m.segments} segment${m.segments === 1 ? '' : 's'}`)
+  if (m.stills) parts.push(`${m.stills} still${m.stills === 1 ? '' : 's'}`)
+  if (m.spriteSheets) parts.push(`${m.spriteSheets} sprite sheet${m.spriteSheets === 1 ? '' : 's'}`)
+  if (m.mediaObjects) parts.push(`${m.mediaObjects} media object${m.mediaObjects === 1 ? '' : 's'}`)
+  if (m.bytes) parts.push(size(m.bytes))
+  if (m.keptSegments) parts.push(`${m.keptSegments} kept for ${m.clips ?? 0} clip${m.clips === 1 ? '' : 's'}`)
+  return parts.join(' · ') || '—'
+}
+
+export function RemovalLog() {
+  const [items, setItems] = useState<Removal[] | null>(null)
+  const [outcome, setOutcome] = useState<'' | Removal['outcome']>('')
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    req(`/storage/removals${outcome ? `?outcome=${outcome}` : ''}`)
+      .then((r: any) => { setItems(r.items); setErr('') }).catch((e: any) => setErr(e.message))
+  }, [outcome])
+  const failed = useMemo(() => (items ?? []).filter((i) => i.outcome === 'failed').length, [items])
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ padding: '14px 14px 0' }}>
+        <div className="flex items-center gap-2">
+          <div className="sec-label" style={{ marginTop: 0 }}>Removal log</div>
+          <div className="flex-1" />
+          <select value={outcome} onChange={(e) => setOutcome(e.target.value as any)} aria-label="Filter by outcome">
+            <option value="">All outcomes</option>
+            <option value="removed">Removed</option>
+            <option value="kept_for_clips">Clip sources kept</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+        <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginBottom: 10 }}>
+          Recordings that expired and were removed by retention. They no longer appear under Recordings; this is the record that they
+          existed, which rule removed them, whether it worked and what was taken.{failed > 0 && ` ${failed} failed and will be retried.`}
+        </div>
+        {err && <div style={{ marginBottom: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
+      </div>
+      {!items ? <div className="loading">Loading…</div> : (
+        <table>
+          <thead><tr><th>When</th><th>Recording</th><th>Expired</th><th>Rule</th><th>Outcome</th><th>What was removed</th></tr></thead>
+          <tbody>
+            {items.map((r) => (
+              <tr key={r.id}>
+                <td style={{ whiteSpace: 'nowrap' }}>{dateTime(r.at)}</td>
+                <td>
+                  <div style={{ fontWeight: 600 }}>{r.source.name ?? r.title ?? 'Recording'}</div>
+                  <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>
+                    {r.startMs ? dateTime(r.startMs) : ''}{r.endMs ? ` → ${dateTime(r.endMs)}` : ''}
+                  </div>
+                </td>
+                <td style={{ whiteSpace: 'nowrap', color: 'var(--muted)' }}>{r.expiredAt ? dayOnly(r.expiredAt) : '—'}</td>
+                <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>
+                  {r.trigger === 'manual' ? 'Date set by hand' : r.trigger === 'legacy' ? 'Channel keep period' : r.ruleName ?? 'Retention rule'}
+                </td>
+                <td style={{ fontSize: 'var(--fs-sm)', color: OUTCOME[r.outcome].color }}>
+                  {OUTCOME[r.outcome].text}
+                  {r.error && <div style={{ color: 'var(--faint)' }} title={r.error}>{r.error.slice(0, 80)}</div>}
+                </td>
+                <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>{whatWasTaken(r)}</td>
+              </tr>
+            ))}
+            {items.length === 0 && <tr><td colSpan={6} style={{ color: 'var(--faint)' }}>Nothing has been removed by retention yet.</td></tr>}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}

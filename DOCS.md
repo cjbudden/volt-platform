@@ -240,7 +240,7 @@ plus `e2e/local-pipeline-test.sh`, `e2e/source-ladder.sh`, `e2e/extractor-test.s
 ---
 
 ## Keeping this repo in sync
-Claude edits the canonical repo directly and commits; you `git pull` (or the files
+Build sessions edit the canonical repo directly and commit; you `git pull` (or the files
 are already in your local folder). To sync GitHub, `git push origin main` from your
 terminal. (The old `volt-update.bundle` / `publish.sh` flow is retired.)
 

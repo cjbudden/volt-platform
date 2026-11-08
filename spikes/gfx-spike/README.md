@@ -1,7 +1,7 @@
 # Volt live HTML graphics burn-in: feasibility spike
 
 Everything here is a throwaway prototype plus the measurement scripts behind
-`REPORT.md`. Nothing in `/home/claude/w` was changed.
+`REPORT.md`. Nothing in `the spike work folder` was changed.
 
 ## Layout
 

@@ -366,6 +366,28 @@ storageRouter.post('/recordings/:id/hold', asyncHandler(async (req, res) => {
   res.json({ id: rec.id, hold: b.hold, objects: objs.length });
 }));
 
+/**
+ * THE REMOVAL LOG: every recording retention has removed, or tried to. The
+ * recordings themselves leave the lists once removed; this is the report that
+ * says they existed, when they expired, which rule or date removed them,
+ * whether it worked, and what was taken (segments, stills, sprite sheets,
+ * media objects, bytes, the bin item). Filters: outcome, sourceId, from/to
+ * (epoch ms), before (ISO time, for paging), limit.
+ */
+storageRouter.get('/removals', asyncHandler(async (req, res) => {
+  const q = z.object({
+    outcome: z.enum(['removed', 'kept_for_clips', 'failed']).optional(),
+    sourceId: z.string().uuid().optional(),
+    from: z.coerce.number().int().nonnegative().optional(),
+    to: z.coerce.number().int().positive().optional(),
+    before: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(1000).optional(),
+  }).parse(req.query);
+  const { listRemovals } = await import('../services/media/removalLog');
+  const items = await listRemovals(accountId(req), q);
+  res.json({ items, next: items.length === (q.limit ?? 200) ? items[items.length - 1].at : null });
+}));
+
 storageRouter.get('/bin', asyncHandler(async (req, res) => {
   const { listBin, TRASH_DAYS } = await import('../services/media/trash');
   res.json({ items: await listBin(accountId(req), { all: req.query.all === '1' }), days: TRASH_DAYS });

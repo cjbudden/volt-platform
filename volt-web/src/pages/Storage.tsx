@@ -4,7 +4,7 @@ import {
   type RetentionStageInput, type SweepPreview, type AnalyticsRetention,
 } from '../api'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
-import { RetentionList, RestoreBin } from './StorageRetention'
+import { RetentionList, RestoreBin, RemovalLog } from './StorageRetention'
 import { MirrorArchive } from './StorageArchive'
 import { useAccess } from '../access'
 
@@ -522,6 +522,7 @@ export default function StoragePage() {
       {/* WHAT GOES NEXT, AND WHAT CAN STILL COME BACK (docs/RETENTION.md). */}
       <RetentionList />
       <RestoreBin />
+      <RemovalLog />
 
       {mirrorArchive && <MirrorArchive />}
 

@@ -59,12 +59,17 @@ Nothing removed by retention, `scripts/prune-recordings.ts` or a Media Library d
 
 * files and whole directories move (rename) to `VOLT_TRASH_DIR` (default `volt-app/trash/`), one folder per item;
 * Image Library objects move inside the image store to `trash/<item>/...`;
-* deleted database rows are kept on the item, parents before children, with the links the delete set to NULL.
+* deleted database rows are kept on the item, parents before children, with the links the delete set to NULL;
+* a library asset's packaged media in the S3 origin bucket (`vod/<id>/`: HLS, DASH, FAST ladder variants) moves inside
+  the bucket to `trash/<item>/vod/<id>/` (`VOD_STORE=s3`), so the CDN stops serving it at once.
 
 **Storage > Recently removed** lists the items. **Restore** puts the files, images, rows and links back; a restored
 recording's media is readable again and put on hold so the next sweep does not take it straight back (set a date in
 the retention list to let it go later). **Delete now** purges one item. Items are purged after `VOLT_TRASH_DAYS`
-(default 7) by the hourly retention sweep: that is the real deletion. S3 tiers are removed directly, not binned.
+(default 7) by the hourly retention sweep: that is the real deletion. A Media Library delete, one asset or in bulk,
+is held for `VOLT_LIBRARY_TRASH_DAYS` (default 2) instead. The sweep runs every `RETENTION_SWEEP_SECONDS` (default
+3600) on the scheduler that holds the leader lock, so an item goes within an hour after its days are up. Recording
+S3 tiers are removed directly, not binned. Bulk remove and management confirmation: `docs/BULK_ACTIONS.md`.
 
 ## The retention list
 
@@ -90,3 +95,9 @@ A recording already pruned to what clips use shows **Kept for clips** with no da
 | GET | `/api/vod/:id/delete-impact` | What the delete dialog shows: what goes, posts that stay, `binDays`, and `blocker` (in an active FAST lineup) |
 | DELETE | `/api/vod/:id` | Delete an asset into the bin; answers `{ bin, binDays, purgeAfter }` (the asset form's Delete) |
 | POST | `/api/vod/:id/restore` | Undelete that asset (latest held bin item), with `vod: manage` rather than the storage permission |
+
+## Removed recordings leave the tables, the record stays
+
+Once retention has removed a recording (every media object deleted, `storage_state = 'deleted'`), it no longer shows in Recordings, a source's recording list, or the channel roll-up. A source whose every recording has been removed drops out of the Recordings list. `GET /api/recordings?includeRemoved=1` still returns them for history checks, and a restore from the bin brings a recording back.
+
+Every removal attempt writes a row to `recording_removals` (migration 0145) and an `audit_log` entry: the source, the time the recording covered, when it expired, the trigger (rule, a date set by hand, or the legacy channel keep period), the outcome (`removed`, `kept_for_clips`, `failed`) and what was taken (segments, stills, sprite sheets, media objects, bytes, bin item), or the error. A repeated failure with the same error is logged once a day, not every sweep. The report is `GET /api/storage/removals` (filters: `outcome`, `sourceId`, `from`, `to`, `before`, `limit`) and the Removal log card on the Storage page.

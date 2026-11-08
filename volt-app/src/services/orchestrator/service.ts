@@ -3,7 +3,7 @@ import { config } from '../../config';
 import { buildEncoderJobConfig, buildThumbnailerJobConfig, JobConfigCtx } from '../jobConfig';
 import { buildRadioJobConfig } from '../radio/jobConfig';
 import { burnPlan } from '../graphics/burnFeed';
-import { resolveCaptionsPlan, buildCaptionsJobConfig } from '../captionsPlan';
+import { resolveCaptionsPlan, buildCaptionsJobConfig, captionsHost } from '../captionsPlan';
 import { estimateEncoderLoad, estimateRadioLoad, estimateWhisperLoad } from '../fleet/streamLoad';
 import { assignStream, recordAssignment, type Assignment } from '../fleet/assign';
 import { createClipVod, deriveEventVod, enqueueClipBuild } from '../clips';
@@ -322,7 +322,7 @@ export class Orchestrator {
       sourceLang: ctx.profile.caption_source_lang,
       targets: ctx.profile.caption_targets,
       modelSize: (ctx.profile as any).caption_model_size,
-      cpuInEncoder: config.orchestrator.captionsCpuInEncoder,
+      ...captionsHost(config.orchestrator),
     });
     let capRes: { taskArn: string; lifecycle: 'spot' | 'on_demand' } | null = null;
     let capAssignment: Assignment | null = null;
@@ -1412,10 +1412,12 @@ export class Orchestrator {
       if (rule) continue;            // the ladder owns it; leave it alone
       // Runs on local disk go through the clip-aware prune (clips' sources kept, the rest
       // to the restore bin); anything else left is removed as before.
+      let pruned: any[] = [];
+      let legacyError: string | null = null;
       try {
         const { pruneRecording } = await import('../media/prune');
-        await pruneRecording(rec.id, { reason: 'expires_at passed and no retention rule governs this channel', actor: 'retention:legacy-expiry' });
-      } catch (e) { console.error('[retention] legacy prune failed for', rec.id, e); }
+        pruned = await pruneRecording(rec.id, { reason: 'expires_at passed and no retention rule governs this channel', actor: 'retention:legacy-expiry' });
+      } catch (e: any) { legacyError = String(e?.message ?? e); console.error('[retention] legacy prune failed for', rec.id, e); }
       const objs = await query<any>(`SELECT id FROM media_objects WHERE recording_id = $1 AND state <> 'deleted' AND NOT hold`, [rec.id]);
       for (const o of objs) {
         try {
@@ -1428,9 +1430,17 @@ export class Orchestrator {
             action: 'delete', actor: 'retention:legacy-expiry',
             detail: 'expires_at passed and no retention rule governs this channel',
           });
-        } catch (e) { console.error('[retention] legacy expiry failed for', o.id, e); }
+        } catch (e: any) { legacyError = legacyError ?? String(e?.message ?? e); console.error('[retention] legacy expiry failed for', o.id, e); }
       }
       const left = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [rec.id]);
+      const held = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted' AND hold`, [rec.id]);
+      const { logRecordingRemoval, summarisePrune } = await import('../media/removalLog');
+      await logRecordingRemoval({
+        recordingId: rec.id, trigger: 'legacy', actor: 'retention:legacy-expiry',
+        reason: 'expires_at passed and no retention rule governs this channel',
+        outcome: !left?.n ? 'removed' : held?.n === left.n && !legacyError ? 'kept_for_clips' : 'failed',
+        removed: summarisePrune(pruned), error: left?.n ? legacyError : null,
+      });
       await query(`UPDATE recordings SET storage_state = $2::media_state, expires_at = CASE WHEN $3 THEN NULL ELSE expires_at END WHERE id = $1`,
         [rec.id, left?.n ? 'available' : 'deleted', !!left?.n]);
       legacyDone++;

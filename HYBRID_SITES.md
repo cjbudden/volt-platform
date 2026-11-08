@@ -2,8 +2,8 @@
 
 Nov 3, 2026 · @Christian Budden
 
-> Saved from the Claude Doc "Volt Hybrid Sites: on-prem ingest and VOD encoding"
-> (https://claude.ai/artifact/Jc8EBMbq4UQHGj3cUXV8EP) for build queue H1, 4 Nov 2026.
+> Saved from the design doc "Volt Hybrid Sites: on-prem ingest and VOD encoding"
+> (design link `hybrid-sites-design` (design-links.local.md)) for build queue H1, 4 Nov 2026.
 > Build status is at the end of this file ("Build status").
 
 ## Recommendation
@@ -45,7 +45,7 @@ Five new ideas, each small, and each defaulting to today's behaviour.
 
 The control plane stays in the cloud and stays the only place that decides: ladders, publishing policy, DRM keys, retention. A site does the heavy work near the source and reports back.
 
-*(Architecture diagram, site and cloud: in the Claude Doc this file was saved from.)*
+*(Architecture diagram, site and cloud: in the design doc this file was saved from.)*
 
 The agent registers files and reports health. Workers lease jobs and DRM keys from the control plane, keep a local archive copy, and upload the packaged output to primary storage, which the cloud verifies before the asset can play.
 

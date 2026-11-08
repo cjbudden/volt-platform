@@ -33,6 +33,7 @@ import { config } from '../../config';
 import { capabilities, isImmediate, storageDriver, tierWords, actionWords, type StorageTier } from './storage';
 import { locationsOf, transition, type MediaObject } from './objects';
 import { reclaimRunSidecars } from './sidecars';
+import { logRecordingRemoval, summarisePrune } from './removalLog';
 
 export type RetentionAction = 'keep' | 'to_cold' | 'to_archive' | 'delete';
 
@@ -520,8 +521,14 @@ export async function sweep(opts: {
     if (manual != null && manual <= Date.now() && obj.state !== 'deleting') {
       if (opts.dryRun) { res.deleted++; continue; }
       try {
-        if (await removeRecordingMedia(obj, `expiry set by hand for ${new Date(manual).toISOString().slice(0, 10)}`, actor)) { res.deleted++; continue; }
-      } catch (e) { res.failed++; console.error('[retention] manual expiry failed for', obj.id, e); continue; }
+        if (await removeRecordingMedia(obj, `expiry set by hand for ${new Date(manual).toISOString().slice(0, 10)}`, actor,
+              { trigger: 'manual', expiredAt: new Date(manual) })) { res.deleted++; continue; }
+      } catch (e: any) {
+        res.failed++; console.error('[retention] manual expiry failed for', obj.id, e);
+        await logRecordingRemoval({ recordingId: obj.recording_id, trigger: 'manual', outcome: 'failed', actor,
+          reason: 'expiry set by hand', expiredAt: new Date(manual), error: String(e?.message ?? e) });
+        continue;
+      }
     }
     if (!rule) continue;
 
@@ -561,7 +568,8 @@ export async function sweep(opts: {
       if (due.stage.action === 'delete') {
         // A recording's run on local disk goes through the clip-aware prune: what clips
         // were cut from stays (held), the rest goes to the restore bin.
-        if (await removeRecordingMedia(obj, `retention rule "${rule.name}", ${due.stage.afterDays} days`, actor)) { res.deleted++; continue; }
+        if (await removeRecordingMedia(obj, `retention rule "${rule.name}", ${due.stage.afterDays} days`, actor,
+              { trigger: 'rule', ruleName: rule.name, expiredAt: new Date(closedAtMsOf(obj) + due.stage.afterDays * 86_400_000) })) { res.deleted++; continue; }
         await transition(obj.id, 'deleting', { action: 'delete', actor, detail: `rule "${rule.name}"` });
         for (const l of locs) {
           await driver.remove(l.uri);
@@ -577,6 +585,11 @@ export async function sweep(opts: {
           detail: `rule "${rule.name}", stage ${due.stage.afterDays}d, age ${due.ageDays.toFixed(1)}d`,
         });
         await afterDelete(obj);
+        if (obj.recording_id) await closeRemovedRecording(obj.recording_id, {
+          trigger: 'rule', ruleName: rule.name, actor,
+          reason: `retention rule "${rule.name}", ${due.stage.afterDays} days`,
+          expiredAt: new Date(closedAtMsOf(obj) + due.stage.afterDays * 86_400_000),
+        });
         res.deleted++;
         continue;
       }
@@ -652,6 +665,11 @@ export async function sweep(opts: {
           });
       }
       console.error(`[retention] ${obj.id} (${obj.logical_key}) failed:`, msg);
+      if (due.stage.action === 'delete' && obj.recording_id) {
+        await logRecordingRemoval({ recordingId: obj.recording_id, trigger: 'rule', outcome: 'failed', actor,
+          ruleName: rule.name, reason: `retention rule "${rule.name}", ${due.stage.afterDays} days`, error: msg,
+          expiredAt: new Date(closedAtMsOf(obj) + due.stage.afterDays * 86_400_000) });
+      }
     }
   }
   return res;
@@ -669,18 +687,44 @@ async function afterDelete(obj: any): Promise<void> {
  * Remove a recording object's run through pruneRun (clips kept, the rest to the bin).
  * False when it is not a local run of a recording, so the caller removes it as before.
  */
-async function removeRecordingMedia(obj: any, reason: string, actor: string): Promise<boolean> {
+async function removeRecordingMedia(obj: any, reason: string, actor: string,
+  meta: { trigger: 'rule' | 'manual'; ruleName?: string; expiredAt?: Date } = { trigger: 'rule' }): Promise<boolean> {
   const m = /^run\/([^/]+)\//.exec(obj.logical_key ?? '');
   const stream = obj.channel_id ?? obj.event_id ?? obj.rec_channel ?? obj.rec_event;
   if (!m || !stream || !obj.recording_id) return false;
   const locs = await locationsOf(obj.id);
   if (!locs.some((l) => l.tier === 'local')) return false;
   const { pruneRun } = await import('./prune');
-  await pruneRun({ streamId: stream, runId: m[1], accountId: obj.account_id ?? null, recordingId: obj.recording_id, reason, actor });
+  const pruned = await pruneRun({ streamId: stream, runId: m[1], accountId: obj.account_id ?? null, recordingId: obj.recording_id, reason, actor });
   const left = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [obj.recording_id]);
   if (!left?.n) await query(`UPDATE recordings SET storage_state = 'deleted' WHERE id = $1`, [obj.recording_id]);
   await refreshNextAction(obj.recording_id).catch(() => {});
+  // THE RECORD OF IT. A fully removed recording leaves the Recordings tables
+  // (lists filter storage_state = 'deleted'); this is what remains to say it
+  // existed, expired, and what was taken.
+  await logRecordingRemoval({
+    recordingId: obj.recording_id, trigger: meta.trigger, ruleName: meta.ruleName ?? null, reason, actor,
+    expiredAt: meta.expiredAt ?? null,
+    outcome: left?.n ? 'kept_for_clips' : 'removed',
+    removed: summarisePrune([pruned]),
+  });
   return true;
+}
+
+/**
+ * After an object-storage delete: when it was the recording's last live
+ * object, the recording is removed, so mark it (which takes it out of the
+ * lists) and write the removal record.
+ */
+async function closeRemovedRecording(recordingId: string, o: {
+  trigger: 'rule' | 'manual'; ruleName?: string; actor: string; reason: string; expiredAt?: Date;
+}): Promise<void> {
+  const left = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [recordingId]);
+  if (left?.n) return;   // other objects of it are still to go; the last one writes the record
+  await query(`UPDATE recordings SET storage_state = 'deleted' WHERE id = $1`, [recordingId]);
+  await refreshNextAction(recordingId).catch(() => {});
+  await logRecordingRemoval({ recordingId, trigger: o.trigger, ruleName: o.ruleName ?? null, reason: o.reason,
+    actor: o.actor, expiredAt: o.expiredAt ?? null, outcome: 'removed' });
 }
 
 /** A default ladder for a new account, in the deployment's own terms. */
