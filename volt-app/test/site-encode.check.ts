@@ -311,6 +311,24 @@ if opt('--mpd_output'):
   a = await asset(A);
   ok(a.media_state === 'failed' && /encoding at the site failed: ffmpeg ran out of disk/.test(a.media_error ?? '') && a.media_error_code === 'disk_full', 'after its attempts the asset says why', [a.media_state, a.media_error]);
 
+  console.log('== a re-encode that succeeds keeps the FAST ladder packages (H4-5) ==');
+  // A FAST channel's package of this asset to its ladder sits inside the asset
+  // folder (ladders/, vod.ladder); a running playout may be reading it.
+  const lad = join(outDir, 'ladders', 'grp', '4s', 'v1');
+  mkdirSync(lad, { recursive: true });
+  writeFileSync(join(lad, 'master.m3u8'), '#EXTM3U\n');
+  await E.requestSiteEncode(req);
+  L = (await lease()).body;
+  await api('POST', `/api/site-agent/jobs/${L.id}/complete`, { leaseId: L.leaseId, result: { probe: encProbe } }, cred);
+  L = (await lease()).body;
+  r = await api('POST', `/api/site-agent/jobs/${L.id}/outputs`, { leaseId: L.leaseId, files: files3 }, cred);
+  for (const f of files3) await upload(L, f, readFileSync(join(out3, f.path)));
+  r = await api('POST', `/api/site-agent/jobs/${L.id}/complete`, { leaseId: L.leaseId, result: { encoder: e3.json ?? {} } }, cred);
+  a = await asset(A);
+  ok(r.status === 200 && a.media_state === 'ready' && files3.every((f) => sha(join(outDir, f.path)) === f.sha256), 'the new package is swapped in and the asset is ready again', [r.status, a.media_state]);
+  ok(existsSync(join(lad, 'master.m3u8')), 'the FAST ladder package beside it is carried into the new folder, not removed with the old one');
+  ok(!readdirSync(join(process.env.CLIPS_DIR!, 'vod')).some((n) => n.includes('.replaced-')), 'and the old folder is gone');
+
   console.log('== failures reported by the worker ==');
   const B = await newAsset('Broken');
   await E.requestSiteEncode({ ...req, vodAssetId: B, sitePath: '/mnt/news/drop/broken.mp4' });

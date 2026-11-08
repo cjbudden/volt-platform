@@ -80,14 +80,25 @@ export async function assetsInUse(channelId: string): Promise<Map<string, Role>>
 }
 
 
-/** Encodes in flight for these assets: vod.encode by asset, vod.ladder by asset and variant (with progress). */
+/** Where an Encode at site original is kept (`ingest.siteSource`), when it is. */
+function siteSourceOf(ingest: any): { siteId: string; sitePath: string } | null {
+  const s = ingest?.siteSource;
+  return s && typeof s.siteId === 'string' && typeof s.sitePath === 'string' && s.siteId && s.sitePath ? { siteId: s.siteId, sitePath: s.sitePath } : null;
+}
+
+/**
+ * Encodes in flight for these assets: vod.encode by asset, vod.ladder by asset
+ * and variant (with progress). An encode at a Hybrid Site (its probe, then its
+ * encode) is an encode of the asset like vod.encode: while it runs the asset
+ * reads as preparing, so a second Prepare does not queue a second one.
+ */
 async function inFlight(ids: string[]) {
   const rows = await query<any>(
-    `SELECT type, payload, progress_pct FROM jobs WHERE type IN ('vod.encode', 'vod.ladder') AND state IN ('queued', 'running') AND payload->>'vodAssetId' = ANY($1::text[])`, [ids]);
+    `SELECT type, payload, progress_pct FROM jobs WHERE type IN ('vod.encode', 'vod.ladder', 'site.vod-probe', 'site.vod-encode') AND state IN ('queued', 'running') AND payload->>'vodAssetId' = ANY($1::text[])`, [ids]);
   const encode = new Set<string>(), ladder = new Map<string, number | null>();
   for (const r of rows) {
     const p = r.payload ?? {};
-    if (r.type === 'vod.encode') encode.add(String(p.vodAssetId));
+    if (r.type === 'vod.encode' || r.type === 'site.vod-probe' || r.type === 'site.vod-encode') encode.add(String(p.vodAssetId));
     else ladder.set(`${p.vodAssetId}|${p.ladderGroupId}|${variantRel(String(p.ladderGroupId), Number(p.segmentSeconds), !!p.loudnorm)}`, r.progress_pct == null ? null : Number(r.progress_pct));
   }
   return { encode, ladder };
@@ -115,6 +126,12 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
     const base = { assetId: id, title, role, packaging: null as Readiness['packaging'], progress: null as number | null, note: null as string | null };
     // A bucket original (build queue 2.1a-2b) counts: the ladder job fetches it.
     const hasSource = vodSourceAvailable(r.source_key);
+    // AN ORIGINAL KEPT AT A HYBRID SITE (Encode at site, H4-3) has no source on
+    // this server, but it is not lost: its own encode is redone at the site,
+    // never in the cloud (H4-5). Packaging it to a channel's ladder (a variant
+    // beside its own encode) is not done at a site yet, so that case still
+    // airs on the asset's own encode.
+    const atSite = !hasSource && !!siteSourceOf(r.ingest);
     if (ladder) {
       const need = needFor(role, ladder);
       const fit = fitToTop(sourceQuality(r), top);
@@ -136,7 +153,7 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
         : `not yet packaged to the channel's ladder (${ladder.groupName}: ${ladder.rungs.map((x) => `${x.height}p`).join(', ')}${need.segmentSeconds !== ladder.segmentSeconds ? `, ${need.segmentSeconds} s segments` : ''}${need.loudnorm ? ', broadcast loudness' : ''})`;
       items.push(hasSource
         ? { ...base, state: 'needs-prepare', why, failed: v?.state === 'failed' }
-        : { ...base, state: 'no-source', why: `${why}; the source file is not on this server${r.master_key ? ', so it airs on its own encode' : ''}` });
+        : { ...base, state: 'no-source', why: `${why}; ${atSite ? 'the original is kept at a site, which encodes it only to its own ladder' : 'the source file is not on this server'}${r.master_key ? ', so it airs on its own encode' : ''}` });
       continue;
     }
     if (busy.encode.has(id)) { items.push({ ...base, state: 'preparing', why: 'encoding' }); continue; }
@@ -147,7 +164,9 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
     else if ((role === 'house' || role === 'ident' || role === 'loop') && er.loudnorm !== true) why = 'loudness not normalised';
     else if ((role === 'slate' || role === 'loop') && Number(er.segmentSeconds) !== 1) why = 'not in 1 s segments';
     if (!why) { items.push({ ...base, state: 'ready', why: null, packaging: 'main' }); continue; }
-    items.push({ ...base, state: hasSource ? 'needs-prepare' : 'no-source', why: hasSource ? why : `${why}; the source file is not on this server` });
+    items.push(hasSource || atSite
+      ? { ...base, state: 'needs-prepare', why: atSite ? `${why}; encoded again at the site that keeps the original` : why }
+      : { ...base, state: 'no-source', why: `${why}; the source file is not on this server` });
   }
   items.sort((a, b) => a.state.localeCompare(b.state) || a.title.localeCompare(b.title));
   return { items, ladder };
@@ -164,7 +183,7 @@ export async function prepare(channelId: string, opts: { auto?: boolean } = {}):
   const { enqueue } = await import('../jobs/queue');
   const queued: string[] = [];
   const skipped: Readiness[] = [];
-  const rows = new Map((await query<any>(`SELECT id, account_id, source_key FROM vod_assets WHERE id = ANY($1::uuid[])`, [list.map((r) => r.assetId)]))
+  const rows = new Map((await query<any>(`SELECT id, account_id, source_key, ingest FROM vod_assets WHERE id = ANY($1::uuid[])`, [list.map((r) => r.assetId)]))
     .map((r) => [String(r.id), r]));
   for (const r of list) {
     if (r.state === 'no-source') { skipped.push(r); continue; }
@@ -182,6 +201,21 @@ export async function prepare(channelId: string, opts: { auto?: boolean } = {}):
         priority: r.role === 'content' || r.role === 'slate' ? 60 : 80,
       });
       await recordQueued(r.assetId, ladder.groupId, need, job?.id ?? null);
+    } else if (!vodSourceAvailable(a.source_key) && siteSourceOf(a.ingest)) {
+      // The original is at a site: the same encode, done there. A site that is
+      // disabled or an account without the add-on is said, not hidden.
+      const at = siteSourceOf(a.ingest)!;
+      try {
+        const { requestSiteEncode } = await import('../sites/siteEncode');
+        await requestSiteEncode({
+          vodAssetId: r.assetId, accountId: a.account_id, siteId: at.siteId, sitePath: at.sitePath, ladderGroupId: null,
+          segmentSeconds: r.role === 'slate' || r.role === 'loop' ? 1 : null,
+          loudnorm: r.role === 'house' || r.role === 'ident' || r.role === 'loop',
+        });
+      } catch (e: any) {
+        skipped.push({ ...r, state: 'no-source', why: `${r.why ?? 'needs encoding'}; the site that keeps the original cannot take it: ${String(e?.message ?? e).slice(0, 200)}` });
+        continue;
+      }
     } else {
       await enqueue({
         type: 'vod.encode',

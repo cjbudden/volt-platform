@@ -401,6 +401,11 @@ async function judgeEncode(job: JobRow, result: any): Promise<Verdict> {
         const old = existsSync(outDir) ? `${outDir}.replaced-${Date.now()}` : null;
         if (old) await rename(outDir, old);
         await rename(local, outDir);
+        // A RE-ENCODE MUST NOT TAKE THE FAST PACKAGES WITH IT (H4-5). A FAST
+        // channel's ladder variants (vod.ladder, `ladders/` inside this folder)
+        // were made from the same original and a running playout may be reading
+        // them, so they are carried into the new folder, not removed with the old.
+        if (old && existsSync(join(old, 'ladders')) && !existsSync(join(outDir, 'ladders'))) await rename(join(old, 'ladders'), join(outDir, 'ladders'));
         // Read back and verified: the bucket's staging copy is done with.
         if (local !== staging) await removeStaging(staging);
         if (old) await rm(old, { recursive: true, force: true }).catch(() => {});

@@ -313,3 +313,11 @@ About 10 to 14 build sessions of the size the recent FAST and SSAI builds took, 
 - **Checked** by `test/site-encode-bucket.check.ts` (34 checks, moto as the bucket, the real agent worker and `vod_encoder.py`; moto does not check the checksum header, so the test changes bytes on the way and the cloud's own hash catches them).
 - **Not yet (H4-5):** the asset page saying "at site" beside Processing (its files carry another session's uncommitted edits), a re-encode or new ladder of a site-kept original sent to its site, the Mac Docker and kill-the-agent runs, GPU on AWS staging.
 
+**Phase 4e as built (H4-5, first part): re-encodes of a site-kept original go to its site.**
+
+- **FAST** (`services/fast/prepare.ts`): an asset whose original is only at a site (`ingest.siteSource`) and that a channel without a ladder needs encoded again (splice alignment, loudness, 1 s segments) reads as needing preparation, and Prepare queues `requestSiteEncode` with the role's `segmentSeconds` and `loudnorm`; a disabled site or an account without the add-on is reported in `skipped`. Site jobs count as encodes in flight.
+- **The swap keeps FAST packages** (`judgeEncode`): `ladders/` inside the asset folder (ladder variants a running playout may read) is moved into the new folder when a site's package replaces an earlier one; before, it was deleted with the old folder.
+- **Encode again** retries the failed site job, which stays in the site pool (checked).
+- **Checked** by `test/site-reencode.check.ts` (21 checks) and three new checks in `test/site-encode.check.ts`.
+- **Not yet (H4-6):** a ladder variant (`vod.ladder`) made at a site (readiness says the title airs on its own encode), "at site" on the asset page, the ingest sidecar for a registration, the Mac Docker and kill-the-agent runs, GPU on AWS staging.
+
