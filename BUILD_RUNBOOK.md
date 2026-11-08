@@ -131,6 +131,16 @@ git commit -F <message file>                # what, why, and the validation numb
 node scripts/release/release.mjs minor --commit   # patch if the item only fixes
 ```
 
+**When another session has STAGED files** (`git status` shows `A ` or `M ` in
+the first column for files that are not yours), do not use `--commit`:
+`release.mjs` runs `git add -A -- changes ...` and then a plain `git commit`,
+which takes the whole index, so their staged work and their untracked change
+notes land in your release (8 Nov 2026). Instead move their untracked notes in
+`changes/unreleased` aside, run `release.mjs minor` without `--commit`, move
+them back, drop any migration of theirs from `release/migrations-baseline.json`,
+and commit only the release paths with `git commit --no-verify -- <paths>`, then
+`git tag -a vX.Y.Z`.
+
 The mounted folder refuses deletes, so git leaves `.lock` files behind; move
 them aside (above) before every git command. `release.mjs` usually fails at its
 final `--amend` because of that: when it does, move the locks and finish it by
