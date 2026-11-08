@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.63.0 (2026-11-08)
+
+### Product (in customer release notes)
+
+- added · Mirror and Archive: Copy rules can now copy an item's HLS/DASH package to a folder at your site: tick HLS/DASH package on a storage target and every playlist and segment goes there as one folder that plays as it is, each file read back. The box says what it costs in room: usually about 1.7 times the original.
+
+### Internal
+
+- added · Mirror and Archive: mirror-archive-packages check suite (52 checks with the real site agent): a package copied as one folder job, every file read back, an incomplete or changed package never counted as archived, folder re-checks; console walk 72 checks.
+
 ## 0.62.0 (2026-11-07)
 
 ### Product (in customer release notes)
