@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.67.0 (2026-11-08)
+
+### Product (in customer release notes)
+
+- added · Hybrid Sites: On-prem watchfolders can now be set to Encode at site: video and audio are registered in the Media Library and encoded by your site's servers, only the finished streams are uploaded, and the original stays on your storage. Images, captions, slates and loops in the same folder are still uploaded.
+
+### Internal
+
+- added · Hybrid Sites: site-encode-placement check suite: registration without upload, the ingest on the site's facts and the encode at the site, end to end with the real agent.
+
 ## 0.66.0 (2026-11-08)
 
 ### Product (in customer release notes)

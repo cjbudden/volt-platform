@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.66.0",
+  "version": "0.67.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -32447,6 +32447,32 @@
     }
    }
   },
+  "/api/storage/removals": {
+   "get": {
+    "operationId": "getStorageRemovals",
+    "summary": "Get storage removals",
+    "tags": [
+     "Storage"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/storage/retention": {
    "get": {
     "operationId": "getStorageRetention",
@@ -38653,6 +38679,50 @@
     "parameters": [
      {
       "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/qc/findings/{findingId}/review": {
+   "post": {
+    "operationId": "postVODByIDQcFindingsByFindingIdReview",
+    "summary": "Review (finding)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "findingId",
       "in": "path",
       "required": true,
       "schema": {
