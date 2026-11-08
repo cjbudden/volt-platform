@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.64.0 (2026-11-08)
+
+### Product (in customer release notes)
+
+- improved · Mirror and Archive: Copy rules can now copy an item's HLS/DASH package into an S3-compatible store at your site, such as MinIO, as well as to a folder: every playlist and segment goes under one folder in the bucket, each object read back, and nothing already in the store is ever replaced. A package that cannot be finished leaves nothing behind.
+
+### Internal
+
+- added · Mirror and Archive: mirror-archive-packages now 69 checks: packages into a real S3 API (moto with signatures checked) by the real site agent, the whole folder to -2 when its name is in use, a 412 race, every object removed when a package is not whole, store re-checks; console walk 75 checks.
+
 ## 0.63.0 (2026-11-08)
 
 ### Product (in customer release notes)
