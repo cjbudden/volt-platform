@@ -111,6 +111,8 @@ VOLT_ENCODER_IMAGE=volt-encoder:<version> volt-agent site run
 
 The server needs Docker. The encoder runs with the file's folder mounted read only and no network. Encodes planned for an NVIDIA graphics card go only to servers that reported one. Each encode works in `~/.volt-agent/encode` (or the folder `VOLT_SITE_SCRATCH` names), which is emptied when the job ends, so leave room there for about twice the size of your largest file.
 
+The finished streams go from the site's server straight to Volt's storage, over HTTPS, one file at a time, each with a link that is good for that file only and for 15 minutes. Each file is checked against the checksum the server reported for it, so anything changed on the way is refused and sent again. Large files are sent from disk as they are read, so the agent does not need memory for them. The server needs outbound HTTPS to your Volt address and, on Volt's cloud, to Amazon S3 in the region your Volt runs in; allow both through your firewall.
+
 ### Keep archive copies at the site
 
 With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, a NAS share mounted on it, or an S3-compatible object store on your network (MinIO, NetApp StorageGRID and similar). Storage targets and copies are on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page, and copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage).
@@ -218,6 +220,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | An encode at the site waits with *is not there (is the share mounted?)* | The folder holding the file is not mounted on the server that took the job | Mount the share on every server of the site; the encode is retried by itself |
 | An encode at the site fails with *not at the site* | The file was moved or deleted before it was encoded | Put the file back and encode it again |
 | An encode planned for a graphics card never starts | No server of the site reported an NVIDIA card | Run the agent on a server with one, or choose an encoding profile that does not use the graphics card |
+| An encode at the site waits with *uploading ... failed (HTTP 403)* | The upload was refused by Volt's storage: often a proxy on the site's network that changes or strips the request's headers | Let the server reach Amazon S3 in Volt's region directly over HTTPS, without a proxy that rewrites requests; the encode is retried by itself |
+| An encode at the site is encoded again with *does not match its declared SHA-256* | A file changed between the encoder and Volt (a proxy or antivirus that rewrites files, or failing storage) | Exclude the agent's encode folder from such software and check the storage; after its attempts the item says why |
 | An on-prem watchfolder's **Last pass** stays old | No approved server of the site is running the agent, or it cannot read the folder | Check the server here; the folder's page shows the agent's last error under **Last scan failed** |
 
 ## Through the API

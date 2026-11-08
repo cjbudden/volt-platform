@@ -59,6 +59,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "origin" {
       days = 8
     }
   }
+  # Site encode packages waiting for verification (build queue H4-4). A site
+  # uploads its package under site-staging/<asset>/<job>-a<attempt>/ and the
+  # control plane removes it once it has been read back, verified or refused.
+  # This catches an attempt whose task died before it could, so a package
+  # nobody will verify is not paid for: no attempt waits more than hours.
+  rule {
+    id     = "site-staging"
+    status = "Enabled"
+    filter {
+      prefix = "site-staging/"
+    }
+    expiration {
+      days = 3
+    }
+  }
 }
 
 # ---- CloudFront -------------------------------------------------------------

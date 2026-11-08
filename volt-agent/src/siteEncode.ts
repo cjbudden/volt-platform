@@ -51,6 +51,17 @@ export const ENCODE_JOB_TYPES = ['site.vod-probe', 'site.vod-encode'];
 /** Files declared per request: a long film's package is declared in parts that each fit a request body. */
 export const DECLARE_BATCH = 1000;
 
+/**
+ * Package files bigger than this are streamed from disk with their length
+ * stated, instead of read into memory whole before the PUT (H4-4): a 4K
+ * rendition's segments are small, but a long single-file output need not fit
+ * in the agent's memory. VOLT_SITE_STREAM_ABOVE_MB overrides it.
+ */
+export const STREAM_ABOVE_BYTES = Number(process.env.VOLT_SITE_STREAM_ABOVE_MB ?? 256) * 2 ** 20;
+
+/** Headers the cloud may ask an upload to carry (a presigned bucket URL signs the checksum). */
+const UPLOAD_HEADER = /^(x-amz-[a-z0-9-]+|content-md5)$/;
+
 export interface EncoderRun { code: number | null; stdout: string; stderr: string }
 
 /** Runs vod_encoder.py with one job file. `job` already carries this host's paths. */
@@ -76,6 +87,8 @@ export interface EncodeCtx {
   /** Whether this host has an NVIDIA GPU (what it reports in its heartbeat). */
   hasGpu?: boolean;
   declareBatch?: number;
+  /** Stream files bigger than this many bytes (default STREAM_ABOVE_BYTES). */
+  streamAboveBytes?: number;
 }
 
 class Refused extends Error { constructor(message: string, public code: string, public permanent = false) { super(message); } }
@@ -298,14 +311,24 @@ async function runEncode(ctx: EncodeCtx, job: any, scratch: string, abort: Abort
   let sent = 0;
   const f = ctx.fetch ?? fetch;
   for (const file of files) {
-    const u = await call(ctx, `/api/site-agent/jobs/${job.id}/transfer-url`, { leaseId: job.leaseId, name: `out/${file.path}` });
+    const u = await call(ctx, `/api/site-agent/jobs/${job.id}/transfer-url`, { leaseId: job.leaseId, name: `out/${file.path}`, signedHeaders: true });
     if (u.status === 409 && u.body?.code === 'lease_lost') throw new LeaseLost();
     if (u.status !== 200 || !u.body?.url) throw new Refused(`no upload URL for ${file.path}: ${u.body?.error ?? `HTTP ${u.status}`}`, u.body?.code ?? 'transfer_refused');
     const url = /^https?:\/\//.test(u.body.url) ? u.body.url : ctx.server.replace(/\/+$/, '') + u.body.url;
     // No credential on the request: the URL is the permission (a presigned
-    // bucket URL would be refused with one).
-    const body = await readFile(file.abs);
-    const put = await f(url, { method: 'PUT', body: body as any, headers: { 'content-type': 'application/octet-stream' } });
+    // bucket URL would be refused with one). Headers the cloud signed into the
+    // URL (the file's SHA-256 for the bucket) are sent exactly as given.
+    const headers: Record<string, string> = { 'content-type': 'application/octet-stream' };
+    if (u.body.headers && typeof u.body.headers === 'object') {
+      for (const [k, v] of Object.entries(u.body.headers)) if (UPLOAD_HEADER.test(k.toLowerCase()) && typeof v === 'string') headers[k.toLowerCase()] = v;
+    }
+    // A large file goes from disk as a stream with its length stated (S3
+    // refuses a PUT of unknown length); a small one is read whole.
+    const streamed = file.bytes > (ctx.streamAboveBytes ?? STREAM_ABOVE_BYTES);
+    const init: any = streamed
+      ? { method: 'PUT', body: createReadStream(file.abs), duplex: 'half', headers: { ...headers, 'content-length': String(file.bytes) } }
+      : { method: 'PUT', body: await readFile(file.abs), headers };
+    const put = await f(url, init);
     const text = await put.text().catch(() => '');
     if (put.status === 409) throw new LeaseLost();
     if (!put.ok) {

@@ -31,7 +31,7 @@ import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
 import { archivePass } from './siteArchive';
 import { encodePass, siteProbe } from './siteEncode';
 
-export const AGENT_VERSION = '0.8.0';
+export const AGENT_VERSION = '0.9.0';
 
 export interface SiteState {
   server: string;

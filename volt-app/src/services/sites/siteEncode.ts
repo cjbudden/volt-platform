@@ -27,15 +27,31 @@
 //       encode's own finish runs (finishEncode): the asset is recorded exactly
 //       as one encoded here, then QC, stills and follow-up jobs.
 //
-//  WHERE THE PACKAGE LANDS. This build writes to the control plane's own disk
-//  (the single Mac server, VOD_STORE local). With the origin bucket (AWS) the
-//  upload should go straight to the bucket instead of through the control
-//  plane, which is H4-2; until then a site encode is refused there rather
-//  than moving every byte through the API.
+//  WHERE THE PACKAGE LANDS.
+//    - VOD_STORE local (the single Mac server): each file is PUT to this API
+//      through a signed URL, into a staging folder on this disk, and checked
+//      against its SHA-256 as it arrives.
+//    - VOD_STORE s3 (AWS, build queue H4-4): each file is PUT straight to the
+//      origin bucket under site-staging/<asset>/<job>-a<attempt>/ with a
+//      presigned URL that also signs the file's SHA-256, so S3 itself refuses
+//      other bytes and no byte of the upload passes through the API or its
+//      load balancer. On complete the cloud reads the package back from the
+//      bucket (in region, so no transfer charge), hashes every file against
+//      what was declared, and then verifies and records it exactly as on the
+//      Mac: the same verifyPackage and the same finishEncode, which puts the
+//      package under vod/<id>/ as it does after a cloud encode. The staging
+//      prefix is removed either way; a lifecycle rule in deploy/terraform
+//      sweeps whatever a dead task left behind.
 // ============================================================================
 import { mkdir, rename, rm, stat, readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
+import { Transform, type Readable } from 'node:stream';
 import { join, dirname, posix } from 'node:path';
+import { config } from '../../config';
+import { isS3Uri, mediaS3Client, parseS3Uri } from '../media/s3Driver';
+import { vodStore } from '../fast/vodStore';
 import { one, query } from '../../db';
 import { ApiError, badRequest, conflict, notFound } from '../../util/http';
 import { enqueue, sitePool, type JobRow } from '../jobs/queue';
@@ -69,11 +85,8 @@ export interface SiteEncodeRequest {
   sourceBytes?: number | null;
 }
 
-/** The origin the package would land in: only this server's disk in this build. */
-async function storeIsLocal(): Promise<boolean> {
-  const { vodStore } = await import('../fast/vodStore');
-  return vodStore() === 'local';
-}
+/** Where a site's package is uploaded to wait for verification, in the origin bucket. */
+export const SITE_STAGING_PREFIX = 'site-staging/';
 
 /**
  * Queue an encode at a site. The asset reads Processing until the cloud has
@@ -96,9 +109,6 @@ export async function requestSiteEncode(r: SiteEncodeRequest): Promise<JobRow> {
        LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE v.id = $1 AND COALESCE(g.account_id, v.account_id) = $2`, [r.vodAssetId, r.accountId]);
   if (!asset) throw notFound('asset not found');
-  if (!(await storeIsLocal())) {
-    throw err(409, 'Encoding at a site with the origin bucket arrives with build queue H4-2; this server stores packages in a bucket', 'site_encode_needs_local_store');
-  }
   const payload = {
     vodAssetId: r.vodAssetId, accountId: r.accountId, siteId: r.siteId, sitePath,
     ladderGroupId: r.ladderGroupId ?? null, segmentSeconds: r.segmentSeconds ?? null, loudnorm: !!r.loudnorm,
@@ -173,9 +183,78 @@ export interface DeclaredFile { path: string; bytes: number; sha256: string }
 /** A package path: plain segments, no dot files, no way out. */
 const SAFE_PATH = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}){0,6}$/;
 
-/** Where this attempt's upload waits until it is verified. */
+/**
+ * Where this attempt's upload waits until it is verified: a folder on this
+ * disk, or (packages in the origin bucket) an s3:// prefix of its own.
+ */
 export function stagingDirFor(job: Pick<JobRow, 'id' | 'attempts' | 'payload'>): string {
+  if (vodStore() === 's3') return `s3://${config.aws.s3Bucket}/${SITE_STAGING_PREFIX}${job.payload.vodAssetId}/${job.id}-a${job.attempts || 1}`;
+  return localCopyFor(job);
+}
+
+/** The folder on this disk the package is verified and recorded from (on S3, where it is read back to). */
+function localCopyFor(job: Pick<JobRow, 'id' | 'attempts' | 'payload'>): string {
   return `${outDirFor(job.payload.vodAssetId)}.site-${job.id}-a${job.attempts || 1}`;
+}
+
+/** Remove an attempt's upload, wherever it waits. Never throws: a leftover is swept, not fatal. */
+export async function removeStaging(staging: string): Promise<void> {
+  if (!isS3Uri(staging)) { await rm(staging, { recursive: true, force: true }).catch(() => {}); return; }
+  const loc = parseS3Uri(`${staging.replace(/\/+$/, '')}/`);
+  // Only ever a site-staging prefix: a bad payload must not empty anything else.
+  if (!loc || !loc.key.startsWith(SITE_STAGING_PREFIX) || loc.key.split('/').length < 4) return;
+  try {
+    const { ListObjectsV2Command, DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
+    const c = await mediaS3Client(config.aws.region);
+    let token: string | undefined;
+    do {
+      const r: any = await c.send(new ListObjectsV2Command({ Bucket: loc.bucket, Prefix: loc.key, ContinuationToken: token }));
+      const keys = (r.Contents ?? []).map((o: any) => ({ Key: o.Key }));
+      if (keys.length) await c.send(new DeleteObjectsCommand({ Bucket: loc.bucket, Delete: { Objects: keys, Quiet: true } }));
+      token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    } while (token);
+  } catch (e) {
+    console.error(`[site encode] staging ${staging} not removed (the lifecycle rule sweeps it):`, e);
+  }
+}
+
+/**
+ * Read an attempt's upload back from the bucket into `dest`, hashing every
+ * file on the way: present, at its declared size, with its declared SHA-256.
+ * Every problem is listed. In region this costs GET requests, not transfer.
+ */
+export async function readBackFromBucket(staging: string, declared: DeclaredFile[], dest: string): Promise<string[]> {
+  const loc = parseS3Uri(`${staging.replace(/\/+$/, '')}/`);
+  if (!loc) return ['the upload has no place in the bucket'];
+  const { ListObjectsV2Command, GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const c = await mediaS3Client(config.aws.region);
+  const sizes = new Map<string, number>();
+  let token: string | undefined;
+  do {
+    const r: any = await c.send(new ListObjectsV2Command({ Bucket: loc.bucket, Prefix: loc.key, ContinuationToken: token }));
+    for (const o of r.Contents ?? []) sizes.set(String(o.Key).slice(loc.key.length), Number(o.Size ?? 0));
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  const problems: string[] = [];
+  for (const d of declared) {
+    const size = sizes.get(d.path);
+    if (size === undefined) problems.push(`${d.path} was declared but not uploaded`);
+    else if (size !== d.bytes) problems.push(`${d.path} is ${size} bytes, declared ${d.bytes}`);
+  }
+  if (problems.length) return problems.slice(0, 50);
+  await mkdir(dest, { recursive: true });
+  const fetchOne = async (d: DeclaredFile) => {
+    const target = join(dest, ...d.path.split('/'));
+    await mkdir(dirname(target), { recursive: true });
+    const r: any = await c.send(new GetObjectCommand({ Bucket: loc.bucket, Key: loc.key + d.path }));
+    const h = createHash('sha256');
+    const tap = new Transform({ transform(chunk, _e, cb) { h.update(chunk); cb(null, chunk); } });
+    await pipeline(r.Body as Readable, tap, createWriteStream(target));
+    if (h.digest('hex') !== d.sha256) problems.push(`${d.path} does not match its declared SHA-256`);
+  };
+  const n = 8;
+  for (let i = 0; i < declared.length && problems.length < 50; i += n) await Promise.all(declared.slice(i, i + n).map(fetchOne));
+  return problems.slice(0, 50);
 }
 
 /**
@@ -207,7 +286,8 @@ export function declareOutputs(job: JobRow, raw: unknown, append = false): { dec
   if (total > MAX_PACKAGE_BYTES) throw badRequest(`a package is limited to ${MAX_PACKAGE_BYTES} bytes`);
   const root = stagingDirFor(job);
   const all = [...before, ...declared];
-  const transfers: JobTransfer[] = all.map((d) => ({ name: `out/${d.path}`, direction: 'upload', uri: join(root, ...d.path.split('/')), bytes: d.bytes, sha256: d.sha256 }));
+  const uriOf = (path: string) => (isS3Uri(root) ? `${root}/${path}` : join(root, ...path.split('/')));
+  const transfers: JobTransfer[] = all.map((d) => ({ name: `out/${d.path}`, direction: 'upload', uri: uriOf(d.path), bytes: d.bytes, sha256: d.sha256 }));
   return { declared: all, transfers, staging: root };
 }
 
@@ -289,11 +369,22 @@ async function judgeEncode(job: JobRow, result: any): Promise<Verdict> {
   // Verified where it was declared to go (a lease reaped mid-upload leaves a
   // declaration of its own attempt, which the next attempt replaces).
   const staging = typeof job.payload?.staging === 'string' ? job.payload.staging : stagingDirFor(job);
-  const problems = await verifyPackage(staging, declared, job.payload);
+  // In the bucket: read back and hashed into a folder here first, so what is
+  // verified and recorded is exactly the bytes that were declared.
+  const local = isS3Uri(staging) ? localCopyFor(job) : staging;
+  let problems: string[];
+  try {
+    if (local !== staging) await rm(local, { recursive: true, force: true });
+    problems = local !== staging ? await readBackFromBucket(staging, declared, local) : [];
+    if (!problems.length) problems = await verifyPackage(local, declared, job.payload);
+  } catch (e: any) {
+    problems = [`the upload could not be read back (${String(e?.message ?? e).slice(0, 200)})`];
+  }
   if (problems.length) {
     // THE UPLOAD IS DISCARDED, never half kept: the retry uploads into a
     // staging folder of its own attempt.
-    await rm(staging, { recursive: true, force: true }).catch(() => {});
+    await removeStaging(staging);
+    if (local !== staging) await rm(local, { recursive: true, force: true }).catch(() => {});
     return { ok: false, status: 422, message: `the package did not verify: ${problems.slice(0, 5).join('; ')}${problems.length > 5 ? ` (and ${problems.length - 5} more)` : ''}`, code: 'verification_failed' };
   }
   const encoderResult = result?.encoder && typeof result.encoder === 'object' ? result.encoder : {};
@@ -309,7 +400,9 @@ async function judgeEncode(job: JobRow, result: any): Promise<Verdict> {
         await mkdir(dirname(outDir), { recursive: true });
         const old = existsSync(outDir) ? `${outDir}.replaced-${Date.now()}` : null;
         if (old) await rename(outDir, old);
-        await rename(staging, outDir);
+        await rename(local, outDir);
+        // Read back and verified: the bucket's staging copy is done with.
+        if (local !== staging) await removeStaging(staging);
         if (old) await rm(old, { recursive: true, force: true }).catch(() => {});
         const master = existsSync(join(outDir, 'master.m3u8')) ? `${publicBase(p.vodAssetId)}/master.m3u8` : null;
         const mpd = existsSync(join(outDir, 'manifest.mpd')) ? `${publicBase(p.vodAssetId)}/manifest.mpd` : null;
@@ -349,7 +442,7 @@ export async function siteEncodeAttemptFailed(job: JobRow, message: string, code
   if (!job.payload?.vodAssetId) return;
   if (job.type === SITE_VOD_ENCODE) {
     // The next attempt starts clean: no declaration, no upload transfers, no staging.
-    await rm(typeof job.payload?.staging === 'string' ? job.payload.staging : stagingDirFor(job), { recursive: true, force: true }).catch(() => {});
+    await removeStaging(typeof job.payload?.staging === 'string' ? job.payload.staging : stagingDirFor(job));
     await query(
       `UPDATE jobs SET payload = (payload - 'declared' - 'staging') || jsonb_build_object('transfers', '[]'::jsonb) WHERE id = $1`, [job.id]);
   }

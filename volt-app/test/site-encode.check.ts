@@ -164,7 +164,8 @@ if opt('--mpd_output'):
   const theirs = await newAsset('Theirs', plain);
   ok((await t(() => E.requestSiteEncode({ ...req, vodAssetId: theirs })))?.status === 404, "another account's asset is not found");
   process.env.VOD_STORE = 's3';
-  ok((await t(() => E.requestSiteEncode(req)))?.code === 'site_encode_needs_local_store', 'with the origin bucket it is refused until H4-2');
+  ok(/^s3:\/\/[^/]+\/site-staging\/[0-9a-f-]+\/j1-a2$/.test(E.stagingDirFor({ id: 'j1', attempts: 2, payload: { vodAssetId: A } } as any)),
+    'with the origin bucket the package waits under site-staging/ in the bucket (H4-4; site-encode-bucket.check.ts runs it)', E.stagingDirFor({ id: 'j1', attempts: 2, payload: { vodAssetId: A } } as any));
   process.env.VOD_STORE = 'local';
   const probeJob = await E.requestSiteEncode(req);
   ok(probeJob.type === E.SITE_VOD_PROBE && probeJob.pool === Q.sitePool(site), 'the probe waits in the site pool', [probeJob.type, probeJob.pool]);

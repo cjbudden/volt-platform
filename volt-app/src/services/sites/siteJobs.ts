@@ -24,7 +24,6 @@
 //  of its own site did not hand it.
 // ============================================================================
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { rm } from 'node:fs/promises';
 import { createReadStream, createWriteStream, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -39,7 +38,7 @@ import type { SitePrincipal } from './sites';
 import { requireApprovedHost } from './siteWatchfolders';
 import { licenceRequired } from './licences';
 import { ARCHIVE_JOB_TYPES, attemptFailed, isArchiveJob, judge } from '../archive/archive';
-import { declareOutputs, isSiteEncodeJob, judgeSiteEncode, siteEncodeAttemptFailed } from './siteEncode';
+import { declareOutputs, isSiteEncodeJob, judgeSiteEncode, removeStaging, siteEncodeAttemptFailed } from './siteEncode';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LEASE_PREFIX = 'site-host:';
@@ -183,7 +182,7 @@ export async function outputs(p: SitePrincipal, jobId: string, b: any) {
   if (!r) throw leaseLost('it changed hands');
   // An earlier attempt's upload (its lease was reaped mid-upload) is not kept.
   const before = job.payload?.staging;
-  if (typeof before === 'string' && before !== staging) await rm(before, { recursive: true, force: true }).catch(() => {});
+  if (typeof before === 'string' && before !== staging) await removeStaging(before);
   return { ok: true, files: declared.length, bytes: declared.reduce((a, d) => a + d.bytes, 0), transfers: transfers.map((t) => ({ name: t.name, direction: t.direction, bytes: t.bytes, sha256: t.sha256 })) };
 }
 
@@ -197,8 +196,16 @@ export async function transferUrl(p: SitePrincipal, jobId: string, b: any) {
   const expiresAt = new Date(Date.now() + TRANSFER_URL_SECONDS * 1000);
   const method = t.direction === 'download' ? 'GET' : 'PUT';
   if (isS3Uri(t.uri)) {
-    const url = await presignS3(t.uri, method, TRANSFER_URL_SECONDS);
-    return { name: t.name, direction: t.direction, method, url, expiresAt, via: 's3' };
+    // AN UPLOAD STRAIGHT TO THE BUCKET IS HELD TO ITS CHECKSUM BY S3 (H4-4):
+    // the file's SHA-256 is a signed header of the URL, so the host must send
+    // it as given and S3 refuses any other bytes (BadDigest). Only for an
+    // agent that says it sends the headers it is given (`signedHeaders`,
+    // agent 0.9.0 on): an older one would leave the header off and every PUT
+    // would be refused. The cloud hashes what it reads back either way.
+    const headers: Record<string, string> = {};
+    if (method === 'PUT' && b?.signedHeaders === true && t.sha256 && /^[0-9a-f]{64}$/i.test(t.sha256)) headers['x-amz-checksum-sha256'] = Buffer.from(t.sha256, 'hex').toString('base64');
+    const url = await presignS3(t.uri, method, TRANSFER_URL_SECONDS, headers);
+    return { name: t.name, direction: t.direction, method, url, expiresAt, via: 's3', ...(Object.keys(headers).length ? { headers } : {}) };
   }
   const token = signTransfer({ j: job.id, l: job.claimed_by!, n: t.name, e: Math.floor(expiresAt.getTime() / 1000) });
   return { name: t.name, direction: t.direction, method, url: `/api/site-agent/transfers/${token}`, expiresAt, via: 'api' };
@@ -290,7 +297,7 @@ class NodeSha256 {
  * A presigned URL for exactly one key. A prefix (a whole tree) is refused:
  * a job that moves a tree lists one transfer per file.
  */
-export async function presignS3(uri: string, method: 'GET' | 'PUT', expiresSec: number): Promise<string> {
+export async function presignS3(uri: string, method: 'GET' | 'PUT', expiresSec: number, signedHeaders: Record<string, string> = {}): Promise<string> {
   const loc = parseS3Uri(uri);
   if (!loc || loc.prefix || !loc.key) throw badRequest('a transfer names one object, not a prefix');
   const region = config.aws.region;
@@ -310,8 +317,10 @@ export async function presignS3(uri: string, method: 'GET' | 'PUT', expiresSec: 
   }
   const host = port ? `${hostname}:${port}` : hostname;
   const signed: any = await signer.presign(
-    { method, protocol, hostname, port: port ? Number(port) : undefined, path, headers: { host }, query: {} } as any,
-    { expiresIn: expiresSec },
+    { method, protocol, hostname, port: port ? Number(port) : undefined, path, headers: { host, ...signedHeaders }, query: {} } as any,
+    // Kept as headers the request must carry, not moved into the query string,
+    // so S3 checks them against the body (x-amz-checksum-sha256).
+    { expiresIn: expiresSec, unhoistableHeaders: new Set(Object.keys(signedHeaders)) },
   );
   const qs = new URLSearchParams(signed.query as Record<string, string>).toString();
   return `${protocol}//${host}${signed.path}?${qs}`;

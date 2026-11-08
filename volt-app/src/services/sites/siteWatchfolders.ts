@@ -629,7 +629,7 @@ export async function registerSiteItem(p: SitePrincipal, folderId: string, itemI
       note = `registered at the site; in the Media Library as "${title}", encoding at the site${status === 'awaiting_metadata' ? ' (waiting for required metadata before it is ingested)' : ''}`;
     } catch (e: any) {
       // Registered, but the encode cannot be queued (the site was disabled, or
-      // this server keeps packages in a bucket, H4-4): the asset says why.
+      // the add-on withdrawn): the asset says why.
       const msg = String(e?.message ?? e).slice(0, 500);
       await query(
         `UPDATE vod_assets SET media_state = 'failed', media_error = $2, media_error_code = $3, media_state_at = now(), updated_at = now() WHERE id = $1`,
