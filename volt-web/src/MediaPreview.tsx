@@ -100,8 +100,35 @@ const fmt = (s: number) => {
   return h ? `${h}:${String(m % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`
 }
 
-export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster, assetId }: {
+/** A request from outside the player (a QC finding, say) to go to a time, and
+ *  optionally play a stretch and stop at its end. `key` changes per request so
+ *  asking for the same place twice still seeks. */
+export interface SeekRequest { ms: number; play?: boolean; untilMs?: number | null; key: number }
+
+/** Seek, play, and stop at untilMs, on any media element. */
+function useSeekRequest(ref: { current: HTMLMediaElement | null }, seek: SeekRequest | null | undefined) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !seek) return
+    const go = () => {
+      el.currentTime = Math.max(0, seek.ms / 1000)
+      if (seek.play) el.play().catch(() => { /* autoplay refused: it is still at the place */ })
+      else el.pause()
+    }
+    if (el.readyState >= 1) go(); else el.addEventListener('loadedmetadata', go, { once: true })
+    if (!seek.play || seek.untilMs == null) return () => el.removeEventListener('loadedmetadata', go)
+    const stopAt = seek.untilMs / 1000
+    const onT = () => { if (el.currentTime >= stopAt) { el.pause(); el.removeEventListener('timeupdate', onT) } }
+    el.addEventListener('timeupdate', onT)
+    return () => { el.removeEventListener('timeupdate', onT); el.removeEventListener('loadedmetadata', go) }
+    /* eslint-disable-next-line */
+  }, [seek?.key])
+}
+
+export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster, assetId, seek }: {
   sources: PreviewSources
+  /** Go to a time from outside (QC review). */
+  seek?: SeekRequest | null
   /** The library asset being previewed: turns on frame stepping and timecode
    *  from its frame index (build queue 3.2-3). Without it the preview is a
    *  plain player, as for a loop's media. */
@@ -118,13 +145,14 @@ export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt,
   const hasAny = !!(sources.file || sources.hls)
   if (!hasAny) return null
   return audioOnly
-    ? <AudioPreview sources={sources} title={title} err={err} setErr={setErr} />
-    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} assetId={assetId} />
+    ? <AudioPreview sources={sources} title={title} err={err} setErr={setErr} seek={seek} />
+    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} assetId={assetId} seek={seek} />
 }
 
 /** Video: the Volt player SDK with the admin skin (the same player customers embed). */
-function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null; assetId?: string | null }) {
+function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId, seek }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null; assetId?: string | null; seek?: SeekRequest | null }) {
   const ref = useRef<HTMLVideoElement | null>(null)
+  useSeekRequest(ref, seek)
   const frames = useFrameStepping(ref, assetId ?? null)
   // THE ASSET'S IMAGE AS THE POSTER, on the video element itself: shown until it plays, and
   // put back if loading a new source clears it. A newly chosen image is a new URL (versioned).
@@ -179,8 +207,9 @@ function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId }: 
   )
 }
 
-function AudioPreview({ sources, title, err, setErr }: { sources: PreviewSources; title?: string | null; err: string; setErr: (m: string) => void }) {
+function AudioPreview({ sources, title, err, setErr, seek }: { sources: PreviewSources; title?: string | null; err: string; setErr: (m: string) => void; seek?: SeekRequest | null }) {
   const ref = useRef<HTMLAudioElement | null>(null)
+  useSeekRequest(ref, seek)
   const [el, setEl] = useState<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0)

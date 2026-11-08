@@ -7,7 +7,7 @@ import { ClipProvenancePanel } from '../ClipProvenance'
 import { navigate } from '../router'
 import { useAccess } from '../access'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
-import MediaPreview from '../MediaPreview'
+import MediaPreview, { type SeekRequest } from '../MediaPreview'
 import { AssetImage } from './vod/AssetImage'
 import { confirmLeave, setUnsaved, stable } from './vod/unsaved'
 import { AssetFiles } from './vod/AssetFiles'
@@ -175,6 +175,8 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
   const [tab, setTab] = useState<'play' | 'markers' | 'history' | 'availability' | 'rights' | 'metadata' | 'files' | 'encode' | 'formats'>('play')
   const [composeOpen, setComposeOpen] = useState(false)
   const [socialKey, setSocialKey] = useState(0)
+  // QC review drives the player: a finding's place, paused, or a stretch played.
+  const [seek, setSeek] = useState<SeekRequest | null>(null)
   async function load() {
     try { setD(await api.vodAsset(id)); setErr('') } catch (e: any) { setErr(e.message) }
   }
@@ -258,7 +260,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
           <div>
             {playable ? (
-              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} assetId={d.id}
+              <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} assetId={d.id} seek={seek}
                 poster={d.poster_key ? signImage(`1280x720,${d.poster_shape === 'square' ? 'contain,bg=000000' : 'cover'}${posterVersion(d.poster_picked_at) ? `,v=${posterVersion(d.poster_picked_at)}` : ''}`, String(d.poster_key)) ?? thumbUrl(`/${String(d.poster_key).replace(/^\/+/, '')}`, 1280, 720, 'cover') : null} />
             ) : (
               <div style={{
@@ -318,10 +320,12 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
                     <ReviewAction d={d} onChanged={() => { load(); onChanged() }} />
                   </td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>QC</td>
-                  <td style={{ color: QC_TONE[d.qc_state] ?? 'var(--muted)' }}>{d.qc_state ?? 'not run'}{d.qc_at ? <span style={{ color: 'var(--faint)' }}> · {new Date(d.qc_at).toLocaleString()}</span> : null}</td></tr>
+                  <td style={{ color: QC_TONE[d.qc_state] ?? 'var(--muted)' }}>{d.qc_state ?? 'not run'}{d.qc_machine_state && d.qc_state && d.qc_machine_state !== d.qc_state ? <span style={{ color: 'var(--muted)' }}> (after review; QC said {d.qc_machine_state})</span> : null}{d.qc_at ? <span style={{ color: 'var(--faint)' }}> · {new Date(d.qc_at).toLocaleString()}</span> : null}</td></tr>
               </tbody>
             </table>
-            <QcChecks id={d.id} state={d.qc_state ?? null} at={d.qc_at ?? null} />
+            <QcChecks id={d.id} state={d.qc_state ?? null} at={d.qc_at ?? null} durationMs={d.duration_ms ?? null}
+              onJump={playable ? (r) => setSeek({ ...r, key: Date.now() }) : undefined}
+              onChanged={() => { load(); onChanged() }} />
             {d.master_key && !noMedia && (
               <div style={{ marginTop: 10 }}>
                 <a className="btn ghost" href={d.master_key} target="_blank" rel="noreferrer">HLS manifest</a>

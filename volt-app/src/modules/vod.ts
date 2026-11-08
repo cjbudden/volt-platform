@@ -8,7 +8,7 @@ import { videoObjectFromAsset } from '../services/schemaOrg';
 import { traceClip } from '../services/clips/provenance';
 import { enqueueClipBuild } from '../services/clips';
 import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, qcFailedQueue, IllegalReview } from '../services/review';
-import { qcFindings } from '../services/qc';
+import { qcFindings, reviewQcFinding, QcReviewError } from '../services/qc';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
 import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
@@ -592,7 +592,7 @@ vodRouter.get(
       assetId: row.id,
       state: row.review_state ?? 'draft',
       reviewedAt: row.reviewed_at,
-      qc: { state: row.qc_state ?? null, at: row.qc_at ?? null, findings: await qcFindings(row.id) },
+      qc: { state: row.qc_state ?? null, machineState: row.qc_machine_state ?? row.qc_state ?? null, at: row.qc_at ?? null, findings: await qcFindings(row.id) },
       history: await reviewHistory(row.id),
       gate: await publishGate(row.id),
     });
@@ -632,6 +632,38 @@ vodRouter.post(
       });
     } catch (e: any) {
       if (e instanceof IllegalReview) throw badRequest(e.message);
+      throw e;
+    }
+  })
+);
+
+/**
+ * A PERSON'S VERDICT ON ONE QC FINDING, after jumping to it in the player:
+ * accepted (it is fine), confirmed (it is a real problem) or null (undo).
+ * Accepted findings stop counting toward the asset's QC state, so an asset
+ * whose every error has been checked and accepted is no longer held back.
+ * Accepting an error needs a note. Every verdict is in the audit log.
+ */
+vodRouter.post(
+  '/:id/qc/findings/:findingId/review',
+  asyncHandler(async (req, res) => {
+    const row = await fetchOwned(req.params.id, accountId(req));
+    if (!row) throw notFound('VOD asset not found');
+    const body = z.object({
+      verdict: z.enum(['accepted', 'confirmed']).nullable(),
+      note: z.string().max(2000).optional(),
+    }).parse(req.body ?? {});
+    const findingId = Number(req.params.findingId);
+    if (!Number.isInteger(findingId) || findingId <= 0) throw badRequest('Not a QC finding id.');
+    try {
+      const r = await reviewQcFinding({
+        assetId: row.id, findingId, verdict: body.verdict, note: body.note ?? null,
+        actorLabel: await actorLabel(req), actorId: actorId(req), accountId: accountId(req),
+      });
+      res.json({ qc: { state: r.state, machineState: r.machine, finding: r.finding }, gate: await publishGate(row.id) });
+    } catch (e: any) {
+      if (e instanceof QcReviewError) throw badRequest(e.message);
+      if (e?.status === 404) throw notFound(e.message);
       throw e;
     }
   })
@@ -704,7 +736,7 @@ vodRouter.post(
       return;
     }
     // New media will be judged afresh.
-    await query(`UPDATE vod_assets SET qc_state = NULL, qc_at = NULL, built_at = NULL, updated_at = now() WHERE id = $1`, [asset.id]);
+    await query(`UPDATE vod_assets SET qc_state = NULL, qc_machine_state = NULL, qc_at = NULL, built_at = NULL, updated_at = now() WHERE id = $1`, [asset.id]);
     await query(`DELETE FROM qc_events WHERE vod_asset_id = $1`, [asset.id]);
     const job = await enqueueClipBuild({
       vodAssetId: asset.id, streamId, fromMs, toMs, outputKind: asset.output_kind,
@@ -932,7 +964,7 @@ vodRouter.patch(
          -- in its own header as the thing that must not happen.
          review_state = 'draft'::review_state,
          reviewed_by = NULL, reviewed_at = NULL,
-         qc_state = NULL, qc_at = NULL,
+         qc_state = NULL, qc_machine_state = NULL, qc_at = NULL,
          built_at = NULL,
          updated_at = now()
        WHERE id=$1 AND EXISTS (SELECT 1 ${OWNED} WHERE v.id=$1 AND ${OWNER_ACCOUNT}=$2)

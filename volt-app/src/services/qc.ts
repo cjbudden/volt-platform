@@ -43,6 +43,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { one, query } from '../db';
 import { config } from '../config';
+import { writeAudit } from './audit';
 
 export type QcSeverity = 'info' | 'warning' | 'error';
 
@@ -217,6 +218,39 @@ function parseLoudness(log: string): { lufs: number | null; truePeak: number | n
   };
 }
 
+/**
+ * WHERE THE LOUDNESS IS, so a loudness finding can be jumped to like any other.
+ *
+ * ebur128 prints a line every 100 ms with the short-term loudness (S, the
+ * 3 seconds ending at t) and the true peak of that frame per channel (FTPK).
+ * The loudest short-term window is where an over-target clip is most over;
+ * the highest frame peak is where it would clip. Both are positions in the
+ * clip, in ms.
+ */
+export function parseLoudnessPlaces(log: string): { loudest: { atMs: number; lufs: number } | null; peak: { atMs: number; dbfs: number } | null } {
+  let loudest: { atMs: number; lufs: number } | null = null;
+  let peak: { atMs: number; dbfs: number } | null = null;
+  for (const line of log.split('\n')) {
+    const t = /\bt:\s*([\d.]+)/.exec(line);
+    if (!t) continue;
+    const atMs = Math.round(parseFloat(t[1]) * 1000);
+    const st = /\bS:\s*(-?[\d.]+)/.exec(line);
+    if (st) {
+      const v = parseFloat(st[1]);
+      // the first 3 s have no full window yet and read low, so they never win unfairly
+      if (Number.isFinite(v) && (!loudest || v > loudest.lufs)) loudest = { atMs, lufs: v };
+    }
+    const fp = /FTPK:\s*([-\d.\sinf]+?)\s*dBFS/.exec(line);
+    if (fp) {
+      for (const tok of fp[1].trim().split(/\s+/)) {
+        const v = tok === '-inf' ? -Infinity : parseFloat(tok);
+        if (Number.isFinite(v) && (!peak || v > peak.dbfs)) peak = { atMs, dbfs: v };
+      }
+    }
+  }
+  return { loudest, peak };
+}
+
 // ---- the pass --------------------------------------------------------------
 /**
  * Run QC over a finished clip.
@@ -315,6 +349,11 @@ export async function runQc(vodAssetId: string, opts: { path?: string } = {}): P
       // than that is media that was not there, or a trim in the wrong place.
       check: 'duration', severity: Math.abs(measuredMs - wantedMs) > DURATION_ERROR_MS ? 'error' : 'warning',
       measured: `${(measuredMs / 1000).toFixed(2)}s`, expected: `${(wantedMs / 1000).toFixed(2)}s`,
+      // WHERE TO LOOK: the end, which is where a clip that is too short stops
+      // early and a clip that is too long runs on. The last 5 s, or the part
+      // past the requested length.
+      fromMs: measuredMs > wantedMs ? Math.max(0, wantedMs) : Math.max(0, measuredMs - 5000),
+      toMs: measuredMs,
       message: `The clip is ${(Math.abs(measuredMs - wantedMs) / 1000).toFixed(2)}s ` +
                `${measuredMs > wantedMs ? 'longer' : 'shorter'} than the range that was asked for.`,
     });
@@ -365,6 +404,7 @@ export async function runQc(vodAssetId: string, opts: { path?: string } = {}): P
 
   // loudness
   const { lufs, truePeak } = parseLoudness(log);
+  const places = parseLoudnessPlaces(log);
   if (!streams.audio) {
     skipped.push({ check: 'silence', reason: 'this media has no audio track' });
     skipped.push({ check: 'loudness', reason: 'this media has no audio track' });
@@ -375,15 +415,23 @@ export async function runQc(vodAssetId: string, opts: { path?: string } = {}): P
       findings.push({
         check: 'loudness', severity: 'warning',
         measured: `${lufs.toFixed(1)} LUFS`, expected: `${TARGET_LUFS} LUFS ±${LUFS_TOLERANCE}`,
+        // Loudness is a whole-clip figure, but a reviewer still needs somewhere
+        // to listen: the loudest 3 s when it is over target. Under target has
+        // no single place, so it carries none.
+        ...(lufs > TARGET_LUFS && places.loudest
+          ? { fromMs: Math.max(0, places.loudest.atMs - 3000), toMs: places.loudest.atMs } : {}),
         message: `Integrated loudness is ${lufs.toFixed(1)} LUFS, ` +
-                 `${Math.abs(lufs - TARGET_LUFS).toFixed(1)} LU ${lufs > TARGET_LUFS ? 'above' : 'below'} target.`,
+                 `${Math.abs(lufs - TARGET_LUFS).toFixed(1)} LU ${lufs > TARGET_LUFS ? 'above' : 'below'} target.` +
+                 (lufs > TARGET_LUFS && places.loudest ? ` Loudest at ${(places.loudest.atMs / 1000).toFixed(1)}s (${places.loudest.lufs.toFixed(1)} LUFS short-term).` : ''),
       });
     }
     if (truePeak != null && truePeak > TRUE_PEAK_CEILING_DBFS) {
       findings.push({
         check: 'loudness', severity: 'warning',
         measured: `${truePeak.toFixed(1)} dBFS`, expected: `at or below ${TRUE_PEAK_CEILING_DBFS} dBFS`,
-        message: `True peak reaches ${truePeak.toFixed(1)} dBFS and will clip on some decoders.`,
+        ...(places.peak ? { fromMs: Math.max(0, places.peak.atMs - 1000), toMs: places.peak.atMs + 1000 } : {}),
+        message: `True peak reaches ${truePeak.toFixed(1)} dBFS and will clip on some decoders.` +
+                 (places.peak ? ` Highest at ${(places.peak.atMs / 1000).toFixed(1)}s.` : ''),
       });
     }
   }
@@ -410,15 +458,29 @@ async function finish(assetId: string, findings: QcFinding[], skipped: { check: 
     : findings.some((f) => f.severity === 'warning') ? 'warnings'
     : 'pass';
 
+  // VERDICTS SURVIVE A RE-RUN when the same finding comes back. Read them
+  // before the findings are replaced, and match each new finding to an old
+  // one: same check, severity and measurement, at the same place within a
+  // second. A finding that changed is a new finding and needs a new look.
+  const prior = await query<any>(
+    `SELECT check_name, severity::text AS severity, from_ms, measured, review_state, review_note, reviewed_by, reviewed_at
+       FROM qc_events WHERE vod_asset_id = $1 AND review_state IS NOT NULL`, [assetId]);
+  const verdictFor = (f: QcFinding) => prior.find((p: any) =>
+    p.check_name === f.check && p.severity === f.severity && (p.measured ?? null) === (f.measured ?? null)
+    && ((p.from_ms == null && f.fromMs == null) || (p.from_ms != null && f.fromMs != null && Math.abs(Number(p.from_ms) - f.fromMs) <= 1000)));
+
   // A re-run replaces its own findings entirely: stale findings from a previous
   // cut are worse than none, because they describe media that no longer exists.
   await query(`DELETE FROM qc_events WHERE vod_asset_id = $1`, [assetId]);
   for (const f of findings) {
+    const v = verdictFor(f);
     await query(
-      `INSERT INTO qc_events (vod_asset_id, check_name, severity, from_ms, to_ms, measured, expected, message)
-       VALUES ($1,$2,$3::qc_severity,$4,$5,$6,$7,$8)`,
+      `INSERT INTO qc_events (vod_asset_id, check_name, severity, from_ms, to_ms, measured, expected, message,
+                              review_state, review_note, reviewed_by, reviewed_at)
+       VALUES ($1,$2,$3::qc_severity,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [assetId, f.check, f.severity, f.fromMs ?? null, f.toMs ?? null,
-       f.measured ?? null, f.expected ?? null, f.message]
+       f.measured ?? null, f.expected ?? null, f.message,
+       v?.review_state ?? null, v?.review_note ?? null, v?.reviewed_by ?? null, v?.reviewed_at ?? null]
     );
   }
   // Checks that could not run are recorded too. "We did not look" and "we looked
@@ -431,9 +493,11 @@ async function finish(assetId: string, findings: QcFinding[], skipped: { check: 
     );
   }
   await query(
-    `UPDATE vod_assets SET qc_state = $2, qc_at = now(), updated_at = now() WHERE id = $1`,
+    `UPDATE vod_assets SET qc_machine_state = $2, qc_at = now(), updated_at = now() WHERE id = $1`,
     [assetId, state]
   );
+  // The state every gate reads: the machine's, less what a person accepted.
+  await refreshQcState(assetId);
   if (media) {
     await query(
       `UPDATE vod_assets SET
@@ -453,10 +517,72 @@ async function finish(assetId: string, findings: QcFinding[], skipped: { check: 
 
 export async function qcFindings(assetId: string) {
   return query<any>(
-    `SELECT check_name, severity, from_ms, to_ms, measured, expected, message, at
+    `SELECT id, check_name, severity, from_ms, to_ms, measured, expected, message, at,
+            review_state, review_note, reviewed_by, reviewed_at
        FROM qc_events WHERE vod_asset_id = $1
       ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
                CASE check_name WHEN 'media' THEN 0 WHEN 'playback' THEN 1 ELSE 2 END, from_ms NULLS LAST`,
     [assetId]
   );
+}
+
+// ---- review: a person's verdict on a finding --------------------------------
+/** Skipped-check rows are recorded as info findings; they are not reviewable. */
+const NOT_CHECKED = `message LIKE 'Not checked:%'`;
+
+/**
+ * Recompute the asset's QC state from its findings, discounting the ones a
+ * person accepted. Every gate (publishing, readiness, the review queue) reads
+ * vod_assets.qc_state, so accepting the last error is what lets the asset
+ * through, and nothing downstream needs to know about verdicts.
+ */
+export async function refreshQcState(assetId: string): Promise<{ state: QcResult['state']; machine: string | null }> {
+  const r = await one<any>(
+    `SELECT
+       bool_or(severity = 'error'   AND review_state IS DISTINCT FROM 'accepted') AS err,
+       bool_or(severity = 'warning' AND review_state IS DISTINCT FROM 'accepted') AS warn
+       FROM qc_events WHERE vod_asset_id = $1 AND NOT (${NOT_CHECKED})`, [assetId]);
+  const state: QcResult['state'] = r?.err ? 'failed' : r?.warn ? 'warnings' : 'pass';
+  const row = await one<any>(
+    `UPDATE vod_assets SET qc_state = $2, updated_at = now() WHERE id = $1 RETURNING qc_machine_state`, [assetId, state]);
+  return { state, machine: row?.qc_machine_state ?? null };
+}
+
+export class QcReviewError extends Error { status = 400; }
+
+/**
+ * Record a verdict on one finding: 'accepted' (looked at it, it is fine),
+ * 'confirmed' (looked at it, it is a real problem) or null (undo). Accepting
+ * an ERROR needs a note: it overrides a check that would otherwise block the
+ * asset, and the next person to wonder why should be able to read why.
+ */
+export async function reviewQcFinding(o: {
+  assetId: string; findingId: number; verdict: 'accepted' | 'confirmed' | null; note?: string | null;
+  actorLabel: string; actorId: string | null; accountId: string | null;
+}): Promise<{ state: QcResult['state']; machine: string | null; finding: any }> {
+  const f = await one<any>(`SELECT * FROM qc_events WHERE id = $1 AND vod_asset_id = $2`, [o.findingId, o.assetId]);
+  if (!f) throw Object.assign(new Error('QC finding not found'), { status: 404 });
+  if (/^Not checked:/.test(f.message)) throw new QcReviewError('A check that did not run has nothing to review. Run QC again once it can.');
+  const note = o.note?.trim() || null;
+  if (o.verdict === 'accepted' && f.severity === 'error' && !note) {
+    throw new QcReviewError('Say why: accepting an error overrides QC, so it needs a note (for example "checked, the end is the closing credits").');
+  }
+  const updated = await one<any>(
+    `UPDATE qc_events SET review_state = $3, review_note = $4,
+            reviewed_by = CASE WHEN $3::text IS NULL THEN NULL ELSE $5 END,
+            reviewed_at = CASE WHEN $3::text IS NULL THEN NULL ELSE now() END
+      WHERE id = $1 AND vod_asset_id = $2
+      RETURNING id, check_name, severity, from_ms, to_ms, measured, expected, message, at,
+                review_state, review_note, reviewed_by, reviewed_at`,
+    [o.findingId, o.assetId, o.verdict, o.verdict ? note : null, o.actorLabel]);
+  const st = await refreshQcState(o.assetId);
+  await writeAudit(null, {
+    accountId: o.accountId, userId: o.actorId, label: o.actorLabel, action: 'update',
+    entityType: 'vod_asset', entityId: o.assetId,
+    snapshot: { qcReview: {
+      finding: f.message, check: f.check_name, severity: f.severity, fromMs: f.from_ms, toMs: f.to_ms,
+      verdict: o.verdict ?? 'cleared', note, qcState: st.state, qcMachineState: st.machine,
+    } },
+  }).catch(() => {});
+  return { ...st, finding: updated };
 }

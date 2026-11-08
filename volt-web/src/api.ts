@@ -2026,6 +2026,9 @@ export const api = {
     req(`/vod/${id}/review`, { method: 'POST', body: JSON.stringify({ to, note }) }),
   rerunQc: (id: string): Promise<{ jobId: string; state: string }> =>
     req(`/vod/${id}/qc`, { method: 'POST' }),
+  /** A verdict on one QC finding: accepted, confirmed, or null to clear it. Accepting an error needs a note. */
+  reviewQcFinding: (id: string, findingId: number, verdict: 'accepted' | 'confirmed' | null, note?: string): Promise<{ qc: { state: string; machineState: string | null; finding: QcFinding } }> =>
+    req(`/vod/${id}/qc/findings/${findingId}/review`, { method: 'POST', body: JSON.stringify({ verdict, note }) }),
   /** Build a clip again over the same range. A 409 carries coveragePct, gapMs
    *  and gaps in ApiError.body so the page can offer to accept the gaps. */
   vodRebuild: (id: string, acceptGapsMs = 0): Promise<{ jobId: string; state: string; coveragePct: number }> =>
@@ -2817,6 +2820,8 @@ export type ReviewStateId = 'draft' | 'in_review' | 'changes_requested' | 'appro
 
 /** What a machine measured, not what anyone decided. */
 export interface QcFinding {
+  /** Present on findings from QC passes (qc_events.id): what a verdict is recorded against. */
+  id?: number
   check_name: string
   severity: 'info' | 'warning' | 'error'
   from_ms: number | null
@@ -2825,6 +2830,11 @@ export interface QcFinding {
   expected: string | null
   message: string
   at: string
+  /** A person's verdict after checking it in the player: accepted (fine) or confirmed (a real problem). */
+  review_state?: 'accepted' | 'confirmed' | null
+  review_note?: string | null
+  reviewed_by?: string | null
+  reviewed_at?: string | null
 }
 
 export interface ReviewDecisionRow {
@@ -2843,7 +2853,8 @@ export interface AssetReview {
   assetId: string
   state: ReviewStateId
   reviewedAt: string | null
-  qc: { state: string | null; at: string | null; findings: QcFinding[] }
+  /** state: what gates read (accepted findings discounted). machineState: what the checks said. */
+  qc: { state: string | null; machineState?: string | null; at: string | null; findings: QcFinding[] }
   history: ReviewDecisionRow[]
   gate: {
     allowed: boolean

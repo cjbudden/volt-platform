@@ -384,3 +384,26 @@
 .src-facts dd{margin:0;color:var(--text);word-break:break-word;font-variant-numeric:tabular-nums}
 .src-facts .src-h{margin:12px 0 6px;font-size:var(--fs-xs);font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .src-facts .src-warn{color:var(--warn,#fbbf24)}
+
+/* QC review (AssetStatus.tsx QcChecks): every finding, where it is, and a person's verdict. */
+.qc-review { margin-top: 8px; font-size: var(--fs-sm) }
+.qc-review-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--muted); margin-bottom: 8px }
+.qc-review-sum > div { flex: 1 1 160px }
+.qc-strip { position: relative; height: 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 3px; margin-bottom: 8px }
+.qc-strip-m { position: absolute; top: 2px; bottom: 2px; padding: 0; border: 0; border-radius: 2px; cursor: pointer; opacity: .85 }
+.qc-strip-m:disabled { cursor: default }
+.qc-strip-m.bad { background: var(--down) } .qc-strip-m.warn { background: var(--warn) }
+.qc-strip-m.info { background: var(--faint) } .qc-strip-m.done { background: var(--live); opacity: .5 }
+.qc-strip-m.on, .qc-strip-m:hover { opacity: 1; outline: 1px solid var(--text, #fff); outline-offset: 1px }
+.qc-finding { padding: 4px 0 6px; border-top: 1px solid var(--border) }
+.qc-finding.on { background: var(--panel-2) }
+.qc-check.done .qc-check-ic { color: var(--live) } .qc-check.done .qc-check-m { color: var(--muted) }
+.qc-check.info .qc-check-ic { color: var(--faint) }
+.qc-meas, .qc-verdict, .qc-at, .qc-acts, .qc-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px }
+.qc-meas { color: var(--faint); font-size: var(--fs-label) }
+.qc-at-t, .qc-at-p { display: inline-flex; align-items: center; gap: 3px; background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--brand); font: inherit; font-variant-numeric: tabular-nums; padding: 1px 6px; cursor: pointer }
+.qc-at-t:disabled, .qc-at-p:disabled { color: var(--faint); cursor: default }
+.qc-at-p svg { width: 11px; height: 11px }
+.qc-verdict { color: var(--muted) } .qc-verdict-n { color: var(--faint); flex-basis: 100% }
+.qc-undo { background: none; border: 0; color: var(--brand); font: inherit; padding: 0; cursor: pointer }
+.qc-note { flex-direction: column; align-items: stretch } .qc-note .inp { width: 100% }

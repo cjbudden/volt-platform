@@ -49,6 +49,16 @@ Editors, producers and whoever signs clips off before they go out use it.
 3. **Not checked** names any check that did not run. That is different from a check that ran and found nothing.
 4. Choose **Re-run QC** after a re-cut, or when a check was added. **QC is running again. The findings below update in a few seconds.** confirms it started; if it could not start, the reason is shown instead.
 
+### Check each finding in the player
+
+QC measures; you decide whether what it found matters. In the Media Library, open the asset: under **QC** on the **Preview** tab every finding is listed with where it is in the clip, and the strip above the list shows each one along the clip's length.
+
+1. Choose a finding's time (for example **10:48.0–10:53.0**) to go there with the player paused, or **Play** to hear and see it from two seconds before to one second after, then stop. Choosing a mark on the strip does the same as its time. **Go to next** moves to the next finding nobody has checked.
+2. Length findings point at the end of the clip, where a short clip stops early or a long one runs on. Loudness findings point at the loudest three seconds, and true peak findings at the highest peak.
+3. Choose **Looks fine** if it is deliberate (black over the credits, a quiet ending), or **Real problem** if it needs fixing. Accepting an error asks why, and the note is kept with the finding. **Undo** clears a verdict.
+4. Accepted findings stop counting. When every error has been accepted the asset is released for FAST, loops, blocking and publishing, and **QC** reads, for example, **warnings (after review; QC said failed)**, so the override stays visible. Every verdict is in the audit log.
+5. A verdict carries over when QC runs again and finds the same thing in the same place. Building the clip again starts fresh, because the media is new.
+
 ### Decide
 
 1. Type a note in **A note for whoever reads this next…**. The line under it says when a note is needed: to request changes or reject. Choosing either without one says so before anything is sent.
@@ -111,6 +121,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/vod/{id}/review` | One clip's state, QC findings, decisions and whether it may be published |
 | `POST /api/vod/{id}/review` | Moves it on: `{"to": "in_review"}`, `"approved"`, `"changes_requested"`, `"rejected"` or `"draft"`, with a `note` (required for anything but `in_review` and `approved`). An approval answers with `autoPublish`: `published` or `scheduled` when the rule published it, `skipped` when it waits for someone |
 | `POST /api/vod/{id}/qc` | Runs QC again |
+| `POST /api/vod/{id}/qc/findings/{findingId}/review` | A verdict on one finding: `{ "verdict": "accepted" \| "confirmed" \| null, "note": "…" }`. Accepting an error needs a note |
 
 This sends a clip for review, as **Send for review** does, which puts it in the queue:
 

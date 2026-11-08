@@ -26,7 +26,7 @@ export const USAGE_LABEL: Record<UsageStatus, string> = {
 export const USAGE_TIP: Record<UsageStatus, string> = {
   ready: 'Media built and confirmed playable. Can be used in FAST, loops and blocking.',
   unchecked: 'Media built, QC has not checked it yet. Not offered for scheduling until it has.',
-  qc_failed: 'Plays, but QC found an error. Fix it, or approve it in review to use it anyway.',
+  qc_failed: 'Plays, but QC found an error. Check each finding in the player and accept it if it is fine, or fix it.',
   processing: 'The media is being built.',
   failed: 'The build failed, so there is nothing to play.',
   unplayable: 'Files exist but QC could not decode them.',
@@ -92,7 +92,7 @@ export function AssetStatusPanel({ asset, onChanged }: { asset: any; onChanged: 
   const reason = s === 'failed' ? (asset.media_error ?? asset.encode_error ?? 'The build failed.')
     : s === 'unplayable' ? (asset.media_error ?? 'QC could not decode the media.')
     : s === 'no_media' ? (asset.media_error ?? 'Nothing was built for this asset.')
-    : s === 'qc_failed' ? 'QC found an error in this media. It plays, but is held back from FAST, loops and blocking until it is fixed or approved in review.'
+    : s === 'qc_failed' ? 'QC found an error in this media. It plays, but is held back from FAST, loops and blocking. Check each finding below in the player: once every error is accepted as fine, it is released.'
     : s === 'unchecked' ? 'QC has not checked this media yet, so it is not offered for scheduling.'
     : 'The media is being built.'
 
@@ -136,40 +136,162 @@ const CHECK_LABEL: Record<string, string> = {
 }
 const ALL_CHECKS = ['media', 'playback', 'duration', 'coverage', 'silence', 'black', 'loudness']
 
+/** m:ss.s, the precision a reviewer needs to land on a finding. */
+const fmtAt = (ms: number) => { const s = Math.max(0, ms) / 1000; const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}` }
+const PREROLL_MS = 2000
+const POSTROLL_MS = 1000
+
 /**
- * WHAT QC LOOKED AT. "pass" on its own said nothing about what passed (or that
- * nothing was measured). Each check is listed: what it found, that it was
- * clean, or that it could not run and why.
+ * QC REVIEW: what QC looked at, every finding it made, and a person's verdict
+ * on each one.
+ *
+ * QC says what it measured; whether that matters is a judgement, and the
+ * judgement needs the media. Every finding with a place in the clip can be
+ * jumped to (the player pauses on it) or played (two seconds before to a
+ * second after, then it stops). Then it is marked "Looks fine" or "Real
+ * problem". Accepted findings stop counting: when every error is accepted
+ * the asset is no longer held back, and the panel says QC itself failed it so
+ * the override stays visible. Accepting an error needs a note.
  */
-export function QcChecks({ id, state, at }: { id: string; state: string | null; at: string | null }) {
+export function QcChecks({ id, state, at, durationMs, onJump, onChanged }: {
+  id: string; state: string | null; at: string | null
+  /** The clip's length, for the strip of where findings are. */
+  durationMs?: number | null
+  /** Seek the asset's player. Without it, places are shown but not clickable. */
+  onJump?: (r: { ms: number; play?: boolean; untilMs?: number | null }) => void
+  /** A verdict changed the asset's QC state. */
+  onChanged?: () => void
+}) {
+  const notify = useNotify()
   const [findings, setFindings] = useState<QcFinding[] | null>(null)
-  useEffect(() => {
-    let gone = false
-    api.assetReview(id).then((r) => { if (!gone) setFindings(r.qc.findings) }).catch(() => { if (!gone) setFindings([]) })
-    return () => { gone = true }
-  }, [id, state, at])
+  const [machine, setMachine] = useState<string | null>(null)
+  const [current, setCurrent] = useState<number | null>(null)
+  const [noteFor, setNoteFor] = useState<number | null>(null)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState<number | null>(null)
+  useEffect(() => { let gone = false; api.assetReview(id).then((r) => { if (!gone) { setFindings(r.qc.findings); setMachine(r.qc.machineState ?? r.qc.state) } }).catch(() => { if (!gone) setFindings([]) }); return () => { gone = true } }, [id, state, at])
   if (!state || !findings) return null
+
   const notRun = (f: QcFinding) => f.severity === 'info' && /^Not checked:/.test(f.message)
-  const rows = ALL_CHECKS.map((c) => {
-    const fs = findings.filter((f) => f.check_name === c)
-    const real = fs.filter((f) => !notRun(f))
-    const skip = fs.find(notRun)
-    const worst = real.find((f) => f.severity === 'error') ?? real.find((f) => f.severity === 'warning') ?? real[0]
-    return { c, worst, skip, more: Math.max(0, real.length - 1) }
-  }).filter((r) => r.worst || r.skip || r.c === 'media' || r.c === 'playback' || r.c === 'duration')
+  const real = findings.filter((f) => !notRun(f))
+  const reviewable = real.filter((f) => f.id != null && f.severity !== 'info')
+  const open = reviewable.filter((f) => !f.review_state)
+  const located = real.filter((f) => f.from_ms != null)
+  const ordered = [...located].sort((a, b) => Number(a.from_ms) - Number(b.from_ms))
+  const span = Math.max(Number(durationMs ?? 0), ...located.map((f) => Number(f.to_ms ?? f.from_ms ?? 0)), 1)
+
+  const go = (f: QcFinding, play = false) => {
+    if (f.from_ms == null || !onJump) return
+    setCurrent(f.id ?? null)
+    const from = Number(f.from_ms), to = Number(f.to_ms ?? f.from_ms)
+    onJump(play ? { ms: Math.max(0, from - PREROLL_MS), play: true, untilMs: to + POSTROLL_MS } : { ms: from })
+  }
+  const nextOpen = () => {
+    const after = current == null ? -1 : Number(ordered.find((f) => f.id === current)?.from_ms ?? -1)
+    const list = ordered.filter((f) => f.id != null && f.severity !== 'info' && !f.review_state)
+    const n = list.find((f) => Number(f.from_ms) > after) ?? list[0]
+    if (n) go(n)
+  }
+  async function verdict(f: QcFinding, v: 'accepted' | 'confirmed' | null, withNote?: string) {
+    if (f.id == null) return
+    if (v === 'accepted' && f.severity === 'error' && !withNote?.trim()) { setNoteFor(f.id); setNote(''); return }
+    setBusy(f.id)
+    try {
+      const r = await api.reviewQcFinding(id, f.id, v, withNote?.trim() || undefined)
+      setFindings((fs) => fs?.map((x) => (x.id === f.id ? r.qc.finding : x)) ?? fs)
+      setMachine(r.qc.machineState)
+      setNoteFor(null); setNote('')
+      if (r.qc.state !== state) onChanged?.()
+    } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBusy(null) }
+  }
+
+  const overridden = machine === 'failed' && state !== 'failed'
+  const summary = open.length
+    ? `${open.length} finding${open.length === 1 ? '' : 's'} to check${open.some((f) => f.severity === 'error') ? `, ${open.filter((f) => f.severity === 'error').length} blocking` : ''}.`
+    : reviewable.length ? `Every finding has been checked.` : null
+
+  // Checks with nothing to say still get a line: clean, or not run and why.
+  const quiet = ALL_CHECKS.map((c) => ({ c, fs: real.filter((f) => f.check_name === c), skip: findings.find((f) => f.check_name === c && notRun(f)) }))
+    .filter((r) => !r.fs.length && (r.skip || r.c === 'media' || r.c === 'playback' || r.c === 'duration'))
+
   return (
-    <ul className="qc-checks" aria-label="QC checks">
-      {rows.map(({ c, worst, skip, more }) => {
-        const tone = worst ? (worst.severity === 'error' ? 'bad' : worst.severity === 'warning' ? 'warn' : 'info') : skip ? 'skip' : 'ok'
-        const text = worst ? worst.message : skip ? skip.message.replace(/^Not checked: /, 'Not checked: ') : 'OK'
-        return (
-          <li key={c} className={`qc-check ${tone}`}>
-            <span className="qc-check-ic" aria-hidden="true">{tone === 'ok' ? LibIcon.check : tone === 'skip' ? LibIcon.empty : tone === 'info' ? LibIcon.info : LibIcon.alert}</span>
+    <div className="qc-review" aria-label="QC review">
+      {(summary || overridden) && (
+        <div className="qc-review-sum">
+          {overridden && <div><b>Passes after review.</b> QC failed it; every error was checked and accepted.</div>}
+          {summary && <div>{summary}</div>}
+          {open.some((f) => f.from_ms != null) && onJump && <button type="button" className="btn ghost sm" onClick={nextOpen}>Go to next</button>}
+        </div>
+      )}
+      {located.length > 0 && (
+        <div className="qc-strip" role="group" aria-label="Where QC found things">
+          {located.map((f, i) => {
+            const a = Number(f.from_ms), b = Math.max(a, Number(f.to_ms ?? a))
+            const tone = f.review_state === 'accepted' ? 'done' : f.review_state === 'confirmed' ? 'bad' : f.severity === 'error' ? 'bad' : f.severity === 'warning' ? 'warn' : 'info'
+            return <button key={f.id ?? i} type="button" className={`qc-strip-m ${tone}${current === f.id ? ' on' : ''}`}
+              style={{ left: `${(a / span) * 100}%`, width: `max(4px, ${((b - a) / span) * 100}%)` }}
+              title={`${CHECK_LABEL[f.check_name] ?? f.check_name} at ${fmtAt(a)}: ${f.message}`} aria-label={`Go to ${CHECK_LABEL[f.check_name] ?? f.check_name} at ${fmtAt(a)}`}
+              disabled={!onJump} onClick={() => go(f)} />
+          })}
+        </div>
+      )}
+      <ul className="qc-checks" aria-label="QC checks">
+        {quiet.map(({ c, skip }) => (
+          <li key={c} className={`qc-check ${skip ? 'skip' : 'ok'}`}>
+            <span className="qc-check-ic" aria-hidden="true">{skip ? LibIcon.empty : LibIcon.check}</span>
             <span className="qc-check-n">{CHECK_LABEL[c] ?? c}</span>
-            <span className="qc-check-m">{text}{more ? ` (+${more} more)` : ''}</span>
+            <span className="qc-check-m">{skip ? skip.message : 'OK'}</span>
           </li>
-        )
-      })}
-    </ul>
+        ))}
+        {[...real].sort((a, b) => (ALL_CHECKS.indexOf(a.check_name) - ALL_CHECKS.indexOf(b.check_name)) || (Number(a.from_ms ?? -1) - Number(b.from_ms ?? -1))).map((f, i) => {
+          const tone = f.review_state === 'accepted' ? 'done' : f.severity === 'error' || f.review_state === 'confirmed' ? 'bad' : f.severity === 'warning' ? 'warn' : 'info'
+          const reviewableRow = f.id != null && f.severity !== 'info'
+          return (
+            <li key={f.id ?? `${f.check_name}-${i}`} className={`qc-check qc-finding ${tone}${current != null && current === f.id ? ' on' : ''}`}>
+              <span className="qc-check-ic" aria-hidden="true">{f.review_state === 'accepted' ? LibIcon.check : tone === 'info' ? LibIcon.info : LibIcon.alert}</span>
+              <span className="qc-check-n">{CHECK_LABEL[f.check_name] ?? f.check_name}</span>
+              <span className="qc-check-m">
+                {f.message}
+                {(f.measured || f.expected) && <span className="qc-meas">{f.measured ? `Measured ${f.measured}` : ''}{f.expected ? ` · expected ${f.expected}` : ''}</span>}
+                {f.from_ms != null && (
+                  <span className="qc-at">
+                    <button type="button" className="qc-at-t" disabled={!onJump} onClick={() => go(f)} title="Go to this point, paused">
+                      {fmtAt(Number(f.from_ms))}{f.to_ms != null && Number(f.to_ms) !== Number(f.from_ms) ? `–${fmtAt(Number(f.to_ms))}` : ''}
+                    </button>
+                    <button type="button" className="qc-at-p" disabled={!onJump} onClick={() => go(f, true)} title="Play from 2 s before to 1 s after, then stop">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>Play
+                    </button>
+                  </span>
+                )}
+                {reviewableRow && f.review_state && (
+                  <span className="qc-verdict">
+                    {f.review_state === 'accepted' ? 'Checked, looks fine' : 'Checked, real problem'}{f.reviewed_by ? ` · ${f.reviewed_by}` : ''}
+                    {f.review_note ? <span className="qc-verdict-n">“{f.review_note}”</span> : null}
+                    <button type="button" className="qc-undo" disabled={busy === f.id} onClick={() => verdict(f, null)}>Undo</button>
+                  </span>
+                )}
+                {reviewableRow && !f.review_state && noteFor !== f.id && (
+                  <span className="qc-acts">
+                    <button type="button" className="btn ghost sm" disabled={busy === f.id} onClick={() => verdict(f, 'accepted')}>Looks fine</button>
+                    <button type="button" className="btn ghost sm" disabled={busy === f.id} onClick={() => verdict(f, 'confirmed')}>Real problem</button>
+                  </span>
+                )}
+                {noteFor === f.id && (
+                  <span className="qc-note">
+                    <input className="inp" autoFocus value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
+                      placeholder="Why it is fine, e.g. the end is the credits" aria-label="Why this error is fine"
+                      onKeyDown={(e) => { if (e.key === 'Enter' && note.trim()) verdict(f, 'accepted', note); if (e.key === 'Escape') setNoteFor(null) }} />
+                    <span className="qc-acts">
+                      <button type="button" className="btn primary sm" disabled={!note.trim() || busy === f.id} onClick={() => verdict(f, 'accepted', note)}>Accept</button>
+                      <button type="button" className="btn ghost sm" onClick={() => setNoteFor(null)}>Cancel</button>
+                    </span>
+                  </span>
+                )}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
