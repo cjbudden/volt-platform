@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.69.0 (2026-11-08)
+
+### Product (in customer release notes)
+
+- improved · Hybrid Sites: When a FAST channel needs a video from an Encode at site folder encoded again, Prepare now sends the encode to the site that keeps the original instead of reporting that there is no source.
+- fixed · Hybrid Sites: When a site re-encoded a video, the copies already packaged for a FAST channel's ladder were removed with the old version; they are now kept.
+
 ## 0.68.0 (2026-11-08)
 
 ### Product (in customer release notes)
