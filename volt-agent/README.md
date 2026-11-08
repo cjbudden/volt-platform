@@ -57,3 +57,18 @@ file others can read is refused:
 or in the environment: `VOLT_ARCHIVE_KEY_NAS_MINIO_ID` and
 `VOLT_ARCHIVE_KEY_NAS_MINIO_SECRET`. They are read for every copy, so rotated
 keys take effect at once.
+
+**Encoding at the site** (Hybrid Sites, Encode at site). The agent leases the
+site's probe and encode jobs and runs `vod_encoder.py` with the settings the
+cloud planned; only the packaged output is uploaded, and the cloud checks it
+before the asset is ready. Point the agent at the pinned encoder image:
+
+```
+VOLT_ENCODER_IMAGE=volt-encoder:<version> volt-agent site run
+```
+
+It runs under Docker with the source folder mounted read only and no network;
+jobs planned for NVENC go only to hosts with an NVIDIA GPU (and get
+`--gpus all`). Without Docker, `VOLT_ENCODER_BIN=<volt-encoder/bin>` runs the
+script with this host's own python3, ffmpeg and packager. Each attempt works in
+`~/.volt-agent/encode` (or `VOLT_SITE_SCRATCH`), removed when the job ends.

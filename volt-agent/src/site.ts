@@ -14,7 +14,10 @@
 //             heartbeat rather than inside it, so a long upload never makes
 //             the host look stale. And lease the site's Mirror and Archive
 //             jobs (siteArchive.ts, build queue H3-2) in a loop of their own,
-//             into folders or S3-compatible stores (H3-4).
+//             into folders or S3-compatible stores (H3-4). And, with Hybrid
+//             Sites, lease the site's encode jobs (siteEncode.ts, build queue
+//             H4-2): probe and encode files whose source stays on site, then
+//             upload only the package.
 //
 //  OUTBOUND ONLY: the agent calls the cloud over HTTPS and listens on nothing.
 //  The credential lives in the state file, readable by its owner only.
@@ -26,8 +29,9 @@ import * as os from 'node:os';
 
 import { watchPass, emptyMemory, type SiteWatchMemory } from './siteWatch';
 import { archivePass } from './siteArchive';
+import { encodePass } from './siteEncode';
 
-export const AGENT_VERSION = '0.6.0';
+export const AGENT_VERSION = '0.7.0';
 
 export interface SiteState {
   server: string;
@@ -136,7 +140,7 @@ export async function beat(state: SiteState, stateFile: string, facts?: HostFact
 }
 
 /** Heartbeat for ever. Network faults are logged and retried; a refusal stops the agent. */
-export async function runSite(stateFile: string, log: (s: string) => void = console.log, signal?: AbortSignal, opts: { watchEverySeconds?: number; archiveEverySeconds?: number } = {}) {
+export async function runSite(stateFile: string, log: (s: string) => void = console.log, signal?: AbortSignal, opts: { watchEverySeconds?: number; archiveEverySeconds?: number; encodeEverySeconds?: number } = {}) {
   const state = await loadSiteState(stateFile);
   if (!state) throw new Error(`No enrolment in ${stateFile}. Run: volt-agent site enrol <server> <token>`);
   let every = 30;
@@ -177,6 +181,23 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
   };
   const archiveTimer = setInterval(() => { void archive(); }, Math.min(archiveEvery, 5000));
   signal?.addEventListener('abort', () => clearInterval(archiveTimer), { once: true });
+  // THE ENCODE LOOP (H4-2): a loop of its own, so a two-hour encode never
+  // holds up archive copies or the heartbeat. Whether this host has an
+  // NVIDIA GPU is read once: the cloud only hands GPU jobs to such hosts.
+  let encoding = false; let lastEncode = 0; let hasGpu: boolean | null = null;
+  const encodeEvery = (opts.encodeEverySeconds ?? 15) * 1000;
+  const encode = async () => {
+    if (encoding || signal?.aborted || state.status !== 'approved' || !hybrid() || Date.now() - lastEncode < encodeEvery) return;
+    encoding = true; lastEncode = Date.now();
+    try {
+      if (hasGpu === null) hasGpu = (await nvidiaGpus()).length > 0;
+      await encodePass({ server: state.server, credential: () => state.credential, log, hasGpu });
+    } catch (e: any) {
+      log(`[encode] pass failed, retrying: ${e?.message ?? e}`);
+    } finally { encoding = false; lastEncode = Date.now(); }
+  };
+  const encodeTimer = setInterval(() => { void encode(); }, Math.min(encodeEvery, 5000));
+  signal?.addEventListener('abort', () => clearInterval(encodeTimer), { once: true });
   while (!signal?.aborted) {
     try {
       const r = await beat(state, stateFile);
@@ -184,11 +205,12 @@ export async function runSite(stateFile: string, log: (s: string) => void = cons
       log(`[site] ${state.siteName ?? state.siteId}: host ${r.status}${r.rotate ? ', credential rotated' : ''}${r.pullConfig ? `, config ${state.configVersion}` : ''}`);
       void watch();
     } catch (e: any) {
-      if (e.status === 401 || e.status === 403) { clearInterval(watchTimer); clearInterval(archiveTimer); log(`[site] refused: ${e.message}`); throw e; }
+      if (e.status === 401 || e.status === 403) { clearInterval(watchTimer); clearInterval(archiveTimer); clearInterval(encodeTimer); log(`[site] refused: ${e.message}`); throw e; }
       log(`[site] heartbeat failed, retrying: ${e.message}`);
     }
     await new Promise((res) => { const t = setTimeout(res, every * 1000); signal?.addEventListener('abort', () => { clearTimeout(t); res(null); }, { once: true }); });
   }
   clearInterval(watchTimer);
   clearInterval(archiveTimer);
+  clearInterval(encodeTimer);
 }

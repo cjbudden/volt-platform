@@ -115,19 +115,19 @@ export async function claim(types: string[], workerId: string): Promise<JobRow |
  * host, H3). `types` narrows it to what that worker can run; null takes any.
  * The lease, attempts, backoff and reaper are the same as for cloud work.
  */
-export async function claimInPool(pool: string, types: string[] | null, workerId: string, excludeTypes: string[] = []): Promise<JobRow | null> {
+export async function claimInPool(pool: string, types: string[] | null, workerId: string, excludeTypes: string[] = [], opts: { gpu?: boolean } = {}): Promise<JobRow | null> {
   if (!pool) throw new Error('claimInPool needs a pool; cloud work is claimed with claim()');
   if (types && !types.length) return null;
+  const where = ['pool = $1'];
+  const args: unknown[] = [pool];
+  if (types) { args.push(types); where.push(`type = ANY($${args.length})`); }
   // excludeTypes: work this worker may not take (a site whose account lacks
   // the add-on a job type belongs to, build queue H3-2).
-  if (excludeTypes.length) {
-    return types
-      ? claimWhere(`pool = $1 AND type = ANY($2) AND NOT (type = ANY($3))`, [pool, types, excludeTypes], workerId)
-      : claimWhere(`pool = $1 AND NOT (type = ANY($2))`, [pool, excludeTypes], workerId);
-  }
-  return types
-    ? claimWhere(`pool = $1 AND type = ANY($2)`, [pool, types], workerId)
-    : claimWhere(`pool = $1`, [pool], workerId);
+  if (excludeTypes.length) { args.push(excludeTypes); where.push(`NOT (type = ANY($${args.length}))`); }
+  // A worker without an NVIDIA GPU never takes a job planned for NVENC (a
+  // site encode, H4-2): it waits for a host that has one.
+  if (opts.gpu === false) where.push(`COALESCE(payload->'encoder'->>'gpu', 'false') <> 'true'`);
+  return claimWhere(where.join(' AND '), args, workerId);
 }
 
 async function claimWhere(filter: string, args: unknown[], workerId: string): Promise<JobRow | null> {
@@ -263,16 +263,25 @@ export async function reapExpiredLeases(): Promise<number> {
   );
   for (const job of expired) {
     const exhausted = job.attempts >= job.max_attempts;
-    await query(
+    const changed = await query(
       exhausted
         ? `UPDATE jobs SET state='failed', last_error=$2, error_code='lease_expired',
-                  finished_at=now(), lease_until=NULL WHERE id=$1 AND state='running'`
+                  finished_at=now(), lease_until=NULL WHERE id=$1 AND state='running' RETURNING id`
         : `UPDATE jobs SET state='queued', last_error=$2, error_code='lease_expired',
                   lease_until=NULL, claimed_by=NULL, claimed_at=NULL,
-                  run_after=now() WHERE id=$1 AND state='running'`,
+                  run_after=now() WHERE id=$1 AND state='running' RETURNING id`,
       [job.id, `worker ${job.claimed_by ?? 'unknown'} stopped reporting; lease expired`]
     );
     await closeAttempt(job.id, 'lease_expired', 'lease expired', 'lease_expired');
+    // A site encode (H4-2) whose host went quiet: its half upload is dropped
+    // so the next attempt starts clean, and on the last attempt the asset
+    // says why instead of reading Processing for ever. Loaded here, not at
+    // the top, because siteEncode imports this module.
+    if (changed.length && (job.type === 'site.vod-probe' || job.type === 'site.vod-encode')) {
+      const { siteEncodeAttemptFailed } = await import('../sites/siteEncode');
+      await siteEncodeAttemptFailed(job, 'the site host stopped reporting (its lease expired)', 'lease_expired', exhausted)
+        .catch((e) => console.error('[jobs] site encode cleanup after a lease expired failed', e));
+    }
   }
   if (expired.length) console.log(`[jobs] reaped ${expired.length} expired lease(s)`);
   return expired.length;

@@ -89,7 +89,11 @@ export async function lease(p: SitePrincipal, rawTypes: unknown) {
   let exclude: string[] = [];
   if (!hybrid) types = (types ?? ARCHIVE_JOB_TYPES).filter(isArchiveJob);
   if (!archive) exclude = ARCHIVE_JOB_TYPES;
-  const job = await claimInPool(sitePool(p.siteId), types, leaseId, exclude);
+  // GPU jobs only to GPU hosts (H4-2): a host that reported no NVIDIA GPU
+  // in its heartbeat is never handed an encode planned for NVENC.
+  const host = await one<{ gpus: any }>(`SELECT gpus FROM site_hosts WHERE id = $1`, [p.hostId]);
+  const gpu = Array.isArray(host?.gpus) && host!.gpus.some((g: any) => String(g?.vendor ?? '').toLowerCase() === 'nvidia');
+  const job = await claimInPool(sitePool(p.siteId), types, leaseId, exclude, { gpu });
   if (!job) return null;
   await one(`UPDATE site_hosts SET last_heartbeat_at = now() WHERE id = $1 RETURNING id`, [p.hostId]);
   return leaseView(job);

@@ -91,6 +91,18 @@ Some work can be sent to a site instead of running in Volt's cloud (the copies a
 
 A server waiting for approval is given no work. Work for a disabled site waits until you enable it.
 
+#### Encoding at the site
+
+With Hybrid Sites, a file can be encoded on a server of the site, so the original never leaves your network and only the finished streams come to Volt. Volt still decides how it is encoded: the server looks at the file, Volt picks the renditions, and the server encodes with exactly those settings. Volt checks every file of the result (each rendition, playlist and segment, at the size the server reported) before the video is ready; a result that does not check out is thrown away and encoded again.
+
+Choosing **Encode at site** on an on-prem watchfolder comes in a later release. To get a server ready now, start the agent with the Volt encoder image it should use:
+
+```
+VOLT_ENCODER_IMAGE=volt-encoder:<version> volt-agent site run
+```
+
+The server needs Docker. The encoder runs with the file's folder mounted read only and no network. Encodes planned for an NVIDIA graphics card go only to servers that reported one. Each encode works in `~/.volt-agent/encode` (or the folder `VOLT_SITE_SCRATCH` names), which is emptied when the job ends, so leave room there for about twice the size of your largest file.
+
 ### Keep archive copies at the site
 
 With the **Mirror and Archive** add-on, the site's servers keep extra copies of your media on storage you own: a folder on the server, a NAS share mounted on it, or an S3-compatible object store on your network (MinIO, NetApp StorageGRID and similar). Storage targets and copies are on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page, and copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage).
@@ -194,6 +206,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A copy to an object store stays **Queued** with *can be read by others* | The key file is readable by other users of the server | `chmod 600` the key file |
 | A copy to an object store stays **Queued** with *the store answered SignatureDoesNotMatch*, *AccessDenied* or *InvalidAccessKeyId* | The keys are wrong, or not allowed to write to that bucket | Check the keys and their permissions in the store |
 | A copy to an object store stays **Queued** with *cannot be reached* | The server cannot reach the store's address | Check the endpoint is the address as the site's server sees it, and the network between them |
+| An encode at the site waits with *This host has no encoder* | The agent was started without `VOLT_ENCODER_IMAGE` | Restart the agent with the encoder image set |
+| An encode at the site waits with *is not there (is the share mounted?)* | The folder holding the file is not mounted on the server that took the job | Mount the share on every server of the site; the encode is retried by itself |
+| An encode at the site fails with *not at the site* | The file was moved or deleted before it was encoded | Put the file back and encode it again |
+| An encode planned for a graphics card never starts | No server of the site reported an NVIDIA card | Run the agent on a server with one, or choose an encoding profile that does not use the graphics card |
 | An on-prem watchfolder's **Last pass** stays old | No approved server of the site is running the agent, or it cannot read the folder | Check the server here; the folder's page shows the agent's last error under **Last scan failed** |
 
 ## Through the API
