@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.68.0 (2026-11-08)
+
+### Product (in customer release notes)
+
+- added · Hybrid Sites: Encode at site now works on Volt's cloud: a site's server sends the finished streams straight to Volt's storage, each file held to its checksum, and Volt checks the whole package before the video is ready. Previously this needed a single-server Volt.
+- improved · Hybrid Sites: The site agent (0.9.0) sends large files from disk as it reads them, so a server no longer needs memory for the biggest file of an encode.
+
+### Internal
+
+- added · Tests: site-encode-bucket.check.ts: a site encode end to end into an S3 bucket (moto), with changed and missing files refused, streamed uploads and the staging clean-up.
+
 ## 0.67.0 (2026-11-08)
 
 ### Product (in customer release notes)
