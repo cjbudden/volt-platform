@@ -53,10 +53,11 @@ export interface RuleSettings {
    *  to run (services/archive/archive.ts copyOnRule). `schedule` (H3-8)
    *  copies nightly what the target does not hold yet, and `what` picks the
    *  original, its sidecars (metadata JSON, captions, companion files,
-   *  poster; services/archive/sidecars.ts) or both; the original alone when
-   *  unsaid. */
+   *  poster; services/archive/sidecars.ts) or both, a clip's file (H3-9) or
+   *  the HLS/DASH package as a folder (H3-11, services/archive/packages.ts);
+   *  the original alone when unsaid. */
   archive?: {
-    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars' | 'clips')[] }[];
+    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars' | 'clips' | 'packages')[] }[];
     offPeak?: { from: string; to: string; timeZone?: string } | null;
   };
 }

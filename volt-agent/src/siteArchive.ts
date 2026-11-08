@@ -12,6 +12,13 @@
 //                    original's before the copy counts.
 //    archive.verify  read a copy back from the target again: present, its
 //                    checksum and size, or gone.
+//    archive.copy-folder, archive.verify-folder (H3-11)
+//                    the same for a FOLDER of many files (an asset's HLS and
+//                    DASH package): every file fetched through its own URL
+//                    into a folder beside its final name, the folder renamed
+//                    in, every file read back; reported as two checksums over
+//                    the whole set (volt-app services/archive/packageManifest.ts,
+//                    compiled in from the same file).
 //
 //  Two kinds of target: a FOLDER on the site's server or a mounted NAS share
 //  (`path`, H3-2), and an on-prem S3-COMPATIBLE STORE such as MinIO (`s3`,
@@ -35,13 +42,14 @@
 //  OUTBOUND ONLY, like the rest of the agent.
 // ============================================================================
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { mkdir, rename, stat, unlink } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, unlink } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { freeName, safeFileName } from '../../volt-app/src/services/archive/naming';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { freeName, nameValue, safeFileName } from '../../volt-app/src/services/archive/naming';
+import { cleanPackagePath, packageLayout, packageManifest, type PackageFile } from '../../volt-app/src/services/archive/packageManifest';
 import * as S3 from './s3Target';
 
-export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify'];
+export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify', 'archive.copy-folder', 'archive.verify-folder'];
 
 export interface ArchiveCtx {
   server: string;
@@ -111,10 +119,12 @@ function storeFor(ctx: ArchiveCtx, job: any): S3.S3Client {
  * bandwidth cap and reporting progress (which keeps the lease). Returns what
  * was downloaded: its size and checksum.
  */
-async function pump(ctx: ArchiveCtx, job: any, sink: (chunk: Uint8Array) => Promise<void>): Promise<{ bytes: number; sha256: string; total: number }> {
-  const transfer = (job.transfers ?? []).find((t: any) => t.name === 'source');
-  if (!transfer) throw new Refused('The job lists no source to copy', 'no_source', true);
-  const u = await call(ctx, `/api/site-agent/jobs/${job.id}/transfer-url`, { leaseId: job.leaseId, name: 'source' });
+interface Progress { last: number; done: number; total: number }
+
+async function pump(ctx: ArchiveCtx, job: any, sink: (chunk: Uint8Array) => Promise<void>, name = 'source', shared?: Progress): Promise<{ bytes: number; sha256: string; total: number }> {
+  const transfer = (job.transfers ?? []).find((t: any) => t.name === name);
+  if (!transfer) throw new Refused(`The job lists no transfer ${name} to copy`, 'no_source', true);
+  const u = await call(ctx, `/api/site-agent/jobs/${job.id}/transfer-url`, { leaseId: job.leaseId, name });
   if (u.status !== 200 || !u.body?.url) throw new Refused(u.body?.error ?? `transfer URL refused (HTTP ${u.status})`, u.body?.code ?? 'transfer_refused');
   const url = /^https?:\/\//.test(u.body.url) ? u.body.url : ctx.server.replace(/\/+$/, '') + u.body.url;
   const f = ctx.fetch ?? fetch;
@@ -124,7 +134,10 @@ async function pump(ctx: ArchiveCtx, job: any, sink: (chunk: Uint8Array) => Prom
   const total = Number(transfer.bytes ?? r.headers.get('content-length') ?? NaN);
   const capBps = Number(job.payload?.target?.bandwidthMbps) > 0 ? Number(job.payload.target.bandwidthMbps) * 1e6 / 8 : 0;
   const down = createHash('sha256');
-  let bytes = 0; const t0 = Date.now(); let lastProgress = Date.now();
+  // A folder copy shares one progress across its files, so the lease is
+  // kept while many small files go by (each alone too quick to report).
+  const prog: Progress = shared ?? { last: Date.now(), done: 0, total };
+  let bytes = 0; const t0 = Date.now();
   const reader = (r.body as any).getReader();
   for (;;) {
     const { done, value } = await reader.read();
@@ -136,15 +149,19 @@ async function pump(ctx: ArchiveCtx, job: any, sink: (chunk: Uint8Array) => Prom
       const due = (bytes / capBps) * 1000 - (Date.now() - t0);
       if (due > 5) await new Promise((res) => setTimeout(res, due));
     }
-    if (Date.now() - lastProgress >= (ctx.progressEveryMs ?? 10_000)) {
-      lastProgress = Date.now();
-      const p = await call(ctx, `/api/site-agent/jobs/${job.id}/progress`, {
-        leaseId: job.leaseId, pct: Number.isFinite(total) && total > 0 ? Math.min(99, Math.floor((bytes / total) * 100)) : undefined, note: `${bytes} bytes copied`,
-      });
-      if (p.status === 409) throw new Refused('the lease was lost while copying', 'lease_lost');
-    }
+    prog.done += value.length;
+    if (Date.now() - prog.last >= (ctx.progressEveryMs ?? 10_000)) await report(ctx, job, prog);
   }
+  if (shared && Date.now() - prog.last >= (ctx.progressEveryMs ?? 10_000)) await report(ctx, job, prog);
   return { bytes, sha256: down.digest('hex'), total };
+}
+
+async function report(ctx: ArchiveCtx, job: any, prog: Progress) {
+  prog.last = Date.now();
+  const p = await call(ctx, `/api/site-agent/jobs/${job.id}/progress`, {
+    leaseId: job.leaseId, pct: Number.isFinite(prog.total) && prog.total > 0 ? Math.min(99, Math.floor((prog.done / prog.total) * 100)) : undefined, note: `${prog.done} bytes copied`,
+  });
+  if (p.status === 409) throw new Refused('the lease was lost while copying', 'lease_lost');
 }
 
 async function runCopy(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
@@ -258,6 +275,96 @@ async function runVerify(ctx: ArchiveCtx, job: any): Promise<Record<string, unkn
   return { present: true, sha256: h.sha256, bytes: h.bytes };
 }
 
+// ---- folders: an asset's HLS/DASH package (H3-11) ---------------------------------
+
+/** The files a folder job lists, each with a path that stays inside the folder. */
+function folderFiles(job: any): { path: string; transfer: string; bytes: number }[] {
+  const raw = Array.isArray(job?.payload?.files) ? job.payload.files : null;
+  if (!raw || !raw.length) throw new Refused('The job lists no files to copy', 'no_source', true);
+  return raw.map((f: any) => {
+    const path = cleanPackagePath(f?.path);
+    if (!path) throw new Refused('A file of this folder has a path outside it', 'outside_target', true);
+    return { path, transfer: String(f?.transfer ?? ''), bytes: Number(f?.bytes) };
+  });
+}
+
+/** Read every listed file of a folder back: its checksum, or counted missing. */
+async function readFolder(dir: string, files: { path: string }[]): Promise<{ list: PackageFile[]; missing: number; bytes: number }> {
+  const list: PackageFile[] = []; let missing = 0; let bytes = 0;
+  for (const f of files) {
+    const p = insideTarget(dir, f.path);
+    let isFile = false;
+    try { isFile = (await stat(p)).isFile(); } catch { isFile = false; }
+    if (!isFile) { missing++; continue; }
+    const h = await hashFile(p);
+    list.push({ path: f.path, bytes: h.bytes, sha256: h.sha256 });
+    bytes += h.bytes;
+  }
+  return { list, missing, bytes };
+}
+
+/**
+ * Copy a folder of files (a package) into a folder target. Written into
+ * `<name>.part-<random>` and renamed in only when every file is there, so a
+ * half package never stays under a name that looks finished; then every
+ * file is READ BACK from its final place.
+ */
+async function runCopyFolder(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  if (job?.payload?.target?.kind !== 'path') throw new Refused('Packages are copied to folder targets only', 'package_needs_folder_target', true);
+  const root = await targetRoot(job);
+  const files = folderFiles(job);
+  const name = freeName(nameValue(job.payload?.folder) || 'package', (n) => existsSync(join(root, n)));
+  const dest = insideTarget(root, name);
+  const part = insideTarget(root, `${name}.part-${randomBytes(6).toString('hex')}`);
+  await mkdir(part, { recursive: true });
+  const down: PackageFile[] = [];
+  const prog: Progress = { last: Date.now(), done: 0, total: files.reduce((s, f) => s + (Number.isFinite(f.bytes) ? f.bytes : 0), 0) };
+  try {
+    for (const f of files) {
+      const p = insideTarget(part, f.path);
+      await mkdir(dirname(p), { recursive: true });
+      const out = createWriteStream(p, { flags: 'wx' });
+      const write = (chunk: Uint8Array) => new Promise<void>((res, rej) => out.write(chunk, (e) => (e ? rej(e) : res())));
+      try {
+        const got = await pump(ctx, job, write, f.transfer, prog);
+        await new Promise<void>((res, rej) => out.end((e?: any) => (e ? rej(e) : res())));
+        down.push({ path: f.path, bytes: got.bytes, sha256: got.sha256 });
+      } catch (e) { out.destroy(); throw e; }
+    }
+  } catch (e) {
+    await rm(part, { recursive: true, force: true }).catch(() => {});
+    throw e;
+  }
+  let final = dest;
+  if (existsSync(final)) final = insideTarget(root, freeName(name, (n) => existsSync(join(root, n))));
+  await rename(part, final);
+  // READ IT BACK from the target: what is reported is what the folder holds.
+  const back = await readFolder(final, files);
+  const downloadSha256 = packageManifest(down);
+  const sha256 = packageManifest(back.list);
+  if (back.missing || sha256 !== downloadSha256) {
+    await rm(final, { recursive: true, force: true }).catch(() => {});
+    throw new Refused(`The package read back from the target does not match what was downloaded (${back.missing} file(s) missing)`, 'checksum_mismatch');
+  }
+  return {
+    storedPath: relative(root, final).split(sep).join('/'), files: back.list.length, bytes: back.bytes,
+    sha256, downloadSha256, layoutSha256: packageLayout(back.list),
+  };
+}
+
+/** Read a package back again: every listed file, as one checksum, with how many are gone. */
+async function runVerifyFolder(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  void ctx;
+  const root = await targetRoot(job);
+  const dir = insideTarget(root, String(job.payload?.storedPath ?? ''));
+  try { if (!(await stat(dir)).isDirectory()) return { present: false }; } catch { return { present: false }; }
+  const files = Array.isArray(job.payload?.files) ? job.payload.files : [];
+  const listed = files.map((f: any) => ({ path: cleanPackagePath(f?.path), bytes: Number(f?.bytes) })).filter((f: any) => f.path) as { path: string; bytes: number }[];
+  const back = await readFolder(dir, listed);
+  const changed = back.list.filter((f) => { const want = listed.find((l) => l.path === f.path); return want && want.bytes !== f.bytes; }).length;
+  return { present: true, sha256: packageManifest(back.list), bytes: back.bytes, files: back.list.length, missingFiles: back.missing, changedFiles: changed };
+}
+
 /**
  * Lease and run this site's archive jobs until there are none (or maxJobs).
  * Returns how many ran. A 403 (the add-on not held) or 204 ends the pass.
@@ -271,10 +378,16 @@ export async function archivePass(ctx: ArchiveCtx): Promise<number> {
     if (l.status !== 200) throw new Error(l.body?.error ?? `lease refused (HTTP ${l.status})`);
     const job = l.body; ran++;
     try {
-      const result = job.type === 'archive.copy' ? await runCopy(ctx, job) : job.type === 'archive.verify' ? await runVerify(ctx, job) : null;
+      const result = job.type === 'archive.copy' ? await runCopy(ctx, job) : job.type === 'archive.verify' ? await runVerify(ctx, job)
+        : job.type === 'archive.copy-folder' ? await runCopyFolder(ctx, job) : job.type === 'archive.verify-folder' ? await runVerifyFolder(ctx, job) : null;
       if (!result) throw new Refused(`this agent does not run ${job.type}`, 'unknown_type', true);
       const c = await call(ctx, `/api/site-agent/jobs/${job.id}/complete`, { leaseId: job.leaseId, result });
-      if (c.status === 422 && job.type === 'archive.copy' && typeof result.storedPath === 'string') {
+      if (c.status === 422 && job.type === 'archive.copy-folder' && typeof result.storedPath === 'string') {
+        // A package the cloud refused (incomplete, or not what it has): the
+        // whole folder this job wrote goes, so no half package stays.
+        await rm(insideTarget(await targetRoot(job), result.storedPath), { recursive: true, force: true }).catch(() => {});
+        log(`[archive] ${job.type} ${job.id}: refused by the cloud (${c.body?.code ?? c.status}), folder removed; it will be retried`);
+      } else if (c.status === 422 && job.type === 'archive.copy' && typeof result.storedPath === 'string') {
         // The cloud refused the copy (it does not match the original): remove
         // it, so only a verified copy ever stays at the target.
         if (job.payload?.target?.kind === 's3') { const c = storeFor(ctx, job); await S3.removeOwn(c, storeKey(c, result.storedPath)); }

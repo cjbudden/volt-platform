@@ -40,8 +40,8 @@ import { ownedTarget, queueCopyJob, validTimeZone } from './archive';
 import { buildDir, sha256File } from './recordings';
 import { nameValue, safeFileName, recordingFileName } from './naming';
 
-/** What a copy rule can copy for an asset (clips: H3-9, services/archive/clips.ts). */
-export const COPY_WHATS = ['source', 'sidecars', 'clips'] as const;
+/** What a copy rule can copy for an asset (clips: H3-9, clips.ts; packages: H3-11, packages.ts). */
+export const COPY_WHATS = ['source', 'sidecars', 'clips', 'packages'] as const;
 export type CopyWhat = typeof COPY_WHATS[number];
 
 /** One sidecar file of an asset, before it is made. */

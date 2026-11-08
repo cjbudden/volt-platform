@@ -32,8 +32,13 @@ import { safeFileName } from './naming';
 
 export const ARCHIVE_COPY = 'archive.copy';
 export const ARCHIVE_VERIFY = 'archive.verify';
+/** A whole folder (an asset's HLS/DASH package, H3-11, packages.ts): its own types, so an older agent never leases one. */
+export const ARCHIVE_COPY_FOLDER = 'archive.copy-folder';
+export const ARCHIVE_VERIFY_FOLDER = 'archive.verify-folder';
 /** The job types the Mirror and Archive licence covers at a site. */
-export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY];
+export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY, ARCHIVE_COPY_FOLDER, ARCHIVE_VERIFY_FOLDER];
+const isCopyJob = (type: string) => type === ARCHIVE_COPY || type === ARCHIVE_COPY_FOLDER;
+const isVerifyJob = (type: string) => type === ARCHIVE_VERIFY || type === ARCHIVE_VERIFY_FOLDER;
 export const isArchiveJob = (type: string) => ARCHIVE_JOB_TYPES.includes(type);
 
 /** path: a folder on the site's server or NAS. s3: an on-prem S3-compatible store (H3-4). */
@@ -334,9 +339,17 @@ export async function requestVerify(accountId: string, userId: string | null, id
   if (!c.stored_path || !c.sha256) throw err(409, 'This copy has not been made yet, so there is nothing to check', 'not_copied');
   if (c.verify_job_state === 'queued' || c.verify_job_state === 'running') return { copy: c, created: false };
   const t = await ownedTarget(accountId, c.target_id);
+  // A package (H3-11) is read back file by file, against the list its copy
+  // job wrote: a file gone from the folder makes the whole copy not match.
+  let files: { path: string; bytes: number }[] | null = null;
+  if (c.what === 'package') {
+    const { packageFilesOf } = await import('./packages');
+    files = (await packageFilesOf(c))?.map((f) => ({ path: f.path, bytes: f.bytes })) ?? null;
+    if (!files) throw err(409, 'The list of files this package copy wrote is gone, so it cannot be checked; copy it again', 'not_copied');
+  }
   const job = await enqueue({
-    type: ARCHIVE_VERIFY, pool: sitePool(t.site_id), createdBy: userId, maxAttempts: 3,
-    payload: { copyId: c.id, storedPath: c.stored_path, sha256: c.sha256, target: targetForAgent(t) },
+    type: files ? ARCHIVE_VERIFY_FOLDER : ARCHIVE_VERIFY, pool: sitePool(t.site_id), createdBy: userId, maxAttempts: 3,
+    payload: { copyId: c.id, storedPath: c.stored_path, sha256: c.sha256, target: targetForAgent(t), ...(files ? { files } : {}) },
   });
   await query(`UPDATE archive_copies SET verify_job_id = $2, updated_at = now() WHERE id = $1`, [c.id, job.id]);
   return { copy: await ownedCopy(accountId, c.id), created: true };
@@ -385,8 +398,8 @@ export async function recheckDue(opts: { limit?: number; accountId?: string } = 
 export type CopyEvent = 'ingest' | 'publish' | 'schedule';
 /** When a copy rule fires: an asset event, or (H3-7) a stretch of recording closing. */
 export type CopyMoment = CopyEvent | 'recording';
-/** What an asset copy takes (H3-8): the original, its sidecars, (H3-9) a clip's file. Original only when unsaid. */
-export type CopyWhat = 'source' | 'sidecars' | 'clips';
+/** What an asset copy takes (H3-8): the original, its sidecars, (H3-9) a clip's file, (H3-11) its HLS/DASH package. Original only when unsaid. */
+export type CopyWhat = 'source' | 'sidecars' | 'clips' | 'packages';
 export interface OffPeak { from: string; to: string; timeZone?: string }
 export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[]; what?: CopyWhat[] }[]; offPeak?: OffPeak | null }
 
@@ -473,6 +486,18 @@ export async function copyOnRule(accountId: string, assetId: string, event: Copy
           out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
         }
       }
+      // The HLS/DASH package as one folder (H3-11, packages.ts). An asset not
+      // packaged yet, or a store target, is skipped quietly.
+      if (whats.includes('packages')) {
+        try {
+          const { requestPackageCopy } = await import('./packages');
+          const r = await requestPackageCopy(accountId, c.targetId, assetId, { runAfter });
+          out.queued.push(...r.queued);
+          if (!r.queued.length) out.skipped.push({ targetId: c.targetId, why: 'package_already_copied_or_queued' });
+        } catch (e: any) {
+          out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
+        }
+      }
       if (whats.includes('sidecars')) {
         try {
           const { requestSidecarCopies } = await import('./sidecars');
@@ -518,18 +543,26 @@ export async function judge(job: JobRow, result: any): Promise<Verdict> {
   const sha = typeof result?.sha256 === 'string' ? result.sha256.toLowerCase() : '';
   const bytes = Number(result?.bytes);
 
-  if (job.type === ARCHIVE_VERIFY) {
+  if (isVerifyJob(job.type)) {
     if (result?.present === false) {
       return { ok: true, apply: async () => { await query(
         `UPDATE archive_copies SET state = 'missing', checked_at = now(), error = 'The copy is no longer at the target', error_code = 'missing', updated_at = now() WHERE id = $1`, [c.id]); } };
     }
     if (!SHA.test(sha) || !Number.isFinite(bytes)) return { ok: false, status: 400, code: 'bad_result', message: 'A check reports present, sha256 and bytes' };
     const same = sha === c.sha256 && (c.bytes === null || Number(c.bytes) === bytes);
+    // A package (H3-11) says how many of its files were gone or changed.
+    const gone = Number(result?.missingFiles) > 0 ? Number(result.missingFiles) : 0;
+    const changed = Number(result?.changedFiles) > 0 ? Number(result.changedFiles) : 0;
+    const why = job.type === ARCHIVE_VERIFY_FOLDER
+      ? `The package at the target no longer matches: ${gone} file${gone === 1 ? '' : 's'} missing, ${changed} changed (${bytes} bytes; expected ${c.bytes ?? '?'})`
+      : `The copy at the target no longer matches (SHA-256 ${sha.slice(0, 12)}…, ${bytes} bytes; expected ${String(c.sha256).slice(0, 12)}…)`;
     return { ok: true, apply: async () => { await query(same
       ? `UPDATE archive_copies SET state = 'verified', verified_at = now(), checked_at = now(), error = NULL, error_code = NULL, updated_at = now() WHERE id = $1`
       : `UPDATE archive_copies SET state = 'corrupt', checked_at = now(), error = $2, error_code = 'checksum_mismatch', updated_at = now() WHERE id = $1`,
-      same ? [c.id] : [c.id, `The copy at the target no longer matches (SHA-256 ${sha.slice(0, 12)}…, ${bytes} bytes; expected ${String(c.sha256).slice(0, 12)}…)`]); } };
+      same ? [c.id] : [c.id, why]); } };
   }
+
+  if (job.type === ARCHIVE_COPY_FOLDER) return judgeFolder(job, c, result);
 
   // archive.copy
   const stored = cleanStoredPath(result?.storedPath);
@@ -569,13 +602,46 @@ export async function judge(job: JobRow, result: any): Promise<Verdict> {
 export async function attemptFailed(job: JobRow, message: string, code: string | null, exhausted: boolean): Promise<void> {
   const copyId = job.payload?.copyId;
   if (!UUID.test(String(copyId))) return;
-  if (job.type === ARCHIVE_COPY) {
+  if (isCopyJob(job.type)) {
     await query(
       `UPDATE archive_copies SET error = $2, error_code = $3, state = CASE WHEN $4 THEN 'failed' ELSE state END, updated_at = now()
         WHERE id = $1 AND job_id = $5`, [copyId, message.slice(0, 2000), code, exhausted, job.id]);
-  } else if (job.type === ARCHIVE_VERIFY && exhausted) {
+  } else if (isVerifyJob(job.type) && exhausted) {
     await query(
       `UPDATE archive_copies SET error = $2, error_code = $3, updated_at = now() WHERE id = $1 AND verify_job_id = $4`,
       [copyId, `The last check could not run: ${message}`.slice(0, 2000), code, job.id]);
   }
+}
+
+/**
+ * A package copy (H3-11): one folder of many files. It counts only when the
+ * folder holds exactly the files the job listed at their sizes (layout), and
+ * every file read back from the target matches what was downloaded and, when
+ * the cloud hashed the package itself, what the cloud has (manifest).
+ */
+async function judgeFolder(job: JobRow, c: any, result: any): Promise<Verdict> {
+  const stored = cleanStoredPath(result?.storedPath);
+  const sha = typeof result?.sha256 === 'string' ? result.sha256.toLowerCase() : '';
+  const bytes = Number(result?.bytes), files = Number(result?.files);
+  const layout = typeof result?.layoutSha256 === 'string' ? result.layoutSha256.toLowerCase() : '';
+  if (!stored || stored.includes('/') || !SHA.test(sha) || !SHA.test(layout) || !Number.isInteger(bytes) || bytes < 0 || !Number.isInteger(files)) {
+    return { ok: false, status: 400, code: 'bad_result', message: 'A package copy reports storedPath (a folder inside the target), files, bytes, sha256 and layoutSha256' };
+  }
+  const listed = Array.isArray(job.payload?.files) ? job.payload.files.length : -1;
+  if (files !== listed || layout !== String(job.payload?.layoutSha256 ?? '').toLowerCase() || bytes !== Number(job.payload?.bytes)) {
+    return { ok: false, status: 422, code: 'package_incomplete', message: `The package at the target is ${files} files and ${bytes} bytes; it should be ${listed} files and ${job.payload?.bytes} bytes` };
+  }
+  const down = typeof result?.downloadSha256 === 'string' ? result.downloadSha256.toLowerCase() : null;
+  if (!down || down !== sha) {
+    return { ok: false, status: 422, code: 'checksum_mismatch', message: 'The package read back from the target does not match the bytes downloaded' };
+  }
+  if (c.expected_sha256 && sha !== c.expected_sha256) {
+    return { ok: false, status: 422, code: 'checksum_mismatch', message: 'The package at the target does not match the files Volt has' };
+  }
+  return { ok: true, apply: async () => {
+    await query(
+      `UPDATE archive_copies SET state = 'verified', stored_path = $2, bytes = $3, sha256 = $4,
+              copied_at = now(), verified_at = now(), checked_at = now(), error = NULL, error_code = NULL, updated_at = now()
+        WHERE id = $1`, [c.id, stored, bytes, sha]);
+  } };
 }

@@ -33,8 +33,8 @@ const KEY_LABEL: Record<RuleKey, string> = {
 const KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'accessRules', 'geo', 'access', 'paywall', 'gate', 'archive']
 
 const ON_LABEL = { ingest: 'when it lands', publish: 'when it is published', recording: 'recordings as each programme or hour ends', schedule: 'nightly, what it does not hold yet' } as const
-type CopyWhat = 'source' | 'sidecars' | 'clips'
-const WHAT_LABEL: Record<CopyWhat, string> = { source: 'original', sidecars: 'sidecars', clips: 'clips' }
+type CopyWhat = 'source' | 'sidecars' | 'clips' | 'packages'
+const WHAT_LABEL: Record<CopyWhat, string> = { source: 'original', sidecars: 'sidecars', clips: 'clips', packages: 'HLS/DASH package' }
 type CopyOn = keyof typeof ON_LABEL
 
 function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTargets: ArchiveTarget[] = []): string {
@@ -321,7 +321,7 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
     const set = new Set<CopyWhat>(cur.what?.length ? cur.what : ['source'])
     if (yes) set.add(w); else set.delete(w)
     if (!set.size) return
-    const what = (['source', 'sidecars', 'clips'] as const).filter(x => set.has(x))
+    const what = (['source', 'sidecars', 'clips', 'packages'] as const).filter(x => set.has(x))
     const next = { targetId, on: cur.on, ...(what.length === 1 && what[0] === 'source' ? {} : { what }) }
     put(copies.map(c => c.targetId === targetId ? next : c), offPeak)
   }
@@ -348,6 +348,9 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!cur.what?.length || cur.what.includes('source')} onChange={e => setWhat(t.id, 'source', e.target.checked)} />Original</label>
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="A metadata file, the caption files, any other files that came with it, and the poster, named after the original"><input type="checkbox" checked={!!cur.what?.includes('sidecars')} onChange={e => setWhat(t.id, 'sidecars', e.target.checked)} />Sidecars</label>
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="For clips cut from a recording: the clip's file as made, with a metadata file beside it"><input type="checkbox" checked={!!cur.what?.includes('clips')} onChange={e => setWhat(t.id, 'clips', e.target.checked)} />Clips</label>
+              {/* H3-11: the size a package means, measured, beside the box (services/archive/packages.ts). */}
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={t.kind === 's3' ? 'Packages go to folder targets only for now' : 'The HLS and DASH package as a folder that plays as it is: playlists, manifest and every segment'}><input type="checkbox" disabled={t.kind === 's3' && !cur.what?.includes('packages')} checked={!!cur.what?.includes('packages')} onChange={e => setWhat(t.id, 'packages', e.target.checked)} />HLS/DASH package</label>
+              {cur.what?.includes('packages') && <span style={{ color: 'var(--faint)' }} data-archive-package-size>usually about 1.7 times the original (0.1 to 6 times), a few hundred files{t.kind === 's3' ? '; folder targets only for now, so nothing is copied here' : ''}</span>}
             </span>}
             <span style={{ color: 'var(--faint)' }}>{t.siteName ? `at ${t.siteName}` : ''}{t.status === 'active' ? '' : ', disabled: no new copies'}</span>
           </div>
@@ -367,7 +370,7 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
         </>}
       </div>
       <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>
-        The original file is copied once per target. Sidecars are a metadata file, the caption files, other files that came with the asset, and its poster. Clips are clips cut from a recording: the clip's file as made, named Title-Channel-date-time, with a metadata file beside it. Nightly copies anything the target does not hold yet.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
+        The original file is copied once per target. Sidecars are a metadata file, the caption files, other files that came with the asset, and its poster. Clips are clips cut from a recording: the clip's file as made, named Title-Channel-date-time, with a metadata file beside it. The HLS/DASH package is every rendition and segment as a folder that plays as it is: on our test library about 1.7 times the size of the original (from 0.1 to 6 times), a few hundred files per asset, so tick it only where the room is there. Nightly copies anything the target does not hold yet.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
       </div>
     </div>
   )

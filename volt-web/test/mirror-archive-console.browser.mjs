@@ -14,6 +14,8 @@
 //   System Admin: the Mirror and Archive switch saves with the account
 //   H3-8: Nightly on each target, Original and Sidecars on a target copied to
 //   H3-9: Clips beside them, saved in order, alone allowed, the last kept
+//   H3-11: the HLS/DASH package on a folder target with its size beside the
+//     box, greyed on a store target, saved and kept
 //   PLAYWRIGHT=<playwright index.mjs> CHROMIUM=<chrome> OUT=<dir> node volt-web/test/mirror-archive-console.browser.mjs
 const { chromium } = await import(process.env.PLAYWRIGHT);
 const B = 'http://127.0.0.1:5173', OUT = process.env.OUT || '/tmp';
@@ -204,6 +206,32 @@ ok('and it is still ticked when the page is opened again', await page.locator('[
   ok('clips alone can be left ticked', await row3.locator('[data-archive-what] label:has-text("Clips") input').isChecked() && !(await row3.locator('[data-archive-what] label:has-text("Original") input').isChecked()))
   await row3.locator('[data-archive-what] label:has-text("Clips") input').click()
   ok('but not unticked when it is the last', await row3.locator('[data-archive-what] label:has-text("Clips") input').isChecked())
+}
+// H3-11: the HLS/DASH package, with the size it means beside the box; folder targets only.
+{
+  await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
+  const storeRow = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
+  const storePkg = storeRow.locator('[data-archive-what] label:has-text("HLS/DASH package") input')
+  ok('a store target offers the package box, greyed (folder targets only)', await storePkg.count() === 1 && await storePkg.isDisabled() && /folder targets only/.test(await storeRow.locator('[data-archive-what] label:has-text("HLS/DASH package")').getAttribute('title') || ''))
+  const nasRow = page.locator('[data-archive-control] [data-archive-target="Machine room NAS"]')
+  if (!(await nasRow.locator('label:has-text("When it is published") input').isChecked())) await nasRow.locator('label:has-text("When it is published") input').check()
+  const pkg = nasRow.locator('[data-archive-what] label:has-text("HLS/DASH package") input')
+  ok('a folder target offers the package box, unticked, with no size note yet', await pkg.count() === 1 && !(await pkg.isChecked()) && await nasRow.locator('[data-archive-package-size]').count() === 0)
+  await pkg.check()
+  const note = await nasRow.locator('[data-archive-package-size]').innerText().catch(() => '')
+  ok('ticked, it says the size beside the box: ' + JSON.stringify(note), /about 1\.7 times the original \(0\.1 to 6 times\), a few hundred files/.test(note))
+  ok('the field says what a package is and what it costs in room', /The HLS\/DASH package is every rendition and segment as a folder that plays as it is: on our test library about 1\.7 times the size of the original/.test(await page.locator('[data-archive-control]').first().innerText()))
+  await nasRow.scrollIntoViewIfNeeded(); await page.screenshot({ path: OUT + '/ma-publishing-packages.png' })
+  const resp4 = page.waitForResponse(r => /\/api\/publishing-rules/.test(r.url()) && r.request().method() === 'PUT', { timeout: 10000 }).catch(() => null)
+  await page.locator('button:has-text("Save publishing rule")').first().click()
+  const sr4 = await resp4
+  const sent4 = sr4 ? JSON.parse(sr4.request().postData() || '{}') : {}
+  const nasId = (await (await page.request.get(B + '/api/archive/targets').catch(() => null))?.json().catch(() => null) ?? []).find?.(t => t.name === 'Machine room NAS')?.id
+  const all4 = sent4.settings?.archive?.copies ?? sent4.archive?.copies ?? []
+  const st4 = all4.find(c => c.targetId === nasId) ?? all4.find(c => (c.what ?? []).includes('packages'))
+  ok('saving sends the original and the package for the NAS: ' + JSON.stringify(st4?.what), !!sr4 && sr4.ok() && JSON.stringify(st4?.what) === '["source","packages"]')
+  await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
+  ok('and the package is still ticked when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="Machine room NAS"] [data-archive-what] label:has-text("HLS/DASH package") input').isChecked())
 }
 ok('Sites is in the menu for this account', await navHas(page, 'Sites'))
 await ctx.close()
