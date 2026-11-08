@@ -207,9 +207,9 @@ function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId, se
   )
 }
 
-function AudioPreview({ sources, title, err, setErr, seek }: { sources: PreviewSources; title?: string | null; err: string; setErr: (m: string) => void; seek?: SeekRequest | null }) {
+function AudioPreview({ sources, title, err, setErr, seek: seekTo }: { sources: PreviewSources; title?: string | null; err: string; setErr: (m: string) => void; seek?: SeekRequest | null }) {
   const ref = useRef<HTMLAudioElement | null>(null)
-  useSeekRequest(ref, seek)
+  useSeekRequest(ref, seekTo)
   const [el, setEl] = useState<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0)
