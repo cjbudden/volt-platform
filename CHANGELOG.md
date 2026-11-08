@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.65.0 (2026-11-08)
+
+### Internal
+
+- added · Hybrid Sites: Site encoding, the cloud side: vod.encode is split into a plan step and an execute step, and a site can probe and encode a file and hand back only the package, which the cloud verifies before the asset plays. The site worker and the Encode at site placement follow in H4-2.
+
 ## 0.64.0 (2026-11-08)
 
 ### Product (in customer release notes)
