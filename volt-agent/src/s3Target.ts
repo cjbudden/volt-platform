@@ -228,6 +228,36 @@ export async function namesLike(c: S3Client, stem: string): Promise<Set<string>>
 }
 
 /**
+ * The top-level names in the target folder that start like `stem`: objects
+ * and "folders" (the first part of longer keys), from one delimited listing,
+ * so a package folder of a few hundred objects counts as one name (H3-12).
+ */
+export async function topNamesLike(c: S3Client, stem: string): Promise<Set<string>> {
+  const out = new Set<string>();
+  const base = c.cfg.prefix ? `${c.cfg.prefix}/` : '';
+  const unxml = (k: string) => k.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  let token: string | undefined;
+  for (let page = 0; page < 20; page++) {
+    const q: Record<string, string> = { 'list-type': '2', prefix: base + stem, delimiter: '/', 'max-keys': '1000' };
+    if (token) q['continuation-token'] = token;
+    const r = await s3(c, 'GET', '', { query: q });
+    if (r.status !== 200) throw await refusal(r, 'Listing the target folder failed');
+    const xml = await r.text();
+    for (const m of xml.matchAll(/<(Key|Prefix)>([^<]+)<\/\1>/g)) {
+      const k = unxml(m[2]);
+      // The answer's own <Prefix> echoes the request; folders come back as
+      // <CommonPrefixes><Prefix>name/</Prefix>, with the slash.
+      if (!k.startsWith(base) || (m[1] === 'Prefix' && !k.endsWith('/'))) continue;
+      const rest = k.slice(base.length).replace(/\/$/, '');
+      if (rest) out.add(rest.split('/')[0]);
+    }
+    token = /<IsTruncated>true<\/IsTruncated>/.test(xml) ? /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1] : undefined;
+    if (!token) break;
+  }
+  return out;
+}
+
+/**
  * Write one object without ever replacing one: `If-None-Match: *` on the PUT
  * (and on completing a multipart upload), so a name that was taken meanwhile
  * answers 412 instead of being overwritten. Returns false on 412.

@@ -18,12 +18,29 @@
 //    - re-checks: verified, then one file gone or changed is corrupt (and
 //      says how many), the whole folder gone is missing;
 //    - a clip's HLS package, named as clips are; nightly; skips (no package,
-//      a store target, no add-on); a package listed from the bucket on an
-//      S3 deployment.
+//      no add-on); a package listed from the bucket on an S3 deployment;
+//    - (H3-12) a store target takes a package: one folder job naming the
+//      store and its key name, never keys.
+//
+//  With a real S3 API (ARCHIVE_S3_TEST_ENDPOINT and keys, as
+//  mirror-archive-s3.check.ts; moto with IAM auth checks the signatures),
+//  the real agent puts a package into the store (H3-12):
+//    - every file an object under `<prefix>/<name>-package/`, byte for byte,
+//      read back and verified; asking again copies nothing;
+//    - a folder name with any object under it is taken: the WHOLE package
+//      goes to -2, the other object untouched;
+//    - an object taken between the look and the write (If-None-Match, 412):
+//      the other object untouched, every object this job wrote removed, then
+//      retried under -2;
+//    - a file gone or changed under the copy: not archived, and every object
+//      the job wrote removed;
+//    - re-checks: verified, one object gone or changed is corrupt, all gone
+//      is missing; nothing ever written outside the target's folder.
 //
 //  Usage: DATABASE_URL=... npx tsx test/mirror-archive-packages.check.ts
+//    (ARCHIVE_S3_TEST_ENDPOINT=... ARCHIVE_S3_TEST_KEY_ID=... ARCHIVE_S3_TEST_SECRET=... for the store part)
 // ============================================================================
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -215,10 +232,14 @@ const walk = (d: string, rel = ''): string[] => readdirSync(d, { withFileTypes: 
   const bare = (await one<any>(`INSERT INTO vod_assets (account_id, source_kind, kind, title, master_key, start_epoch_ms, end_epoch_ms, duration_ms) VALUES ($1,'upload','clip','Bare','/x',0,0,1) RETURNING id`, [acct]))!.id;
   out = await A.copyOnRule(acct, bare, 'ingest');
   ok(out.queued.length === 0 && out.skipped.some((s) => s.why === 'no_package'), 'an asset not packaged yet copies nothing', out);
-  let thrown: any = null;
-  try { await P.requestPackageCopy(acct, store.body.id, show.id); } catch (e) { thrown = e; }
-  ok(store.status === 201 || store.status === 200 ? thrown?.code === 'package_needs_folder_target' : false, 'a store target refuses a package (folder targets only for now), nothing queued', { status: store.status, code: thrown?.code });
-  ok(!(await one(`SELECT 1 FROM archive_copies WHERE target_id = $1`, [store.body?.id ?? '00000000-0000-0000-0000-000000000000'])), 'no copy row is left for it');
+  // H3-12: a store target takes a package (it was refused before), as one
+  // folder job naming the store and the keys' name, never the keys.
+  const sq = await P.requestPackageCopy(acct, store.body.id, show.id);
+  const sjob = await one<any>(`SELECT j.id, j.type, j.payload FROM archive_copies c JOIN jobs j ON j.id = c.job_id WHERE c.target_id = $1 AND c.vod_asset_id = $2`, [store.body.id, show.id]);
+  ok(store.status === 201 && sq.queued.length === 1 && sjob?.type === 'archive.copy-folder' && sjob.payload.target.kind === 's3' && sjob.payload.target.s3?.bucket === 'volt-archive'
+    && sjob.payload.target.s3?.credentialRef === 'k1' && sjob.payload.files.length === PKG.length && !/secret|accessKeyId/i.test(JSON.stringify(sjob.payload)),
+    'a store target takes a package: one folder job with the store and its keys\' name, no keys', { status: store.status, sq, type: sjob?.type, target: sjob?.payload?.target });
+  await query(`UPDATE jobs SET state = 'cancelled' WHERE id = $1`, [sjob.id]);   // minio.local is not there; the real store is below
   const theirs = await mkEncoded('Theirs', 'Theirs.mp4', { account: none });
   out = await A.copyOnRule(none, theirs.id, 'ingest');
   ok(out.queued.length === 0 && !(await one(`SELECT 1 FROM archive_copies WHERE vod_asset_id = $1`, [theirs.id])), 'an account without the add-on copies nothing');
@@ -242,6 +263,123 @@ const walk = (d: string, rel = ''): string[] => readdirSync(d, { withFileTypes: 
   ok(plan && !plan.local && JSON.stringify(plan.files.map((f) => f.path)) === '["720p/seg_1.m4s","master.m3u8"]' && plan.files.every((f) => f.uri.startsWith(`s3://${config.aws.s3Bucket}/vod/${s3id}/`)), 'the package\'s files, each fetched from the bucket, ladders and reframes left out', plan?.files);
   (config.mediaStore as any).driver = wasDriver;
   ok(await P.planPackage({ id: s3id, master_key: `vod/${s3id}/master.m3u8` }) === null, 'on a local deployment a missing folder is not made up');
+
+  console.log('== into a real S3-compatible store (H3-12) ==');
+  const ENDPOINT = process.env.ARCHIVE_S3_TEST_ENDPOINT || undefined;
+  if (!ENDPOINT) {
+    console.log('PASS skipped the store part: set ARCHIVE_S3_TEST_ENDPOINT (and _KEY_ID, _SECRET) to run against moto, MinIO or another S3-compatible store');
+  } else {
+    const KEY_ID = process.env.ARCHIVE_S3_TEST_KEY_ID ?? 'test', SECRET = process.env.ARCHIVE_S3_TEST_SECRET ?? 'test';
+    const bucket = `volt-map-${tag}`.toLowerCase();
+    const { S3Client, CreateBucketCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+    const sdk = new S3Client({ endpoint: ENDPOINT, region: 'us-east-1', forcePathStyle: true, credentials: { accessKeyId: KEY_ID, secretAccessKey: SECRET } });
+    await sdk.send(new CreateBucketCommand({ Bucket: bucket }));
+    const get = async (key: string): Promise<Buffer | null> => {
+      try { const o: any = await sdk.send(new GetObjectCommand({ Bucket: bucket, Key: key })); return Buffer.from(await o.Body.transformToByteArray()); } catch { return null; }
+    };
+    const list = async (prefix = ''): Promise<string[]> => {
+      const out: string[] = []; let token: string | undefined;
+      do {
+        const r: any = await sdk.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+        for (const o of r.Contents ?? []) out.push(o.Key);
+        token = r.IsTruncated ? r.NextContinuationToken : undefined;
+      } while (token);
+      return out.sort();
+    };
+    const under = async (folder: string) => (await list(`Volt/Packages/${folder}/`)).map((k) => k.slice(`Volt/Packages/${folder}/`.length));
+    const kdir = mkdtempSync(join(tmpdir(), 'map-keys-'));
+    const keyFile = join(kdir, 'archive-keys.json');
+    writeFileSync(keyFile, JSON.stringify({ 'pkg-store': { accessKeyId: KEY_ID, secretAccessKey: SECRET } })); chmodSync(keyFile, 0o600);
+    let hook: ((u: string, init: any) => Promise<void>) | null = null;
+    const hooked: typeof fetch = (async (u: any, init: any) => { if (hook) await hook(String(u), init); return fetch(u, init); }) as any;
+    const sctx = { ...ctx, keysFile: keyFile, fetch: hooked };
+    const sdrain = async () => { let n = 0; for (let i = 0; i < 20; i++) { const ran = await AG.archivePass(sctx); n += ran; if (!ran) break; } return n; };
+    const st = await api('POST', '/api/archive/targets', { name: 'Package store', siteId: site, kind: 's3', s3: { endpoint: ENDPOINT, bucket, prefix: 'Volt/Packages', credentialRef: 'pkg-store' } });
+    ok(st.status === 201, 'a store target at the real S3 API', st.body);
+    const storeCopy = async (assetId: string) => one<any>(`SELECT * FROM archive_copies WHERE vod_asset_id = $1 AND target_id = $2`, [assetId, st.body.id]);
+    const due = (copyId: string) => query(`UPDATE jobs SET run_after = now() FROM archive_copies c WHERE (c.job_id = jobs.id OR c.verify_job_id = jobs.id) AND c.id = $1`, [copyId]);
+    const cancel = (copyId: string) => query(`UPDATE jobs SET state = 'cancelled' FROM archive_copies c WHERE c.job_id = jobs.id AND c.id = $1`, [copyId]);
+
+    let q = await P.requestPackageCopy(acct, st.body.id, show.id);
+    await sdrain();
+    let sc = await storeCopy(show.id);
+    ok(q.queued.length === 1 && sc?.state === 'verified' && sc.stored_path === 'MorningNews-package', 'the package is copied into the store and verified', { q, state: sc?.state, err: sc?.error, code: sc?.error_code });
+    const inStore = await under('MorningNews-package');
+    ok(JSON.stringify(inStore) === JSON.stringify([...PKG].sort()), `every file an object under Volt/Packages/MorningNews-package/ (${inStore.length} objects), nothing else`, inStore.filter((f) => !PKG.includes(f)));
+    let same = true;
+    for (const f of PKG) if (!(await get(`Volt/Packages/MorningNews-package/${f}`))?.equals(readFileSync(join(show.dir, f)))) { same = false; break; }
+    ok(same, 'every object byte for byte');
+    ok(Number(sc.bytes) === totalBytes && sc.sha256 === sc.expected_sha256, 'the copy records the size and the checksum over every object, matching the cloud\'s', { bytes: sc.bytes, totalBytes });
+    q = await P.requestPackageCopy(acct, st.body.id, show.id);
+    ok(q.queued.length === 0 && q.kept.length === 1, 'asking again copies nothing', q);
+
+    // A folder name with ANY object under it is taken: the whole package goes to -2.
+    const taken = await mkEncoded('Taken', 'Taken.mp4');
+    const theirsObj = randomBytes(300);
+    await sdk.send(new PutObjectCommand({ Bucket: bucket, Key: 'Volt/Packages/Taken-package/notes.txt', Body: theirsObj }));
+    await P.requestPackageCopy(acct, st.body.id, taken.id); await sdrain();
+    sc = await storeCopy(taken.id);
+    ok(sc?.state === 'verified' && sc.stored_path === 'Taken-package-2' && (await under('Taken-package-2')).length === PKG.length, 'a folder name already in use: the whole package goes to -2', { state: sc?.state, path: sc?.stored_path, err: sc?.error });
+    ok(JSON.stringify(await under('Taken-package')) === '["notes.txt"]' && (await get('Volt/Packages/Taken-package/notes.txt'))?.equals(theirsObj), 'and nothing was added to or replaced in the other folder', await under('Taken-package'));
+
+    // An object taken between the look and the write: If-None-Match answers 412.
+    const race = await mkEncoded('Race', 'Race.mp4');
+    const racer = randomBytes(700);
+    let planted = false;
+    hook = async (u, init) => {
+      if (!planted && init?.method === 'PUT' && new URL(u).pathname.endsWith('/Volt/Packages/Race-package/720p/seg_5.m4s')) {
+        planted = true;
+        await sdk.send(new PutObjectCommand({ Bucket: bucket, Key: 'Volt/Packages/Race-package/720p/seg_5.m4s', Body: racer }));
+      }
+    };
+    await P.requestPackageCopy(acct, st.body.id, race.id);
+    await AG.archivePass(sctx);
+    hook = null;
+    sc = await storeCopy(race.id);
+    ok(planted && sc?.state !== 'verified' && sc?.error_code === 'name_taken', 'an object taken while copying: refused by the store (412), the copy waits to retry', { planted, state: sc?.state, code: sc?.error_code });
+    ok(JSON.stringify(await under('Race-package')) === '["720p/seg_5.m4s"]' && (await get('Volt/Packages/Race-package/720p/seg_5.m4s'))?.equals(racer), 'the other object is untouched and every object the job wrote is removed', await under('Race-package'));
+    await due(sc.id); await sdrain();
+    sc = await storeCopy(race.id);
+    ok(sc?.state === 'verified' && sc.stored_path === 'Race-package-2' && (await under('Race-package-2')).length === PKG.length, 'retried, the whole package goes to -2 and is verified', { state: sc?.state, path: sc?.stored_path, err: sc?.error });
+
+    // Not whole: nothing stays in the store.
+    const gone = await mkEncoded('Gone', 'Gone.mp4');
+    await P.requestPackageCopy(acct, st.body.id, gone.id);
+    unlinkSync(join(gone.dir, '1080p', 'seg_20.m4s'));
+    await AG.archivePass(sctx);
+    sc = await storeCopy(gone.id);
+    ok(sc?.state !== 'verified' && sc?.stored_path === null && (await list('Volt/Packages/Gone-package')).length === 0, 'a file gone from the package: not archived, and every object the job wrote is removed', { state: sc?.state, code: sc?.error_code, left: (await list('Volt/Packages/Gone-package')).length });
+    await cancel(sc.id);
+    const shift = await mkEncoded('Shift', 'Shift.mp4');
+    await P.requestPackageCopy(acct, st.body.id, shift.id);
+    const f3 = join(shift.dir, '720p', 'seg_3.m4s'); writeFileSync(f3, randomBytes(readFileSync(f3).length));
+    await AG.archivePass(sctx);
+    sc = await storeCopy(shift.id);
+    ok(sc?.state !== 'verified' && sc?.error_code === 'checksum_mismatch' && (await list('Volt/Packages/Shift-package')).length === 0, 'a file changed under the copy: the cloud refuses it and the agent removes every object it wrote', { state: sc?.state, code: sc?.error_code, left: (await list('Volt/Packages/Shift-package')).length });
+    await cancel(sc.id);
+
+    // Re-checks, read back object by object.
+    const sid = (await storeCopy(show.id)).id;
+    await api('POST', `/api/archive/copies/${sid}/verify`, {}); await sdrain();
+    ok((await one<any>(`SELECT j.type FROM archive_copies c JOIN jobs j ON j.id = c.verify_job_id WHERE c.id = $1`, [sid]))?.type === 'archive.verify-folder' && (await storeCopy(show.id)).state === 'verified', 'a re-check of an untouched package in the store: verified');
+    const k7 = 'Volt/Packages/MorningNews-package/720p/seg_7.m4s', keep7 = await get(k7);
+    await sdk.send(new DeleteObjectCommand({ Bucket: bucket, Key: k7 }));
+    await api('POST', `/api/archive/copies/${sid}/verify`, {}); await sdrain();
+    sc = await storeCopy(show.id);
+    ok(sc.state === 'corrupt' && /1 file missing, 0 changed/.test(sc.error), 'one object gone: corrupt, and it says one file is missing', { state: sc.state, error: sc.error });
+    await sdk.send(new PutObjectCommand({ Bucket: bucket, Key: k7, Body: keep7! }));
+    await query(`UPDATE archive_copies SET state = 'verified' WHERE id = $1`, [sid]);
+    const k8 = 'Volt/Packages/MorningNews-package/1080p/seg_8.m4s', b8s = (await get(k8))!; b8s[10] ^= 0xff;
+    await sdk.send(new PutObjectCommand({ Bucket: bucket, Key: k8, Body: b8s }));
+    await api('POST', `/api/archive/copies/${sid}/verify`, {}); await sdrain();
+    sc = await storeCopy(show.id);
+    ok(sc.state === 'corrupt' && /0 files missing/.test(sc.error), 'one object changed (same size): corrupt', { state: sc.state, error: sc.error });
+    await query(`UPDATE archive_copies SET state = 'verified' WHERE id = $1`, [sid]);
+    for (const k of await list('Volt/Packages/MorningNews-package/')) await sdk.send(new DeleteObjectCommand({ Bucket: bucket, Key: k }));
+    await api('POST', `/api/archive/copies/${sid}/verify`, {}); await sdrain();
+    ok((await storeCopy(show.id)).state === 'missing', 'every object gone: missing');
+    ok((await list()).every((k) => k.startsWith('Volt/Packages/')), 'nothing was ever written outside the target\'s folder', (await list()).filter((k) => !k.startsWith('Volt/Packages/')));
+  }
 
   srv.close();
   await pool.end();

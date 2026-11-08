@@ -18,7 +18,11 @@
 //                    into a folder beside its final name, the folder renamed
 //                    in, every file read back; reported as two checksums over
 //                    the whole set (volt-app services/archive/packageManifest.ts,
-//                    compiled in from the same file).
+//                    compiled in from the same file). Into a store (H3-12)
+//                    the folder is a key prefix: no rename there, so the
+//                    objects go under their final names with
+//                    `If-None-Match: *` and are all removed again if the
+//                    package does not finish or read back whole.
 //
 //  Two kinds of target: a FOLDER on the site's server or a mounted NAS share
 //  (`path`, H3-2), and an on-prem S3-COMPATIBLE STORE such as MinIO (`s3`,
@@ -310,7 +314,7 @@ async function readFolder(dir: string, files: { path: string }[]): Promise<{ lis
  * file is READ BACK from its final place.
  */
 async function runCopyFolder(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
-  if (job?.payload?.target?.kind !== 'path') throw new Refused('Packages are copied to folder targets only', 'package_needs_folder_target', true);
+  if (job?.payload?.target?.kind === 's3') return runCopyFolderToStore(ctx, job);
   const root = await targetRoot(job);
   const files = folderFiles(job);
   const name = freeName(nameValue(job.payload?.folder) || 'package', (n) => existsSync(join(root, n)));
@@ -352,17 +356,115 @@ async function runCopyFolder(ctx: ArchiveCtx, job: any): Promise<Record<string, 
   };
 }
 
+/**
+ * Write one object of `job`'s transfer `name` into the store under `key`,
+ * never replacing one: one PUT when small, otherwise a multipart upload part
+ * by part as it downloads (as runCopyToStore). `written` is false when the
+ * key was taken between the look and the write (412); nothing is then left.
+ */
+async function storeWrite(ctx: ArchiveCtx, job: any, c: S3.S3Client, key: string, name: string, bytesHint: number, prog?: Progress): Promise<{ written: boolean; bytes: number; sha256: string }> {
+  const partSize = S3.partSizeFor(bytesHint);
+  let buf: Buffer[] = []; let held = 0;
+  let uploadId: string | null = null; const etags: string[] = [];
+  const flushPart = async () => {
+    if (!uploadId) uploadId = await S3.startMultipart(c, key);
+    etags.push(await S3.uploadPart(c, key, uploadId, etags.length + 1, Buffer.concat(buf, held)));
+    buf = []; held = 0;
+  };
+  try {
+    const got = await pump(ctx, job, async (chunk) => {
+      buf.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)); held += chunk.byteLength;
+      if (held >= partSize) await flushPart();
+    }, name, prog);
+    if (!uploadId) return { written: await S3.putNew(c, key, Buffer.concat(buf, held)), bytes: got.bytes, sha256: got.sha256 };
+    if (held) await flushPart();
+    const done = await S3.completeMultipart(c, key, uploadId, etags);
+    if (!done) await S3.abortMultipart(c, key, uploadId);
+    uploadId = null;
+    return { written: done, bytes: got.bytes, sha256: got.sha256 };
+  } catch (e) {
+    if (uploadId) await S3.abortMultipart(c, key, uploadId);
+    throw e;
+  }
+}
+
+/** Remove the objects of a package THIS AGENT wrote (never anything else). */
+async function removeStorePackage(c: S3.S3Client, folder: string, paths: string[]): Promise<void> {
+  for (const p of paths) await S3.removeOwn(c, storeKey(c, `${folder}/${p}`));
+}
+
+/**
+ * Copy a package into an S3-compatible store (H3-12): the folder is the key
+ * prefix `<prefix>/<name>-package/`. A store has no rename, so a free folder
+ * name is picked first (a name with ANY object under it is taken, so the
+ * whole folder gets -2, never a mix), every object is written with
+ * `If-None-Match: *` (nothing in the store is ever replaced), and if any
+ * write is refused, a download fails, or the package does not read back
+ * whole, every object this job wrote is removed again, so no half package
+ * stays. Then every object is READ BACK from the store and that is what the
+ * cloud judges, as for a folder.
+ */
+async function runCopyFolderToStore(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  const c = storeFor(ctx, job);
+  const files = folderFiles(job);
+  const wanted = nameValue(job.payload?.folder) || 'package';
+  const taken = await S3.topNamesLike(c, wanted);
+  const name = freeName(wanted, (n) => taken.has(n));
+  const prog: Progress = { last: Date.now(), done: 0, total: files.reduce((s, f) => s + (Number.isFinite(f.bytes) ? f.bytes : 0), 0) };
+  const down: PackageFile[] = []; const written: string[] = [];
+  try {
+    for (const f of files) {
+      const got = await storeWrite(ctx, job, c, storeKey(c, `${name}/${f.path}`), f.transfer, f.bytes, prog);
+      if (!got.written) throw new Refused(`Another writer took ${name}/${f.path} while copying; it will be retried under a free name`, 'name_taken');
+      written.push(f.path);
+      down.push({ path: f.path, bytes: got.bytes, sha256: got.sha256 });
+    }
+  } catch (e) {
+    await removeStorePackage(c, name, written);
+    throw e;
+  }
+  // READ IT BACK from the store: what is reported is what the store holds.
+  const back = await readStoreFolder(c, name, files);
+  const downloadSha256 = packageManifest(down);
+  const sha256 = packageManifest(back.list);
+  if (back.missing || sha256 !== downloadSha256) {
+    await removeStorePackage(c, name, written);
+    throw new Refused(`The package read back from the store does not match what was downloaded (${back.missing} file(s) missing)`, 'checksum_mismatch');
+  }
+  return { storedPath: name, files: back.list.length, bytes: back.bytes, sha256, downloadSha256, layoutSha256: packageLayout(back.list) };
+}
+
+/** Read every listed object of a package in a store back: its checksum, or counted missing. */
+async function readStoreFolder(c: S3.S3Client, folder: string, files: { path: string }[]): Promise<{ list: PackageFile[]; missing: number; bytes: number }> {
+  const list: PackageFile[] = []; let missing = 0; let bytes = 0;
+  for (const f of files) {
+    const h = await S3.readBack(c, storeKey(c, `${folder}/${f.path}`));
+    if (!h) { missing++; continue; }
+    list.push({ path: f.path, bytes: h.bytes, sha256: h.sha256 });
+    bytes += h.bytes;
+  }
+  return { list, missing, bytes };
+}
+
 /** Read a package back again: every listed file, as one checksum, with how many are gone. */
 async function runVerifyFolder(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
-  void ctx;
+  const files = Array.isArray(job.payload?.files) ? job.payload.files : [];
+  const listed = files.map((f: any) => ({ path: cleanPackagePath(f?.path), bytes: Number(f?.bytes) })).filter((f: any) => f.path) as { path: string; bytes: number }[];
+  const changedOf = (list: PackageFile[]) => list.filter((f) => { const want = listed.find((l) => l.path === f.path); return want && want.bytes !== f.bytes; }).length;
+  if (job?.payload?.target?.kind === 's3') {
+    // A store has no folders: a package none of whose objects are left is gone.
+    const c = storeFor(ctx, job);
+    const folder = String(job.payload?.storedPath ?? '');
+    storeKey(c, folder);
+    const back = await readStoreFolder(c, folder, listed);
+    if (!back.list.length) return { present: false };
+    return { present: true, sha256: packageManifest(back.list), bytes: back.bytes, files: back.list.length, missingFiles: back.missing, changedFiles: changedOf(back.list) };
+  }
   const root = await targetRoot(job);
   const dir = insideTarget(root, String(job.payload?.storedPath ?? ''));
   try { if (!(await stat(dir)).isDirectory()) return { present: false }; } catch { return { present: false }; }
-  const files = Array.isArray(job.payload?.files) ? job.payload.files : [];
-  const listed = files.map((f: any) => ({ path: cleanPackagePath(f?.path), bytes: Number(f?.bytes) })).filter((f: any) => f.path) as { path: string; bytes: number }[];
   const back = await readFolder(dir, listed);
-  const changed = back.list.filter((f) => { const want = listed.find((l) => l.path === f.path); return want && want.bytes !== f.bytes; }).length;
-  return { present: true, sha256: packageManifest(back.list), bytes: back.bytes, files: back.list.length, missingFiles: back.missing, changedFiles: changed };
+  return { present: true, sha256: packageManifest(back.list), bytes: back.bytes, files: back.list.length, missingFiles: back.missing, changedFiles: changedOf(back.list) };
 }
 
 /**
@@ -385,7 +487,8 @@ export async function archivePass(ctx: ArchiveCtx): Promise<number> {
       if (c.status === 422 && job.type === 'archive.copy-folder' && typeof result.storedPath === 'string') {
         // A package the cloud refused (incomplete, or not what it has): the
         // whole folder this job wrote goes, so no half package stays.
-        await rm(insideTarget(await targetRoot(job), result.storedPath), { recursive: true, force: true }).catch(() => {});
+        if (job.payload?.target?.kind === 's3') await removeStorePackage(storeFor(ctx, job), result.storedPath, folderFiles(job).map((f) => f.path));
+        else await rm(insideTarget(await targetRoot(job), result.storedPath), { recursive: true, force: true }).catch(() => {});
         log(`[archive] ${job.type} ${job.id}: refused by the cloud (${c.body?.code ?? c.status}), folder removed; it will be retried`);
       } else if (c.status === 422 && job.type === 'archive.copy' && typeof result.storedPath === 'string') {
         // The cloud refused the copy (it does not match the original): remove

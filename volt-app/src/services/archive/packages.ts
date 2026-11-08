@@ -35,9 +35,13 @@
 //  than new payloads on the old ones: an agent from before this release
 //  never leases a package job, so it cannot mistake a folder for a file.
 //
-//  FOLDER TARGETS ONLY in this release. A package into an S3-compatible
-//  store is refused when queued (`package_needs_folder_target`), so nothing
-//  waits on a job no agent can run.
+//  FOLDER TARGETS AND STORES (H3-12). Into an S3-compatible store the
+//  folder is a key prefix, `<prefix>/<name>-package/`, written by the same
+//  two job types: the agent picks a folder name no object uses yet (so a
+//  taken name gets -2 for the whole folder), writes every object with
+//  `If-None-Match: *` and removes what it wrote if the package does not
+//  finish or read back whole (volt-agent/src/siteArchive.ts). The cloud's
+//  side is the same for both: one job, one copy, judged by judgeFolder.
 // ============================================================================
 import { existsSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
@@ -161,13 +165,15 @@ export async function packageFolderName(a: any): Promise<string> {
  * Copy an asset's package to one target, as one folder. One copy per target:
  * one verified or on its way is left alone; one that failed, changed or went
  * missing is copied afresh. Throws (with a code) when there is no package or
- * the target is a store; copyOnRule turns that into a skip.
+ * the target cannot take a folder; copyOnRule turns that into a skip.
  */
 export async function requestPackageCopy(accountId: string, targetId: string, assetId: string, opts: { runAfter?: Date | null; userId?: string | null } = {}) {
   const t = await ownedTarget(accountId, targetId);
   if (t.status !== 'active') throw code('This storage target is disabled', 'target_disabled');
   if (t.site_status !== 'active') throw code('The site of this storage target is disabled', 'site_disabled');
-  if (t.kind !== 'path') throw code('Packages are copied to folder targets only for now', 'package_needs_folder_target');
+  // Folder targets and S3-compatible stores (H3-12); any other kind a later
+  // release adds has to say how a folder lands there first.
+  if (t.kind !== 'path' && t.kind !== 's3') throw code('Packages are copied to folder targets and S3-compatible stores only', 'package_needs_folder_target');
   const a = await ownedAsset(accountId, assetId);
   if (!a) throw code('asset not found', 'not_found');
 

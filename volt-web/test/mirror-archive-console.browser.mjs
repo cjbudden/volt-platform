@@ -15,7 +15,9 @@
 //   H3-8: Nightly on each target, Original and Sidecars on a target copied to
 //   H3-9: Clips beside them, saved in order, alone allowed, the last kept
 //   H3-11: the HLS/DASH package on a folder target with its size beside the
-//     box, greyed on a store target, saved and kept
+//     box, saved and kept
+//   H3-12: offered on a store target too (no longer greyed), its note says
+//     each file is its own object, saved and kept
 //   PLAYWRIGHT=<playwright index.mjs> CHROMIUM=<chrome> OUT=<dir> node volt-web/test/mirror-archive-console.browser.mjs
 const { chromium } = await import(process.env.PLAYWRIGHT);
 const B = 'http://127.0.0.1:5173', OUT = process.env.OUT || '/tmp';
@@ -207,12 +209,16 @@ ok('and it is still ticked when the page is opened again', await page.locator('[
   await row3.locator('[data-archive-what] label:has-text("Clips") input').click()
   ok('but not unticked when it is the last', await row3.locator('[data-archive-what] label:has-text("Clips") input').isChecked())
 }
-// H3-11: the HLS/DASH package, with the size it means beside the box; folder targets only.
+// H3-11: the HLS/DASH package, with the size it means beside the box. H3-12: stores too.
 {
   await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
   const storeRow = page.locator('[data-archive-control] [data-archive-target="On-site object store"]')
   const storePkg = storeRow.locator('[data-archive-what] label:has-text("HLS/DASH package") input')
-  ok('a store target offers the package box, greyed (folder targets only)', await storePkg.count() === 1 && await storePkg.isDisabled() && /folder targets only/.test(await storeRow.locator('[data-archive-what] label:has-text("HLS/DASH package")').getAttribute('title') || ''))
+  ok('a store target offers the package box, no longer greyed, saying it goes under one folder in the store', await storePkg.count() === 1 && !(await storePkg.isDisabled()) && /under one folder in the store/.test(await storeRow.locator('[data-archive-what] label:has-text("HLS/DASH package")').getAttribute('title') || ''))
+  if (!(await storePkg.isChecked())) await storePkg.check()
+  const storeNote = await storeRow.locator('[data-archive-package-size]').innerText().catch(() => '')
+  ok('ticked on the store, the note says the size and that each file is its own object: ' + JSON.stringify(storeNote), /about 1\.7 times the original \(0\.1 to 6 times\), a few hundred files, each its own object in the store/.test(storeNote) && !/folder targets only/.test(storeNote))
+  await storeRow.scrollIntoViewIfNeeded(); await page.screenshot({ path: OUT + '/ma-publishing-packages-store.png' })
   const nasRow = page.locator('[data-archive-control] [data-archive-target="Machine room NAS"]')
   if (!(await nasRow.locator('label:has-text("When it is published") input').isChecked())) await nasRow.locator('label:has-text("When it is published") input').check()
   const pkg = nasRow.locator('[data-archive-what] label:has-text("HLS/DASH package") input')
@@ -228,10 +234,14 @@ ok('and it is still ticked when the page is opened again', await page.locator('[
   const sent4 = sr4 ? JSON.parse(sr4.request().postData() || '{}') : {}
   const nasId = (await (await page.request.get(B + '/api/archive/targets').catch(() => null))?.json().catch(() => null) ?? []).find?.(t => t.name === 'Machine room NAS')?.id
   const all4 = sent4.settings?.archive?.copies ?? sent4.archive?.copies ?? []
-  const st4 = all4.find(c => c.targetId === nasId) ?? all4.find(c => (c.what ?? []).includes('packages'))
+  // H3-12: the store has the package ticked too now, so the fallback skips it.
+  const st4 = all4.find(c => c.targetId === nasId) ?? all4.find(c => c.targetId !== storeId && (c.what ?? []).includes('packages'))
   ok('saving sends the original and the package for the NAS: ' + JSON.stringify(st4?.what), !!sr4 && sr4.ok() && JSON.stringify(st4?.what) === '["source","packages"]')
+  const stS = all4.find(c => c.targetId === storeId)
+  ok('and the package for the store: ' + JSON.stringify(stS?.what), !!stS && (stS.what ?? []).includes('packages'))
   await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
   ok('and the package is still ticked when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="Machine room NAS"] [data-archive-what] label:has-text("HLS/DASH package") input').isChecked())
+  ok('on the store too', await page.locator('[data-archive-control] [data-archive-target="On-site object store"] [data-archive-what] label:has-text("HLS/DASH package") input').isChecked())
 }
 ok('Sites is in the menu for this account', await navHas(page, 'Sites'))
 await ctx.close()

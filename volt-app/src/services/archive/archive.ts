@@ -486,8 +486,8 @@ export async function copyOnRule(accountId: string, assetId: string, event: Copy
           out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
         }
       }
-      // The HLS/DASH package as one folder (H3-11, packages.ts). An asset not
-      // packaged yet, or a store target, is skipped quietly.
+      // The HLS/DASH package as one folder (H3-11, packages.ts), at a folder
+      // target or (H3-12) in a store. An asset not packaged yet is skipped quietly.
       if (whats.includes('packages')) {
         try {
           const { requestPackageCopy } = await import('./packages');
