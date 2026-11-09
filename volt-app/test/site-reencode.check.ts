@@ -14,8 +14,8 @@
 //      second Prepare queues nothing;
 //    - a disabled site is said in the skipped list, nothing is queued;
 //    - an asset with no original anywhere is still "no source";
-//    - on a channel with a ladder, packaging to the ladder is not done at a
-//      site: it is said, and it airs on its own encode;
+//    - on a channel with a ladder, the ladder variant is queued at the site
+//      too (H4-6; the whole flow is in site-ladder-variant.check.ts);
 //    - "Encode again" (retry) of a failed site encode stays in the site pool.
 //  The carrying-over of a FAST channel's ladder packages when the site's new
 //  package is swapped in is checked in site-encode.check.ts (it needs the
@@ -119,9 +119,11 @@ async function main() {
   await query(`INSERT INTO fast_lineups(channel_id,name,epoch,zone,status,slots) VALUES ($1,'Main',now(),'UTC','draft',$2::jsonb)`, [VIDEO, JSON.stringify([{ id: 's1', kind: 'title', pool: [{ assetId: V }] }])]);
   const r4 = await readinessWithLadder(VIDEO);
   const v = r4.items.find((x) => x.assetId === V)!;
-  ok(r4.ladder?.groupName === 'HD' && v.state === 'no-source' && /kept at a site, which encodes it only to its own ladder, so it airs on its own encode/.test(String(v.why)), 'packaging to the channel ladder is not done at a site: said, and it airs on its own encode', v);
+  // Since H4-6 the variant is made at the site (site-ladder-variant.check.ts has the whole flow).
+  ok(r4.ladder?.groupName === 'HD' && v.state === 'needs-prepare' && /packaged at the site that keeps the original/.test(String(v.why)), 'packaging to the channel ladder is done at the site (H4-6)', v);
   const p4 = await prepare(VIDEO);
-  ok(!p4.queued.length && (await one<any>(`SELECT count(*)::int AS n FROM jobs WHERE payload->>'vodAssetId' = $1`, [V])).n === 0, 'Prepare queues nothing for it (no vod.ladder without a source)', p4.queued);
+  const vj = await query<any>(`SELECT type, pool, payload FROM jobs WHERE payload->>'vodAssetId' = $1`, [V]);
+  ok(p4.queued.includes(V) && vj.length === 1 && vj[0].type === 'site.vod-probe' && vj[0].pool === Q.sitePool(SITE) && vj[0].payload.variant?.ladderGroupId === LG, 'Prepare queues the variant at the site, never a cloud vod.ladder without a source', vj);
 
   await pool.end();
   console.log(`\n${pass}/${pass + fail} passed`);

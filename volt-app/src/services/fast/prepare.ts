@@ -98,8 +98,10 @@ async function inFlight(ids: string[]) {
   const encode = new Set<string>(), ladder = new Map<string, number | null>();
   for (const r of rows) {
     const p = r.payload ?? {};
-    if (r.type === 'vod.encode' || r.type === 'site.vod-probe' || r.type === 'site.vod-encode') encode.add(String(p.vodAssetId));
-    else ladder.set(`${p.vodAssetId}|${p.ladderGroupId}|${variantRel(String(p.ladderGroupId), Number(p.segmentSeconds), !!p.loudnorm)}`, r.progress_pct == null ? null : Number(r.progress_pct));
+    // A site job that makes a ladder variant (H4-6) is a variant in flight, not an encode of the asset.
+    const v = r.type !== 'vod.ladder' && p.variant ? p.variant : r.type === 'vod.ladder' ? p : null;
+    if (!v) encode.add(String(p.vodAssetId));
+    else ladder.set(`${p.vodAssetId}|${v.ladderGroupId}|${variantRel(String(v.ladderGroupId), Number(v.segmentSeconds), !!v.loudnorm)}`, r.progress_pct == null ? null : Number(r.progress_pct));
   }
   return { encode, ladder };
 }
@@ -128,9 +130,8 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
     const hasSource = vodSourceAvailable(r.source_key);
     // AN ORIGINAL KEPT AT A HYBRID SITE (Encode at site, H4-3) has no source on
     // this server, but it is not lost: its own encode is redone at the site,
-    // never in the cloud (H4-5). Packaging it to a channel's ladder (a variant
-    // beside its own encode) is not done at a site yet, so that case still
-    // airs on the asset's own encode.
+    // never in the cloud (H4-5), and so is a channel ladder's variant beside
+    // it (H4-6).
     const atSite = !hasSource && !!siteSourceOf(r.ingest);
     if (ladder) {
       const need = needFor(role, ladder);
@@ -151,9 +152,9 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
         : v?.state === 'failed'
         ? `packaging to ${ladder.groupName} failed: ${String(v.error ?? 'no reason given').slice(0, 200)}`
         : `not yet packaged to the channel's ladder (${ladder.groupName}: ${ladder.rungs.map((x) => `${x.height}p`).join(', ')}${need.segmentSeconds !== ladder.segmentSeconds ? `, ${need.segmentSeconds} s segments` : ''}${need.loudnorm ? ', broadcast loudness' : ''})`;
-      items.push(hasSource
-        ? { ...base, state: 'needs-prepare', why, failed: v?.state === 'failed' }
-        : { ...base, state: 'no-source', why: `${why}; ${atSite ? 'the original is kept at a site, which encodes it only to its own ladder' : 'the source file is not on this server'}${r.master_key ? ', so it airs on its own encode' : ''}` });
+      items.push(hasSource || atSite
+        ? { ...base, state: 'needs-prepare', why: atSite ? `${why}; packaged at the site that keeps the original` : why, failed: v?.state === 'failed' }
+        : { ...base, state: 'no-source', why: `${why}; the source file is not on this server${r.master_key ? ', so it airs on its own encode' : ''}` });
       continue;
     }
     if (busy.encode.has(id)) { items.push({ ...base, state: 'preparing', why: 'encoding' }); continue; }
@@ -191,7 +192,22 @@ export async function prepare(channelId: string, opts: { auto?: boolean } = {}):
     if (opts.auto && r.failed) continue;
     const a = rows.get(r.assetId);
     if (!a) continue;
-    if (ladder) {
+    if (ladder && !vodSourceAvailable(a.source_key) && siteSourceOf(a.ingest)) {
+      // The variant is made at the site that keeps the original, as vod.ladder
+      // would make it here; the asset keeps airing its own encode meanwhile.
+      const need = needFor(r.role, ladder);
+      const at = siteSourceOf(a.ingest)!;
+      try {
+        const { requestSiteEncode } = await import('../sites/siteEncode');
+        await requestSiteEncode({
+          vodAssetId: r.assetId, accountId: a.account_id, siteId: at.siteId, sitePath: at.sitePath,
+          variant: { ladderGroupId: ladder.groupId, segmentSeconds: need.segmentSeconds, loudnorm: need.loudnorm, channelId },
+        });
+      } catch (e: any) {
+        skipped.push({ ...r, state: 'no-source', why: `${r.why ?? 'needs packaging'}; the site that keeps the original cannot take it: ${String(e?.message ?? e).slice(0, 200)}` });
+        continue;
+      }
+    } else if (ladder) {
       const need = needFor(r.role, ladder);
       const job = await enqueue({
         type: 'vod.ladder',

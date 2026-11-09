@@ -42,6 +42,17 @@
 //      package under vod/<id>/ as it does after a cloud encode. The staging
 //      prefix is removed either way; a lifecycle rule in deploy/terraform
 //      sweeps whatever a dead task left behind.
+//
+//  A FAST CHANNEL'S LADDER VARIANT AT A SITE (build queue H4-6). A site-kept
+//  original that a channel with a ladder needs packaged to that ladder is
+//  packaged at the site too, in the same two jobs with `variant` in the
+//  payload: the probe goes to the site, the cloud plans the variant with the
+//  SAME settings vod.ladder uses (handlers/vodLadder.ts: every rung, the 16:9
+//  box, the ladder's frame rate, one folder per version of the ladder), and
+//  the verified package lands in that variant's folder under ladders/ with its
+//  vod_asset_ladders row. It is not the asset's own encode: the asset keeps
+//  its media, state, encode result and stills, and a failure fails only the
+//  variant's row.
 // ============================================================================
 import { mkdir, rename, rm, stat, readFile } from 'node:fs/promises';
 import { createWriteStream, existsSync } from 'node:fs';
@@ -59,6 +70,8 @@ import { JobLog } from '../jobs/jobLog';
 import { PermanentError } from '../jobs/worker';
 import { planEncode, encoderJobFor, finishEncode, outDirFor, publicBase, type EncodePlan } from '../jobs/handlers/vodEncode';
 import type { JobTransfer } from './siteJobs';
+import { setRow, ladderNotes, variantFolder, ladderEncoderSettings, variantLadder } from '../jobs/handlers/vodLadder';
+import { variantRel } from '../fast/ladder';
 
 export const SITE_VOD_PROBE = 'site.vod-probe';
 export const SITE_VOD_ENCODE = 'site.vod-encode';
@@ -83,6 +96,24 @@ export interface SiteEncodeRequest {
   loudnorm?: boolean;
   /** The source's size, when the site reported it (shown on the asset). */
   sourceBytes?: number | null;
+  /**
+   * Package to a FAST channel's ladder instead of the asset's own encode
+   * (a variant beside it, H4-6). ladderGroupId, segmentSeconds and loudnorm
+   * above are then ignored.
+   */
+  variant?: SiteVariant | null;
+}
+
+/** Which variant of a channel ladder a site job makes (as vod.ladder's payload names it). */
+export interface SiteVariant { ladderGroupId: string; segmentSeconds: number; loudnorm: boolean; channelId?: string | null }
+
+/** The dedupe key part of a variant: one in flight per asset and variant, beside the asset's own encode. */
+const variantKey = (v: SiteVariant) => variantRel(v.ladderGroupId, v.segmentSeconds, !!v.loudnorm);
+
+function variantOf(raw: any): SiteVariant | null {
+  if (!raw) return null;
+  if (!UUID.test(String(raw.ladderGroupId)) || !(Number(raw.segmentSeconds) > 0) || Number(raw.segmentSeconds) > 60) throw badRequest('variant needs a ladderGroupId and segmentSeconds');
+  return { ladderGroupId: String(raw.ladderGroupId), segmentSeconds: Number(raw.segmentSeconds), loudnorm: !!raw.loudnorm, channelId: raw.channelId && UUID.test(String(raw.channelId)) ? String(raw.channelId) : null };
 }
 
 /** Where a site's package is uploaded to wait for verification, in the origin bucket. */
@@ -109,6 +140,18 @@ export async function requestSiteEncode(r: SiteEncodeRequest): Promise<JobRow> {
        LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE v.id = $1 AND COALESCE(g.account_id, v.account_id) = $2`, [r.vodAssetId, r.accountId]);
   if (!asset) throw notFound('asset not found');
+  const variant = variantOf(r.variant);
+  if (variant) {
+    // A variant leaves the asset alone: it keeps playing its own encode, and
+    // the readiness of the channel follows the variant's row.
+    const payload = {
+      vodAssetId: r.vodAssetId, accountId: r.accountId, siteId: r.siteId, sitePath, variant,
+      sourceBytes: Number.isSafeInteger(r.sourceBytes) ? r.sourceBytes : null,
+    };
+    const job = await enqueue({ type: SITE_VOD_PROBE, payload, pool: sitePool(r.siteId), dedupeKey: `${SITE_VOD_PROBE}:${r.vodAssetId}:${variantKey(variant)}`, priority: 60, channelId: variant.channelId ?? null });
+    await setRow({ vodAssetId: r.vodAssetId, ...variant }, { state: 'queued', error: null, job_id: job.id });
+    return job;
+  }
   const payload = {
     vodAssetId: r.vodAssetId, accountId: r.accountId, siteId: r.siteId, sitePath,
     ladderGroupId: r.ladderGroupId ?? null, segmentSeconds: r.segmentSeconds ?? null, loudnorm: !!r.loudnorm,
@@ -144,6 +187,7 @@ async function judgeProbe(job: JobRow, result: any): Promise<Verdict> {
   if (probe.ok === false) {
     return { ok: false, status: 422, message: `the source could not be read at the site (${String(probe.error ?? 'no reason given').slice(0, 300)})`, code: 'unreadable_source', permanent: true };
   }
+  if (job.payload?.variant) return judgeVariantProbe(job, probe);
   const log = await JobLog.open(job.id, job.attempts || 1);
   let plan: EncodePlan;
   try {
@@ -174,6 +218,52 @@ async function judgeProbe(job: JobRow, result: any): Promise<Verdict> {
       await log.close();
     },
   };
+}
+
+/**
+ * The probe of a variant: plan it exactly as vod.ladder would here, and queue
+ * the encode at the site with that plan in its payload (the folder, the rungs
+ * and the frame rate it is verified and recorded against).
+ */
+async function judgeVariantProbe(job: JobRow, probe: Record<string, any>): Promise<Verdict> {
+  const p = job.payload as SiteEncodeRequest & { variant: SiteVariant };
+  const v = p.variant;
+  const log = await JobLog.open(job.id, job.attempts || 1);
+  try {
+    log.step(`probe from the site: ${probe.width ?? '?'}x${probe.height ?? '?'}${probe.fps ? ` ${probe.fps} fps` : ''}${probe.durationMs ? `, ${(probe.durationMs / 1000).toFixed(1)} s` : ''}`);
+    if (probe.hasVideo === false) throw new PermanentError('this file has no video track, so it cannot go on a video ladder', 'no_video');
+    const ladder = await variantLadder(v.ladderGroupId, p.accountId);
+    const asset = await one<any>(`SELECT ingest FROM vod_assets WHERE id = $1`, [p.vodAssetId]);
+    if (!asset) throw new PermanentError('the asset is gone', 'asset_missing');
+    const notes = ladderNotes(asset, probe, ladder);
+    const rel = variantFolder(ladder, v);
+    const encoder = ladderEncoderSettings(ladder, v, probe);
+    return {
+      ok: true,
+      apply: async () => {
+        try {
+          const enc = await enqueue({
+            type: SITE_VOD_ENCODE, pool: job.pool, priority: 60, dedupeKey: `${SITE_VOD_ENCODE}:${p.vodAssetId}:${variantKey(v)}`, channelId: v.channelId ?? null,
+            payload: {
+              vodAssetId: p.vodAssetId, accountId: p.accountId, siteId: p.siteId, sitePath: p.sitePath, sourceBytes: p.sourceBytes ?? null,
+              probe, encoder, transfers: [],
+              variant: { ...v, rel, rungs: ladder.rungs, fps: ladder.fps, notes, groupName: ladder.groupName },
+            },
+          });
+          await setRow({ vodAssetId: p.vodAssetId, ...v }, { state: 'encoding', error: null, job_id: enc.id });
+          log.step(`queued the ladder variant at the site: ${ladder.groupName}, ${ladder.rungs.map((r) => `${r.height}p`).join(', ')}, ${v.segmentSeconds} s segments${v.loudnorm ? ', loudness normalised' : ''}`);
+          for (const n of notes) log.step(`  ${n}`);
+        } finally {
+          await log.close();
+        }
+      },
+    };
+  } catch (e: any) {
+    log.err(`FAILED: ${String(e?.message ?? e)}\n`);
+    await log.close();
+    if (e instanceof PermanentError) return { ok: false, status: 422, message: e.message, code: e.code, permanent: true };
+    throw e;
+  }
 }
 
 /* ---------------------------------------------------- declared outputs */
@@ -323,6 +413,9 @@ export async function verifyPackage(dir: string, declared: DeclaredFile[], paylo
   }
   if (problems.length) return problems;
   const plan = payload.plan as EncodePlan;
+  // A ladder variant carries every rung of the ladder; an encode the rungs it kept.
+  const variantRungs: number | null = payload.variant ? (Array.isArray(payload.variant.rungs) ? payload.variant.rungs.length : 0) : null;
+  const audioOnly = variantRungs === null && !!plan?.audioOnly;
   const packaging = String(payload.encoder?.packaging ?? 'both');
   if (packaging !== 'dash' && !have.has('master.m3u8')) return ['the package has no master.m3u8'];
   if (packaging !== 'hls' && !have.has('manifest.mpd')) return ['the package has no manifest.mpd'];
@@ -334,8 +427,8 @@ export async function verifyPackage(dir: string, declared: DeclaredFile[], paylo
     const master = await read('master.m3u8');
     if (!master.startsWith('#EXTM3U')) problems.push('master.m3u8 is not an HLS playlist');
     const variants = (master.match(/^#EXT-X-STREAM-INF/gm) ?? []).length;
-    const want = plan.audioOnly ? 1 : plan.fit.kept.length;
-    if (plan.audioOnly ? variants < 1 : variants !== want) {
+    const want = variantRungs ?? (audioOnly ? 1 : plan.fit.kept.length);
+    if (audioOnly ? variants < 1 : variants !== want) {
       problems.push(`master.m3u8 lists ${variants} rendition(s); the plan has ${want}`);
     }
     for (const child of urisIn(master, '')) {
@@ -388,6 +481,7 @@ async function judgeEncode(job: JobRow, result: any): Promise<Verdict> {
     return { ok: false, status: 422, message: `the package did not verify: ${problems.slice(0, 5).join('; ')}${problems.length > 5 ? ` (and ${problems.length - 5} more)` : ''}`, code: 'verification_failed' };
   }
   const encoderResult = result?.encoder && typeof result.encoder === 'object' ? result.encoder : {};
+  if (job.payload?.variant) return { ok: true, apply: () => finishVariant(job, declared, local, staging, encoderResult) };
   return {
     ok: true,
     apply: async () => {
@@ -429,6 +523,48 @@ async function judgeEncode(job: JobRow, result: any): Promise<Verdict> {
   };
 }
 
+/**
+ * A verified ladder variant from the site: into its own folder under the
+ * asset's ladders/ (on AWS uploaded under vod/<id>/<folder>, as vod.ladder
+ * does), and its row ready. The asset's own encode is not touched.
+ */
+async function finishVariant(job: JobRow, declared: DeclaredFile[], local: string, staging: string, encoderResult: any): Promise<void> {
+  const p = job.payload;
+  const v = p.variant;
+  const key = { vodAssetId: p.vodAssetId, ladderGroupId: v.ladderGroupId, segmentSeconds: v.segmentSeconds, loudnorm: !!v.loudnorm };
+  const log = await JobLog.open(job.id, job.attempts || 1);
+  try {
+    log.step(`ladder variant from the site verified: ${declared.length} files`);
+    const rel = String(v.rel);
+    if (!/^ladders\/[0-9a-f-]{36}\/\d+s(-loud)?\/[0-9a-f]{8}$/.test(rel)) throw new Error(`the variant's folder is not a ladder folder (${rel})`);
+    const outDir = join(outDirFor(p.vodAssetId), ...rel.split('/'));
+    await mkdir(dirname(outDir), { recursive: true });
+    // Same version of the ladder: replaced whole, as vod.ladder starts fresh.
+    await rm(outDir, { recursive: true, force: true });
+    await rename(local, outDir);
+    if (local !== staging) await removeStaging(staging);
+    let master = existsSync(join(outDir, 'master.m3u8')) ? `${publicBase(p.vodAssetId)}/${rel}/master.m3u8` : null;
+    let mpd = existsSync(join(outDir, 'manifest.mpd')) ? `${publicBase(p.vodAssetId)}/${rel}/manifest.mpd` : null;
+    if (vodStore() === 's3') {
+      const { uploadVodDir } = await import('../fast/vodStore');
+      const up = await uploadVodDir(outDir, p.vodAssetId, { subdir: rel });
+      master = master ? up.master : null;
+      mpd = mpd ? up.mpd : null;
+    }
+    await setRow(key, {
+      state: 'ready', master_key: master, mpd_key: mpd, zero_start: encoderResult?.zero_start === true,
+      rungs: v.rungs, fps: v.fps, notes: [...(Array.isArray(v.notes) ? v.notes : []), `packaged at the site that keeps the original`],
+      error: null, job_id: job.id,
+    });
+    log.step(`ready: ${master ?? mpd}`);
+  } catch (e: any) {
+    log.err(`FAILED after verification: ${String(e?.message ?? e)}\n`);
+    await setRow(key, { state: 'failed', error: `the variant from the site was verified but could not be recorded: ${String(e?.message ?? e).slice(0, 300)}`, job_id: job.id }).catch(() => {});
+  } finally {
+    await log.close();
+  }
+}
+
 /** Judge a site encode job's result before it counts (called by siteJobs.complete). */
 export async function judgeSiteEncode(job: JobRow, result: any): Promise<Verdict> {
   if (job.type === SITE_VOD_PROBE) return judgeProbe(job, result);
@@ -451,5 +587,9 @@ export async function siteEncodeAttemptFailed(job: JobRow, message: string, code
     await query(
       `UPDATE jobs SET payload = (payload - 'declared' - 'staging') || jsonb_build_object('transfers', '[]'::jsonb) WHERE id = $1`, [job.id]);
   }
-  if (final) await markFailed(job.payload.vodAssetId, `encoding at the site failed: ${message}`, code);
+  if (!final) return;
+  const v = job.payload.variant;
+  // A variant's failure is the variant's: the asset keeps its own encode.
+  if (v) await setRow({ vodAssetId: job.payload.vodAssetId, ladderGroupId: v.ladderGroupId, segmentSeconds: v.segmentSeconds, loudnorm: !!v.loudnorm }, { state: 'failed', error: `packaging at the site failed: ${message}`.slice(0, 1000), job_id: job.id });
+  else await markFailed(job.payload.vodAssetId, `encoding at the site failed: ${message}`, code);
 }

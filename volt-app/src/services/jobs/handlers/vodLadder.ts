@@ -29,7 +29,7 @@ import { loadLadder, NoLadderError } from '../../encode/store';
 import { PermanentError, type JobContext } from '../worker';
 import { JobLog } from '../jobLog';
 import { outDirFor, publicBase, runEncoder, lastJson, probeSource } from './vodEncode';
-import { toChannelLadder, variantRel, fitToTop, sourceQuality, fmtKbps } from '../../fast/ladder';
+import { toChannelLadder, variantRel, fitToTop, sourceQuality, fmtKbps, type ChannelLadder } from '../../fast/ladder';
 
 export interface VodLadderPayload {
   vodAssetId: string;
@@ -41,7 +41,8 @@ export interface VodLadderPayload {
   channelId?: string | null;
 }
 
-async function setRow(p: VodLadderPayload, fields: Record<string, unknown>) {
+/** The variant's row (vod_asset_ladders), upserted. Also written by a variant made at a Hybrid Site (sites/siteEncode.ts). */
+export async function setRow(p: Pick<VodLadderPayload, 'vodAssetId' | 'ladderGroupId' | 'segmentSeconds' | 'loudnorm'>, fields: Record<string, unknown>) {
   const cols = Object.keys(fields);
   await query(
     `INSERT INTO vod_asset_ladders (vod_asset_id, ladder_group_id, segment_seconds, loudnorm, origin, ${cols.join(', ')})
@@ -52,6 +53,51 @@ async function setRow(p: VodLadderPayload, fields: Record<string, unknown>) {
       const v = fields[c];
       return v != null && typeof v === 'object' ? JSON.stringify(v) : v;
     })]);
+}
+
+/**
+ * What a variant notes about its source, the folder it lives in and the
+ * encoder settings without paths. Shared with a variant made at a Hybrid Site
+ * (H4-6), so a site's variant is the same encode as one made here.
+ */
+export function ladderNotes(asset: { ingest?: any }, probe: any, ladder: ChannelLadder): string[] {
+  const notes: string[] = [];
+  const q = sourceQuality({ ingest: asset.ingest, encode_result: { probe } });
+  const fit = fitToTop(q, ladder.rungs[0]);
+  if (fit.fit === 'below') notes.push(`below the top rung: ${fit.why}; scaled up so the channel keeps every rung`);
+  if (q.width && q.height && Math.abs(q.width / q.height - 16 / 9) >= 0.01) notes.push(`${q.width}x${q.height} is not 16:9: fitted into each rung's 16:9 box with ${q.width / q.height > 16 / 9 ? 'bars above and below' : 'bars at the sides'}`);
+  if (probe.fps && Math.abs(Number(probe.fps) - ladder.fps) > 0.5) notes.push(`the source is ${probe.fps} fps; encoded at the ladder's ${ladder.fps} fps so every asset on the channel shares one frame rate`);
+  return notes;
+}
+
+/**
+ * ONE FOLDER PER VERSION OF THE LADDER (its renditions and frame rate): a
+ * re-package after the ladder changed must not delete segments a running
+ * playout is still reading from the previous one.
+ */
+export function variantFolder(ladder: ChannelLadder, p: Pick<VodLadderPayload, 'ladderGroupId' | 'segmentSeconds' | 'loudnorm'>): string {
+  const ver = createHash('sha1').update(JSON.stringify([ladder.rungs.map((r) => [r.height, r.width, r.bitrate_kbps]), ladder.fps])).digest('hex').slice(0, 8);
+  return `${variantRel(p.ladderGroupId, p.segmentSeconds, !!p.loudnorm)}/${ver}`;
+}
+
+/** vod_encoder.py's job file for a variant, without input, out_dir and work_dir. */
+export function ladderEncoderSettings(ladder: ChannelLadder, p: Pick<VodLadderPayload, 'segmentSeconds' | 'loudnorm'>, probe: any): Record<string, unknown> {
+  return {
+    segment_seconds: p.segmentSeconds, fps: ladder.fps, loudnorm: !!p.loudnorm,
+    gpu: ladder.codecBackend === 'nvenc', packaging: ladder.packaging, has_audio: probe.hasAudio !== false,
+    fit: 'box',
+    ladder: ladder.rungs.map((r) => ({ height: r.height, width: r.width, bitrate_kbps: r.bitrate_kbps })),
+    duration_sec: probe.durationMs ? probe.durationMs / 1000 : null,
+  };
+}
+
+/** The channel ladder a variant is packaged to; a missing or empty ladder is permanent. */
+export async function variantLadder(ladderGroupId: string, accountId: string): Promise<ChannelLadder> {
+  try { return toChannelLadder(await loadLadder(ladderGroupId, accountId), false); }
+  catch (e: any) {
+    if (e instanceof NoLadderError || /no rungs|no renditions|not found/.test(String(e?.message))) throw new PermanentError(String(e?.message ?? e), 'no_ladder');
+    throw e;
+  }
 }
 
 export async function handleVodLadder(ctx: JobContext): Promise<Record<string, unknown>> {
@@ -89,34 +135,20 @@ async function run(ctx: JobContext, p: VodLadderPayload, log: JobLog): Promise<R
 async function runFrom(ctx: JobContext, p: VodLadderPayload, log: JobLog, asset: any, src: string): Promise<Record<string, unknown>> {
   await setRow(p, { state: 'encoding', error: null, job_id: ctx.job.id });
 
-  let ladder;
-  try { ladder = toChannelLadder(await loadLadder(p.ladderGroupId, p.accountId), false); }
-  catch (e: any) {
-    if (e instanceof NoLadderError || /no rungs|no renditions|not found/.test(String(e?.message))) throw new PermanentError(String(e?.message ?? e), 'no_ladder');
-    throw e;
-  }
+  const ladder = await variantLadder(p.ladderGroupId, p.accountId);
 
   await ctx.progress(2, 'reading the source');
   const probe = await probeSource(src, (s) => log.out(s));
   if (probe.ok === false) throw new PermanentError(`the source could not be read (${probe.error ?? 'no reason given'})`, 'unreadable_source');
   if (probe.hasVideo === false) throw new PermanentError('this file has no video track, so it cannot go on a video ladder', 'no_video');
 
-  const notes: string[] = [];
-  const q = sourceQuality({ ingest: asset.ingest, encode_result: { probe } });
-  const fit = fitToTop(q, ladder.rungs[0]);
-  if (fit.fit === 'below') notes.push(`below the top rung: ${fit.why}; scaled up so the channel keeps every rung`);
-  if (q.width && q.height && Math.abs(q.width / q.height - 16 / 9) >= 0.01) notes.push(`${q.width}x${q.height} is not 16:9: fitted into each rung's 16:9 box with ${q.width / q.height > 16 / 9 ? 'bars above and below' : 'bars at the sides'}`);
-  if (probe.fps && Math.abs(Number(probe.fps) - ladder.fps) > 0.5) notes.push(`the source is ${probe.fps} fps; encoded at the ladder's ${ladder.fps} fps so every asset on the channel shares one frame rate`);
+  const notes = ladderNotes(asset, probe, ladder);
   const rungs = ladder.rungs;
   const label = `${ladder.groupName}: ${rungs.map((r) => `${r.height}p ${fmtKbps(r.bitrate_kbps)}`).join(', ')}${p.segmentSeconds !== ladder.segmentSeconds ? `, ${p.segmentSeconds} s segments` : ''}${p.loudnorm ? ', loudness normalised' : ''}`;
   log.step(`packaging to ${label}`);
   for (const n of notes) log.step(`  ${n}`);
 
-  // ONE FOLDER PER VERSION OF THE LADDER (its renditions and frame rate): a
-  // re-package after the ladder changed must not delete segments a running
-  // playout is still reading from the previous one.
-  const ver = createHash('sha1').update(JSON.stringify([rungs.map((r) => [r.height, r.width, r.bitrate_kbps]), ladder.fps])).digest('hex').slice(0, 8);
-  const rel = `${variantRel(p.ladderGroupId, p.segmentSeconds, !!p.loudnorm)}/${ver}`;
+  const rel = variantFolder(ladder, p);
   const outDir = join(outDirFor(p.vodAssetId), rel);
   // fresh: a previous attempt's segments must not end up in this one's playlists
   await rm(outDir, { recursive: true, force: true });
@@ -124,11 +156,7 @@ async function runFrom(ctx: JobContext, p: VodLadderPayload, log: JobLog, asset:
   const jobPath = join(outDir, 'encode-job.json');
   await writeFile(jobPath, JSON.stringify({
     input: src, out_dir: outDir, work_dir: join(outDir, '.enc'),
-    segment_seconds: p.segmentSeconds, fps: ladder.fps, loudnorm: !!p.loudnorm,
-    gpu: ladder.codecBackend === 'nvenc', packaging: ladder.packaging, has_audio: probe.hasAudio !== false,
-    fit: 'box',
-    ladder: rungs.map((r) => ({ height: r.height, width: r.width, bitrate_kbps: r.bitrate_kbps })),
-    duration_sec: probe.durationMs ? probe.durationMs / 1000 : null,
+    ...ladderEncoderSettings(ladder, p, probe),
   }, null, 1));
 
   let pct = 5, note = `packaging to ${ladder.groupName}`;

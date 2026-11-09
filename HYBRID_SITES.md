@@ -321,3 +321,13 @@ About 10 to 14 build sessions of the size the recent FAST and SSAI builds took, 
 - **Checked** by `test/site-reencode.check.ts` (21 checks) and three new checks in `test/site-encode.check.ts`.
 - **Not yet (H4-6):** a ladder variant (`vod.ladder`) made at a site (readiness says the title airs on its own encode), "at site" on the asset page, the ingest sidecar for a registration, the Mac Docker and kill-the-agent runs, GPU on AWS staging.
 
+**Phase 4f as built (H4-6, first part): a FAST channel's ladder variant made at a site.**
+
+- **The same two jobs, in variant mode** (`services/sites/siteEncode.ts`): `requestSiteEncode({ variant: { ladderGroupId, segmentSeconds, loudnorm, channelId } })` queues `site.vod-probe` in the site pool, keyed per asset and variant (`site.vod-probe:<asset>:ladders/<group>/<seg>s[-loud]`), so it runs beside the asset's own site encode, and records the `vod_asset_ladders` row as queued. The asset is not put into Processing: it keeps airing its own encode.
+- **Planned exactly as `vod.ladder` plans it here** (`handlers/vodLadder.ts`, now shared: `variantLadder`, `ladderNotes`, `variantFolder`, `ladderEncoderSettings`): every rung, each in its 16:9 box, the ladder's frame rate, one folder per version of the ladder. The encode job carries the folder, rungs, frame rate and notes it is verified and recorded against. No agent change: the agent runs whatever settings the job carries.
+- **Verified** by the same `verifyPackage` (the master must list every rung of the ladder), then moved into `clips/vod/<id>/ladders/<group>/<seg>s[-loud]/<version>/` (on AWS uploaded under `vod/<id>/` with `uploadVodDir`, as `vod.ladder` does); the row is ready with its master, rungs, frame rate, splice alignment and a note that the site made it. The asset's own media, state, encode result and stills are untouched.
+- **Failure is the variant's**: a failed last attempt (worker, refusal or lease expiry) fails the row with the reason; the asset never fails because of a variant. Readiness then says the packaging failed and Prepare (not an automatic one) tries again.
+- **FAST** (`services/fast/prepare.ts`): on a channel with a ladder a site-kept original reads "needs prepare ... packaged at the site that keeps the original"; Prepare queues the variant at the site; a site job with `variant` counts as packaging to the ladder, not as an encode of the asset.
+- **Checked** by `test/site-ladder-variant.check.ts` (40 checks; at HEAD it fails 9 of the first 13 and stops); `test/site-reencode.check.ts` updated for the new ladder case.
+- **Not yet (H4-7):** "at site" on the asset page, the ingest sidecar for a registration, the Mac Docker and kill-the-agent runs, GPU on AWS staging.
+
