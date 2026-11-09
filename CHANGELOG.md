@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.77.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- improved · Delivery: A refused on-demand address at the CDN now says why in plain words: This link has expired, Not available in your region, No longer available.
+- fixed · Play gate: A title whose own access is paid now answers 402 with its offers instead of 451 not available, and members-only and group refusals from the POST gate now carry their mode and words instead of a bare error. Refusals carry a message to show, and Scheduled titles carry until.
+- added · Rights: Choose what viewers see where a title cannot play: set your own block message on the Rights page (Not available in your region by default), and offer Notify me if it becomes available. Every player gets the same words from the play gate's 451 answer, and the Rights page shows who is waiting, per title.
+
+### Internal
+
+- added · Tests: block-message suite (39 checks): every refusal code and body, the block message on the Rights page, Notify me stored and refused where it should be, the Volt player showing the gate's words, a warm 451 with no database read; edge-tokens checks the refusal words at both edges.
+
 ## 0.76.0 (2026-11-09)
 
 ### Product (in customer release notes)
