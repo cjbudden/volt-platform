@@ -12,7 +12,8 @@
 //  withdraw, archive and restore store the status at once; the sweep moves a
 //  title whose window ends and fills rows never computed; a rights profile
 //  change sends its assets back to the sweep; the catalogue SQL filter; and a
-//  warm play gate makes no database reads.
+//  warm play gate makes no database reads, the on-demand ad lookup included,
+//  with and without an ad rule (VA-cache, migration 0150).
 //    DATABASE_URL=... npx tsx test/public-status.check.ts
 // ============================================================================
 let pass = 0, fail = 0;
@@ -243,18 +244,56 @@ const check = (m: string, got: unknown, want: unknown) => {
     // ---- scale: a warm play gate makes no database reads
     const warm = await asset(me, 'Warm', LIVE);
     await gateGet(warm); await gateGet(warm);
-    // The on-demand ad lookup (services/vodAds adsForPlay) reads its rule and the
-    // asset on every start of an available title; that predates P1 and is queued
-    // on its own (VA-cache). Everything else in the gate is counted.
+    // The on-demand ad lookup (services/vodAds adsForPlay: the asset and its
+    // rule) is cached too since VA-cache, so every read is counted, and the ad
+    // queries on their own as well.
     let reads = 0, adReads = 0;
     const orig = (pool as any).query.bind(pool);
-    (pool as any).query = (...a: any[]) => { if (/vod_ad_rules|break_cues_ms/.test(String(a[0]))) adReads++; else reads++; return orig(...a); };
+    const counting = () => { reads = 0; adReads = 0; (pool as any).query = (...a: any[]) => { reads++; if (/vod_ad_rules|break_cues_ms/.test(String(a[0]))) adReads++; return orig(...a); }; };
+    counting();
     const w1 = await gateGet(warm), w2 = await gatePost(warm);
-    const availReads = reads;
+    const availReads = reads, availAdReads = adReads;
     const w3 = await gatePost(theirs), w4 = await gatePost(rt), w5 = await gateGet(rt);
     (pool as any).query = orig;
-    check('warm: an available title decided with no database read (the ad lookup aside)', [w1.s, w2.s, availReads], [200, 200, 0]);
-    check('warm: another account\'s title and a hidden title answered with no database read at all', [w3.s, w4.s, w5.s, reads - availReads, adReads <= 4], [404, 404, 404, 0, true]);
+    check('warm, no ad rule: an available title decided with no database read, the ad lookup included', [w1.s, w2.s, availReads, availAdReads], [200, 200, 0, 0]);
+    check('warm: another account\'s title and a hidden title answered with no database read at all', [w3.s, w4.s, w5.s, reads - availReads], [404, 404, 404, 0]);
+
+    // ---- VA-cache: with an ad rule on, a warm gate still reads nothing
+    const listen = await pool.connect();
+    const heard: string[] = [];
+    listen.on('notification', (n: any) => { if (n.channel === 'volt_cache') heard.push(String(n.payload)); });
+    await listen.query('LISTEN volt_cache');
+    const on = await call('PUT', '/api/vod/ads/rules/default', { mode: 'on', policy: {} });
+    check('an ad rule turned on for the account', [on.s, on.j?.mode], [200, 'on']);
+    // The saved rule dropped the cached "no rule" answer at once: the next start asks again, once.
+    counting();
+    const r1 = await gateGet(warm);
+    const afterSave = adReads;
+    (pool as any).query = orig;
+    check('saving a rule drops the cached rule: the next start reads it once', [r1.s, afterSave], [200, 1]);
+    const adFree = await asset(me, 'Warm, ad-free title', `${LIVE}, metadata = '{"adRule":"none"}'::jsonb`);
+    await gateGet(adFree); await gatePost(adFree); await gateGet(warm);
+    counting();
+    const r2 = await gateGet(adFree), r3 = await gatePost(adFree), r4 = await gateGet(warm);
+    (pool as any).query = orig;
+    check('warm, with an ad rule: titles decided with no database read, the ad lookup included', [r2.s, r3.s, r4.s, reads, adReads], [200, 200, 200, 0, 0]);
+    check('the title that opts out of ads plays as it is', [JSON.parse(r2.t).ads ?? null, JSON.parse(r3.t).ads ?? null], [null, null]);
+    // Another process learns of a rule change from the database (migration 0150).
+    heard.length = 0;
+    await query(`UPDATE vod_ad_rules SET mode = 'off', updated_at = now() WHERE account_id = $1`, [me.a]);
+    for (let i = 0; i < 20 && !heard.includes(`vodads:${me.a}`); i++) await new Promise((r) => setTimeout(r, 50));
+    check('migration 0150: a changed rule announces vodads:<account> on volt_cache', heard.includes(`vodads:${me.a}`), true);
+    heard.length = 0;
+    await query(`DELETE FROM vod_ad_rules WHERE account_id = $1`, [me.a]);
+    for (let i = 0; i < 20 && !heard.includes(`vodads:${me.a}`); i++) await new Promise((r) => setTimeout(r, 50));
+    check('migration 0150: a removed rule announces it too', heard.includes(`vodads:${me.a}`), true);
+    // That announcement, as every process receives it, drops the cached rule.
+    invalidateTag(`vodads:${me.a}`);
+    counting();
+    const r5 = await gateGet(warm);
+    (pool as any).query = orig;
+    check('the announcement drops the cached rule: the next start reads it once', [r5.s, adReads], [200, 1]);
+    await listen.query('UNLISTEN volt_cache'); listen.release();
   } catch (e: any) {
     console.log('FAIL threw: ' + (e?.stack ?? e)); fail++;
   } finally {

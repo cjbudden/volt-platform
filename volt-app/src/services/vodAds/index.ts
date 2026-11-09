@@ -28,6 +28,8 @@
 // ============================================================================
 import { randomBytes, createHash } from 'node:crypto';
 import { query, one } from '../../db';
+import { cached, invalidateTag } from '../../scale/cache';
+import { scaleConfig } from '../../scale/config';
 import { expandTag, resolve as resolveVast, bestSource, type Fetcher, type VastAd } from '../fast/vast';
 import { fillBreak, type HouseAd, type PodItem } from '../fast/pod';
 import { readKey, fastConfig } from '../fast/media';
@@ -874,6 +876,29 @@ export interface PlayAds {
   timelineUrl: string | null;
 }
 
+// Every play start of an on-demand title asks for the asset and its ad rule.
+// Read straight from the database that is two queries per viewer, so a busy
+// title would put its whole audience on Postgres. Both answers go through the
+// viewer-path cache (scale/cache.ts) and are dropped the moment they change:
+// the asset row by its 'asset:<id>' trigger (0046), the rules by
+// 'vodads:<account>' (0150, and saveRule in modules/vodAds.ts for this
+// process). Only the gate uses these; editors' screens read fresh.
+async function gateAssetFor(assetId: string, accountId: string): Promise<AssetRow | null> {
+  return cached<AssetRow | null>(`vodads:asset:${accountId}:${assetId}`,
+    { ttlSec: scaleConfig.cache.assetTtlSec,
+      tags: (a) => [`asset:${assetId}`, `acct:${accountId}`, ...(a?.channel_id ? [`asset:${a.channel_id}`] : []), ...(a?.event_id ? [`asset:${a.event_id}`] : [])] },
+    () => assetFor(assetId, accountId));
+}
+async function gateRuleFor(accountId: string, schemaId: string | null) {
+  return cached(`vodads:rule:${accountId}:${schemaId ?? ''}`,
+    { ttlSec: scaleConfig.cache.rulesTtlSec, tags: [`vodads:${accountId}`, `acct:${accountId}`] },
+    () => ruleForAsset(accountId, schemaId));
+}
+/** A rule was saved or removed: the gate asks again on the next play. */
+export function invalidateRuleCache(accountId: string): void {
+  invalidateTag(`vodads:${accountId}`);
+}
+
 /**
  * What the play gate hands a viewer of an on-demand asset: null to play it
  * as it is (no rule, rule off, the title opts out, or the viewer is ad-free),
@@ -888,9 +913,9 @@ export async function adsForPlay(i: {
   accountId: string; assetId: string; via?: string | null; preferred?: Delivery | null; caps?: string[];
   playSid?: string | null; ctx: SessionCtx; fetcher?: Fetcher;
 }): Promise<PlayAds | null> {
-  const asset = await assetFor(i.assetId, i.accountId);
+  const asset = await gateAssetFor(i.assetId, i.accountId);
   if (!asset?.master_key) return null;
-  const rule = await ruleForAsset(i.accountId, asset.schema_id);
+  const rule = await gateRuleFor(i.accountId, asset.schema_id);
   if (!rule) return null;
   if (titleRule(asset.metadata) === 'none') return null;
   const pol = rule.resolved;

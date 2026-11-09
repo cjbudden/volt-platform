@@ -267,7 +267,8 @@ leader) the pre-warm plan.
   for one window). Use Valkey whenever there is more than one API process.
 - **Migration 0046 adds triggers** on keys, accounts, apps, channels, events,
   VOD assets, programmes, publishing rules, output profiles, entitlements and
-  player configs. They only send a NOTIFY; cost is negligible.
+  player configs (0150 adds on-demand ad rules). They only send a NOTIFY;
+  cost is negligible.
 - **The ALB health check is now `/health/ready`.** A task without a database
   leaves the load balancer instead of answering 500s; the container health
   check is `/health/live`, so a database outage does not restart every task.

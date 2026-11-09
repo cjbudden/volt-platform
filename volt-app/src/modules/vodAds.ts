@@ -31,6 +31,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
+  invalidateRuleCache,
   ruleForAsset, assetFor, breaksForRule, replacedView, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
   timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, PLAYER_EVENT_REPEATS, validSid,
   type SessionCtx,
@@ -87,6 +88,9 @@ async function saveRule(req: Request, res: Response, schemaId: string | null) {
       [before.id, b.mode, JSON.stringify(policy), b.adServerId ?? null, JSON.stringify(b.houseAds)])
     : await one<any>(`INSERT INTO vod_ad_rules (account_id, schema_id, mode, policy, ad_server_id, house_ads) VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb) RETURNING *`,
       [acct, schemaId, b.mode, JSON.stringify(policy), b.adServerId ?? null, JSON.stringify(b.houseAds)]);
+  // The play gate keeps rules cached: drop them here at once (the 0150 trigger
+  // tells the other processes).
+  invalidateRuleCache(acct);
   const who = actor(req);
   await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: before ? 'update' : 'create', entityType: 'vod_ad_rule', entityId: row.id,
     changes: { mode: { from: before?.mode ?? null, to: b.mode } } });
@@ -102,6 +106,7 @@ vodAdsRouter.delete('/rules/content-type/:id', asyncHandler(async (req, res) => 
   if (!UUID.test(req.params.id)) throw notFound('Content type not found');
   const r = await one<any>(`DELETE FROM vod_ad_rules WHERE account_id = $1 AND schema_id = $2 RETURNING id`, [accountId(req), req.params.id]);
   if (!r) throw notFound('No rule for that content type');
+  invalidateRuleCache(accountId(req));
   const who = actor(req);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'delete', entityType: 'vod_ad_rule', entityId: r.id });
   res.status(204).end();
