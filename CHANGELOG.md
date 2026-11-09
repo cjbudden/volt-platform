@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.73.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- fixed · Workflows: Copies to your own storage were left out of the Workflows report altogether, and encodes at a site were listed only under Other background work; both now count on their stage, including days already reported.
+- added · Workflows: Work done at your own sites now shows on the Workflows map and in its report, in a new Your sites lane: Encode at site for Hybrid Sites, and Archive copies for Mirror and Archive, each with its runs, error rate, times, retries and most common error. Each add-on brings only its own stage.
+
 ## 0.72.0 (2026-11-09)
 
 ### Product (in customer release notes)
