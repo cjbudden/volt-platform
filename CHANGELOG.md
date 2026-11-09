@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.70.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · VOD: A video whose original stays at one of your sites can now go on a FAST channel that has its own ladder: the site packages it to that ladder, and the title keeps airing its current version until the site's copy has been checked.
+
+### Internal
+
+- added · VOD: New check suite site-ladder-variant: a FAST ladder variant made at a site, from Prepare to the verified package and its row.
+
 ## 0.69.0 (2026-11-08)
 
 ### Product (in customer release notes)
