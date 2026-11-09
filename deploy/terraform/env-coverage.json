@@ -175,6 +175,22 @@
       "class": "default",
       "why": "Derived from JWT_ACCESS_SECRET (a Secrets Manager value) when unset, so every task signs and checks the same rights claims."
     },
+    "EDGE_STORE_FILE": {
+      "class": "local",
+      "why": "The Mac staging edge reads the play-token key and revocations from this file; on AWS they go to the KeyValueStore (EDGE_RIGHTS_KVS_ARN)."
+    },
+    "EDGE_TOKEN_KEY": {
+      "class": "default",
+      "why": "Derived from JWT_ACCESS_SECRET (a Secrets Manager value) when unset, so every task signs the same on-demand play tokens; the edge gets it from the KeyValueStore."
+    },
+    "EDGE_TOKEN_OPEN_TTL_SEC": {
+      "class": "default",
+      "why": "On-demand play token lifetimes (4 hours, 24 for open content), always cut to the title's window; a publishing policy will set them (build queue P3)."
+    },
+    "EDGE_TOKEN_TTL_SEC": {
+      "class": "default",
+      "why": "On-demand play token lifetimes (4 hours, 24 for open content), always cut to the title's window; a publishing policy will set them (build queue P3)."
+    },
     "ENCODER_BIN": {
       "class": "local",
       "why": "Only the local and docker launchers use these; on AWS ORCH_LAUNCHER is ecs."

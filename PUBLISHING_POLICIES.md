@@ -322,7 +322,7 @@ Collections are the one editorial grouping, replacing playlists: manual, rule-ba
 ## Build phases and open questions
 
 1. **Lifecycle and status**: editorial state, dates, computed `public_status` with reasons, precomputed decision records cached in memory and Redis, time-aware catalogue caching, Availability tab timeline and tester. Lowest risk, biggest clarity gain.
-2. **Tokenised VOD playback**: token claims with window-clamped `exp`, edge check, revocation set, refusal codes, block message, and logging every refusal to availability_events so the Rights demand report has history from day one. This is what makes the rules hold on public play URLs.
+2. **Tokenised VOD playback**: token claims with window-clamped `exp`, edge check, revocation set, refusal codes, block message, and logging every refusal to availability_events so the Rights demand report has history from day one. This is what makes the rules hold on public play URLs. *Built 9 Nov 2026 (P2, v0.76.0): the token in the play URL's path, the CloudFront and staging edge checks and the revocation set (`volt-app/src/services/edgeTokens.ts`). Refusal codes, the block message, enforcing and token-free are P2-2; counting and the report P2-3.*
 3. **Policy sections and precedence**: protection, distribution and retention sections, metadata-rule rung, locks, presets, impact preview, conflict checks.
 4. **Encode-time handling**: policy shown at upload, snapshot, repackage on change.
 5. **Retention and archive**: sweep, warnings, legal hold, storage tier move.

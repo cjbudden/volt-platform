@@ -190,6 +190,29 @@ resource "aws_cloudfront_distribution" "cdn" {
     }
   }
 
+  # On-demand media behind a play token (edge_tokens.tf): checked and
+  # stripped by the token function, then served from S3. Listed first so
+  # the *.m3u8 and *.mpd behaviours below never take a /t/ request.
+  dynamic "ordered_cache_behavior" {
+    for_each = local.edge_token_paths
+    content {
+      path_pattern               = ordered_cache_behavior.value.path
+      target_origin_id           = "s3-origin"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+      cached_methods             = ["GET", "HEAD"]
+      cache_policy_id            = ordered_cache_behavior.value.cache == "manifest" ? aws_cloudfront_cache_policy.manifest.id : aws_cloudfront_cache_policy.segment.id
+      origin_request_policy_id   = aws_cloudfront_origin_request_policy.vod_token[0].id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+      realtime_log_config_arn    = local.cdn_logs ? aws_cloudfront_realtime_log_config.cdn[0].arn : null
+      compress                   = true
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.vod_token[0].arn
+      }
+    }
+  }
+
   # A variant asked for by its own path: the rights function still decides
   # (only its own audience gets it), the variants origin answers. Listed
   # before the *.m3u8 and *.mpd behaviours so they never send it to S3.

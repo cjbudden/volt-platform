@@ -210,6 +210,14 @@ async function store(a: any, now: Date): Promise<StatusAnswer> {
     `UPDATE vod_assets SET public_status = $2, status_reason = $3, status_until = $4, status_at = now() WHERE id = $1`,
     [a.id, s.status, s.reason, s.until]);
   if (changed) invalidateTag(`asset:${a.id}`);
+  // It was playable and is not any more, before its window ran out (withdrawn,
+  // archived, restricted, moved back to scheduled, or the window cut short):
+  // play tokens already handed out must stop at the edge too
+  // (services/edgeTokens.ts, build queue P2).
+  if (a.public_status === 'available' && s.status !== 'available') {
+    await (await import('./edgeTokens')).revokeAsset(a.id, s.reason, Math.floor(now.getTime() / 1000))
+      .catch((e) => console.error(`[edge-tokens] revoke ${a.id}:`, e?.message ?? e));
+  }
   return s;
 }
 

@@ -29,6 +29,9 @@ import { mp3FeedFor, publicMp3Path } from '../services/radio/mp3Feed';
 import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
 import { adsForPlay } from '../services/vodAds';
 import { publicDecision, publiclyVisible } from '../services/publicStatus';
+import { edgeTokensMode, mintEdgeToken, policyClassOf, tokenPrefix, withToken } from '../services/edgeTokens';
+import { rightsForAsset } from '../services/rightsProfiles';
+import { vodAvailabilityRow } from '../services/viewerPath';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -314,6 +317,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   const geo = viewerGeo(req, b.geo);
   note.kind = kind; note.geo = geo ?? null;
   let edgeSec = cacheable ? scaleConfig.edge.availabilityMaxAgeSec : 0;
+  let vodStatus: Awaited<ReturnType<typeof publicDecision>> = null;
 
   // THE PUBLIC VISIBILITY RULE (build queue P1, services/publicStatus.ts). An
   // on-demand asset that is not public (draft, in review, processing,
@@ -324,6 +328,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   if (kind === 'vod') {
     const now = new Date();
     const ps = await publicDecision(b.assetId, now);
+    vodStatus = ps;
     if (!ps || !publiclyVisible(ps, now)) return { status: 404, body: { error: 'unknown asset' }, edgeSec: cacheable ? 5 : 0 };
     if (ps.until) edgeSec = Math.max(0, Math.min(edgeSec, Math.floor((ps.until.getTime() - now.getTime()) / 1000)));
     if (ps.status === 'scheduled') {
@@ -403,6 +408,25 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
       playSid: b.sid ?? null, ctx: { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null, country: geo ?? null, appId: key.app_id ?? null } })
       .catch((e) => { console.warn('[vod-ads] play gate: playing without ads:', e?.message ?? e); return null; });
     if (ads) { delivery = { hls: ads.hls, dash: ads.dash }; edgeSec = 0; }
+  }
+  // EDGE PLAY TOKENS (services/edgeTokens.ts, build queue P2). The media URLs
+  // carry a signed token in the path that the edge checks on every manifest
+  // and segment request: bound to this asset's folder and the viewer's
+  // country, ending at the earlier of its lifetime and the asset's window.
+  // An ad session's addresses are the stitcher's own (per viewer) and are left
+  // as they are. Everything it reads is cached: no database read when warm.
+  if (kind === 'vod' && delivery && !ads && edgeTokensMode() !== 'off') {
+    const prefix = tokenPrefix([delivery.hls, delivery.dash]);
+    if (prefix) {
+      const row = await vodAvailabilityRow(b.assetId);
+      const prof = row ? await rightsForAsset(row) : null;
+      const et = mintEdgeToken({ assetId: b.assetId, prefix, country: geo ?? null, sid: b.sid ?? null,
+        policyClass: policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }),
+        effectiveUntil: vodStatus?.effectiveUntil ?? null });
+      delivery = { ...delivery, hls: withToken(delivery.hls, et.token), dash: withToken(delivery.dash, et.token) };
+      // A shared (edge-cached) answer never outlives the token in it.
+      if (edgeSec > 0) edgeSec = Math.max(0, Math.min(edgeSec, et.claims.e - et.claims.n - 60));
+    }
   }
   return {
     status: 200, edgeSec,

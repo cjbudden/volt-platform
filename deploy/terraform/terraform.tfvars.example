@@ -114,6 +114,11 @@ prewarm_origin_fraction = 0.1
 #   Run the rights function on HLS and DASH manifests (per-stream geo and
 #   programme blackout at the edge).
 
+# edge_tokens.tf
+# edge_tokens = "issue"
+#   On-demand play URLs carry a signed token the CDN checks on every manifest
+#   and segment request (needs edge_rights_enabled). "off" for plain URLs.
+
 # images.tf
 # enable_image_edge = true
 #   Put the image CDN (CloudFront, S3-first origin group) in front of /img.

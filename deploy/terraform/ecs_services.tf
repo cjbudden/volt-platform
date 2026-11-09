@@ -336,6 +336,8 @@ locals {
     # services/variantManifest.ts: the CDN sends replaced viewers to this
     # service (the "variants" origin in s3_cloudfront.tf); off with edge rights
     { name = "EDGE_VARIANT_SERVICE", value = var.edge_rights_enabled ? "1" : "0" },
+    # edge_tokens.tf: on-demand play URLs carry a token the CDN checks
+    { name = "VOLT_EDGE_TOKENS", value = local.edge_tokens_on ? "issue" : "off" },
     { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
     { name = "CDN_BASE_URL", value = "https://${aws_cloudfront_distribution.cdn.domain_name}" },
     { name = "AWS_REGION", value = var.region },

@@ -195,17 +195,25 @@ export function startScheduler(): () => void {
   // EDGE RIGHTS (services/edgeRights.ts): keep the CloudFront KeyValueStore the
   // manifest function reads in step with geo settings and programme
   // blackouts. Every minute, and only what changed is written (memo). Off
-  // unless EDGE_RIGHTS_KVS_ARN is set (Terraform output edge_rights_kvs_arn).
+  // unless EDGE_RIGHTS_KVS_ARN is set (Terraform output edge_rights_kvs_arn),
+  // or EDGE_STORE_FILE on the Mac staging stack, where the nginx edge reads
+  // the same keys from a file on the shared volume.
+  // The same store carries the on-demand play tokens' key and revocation set
+  // (services/edgeTokens.ts, build queue P2).
   const kvsArn = process.env.EDGE_RIGHTS_KVS_ARN || '';
+  const storeFile = process.env.EDGE_STORE_FILE || '';
   const edgeMemo = new Map<string, string | null>();
-  const edgeRights = kvsArn ? setInterval(() => {
+  const edgeRights = kvsArn || storeFile ? setInterval(() => {
     (async () => {
       const er = await import('../edgeRights');
-      const store = await er.cloudFrontKvsStore(kvsArn);
+      const et = await import('../edgeTokens');
+      const store = kvsArn ? await er.cloudFrontKvsStore(kvsArn) : await et.fileEdgeStore(storeFile);
       // the key the function checks rights-class claims with (written once, then only on change)
       await er.syncClaimKey(store, edgeMemo);
       const r = await er.syncEdgeRights(store, await er.allStreams(), undefined, edgeMemo);
       if (r.put || r.deleted || r.failed) console.log(`[edge-rights] ${r.put} written, ${r.deleted} removed, ${r.failed} failed`);
+      const t = await et.syncEdgeTokens(store, edgeMemo);
+      if (t.put || t.deleted) console.log(`[edge-tokens] ${t.put} written, ${t.deleted} removed`);
     })().catch((e) => console.error('[edge-rights] sync error', e));
   }, 60_000) : null;
   edgeRights?.unref?.();

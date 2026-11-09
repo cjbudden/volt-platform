@@ -55,6 +55,13 @@ x-volt-env: &volt-env
   # Shared disk: every role reads and writes the same files (image library,
   # clips, uploads, the local origin). In AWS these live in S3.
   ORIGIN_DIR: /data/origin
+  # On-demand play tokens (build queue P2, services/edgeTokens.ts): the play
+  # gate puts a signed token in the media URLs and the edge checks it. The
+  # scheduler writes the key and the revocation set to this file, which the
+  # edge reads (the CloudFront KeyValueStore's stand-in). "off" to hand out
+  # plain URLs as before.
+  VOLT_EDGE_TOKENS: ${VOLT_EDGE_TOKENS:-issue}
+  EDGE_STORE_FILE: /data/edge/store.json
   CLIPS_DIR: /data/clips
   UPLOAD_STAGING_DIR: /data/uploads-staging
   FILLER_DIR: /data/filler
@@ -184,8 +191,12 @@ services:
       # replacing only variables set here, and writes the result to this dir.
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
       EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:?set EDGE_SHARED_SECRET in .env}
+      EDGE_STORE_FILE: /data/edge/store.json
     volumes:
       - ./nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
+      - ./edge-token.js:/etc/nginx/edge-token.js:ro
+      # the play-token key and revocations the scheduler writes (read only here)
+      - voltdata:/data:ro
 
 volumes:
   dbdata:

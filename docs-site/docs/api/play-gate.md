@@ -120,6 +120,22 @@ What Volt reports to the ad server needs nothing from your player: impressions, 
 
 A viewer who paid for the title (and, if the rule says so, a signed-in member) gets no `ads` and plays the title as it is. The Volt player handles all of this itself (`player.getState().ad`, `player.commands.adClick()`, see [Player SDK](../guides/player-sdk.md)).
 
+### 7. On-demand addresses carry a token
+
+On deployments with play tokens at the CDN (all Volt deployments from v0.76.0, unless the operator turned them off), the `delivery` addresses of an on-demand title carry a signed token in their path:
+
+```
+https://cdn.example.com/t/eyJhIjoi...0c1f.../vod/<title>/master.m3u8
+```
+
+Play the address exactly as it is. Every manifest and segment request goes through the token, because segments are named relative to the manifest; your player needs no extra code, and Safari's own HLS player works too. The CDN checks the token on each request and answers `403` when:
+
+- the token has expired. It lasts four hours (24 hours for free titles with no rules for who may watch), and never past the end of the title's window, so playback ends on the second the window closes;
+- the request comes from another country than the one the gate answered for (a copied link sent abroad);
+- the title stopped being public after the token was handed out (withdrawn, archived, its rights ended early). Within about a minute, every earlier token for it stops working.
+
+After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not. Ad sessions (step 6) keep their own addresses.
+
 ## Troubleshooting
 
 ```bash file=play-gate/wrong-site.sh
@@ -136,4 +152,5 @@ A viewer who paid for the title (and, if the rule says so, a signed-in member) g
 | Members get `sign_in` although your app knows them | A `viewer` or `entitled` sent in the body is ignored from browsers and phones | Sign them in, or use the [token exchange](authentication.md) from your server |
 | `200` with `delivery: null` | The live channel is off air, or its output is not ready | Show "not on air" and try again |
 | `200` with `ads` and `delivery.dash: null` | The title has ad breaks for this viewer, carried in the HLS address: the ads are guided, or the title has no DASH encode | Play `delivery.hls` |
+| `403` from the CDN on a manifest or segment of an on-demand title | The address's token expired, the viewer is in another country than when they asked, or the title stopped being public | Ask the gate again for a new address (step 7) |
 | `404` on `delivery.dash` with ads | One of the ads chosen for this viewer has no fMP4 version and cannot be a DASH Period | Play `delivery.hls` |
