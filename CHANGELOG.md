@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.72.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · Hybrid Sites: An Encode at site watchfolder can now fall back to the cloud. Set If the site does not encode it to a time from 15 minutes to 1 day: when no server of the site has started an encode in that time, the site's agent sends the original and Volt encodes it in the cloud, recording why in the audit log. By default the item still waits for the site and the original never leaves your storage.
+
+### Internal
+
+- added · Hybrid Sites: Site agent 0.11.0 sends an original Volt asks for on the resumable upload (GET and POST /api/site-agent/watchfolders/:id/fallbacks); test/site-fallback.check.ts.
+
 ## 0.71.0 (2026-11-09)
 
 ### Product (in customer release notes)
