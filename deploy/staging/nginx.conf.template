@@ -46,6 +46,8 @@ http {
   # On-demand play tokens (edge-token.js): "ok", "403" or "503".
   js_import edgetoken from /etc/nginx/edge-token.js;
   js_set $edge_token edgetoken.verdict;
+  # The words of a refusal, the same as CloudFront's (build queue P2-2).
+  js_set $edge_refusal edgetoken.refusal;
 
   upstream api_public {
     zone api_public 64k;
@@ -109,14 +111,15 @@ http {
     # behind a token: the token's folder is checked by edge-token.js.
     location ~ ^/t/[^/]+/clips/ {
       limit_req zone=viewer_rl burst=200 nodelay;
-      if ($edge_token = "503") { return 503; }
-      if ($edge_token != "ok") { return 403; }
+      default_type text/plain;
+      if ($edge_token = "503") { return 503 "Try again shortly\n"; }
+      if ($edge_token != "ok") { return 403 $edge_refusal; }
       rewrite ^/t/[^/]+(/.*)$ $1 break;
       proxy_pass http://api_public;
       add_header Cache-Control "no-store" always;
     }
     # Any other /t/ path (regexes are tried in order, so after the one above).
-    location ~ ^/t/ { return 403; }
+    location ~ ^/t/ { default_type text/plain; return 403 "Not available\n"; }
 
     # Viewer sign-in is a credential endpoint: tighter per-IP limit.
     location ~ ^/api/public/auth/ {

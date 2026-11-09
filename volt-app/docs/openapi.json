@@ -5905,6 +5905,33 @@
     }
    }
   },
+  "/api/availability/notify": {
+   "post": {
+    "operationId": "postAvailabilityNotify",
+    "summary": "Availability: notify",
+    "tags": [
+     "Availability"
+    ],
+    "description": "**Credential:** publishable key; viewer session optional",
+    "security": [
+     {
+      "publishableKey": []
+     },
+     {
+      "publishableKey": [],
+      "viewerBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
   "/api/caption-languages": {
    "get": {
     "operationId": "getCaptionLanguages",
@@ -23549,6 +23576,33 @@
         "assetId": "<channelId>"
        }
       }
+     }
+    }
+   }
+  },
+  "/api/public/availability/notify": {
+   "post": {
+    "operationId": "postPublicAvailabilityNotify",
+    "summary": "Availability: notify",
+    "tags": [
+     "Availability"
+    ],
+    "description": "**Credential:** publishable key; viewer session optional",
+    "security": [
+     {
+      "publishableKey": []
+     },
+     {
+      "publishableKey": [],
+      "viewerBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
      }
     }
    }

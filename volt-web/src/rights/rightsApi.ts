@@ -68,8 +68,10 @@ export const rightsApi = {
   remove: (id: string): Promise<void> => req(`/rights/profiles/${id}`, { method: 'DELETE' }),
   assets: (id: string): Promise<{ items: { id: string; title: string; state: string | null; narrowed: boolean; setBy: string | null }[]; hasMore: boolean }> =>
     req(`/rights/profiles/${id}/assets?limit=50`),
-  settings: (): Promise<{ defaultProfileId: string; builtins: { open: string; closed: string } }> => req('/rights/settings'),
+  settings: (): Promise<RightsSettings> => req('/rights/settings'),
   setDefault: (defaultProfileId: string) => req('/rights/settings', { method: 'PUT', ...json({ defaultProfileId }) }),
+  /** The block message (null: the default words) and Notify me (build queue P2-2). */
+  setBlock: (b: { blockMessage?: string | null; notifyMe?: boolean }): Promise<RightsSettings> => req('/rights/settings', { method: 'PUT', ...json(b) }),
   asset: (id: string): Promise<AssetRights> => req(`/rights/assets/${id}`),
   setAsset: (id: string, profileId: string, narrow: RightsNarrow | null): Promise<AssetRights> =>
     req(`/rights/assets/${id}`, { method: 'PUT', ...json({ profileId, narrow }) }),
@@ -155,3 +157,14 @@ export function daysLeft(w: RightsWindow): number | null {
 
 /** A rights date as a day, in UTC like the window itself. */
 export const rightsDay = (s: string) => new Date(s).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+/** GET /api/rights/settings */
+export interface RightsSettings {
+  defaultProfileId: string
+  builtins: { open: string; closed: string }
+  /** What a viewer is told where a title cannot play; null means the default words. */
+  blockMessage: string | null
+  blockMessageDefault: string
+  notifyMe: boolean
+  notifyRequests: { total: number; titles: Array<{ assetId: string; title: string | null; count: number }> }
+}

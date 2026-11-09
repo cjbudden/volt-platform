@@ -80,7 +80,10 @@ export async function resolveAsset(apiBase: string, appKey: string, assetId: str
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok || j.available === false) {
     const products = Array.isArray(j.products) ? j.products.filter((p: any) => p && typeof p.productKey === 'string') : [];
-    throw new GateError(r.status, gateMessage(r.status, j.mode ?? null), j.mode ?? null, products, j.meta ?? null);
+    // The gate's own words when it gives them (the account's block message on a
+    // 451, build queue P2-2), so the viewer reads the same thing on every platform.
+    const said = typeof j.message === 'string' && j.message.trim() ? j.message.trim().slice(0, 200) : null;
+    throw new GateError(r.status, said ?? gateMessage(r.status, j.mode ?? null), j.mode ?? null, products, j.meta ?? null);
   }
   const d = j.delivery ?? null;
   const m = j.meta ?? {};

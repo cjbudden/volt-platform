@@ -111,6 +111,19 @@ export function mintEdgeToken(o: {
 export type EdgeVerdict = 'ok' | 'malformed' | 'signature' | 'early' | 'expired' | 'path' | 'country' | 'revoked';
 
 /**
+ * The words in an edge refusal's body (build queue P2-2), the same at both
+ * edges and on the play gate: a URL taken across a border says what the gate
+ * would have said (DEFAULT_BLOCK_MESSAGE). The edge cannot read an account's
+ * own block message (it has no database), so it always uses the default words;
+ * players show the account's message from the gate's 451 before they get here.
+ */
+export const EDGE_REFUSAL_TEXT: Record<Exclude<EdgeVerdict, 'ok'>, string> = {
+  malformed: 'Not available', signature: 'Not available', path: 'Not available',
+  early: 'This link has expired', expired: 'This link has expired',
+  country: 'Not available in your region', revoked: 'No longer available',
+};
+
+/**
  * THE EDGE'S CHECK, in TypeScript: the reference the two edge files are tested
  * against (test/edge-tokens.check.ts runs all three on the same cases).
  * `uri` is the path after the /t/<token> prefix.

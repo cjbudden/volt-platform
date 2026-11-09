@@ -31,6 +31,8 @@ import { adsForPlay } from '../services/vodAds';
 import { publicDecision, publiclyVisible } from '../services/publicStatus';
 import { edgeTokensMode, mintEdgeToken, policyClassOf, tokenPrefix, withToken } from '../services/edgeTokens';
 import { rightsForAsset } from '../services/rightsProfiles';
+import { limit } from '../scale/ratelimit';
+import { blockSettings, addNotifyRequest, type NotifyReason } from '../services/blockMessage';
 import { vodAvailabilityRow } from '../services/viewerPath';
 
 // ---- management (JWT-auth) --------------------------------------------------
@@ -332,8 +334,12 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     if (!ps || !publiclyVisible(ps, now)) return { status: 404, body: { error: 'unknown asset' }, edgeSec: cacheable ? 5 : 0 };
     if (ps.until) edgeSec = Math.max(0, Math.min(edgeSec, Math.floor((ps.until.getTime() - now.getTime()) / 1000)));
     if (ps.status === 'scheduled') {
-      return { status: 403, edgeSec, body: { available: false, mode: 'scheduled', reason: 'Not available yet.',
-        availableFrom: ps.effectiveFrom?.toISOString() ?? null, meta: await metaFor(key.account_id, kind, b.assetId) } };
+      const bs = await blockSettings(key.account_id);
+      const from = ps.effectiveFrom?.toISOString() ?? null;
+      // `until`: when the 403 stops being the answer (the design's name);
+      // availableFrom is kept for players built before it.
+      return { status: 403, edgeSec, body: { available: false, mode: 'scheduled', reason: 'Not available yet.', message: 'Not available yet',
+        until: from, availableFrom: from, notify: bs.notify, meta: await metaFor(key.account_id, kind, b.assetId) } };
     }
   }
   if (edgeSec > 0 && kind === 'channel') {
@@ -371,7 +377,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
           `[availability] programme replacement ${rights.replacementAssetId} is not an asset of ` +
           `account ${key.account_id}; serving a hard block instead of the slate`
         );
-        return { status: 451, body: { available: false, mode: 'blocked', reason: rights.reason }, edgeSec };
+        return { status: 451, body: await blockedBody(key.account_id, rights, note), edgeSec };
       }
       const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: rights.replacementAssetId, assetKind: rk, geo, sid: b.sid });
       return {
@@ -383,13 +389,27 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
       };
     }
     const r: any = rights;
-    const paywall = r.rule?.reason === 'payment_required';
+    // Which refusal, from the same reading the playback reports use: a rule's
+    // paywall, or a title whose own access is paid or entitled with no rule
+    // (that one used to fall through to 451 as if it were a region block), is
+    // 402; sign in and a group rule 403; geo and rights 451.
+    const why = classifyGate(451, null, { ...note, rights }).reason;
+    const paywall = why === 'payment' || r.rule?.reason === 'payment_required';
+    const signIn = !paywall && (why === 'sign_in' || r.rule?.reason === 'members_only');
+    const status = paywall ? 402 : signIn || why === 'group' || r.rule?.reason === 'group' ? 403 : 451;
+    // 451: geo or rights. The viewer is shown the title locked, with the
+    // account's block message and, if offered, "Notify me" (build queue P2-2).
+    if (status === 451) {
+      return { status, edgeSec, body: { ...(await blockedBody(key.account_id, rights, note)), ruleId: r.rule?.ruleId ?? undefined,
+        meta: await metaFor(key.account_id, kind, b.assetId) } };
+    }
     return {
-      status: paywall ? 402 : r.rule?.reason === 'members_only' || r.rule?.reason === 'group' ? 403 : 451,
-      body: { available: false, mode: paywall ? 'paywall' : r.rule?.reason === 'members_only' ? 'sign_in' : 'blocked',
+      status,
+      body: { available: false, mode: paywall ? 'paywall' : signIn ? 'sign_in' : 'blocked',
         reason: rights.reason, products: r.products ?? undefined, ruleId: r.rule?.ruleId ?? undefined,
+        message: paywall ? 'Buy or subscribe to watch' : signIn ? 'Sign in to watch' : 'Not available to you',
         // What it is, so the player can show the title and artwork behind a paywall or sign-in.
-        meta: paywall || r.rule?.reason === 'members_only' ? await metaFor(key.account_id, kind, b.assetId) : undefined },
+        meta: paywall || signIn ? await metaFor(key.account_id, kind, b.assetId) : undefined },
       edgeSec,
     };
   }
@@ -542,6 +562,20 @@ async function metaFor(acct: string, kind: string, id: string) {
     ...(m.brandMark ? { brandMark: m.brandMark } : {}) };
 }
 
+/**
+ * A 451 answer: the title cannot play where this viewer is, for a geo rule
+ * (`code: 'region'`) or the rights (`code: 'rights'`). `message` is the
+ * account's block message, the words every player shows; `notify` says whether
+ * to offer "Notify me" (POST /api/availability/notify). PUBLISHING_POLICIES.md
+ * "Block message".
+ */
+async function blockedBody(acct: string, rights: any, note: GateNote): Promise<Record<string, unknown>> {
+  const bs = await blockSettings(acct);
+  const c = classifyGate(451, null, { ...note, rights });
+  return { available: false, mode: 'blocked', code: c.reason === 'geo' ? 'region' : 'rights', reason: rights?.reason ?? null,
+    message: bs.message, notify: bs.notify };
+}
+
 function send(res: Response, a: GateAnswer): void {
   if (a.edgeSec > 0) edgeCache(res, a.edgeSec, true); else noStore(res);
   res.status(a.status).json(a.body);
@@ -557,8 +591,10 @@ availabilityRouter.post(
   asyncHandler(async (req, res) => {
     const b = availSchema.parse(req.body);
     const a = await timedDecide(req, b, { cacheable: false }, 'POST');
-    // A Scheduled teaser (403, mode scheduled) is an answer, not an error: it carries when and what.
-    if ((a.status === 401 || a.status === 403 || a.status === 404) && a.body?.mode !== 'scheduled') throw new ApiError(a.status, a.body.error);
+    // A refusal with a mode (a Scheduled teaser, sign in, a group rule) is an
+    // answer, not an error: it carries what, when and the words to show. Only
+    // bare errors (bad key, unknown asset, app restriction) are thrown.
+    if ((a.status === 401 || a.status === 403 || a.status === 404) && !a.body?.mode) throw new ApiError(a.status, a.body.error);
     send(res, a);
   })
 );
@@ -590,6 +626,44 @@ availabilityRouter.get(
     });
     const a = await timedDecide(req, b, { cacheable: true }, 'GET');
     send(res, a);
+  })
+);
+
+/**
+ * "NOTIFY ME IF IT BECOMES AVAILABLE" (build queue P2-2).
+ *
+ *   POST /api/availability/notify { appKey, assetId, geo?, email? }
+ *
+ * Kept only when the play gate would refuse this viewer right now with a 451
+ * (geo or rights) or a Scheduled teaser, and the account offers the button
+ * (the gate's `notify: true`). The same decision is run, so the request cannot
+ * be used to learn anything the gate would not say: an unknown or unpublished
+ * title is 404 as there. A signed-in viewer (Authorization: Bearer <viewer
+ * token>) is remembered by their id, anyone else by the email they give.
+ * Asking twice for the same title changes nothing.
+ */
+const notifySchema = availSchema.pick({ appKey: true, assetId: true, geo: true }).extend({
+  email: z.string().trim().email().max(254).optional(),
+});
+availabilityRouter.post(
+  '/notify',
+  asyncHandler(async (req, res) => {
+    const b = notifySchema.parse(req.body ?? {});
+    // A public form that stores what it is given: a few dozen a viewer an hour.
+    await limit(`availability-notify-ip:${req.ip}`, 30, 3600);
+    const a = await decide(req, { appKey: b.appKey, assetId: b.assetId, geo: b.geo }, { cacheable: false });
+    if (a.status === 401 || (a.status === 403 && !a.body?.mode) || a.status === 404) throw new ApiError(a.status, a.body?.error ?? 'unknown asset');
+    const refused = a.status === 451 || (a.status === 403 && a.body?.mode === 'scheduled');
+    if (!refused) throw new ApiError(409, 'This title is not held back from you: there is nothing to be told about.');
+    if (!a.body?.notify) throw new ApiError(409, 'Notify me is not offered for this title.');
+    const viewer = optionalViewer(req);
+    if (!viewer && !b.email) throw badRequest('Give an email address, or sign in, to be told.');
+    const key = await verifyKey(b.appKey);
+    const reason: NotifyReason = a.body.mode === 'scheduled' ? 'scheduled' : a.body.code === 'region' ? 'region' : 'rights';
+    const r = await addNotifyRequest({ accountId: key!.account_id, assetId: b.assetId, reason, country: viewerGeo(req, b.geo) ?? null,
+      viewerId: viewer?.sub ?? null, email: viewer ? null : b.email ?? null });
+    noStore(res);
+    res.status(r.created ? 201 : 200).json({ notify: true, created: r.created, reason });
   })
 );
 

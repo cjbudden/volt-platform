@@ -882,6 +882,15 @@
   "group": "/api/availability"
  },
  {
+  "method": "POST",
+  "path": "/api/availability/notify",
+  "api": "public",
+  "credential": "publishable key; viewer session optional",
+  "access": "public (legacy alias of /api/public/availability/notify)",
+  "viewerTier": true,
+  "group": "/api/availability"
+ },
+ {
   "method": "GET",
   "path": "/api/caption-languages",
   "api": "discovery",
@@ -4565,6 +4574,15 @@
  {
   "method": "POST",
   "path": "/api/public/availability",
+  "api": "public",
+  "credential": "publishable key; viewer session optional",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/availability"
+ },
+ {
+  "method": "POST",
+  "path": "/api/public/availability/notify",
   "api": "public",
   "credential": "publishable key; viewer session optional",
   "access": "public API",

@@ -72,8 +72,8 @@ const check = (m: string, got: unknown, want: unknown) => {
   (globalThis as any).__crypto = crypto;
   const cfHandler = new Function(`${cfSrc.replace("import cf from 'cloudfront';", 'const cf = globalThis.__cf;').replace("import crypto from 'crypto';", 'const crypto = globalThis.__crypto;').replace('${kvs_id}', 'kvs-test')}\nreturn handler;`)();
   const njsSrc = readFileSync(join(__dirname, '../../deploy/staging/edge-token.js'), 'utf8');
-  check('the staging edge file exports what nginx.conf calls', /export default \{ verdict, check \}/.test(njsSrc), true);
-  const njs = new Function(`${njsSrc.replace("import fs from 'fs';", 'const fs = null;').replace("import crypto from 'crypto';", 'const crypto = globalThis.__crypto;').replace(/export default .*/, 'return { verdict, check };')}`)();
+  check('the staging edge file exports what nginx.conf calls', /export default \{ verdict, check, refusal, words \}/.test(njsSrc), true);
+  const njs = new Function(`${njsSrc.replace("import fs from 'fs';", 'const fs = null;').replace("import crypto from 'crypto';", 'const crypto = globalThis.__crypto;').replace(/export default .*/, 'return { verdict, check, words };')}`)();
   const realNow = Date.now;
   const three = async (uri: string, cc: string, at = NOW) => {
     Date.now = () => at * 1000;
@@ -113,12 +113,33 @@ const check = (m: string, got: unknown, want: unknown) => {
   const after = tok({ nowSec: NOW + 30 });
   check('...one issued after it (republished) plays', await three(`/t/${after}${PRE}master.m3u8`, 'AU', NOW + 40), ['ok', `${PRE}master.m3u8`, 'ok']);
   delete store['r:' + A];
+  // ---- the words of a refusal (build queue P2-2): the same at both edges as the reference
+  const say = async (uri: string, cc: string, at = NOW) => {
+    Date.now = () => at * 1000;
+    const m = /^\/t\/([^/]+)(\/.*)$/.exec(uri);
+    const v = m ? T.verifyEdgeToken(m[1], m[2], { country: cc, nowSec: at, revokedAt: store['r:' + A] ? Number(store['r:' + A]) : null, key: store['k:pt'] }).verdict : 'malformed';
+    const out = await cfHandler({ request: { uri, headers: cc ? { 'cloudfront-viewer-country': { value: cc } } : {} } });
+    const nw = njs.words(uri, cc, store, at);
+    Date.now = realNow;
+    return [v === 'ok' ? '' : (T.EDGE_REFUSAL_TEXT as any)[v], out.body ?? '', nw];
+  };
+  check('words: another country says the default block message at both edges', await say(`/t/${good}${PRE}master.m3u8`, 'NZ'),
+    ['Not available in your region', 'Not available in your region', 'Not available in your region']);
+  check('words: expired', await say(`/t/${good}${PRE}master.m3u8`, 'AU', NOW + 4 * 3600), ['This link has expired', 'This link has expired', 'This link has expired']);
+  check('words: tampered', await say(`/t/${body}.${flip}${PRE}master.m3u8`, 'AU'), ['Not available', 'Not available', 'Not available']);
+  check('words: another title\'s folder', await say(`/t/${good}/vod/22222222-2222-4222-8222-222222222222/master.m3u8`, 'AU'), ['Not available', 'Not available', 'Not available']);
+  store['r:' + A] = String(NOW + 10);
+  check('words: revoked', await say(`/t/${good}${PRE}master.m3u8`, 'AU', NOW + 20), ['No longer available', 'No longer available', 'No longer available']);
+  delete store['r:' + A];
+  const { DEFAULT_BLOCK_MESSAGE } = await import('../src/services/blockMessage');
+  check('the edge\'s region words are the play gate\'s default block message', T.EDGE_REFUSAL_TEXT.country, DEFAULT_BLOCK_MESSAGE);
   check('refusals are never cached', (await cfHandler({ request: { uri: `/t/${body}.${flip}${PRE}m.m3u8`, headers: {} } })).headers['cache-control'].value, 'no-store');
 
   // ---- the staging nginx config wires the file in
   const conf = readFileSync(join(__dirname, '../../deploy/staging/nginx.conf.template'), 'utf8');
   check('nginx: njs loaded and the verdict set', [/load_module modules\/ngx_http_js_module\.so;/.test(conf), /js_set \$edge_token edgetoken\.verdict;/.test(conf)], [true, true]);
-  check('nginx: /t/ only to /clips/, refused unless ok, prefix stripped', [/location ~ \^\/t\/\[\^\/\]\+\/clips\/ \{/.test(conf), conf.includes('if ($edge_token != "ok") { return 403; }'), conf.includes('rewrite ^/t/[^/]+(/.*)$ $1 break;'), conf.includes('location ~ ^/t/ { return 403; }')], [true, true, true, true]);
+  check('nginx: /t/ only to /clips/, refused unless ok, prefix stripped', [/location ~ \^\/t\/\[\^\/\]\+\/clips\/ \{/.test(conf), conf.includes('if ($edge_token != "ok") { return 403 $edge_refusal; }'), conf.includes('rewrite ^/t/[^/]+(/.*)$ $1 break;'), conf.includes('location ~ ^/t/ { default_type text/plain; return 403 "Not available\\n"; }')], [true, true, true, true]);
+  check('nginx: a refusal\'s words from the same file (P2-2)', [/js_set \$edge_refusal edgetoken\.refusal;/.test(conf), conf.includes('default_type text/plain;')], [true, true]);
 
   // ---------------------------------------------------------------- database
   const { createServer } = await import('../src/server');

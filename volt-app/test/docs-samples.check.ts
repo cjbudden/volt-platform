@@ -272,6 +272,9 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
   r = await run('play-gate/wrong-site.sh');
   ran('play-gate/wrong-site.sh', r);
   ok(/HTTP 403/.test(r.stdout) && /not in allow-list/.test(r.stdout), 'wrong-site: 403 and why', r.stdout);
+  r = await run('play-gate/notify-me.sh');
+  ran('play-gate/notify-me.sh', r);
+  ok(/HTTP 409/.test(r.stdout) && /not held back from you/.test(r.stdout), 'notify-me: a title that plays for this viewer is refused (409), nothing kept', r.stdout);
 
   // ========================================================================
   console.log('== playback reporting ==');

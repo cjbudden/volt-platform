@@ -496,6 +496,14 @@
       "alt": "The Rights page: summary tiles, the default for new assets, and the list of profiles with their territories, app icons, uses, access, window, asset count, agreement and status"
     },
     {
+      "name": "rights-block-message",
+      "guide": "guides/rights.md",
+      "path": "/rights",
+      "waitFor": ".rt-block",
+      "clip": ".rt-block",
+      "alt": "Where a title cannot play: the block message, the Notify me option, a preview of the locked player, and the viewers waiting per title"
+    },
+    {
       "name": "rights-profile",
       "guide": "guides/rights.md",
       "path": "/rights/5b0c1d2e-3f40-4a51-8b62-7c83d94ea501",

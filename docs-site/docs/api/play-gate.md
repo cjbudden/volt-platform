@@ -60,13 +60,24 @@ If the viewer has just bought a pass, the gate checks their purchases again befo
 |---|---|---|---|
 | `200` | `play` | Play `delivery` | The stream |
 | `200` | `replacement` | A blackout or rights window: play the replacement it names (`assetId` is the replacement's, with its own `delivery`) | The replacement, and `reason` if you show one |
-| `402` | `paywall` | A pass or purchase is needed. `products` lists them; `meta` says what it is | The offers and Buy |
+| `402` | `paywall` | A pass or purchase is needed, by a rule or because the title's own access is paid. `products` lists them; `meta` says what it is | The offers and Buy |
 | `403` | `sign_in` | Members only | Sign in |
-| `403` | `scheduled` | An on-demand title announced ahead of its release (its **Listed from** date has passed). `availableFrom` says when it opens and `meta` what it is; there is no token and no `delivery` | Coming soon, with the date |
-| `451` | `blocked` | Not available here (geo, the rights' territories or apps, a blackout). `reason` says which | Not available |
+| `403` | `scheduled` | An on-demand title announced ahead of its release (its **Listed from** date has passed). `until` (and `availableFrom`, its older name) says when it opens and `meta` what it is; there is no token and no `delivery` | Coming soon, with the date |
+| `451` | `blocked` | Not available where the viewer is. `code` is `region` (a geo rule) or `rights` (the rights' territories or apps, a blackout); `reason` says which rule; `meta` says what it is | The title locked, with `message` |
 | `403` | | The app's key does not work on this site, or the app is off: `error` says which | Nothing: fix the app's settings |
 | `401` | | The key is not valid | Nothing: fix the key |
 | `404` | | No such asset in the key's account, or an on-demand title that is not public (see below) | Not found |
+
+Every refusal with a `mode` also has `message`, the words to show: *Sign in to watch*, *Buy or subscribe to watch*, *Not available yet*, and for `451` the account's own block message (*Not available in your region* unless the account set its own on the **Rights** page). Show `message` as it is, so viewers see the same words on every platform. `notify: true` on a `451` or a `scheduled` answer means the account offers **Notify me if it becomes available** (next section).
+
+### Notify me
+
+When the answer has `notify: true`, show a **Notify me** button. When the viewer presses it, send the title and their email address (a signed-in viewer's session is enough, with no email):
+
+```bash file=play-gate/notify-me.sh
+```
+
+`201` means it was kept, `200` that this viewer had already asked. `409` means there is nothing to wait for (the title plays for this viewer, or the account does not offer the button), `404` the same as the gate for a title that is not public. The account sees who is waiting, per title, on its **Rights** page.
 
 ### Only public titles answer
 
@@ -134,7 +145,7 @@ Play the address exactly as it is. Every manifest and segment request goes throu
 - the request comes from another country than the one the gate answered for (a copied link sent abroad);
 - the title stopped being public after the token was handed out (withdrawn, archived, its rights ended early). Within about a minute, every earlier token for it stops working.
 
-After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not. Ad sessions (step 6) keep their own addresses.
+The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available* or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not. Ad sessions (step 6) keep their own addresses.
 
 ## Troubleshooting
 
@@ -148,6 +159,7 @@ After a `403` from the CDN, ask the gate again: it hands out a new address if th
 | `401 invalid publishable key` | A revoked or mistyped key, or a secret key | Use the app's current `pk_live_...` key |
 | `401 This session belongs to another account` | The viewer signed in with another account's app | Use the same account's key and session |
 | `404 unknown asset` | Not an id in this account (or not an id at all), or an on-demand title that is not public now: a draft, in review, processing, restricted, expired or archived | Check the id; ids from another account always answer 404. In Volt, check the title is published and its dates and rights cover now |
+| `451` with `code: "region"` | A geo rule leaves out the viewer's country | Show `message` with the title locked; offer **Notify me** when `notify` is true |
 | `403` with `mode: "scheduled"` | The title is announced but not open yet | Show it as coming soon; ask again from `availableFrom` |
 | Members get `sign_in` although your app knows them | A `viewer` or `entitled` sent in the body is ignored from browsers and phones | Sign them in, or use the [token exchange](authentication.md) from your server |
 | `200` with `delivery: null` | The live channel is off air, or its output is not ready | Show "not on air" and try again |

@@ -9,8 +9,9 @@
  *   GET    /api/rights/profiles/:id/assets    the assets that use it
  *   PUT    /api/rights/agreements/:id         upload the agreement file (private)
  *   GET    /api/rights/agreements/:id         download it (Rights: manage, audited)
- *   GET    /api/rights/settings               which profile new assets get, and the built-ins
- *   PUT    /api/rights/settings               change that
+ *   GET    /api/rights/settings               which profile new assets get, the built-ins, the block
+ *                                             message, Notify me and the viewers waiting (P2-2)
+ *   PUT    /api/rights/settings               change those
  *   GET    /api/rights/assets/:id             an asset's profile, narrowing and effective rights
  *   PUT    /api/rights/assets/:id             set them (never wider than the profile)
  *   POST   /api/rights/assign                 set one profile on many assets
@@ -29,6 +30,7 @@ import { actor, writeAudit } from '../services/audit';
 import { actorLabel } from '../util/actor';
 import { imageStore } from '../services/imageStore';
 import { assetAccount } from '../services/availability';
+import { blockSettingsFresh, setBlockSettings, notifySummary, DEFAULT_BLOCK_MESSAGE, BLOCK_MESSAGE_MAX } from '../services/blockMessage';
 import {
   USES, ACCESS_TYPES, APP_TYPES, ensureBuiltins, effectiveRights, evaluateRights, wideningProblems, cleanNarrow,
   invalidateRights, appTypeOf, type RightsProfile, type RightsNarrow,
@@ -294,23 +296,48 @@ rightsRouter.get('/agreements/:id', asyncHandler(async (req, res) => {
 // ---------------------------------------------------------------------------
 //  Account settings: which profile new assets get.
 // ---------------------------------------------------------------------------
-rightsRouter.get('/settings', asyncHandler(async (req, res) => {
-  const acct = accountId(req);
+async function settingsView(acct: string) {
   const b = await ensureBuiltins(acct);
   const a = await one<any>(`SELECT default_rights_profile_id FROM accounts WHERE id = $1`, [acct]);
-  res.json({ defaultProfileId: a?.default_rights_profile_id ?? b.open, builtins: b });
+  const bs = await blockSettingsFresh(acct);
+  // What a viewer is told where a title cannot play (the play gate's 451), and
+  // whether players offer Notify me (build queue P2-2). Publishing policies
+  // (P3) will set these per policy; this is the account's default.
+  return { defaultProfileId: a?.default_rights_profile_id ?? b.open, builtins: b,
+    blockMessage: bs.custom ? bs.message : null, blockMessageDefault: DEFAULT_BLOCK_MESSAGE, notifyMe: bs.notify,
+    notifyRequests: await notifySummary(acct) };
+}
+
+rightsRouter.get('/settings', asyncHandler(async (req, res) => {
+  res.json(await settingsView(accountId(req)));
 }));
 
 rightsRouter.put('/settings', asyncHandler(async (req, res) => {
   const acct = accountId(req);
-  const b = z.object({ defaultProfileId: z.string().uuid() }).parse(req.body);
-  const p = await ownedProfile(acct, b.defaultProfileId);
-  const before = await one<any>(`SELECT default_rights_profile_id FROM accounts WHERE id = $1`, [acct]);
-  await query(`UPDATE accounts SET default_rights_profile_id = $2 WHERE id = $1`, [acct, p.id]);
+  const b = z.object({
+    defaultProfileId: z.string().uuid().optional(),
+    /** null or empty: the default words. */
+    blockMessage: z.string().max(BLOCK_MESSAGE_MAX, `A block message is at most ${BLOCK_MESSAGE_MAX} characters`).nullable().optional(),
+    notifyMe: z.boolean().optional(),
+  }).parse(req.body ?? {});
   const who = actor(req);
-  await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'update', entityType: 'account', entityId: acct,
-    changes: { defaultRightsProfileId: { from: before?.default_rights_profile_id ?? null, to: p.id } } });
-  res.json({ defaultProfileId: p.id, builtins: await ensureBuiltins(acct) });
+  if (b.defaultProfileId !== undefined) {
+    const p = await ownedProfile(acct, b.defaultProfileId);
+    const before = await one<any>(`SELECT default_rights_profile_id FROM accounts WHERE id = $1`, [acct]);
+    await query(`UPDATE accounts SET default_rights_profile_id = $2 WHERE id = $1`, [acct, p.id]);
+    await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'update', entityType: 'account', entityId: acct,
+      changes: { defaultRightsProfileId: { from: before?.default_rights_profile_id ?? null, to: p.id } } });
+  }
+  if (b.blockMessage !== undefined || b.notifyMe !== undefined) {
+    const ch = await setBlockSettings(acct, { message: b.blockMessage, notify: b.notifyMe });
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    if (ch.from.message !== ch.to.message) changes.blockMessage = { from: ch.from.message, to: ch.to.message };
+    if (ch.from.notify !== ch.to.notify) changes.notifyMe = { from: ch.from.notify, to: ch.to.notify };
+    if (Object.keys(changes).length) {
+      await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'update', entityType: 'account_block_message', entityId: acct, changes });
+    }
+  }
+  res.json(await settingsView(acct));
 }));
 
 // ---------------------------------------------------------------------------

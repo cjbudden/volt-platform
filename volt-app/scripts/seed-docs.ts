@@ -738,6 +738,18 @@ async function seedRights() {
       [assets[i].id, plan[i], i < 2 ? 'watchfolder' : i < 5 ? 'chosen at upload' : `set by ${DOCS_LOGIN.email}`]);
   }
   if (assets[0]) await query(`UPDATE vod_assets SET rights_narrow = '{"territories":["AU","NZ"]}'::jsonb WHERE id = $1`, [assets[0].id]);
+  // Where a title cannot play (build queue P2-2): the account's own words,
+  // Notify me offered, and a few viewers waiting, so the Rights guide shows them.
+  await query(`UPDATE accounts SET block_message = 'Not licensed in your country yet. We are working on it.', block_notify = true WHERE id = $1`, [ACCOUNT]);
+  const waiting = [[0, 'NZ', 5], [1, 'US', 2], [2, 'GB', 1]];
+  for (const [i, cc, n] of waiting as [number, string, number][]) {
+    if (!assets[i]) continue;
+    for (let k = 1; k <= n; k++) {
+      await query(`INSERT INTO availability_notify (account_id, asset_id, who, email, country, reason, created_at)
+                   VALUES ($1, $2, 'email:' || $3, $3, $4, 'region', now() - ($5 || ' hours')::interval) ON CONFLICT (asset_id, who) DO NOTHING`,
+        [ACCOUNT, assets[i].id, `viewer${k}@example.com`, cc, String(k * 3)]);
+    }
+  }
 }
 
 /**

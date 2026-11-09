@@ -62,6 +62,18 @@ Saving a profile applies to every asset on it at once. The play gate, publishing
 - A watchfolder can name the profile everything it brings in gets. Without one, the account default applies.
 - In the upload panel, **Rights** sets the profile for the files you add. Leave it on the account default to use that.
 
+### Choose what viewers see where a title cannot play
+
+A viewer outside a title's territories, or outside its rights, sees the title locked with a message, not a missing title or a broken player. Below the profiles, **Where a title cannot play** sets that message for the whole account:
+
+![Where a title cannot play: the block message, the Notify me option, a preview of the locked player, and the viewers waiting per title](/img/screens/rights-block-message.png)
+
+1. Type the **Message**, up to 200 characters, and select **Save message**. Leave it empty, or select **Use the default**, for *Not available in your region*.
+2. Tick **Offer "Notify me if it becomes available"** to show a **Notify me** button with the message. A viewer leaves their email address (or is known by their sign-in) and is kept once per title. The same button shows on a title announced ahead of its release.
+3. **Waiting to be told** counts the viewers who asked, per title, so you can see where people want something you have not licensed.
+
+Every Volt player and your own apps get the same words from the [play gate](../api/play-gate.md), so viewers see them the same way on every platform. A link copied to another country is refused by the CDN with *Not available in your region*. Volt keeps the requests; sending the emails when a title opens is not built yet. Publishing policies will later set a message per policy; until then this one applies to every title.
+
 ### Move many assets at once
 
 Use the API's bulk assignment (below) to put up to 1,000 assets on one profile in one call. Their per-title narrowing is cleared unless you ask to keep it.
@@ -69,7 +81,7 @@ Use the API's bulk assignment (below) to put up to 1,000 assets on one profile i
 ## How it connects
 
 - **[Publishing Rules](publishing-rules.md).** Publishing is refused when the rights do not allow on demand or the rights window has ended. The window a rule sets is cut to the rights window. Social accounts the rights do not allow are left out, and an app the rights do not allow is not published to.
-- **The play gate.** A viewer outside the territories or on an app the rights leave out gets the block message and a 451, and the refusal is recorded as a rights refusal in the playback reports in [Analytics](analytics.md). A rule that would let a viewer in for free when the rights allow only a subscription is refused, and a paywall only offers what the rights allow to be sold. An on-demand title outside its rights window, or whose rights do not allow on demand at all, is **restricted**: no public route returns it, and the [play gate](../api/play-gate.md) answers as for an id that does not exist (404), until the window opens.
+- **The play gate.** A viewer outside the territories or on an app the rights leave out gets your block message and a 451, and the refusal is recorded as a rights refusal in the playback reports in [Analytics](analytics.md). A rule that would let a viewer in for free when the rights allow only a subscription is refused, and a paywall only offers what the rights allow to be sold. An on-demand title outside its rights window, or whose rights do not allow on demand at all, is **restricted**: no public route returns it, and the [play gate](../api/play-gate.md) answers as for an id that does not exist (404), until the window opens.
 - **[FAST](fast.md).** An asset whose rights leave out FAST and linear is not offered to lineups, and its window on a channel is cut to its rights window.
 - **[Collections](collections.md).** Collection access works inside the rights, per app and region.
 - **[Audit log](audit-log.md).** Every profile change, assignment and agreement read is recorded.
@@ -79,7 +91,7 @@ Use the API's bulk assignment (below) to put up to 1,000 assets on one profile i
 | Task | Needs |
 | --- | --- |
 | See the profiles (pickers in forms list them) | Any signed-in user |
-| Create, change and delete profiles, set the default, set an asset's rights, assign in bulk | Rights: Manage |
+| Create, change and delete profiles, set the default, set an asset's rights, assign in bulk, set the block message and Notify me | Rights: Manage |
 | Check what the rights answer for a country and app | Rights: View |
 | Open an agreement | Rights: Manage (every read is audited) |
 
@@ -91,6 +103,7 @@ Roles saved before rights arrived have no Rights level. Admins and owners have i
 - **"A title can narrow its rights, never widen them."** The narrowing names something the profile does not allow. Untick it, or change the profile.
 - **A built-in profile cannot be changed.** Create your own profile and make it the default instead.
 - **A profile cannot be deleted.** Assets still use it, or it is the default for new assets. Move the assets with bulk assignment, or choose another default first.
+- **Viewers still see the old message.** Players that asked the gate in the last few seconds keep its answer briefly; the next play shows the new words.
 - **Viewers with no known country are refused.** An allow list cannot let in a viewer whose country cannot be told. That is intended.
 
 ## Through the API
@@ -102,7 +115,7 @@ All under `/api/rights`, with an account token:
 | `GET /profiles`, `POST /profiles` | List or create profiles |
 | `GET`, `PUT`, `DELETE /profiles/{id}` | Read, change or delete one |
 | `PUT /agreements/{id}`, `GET /agreements/{id}` | Upload the agreement (the file's bytes) or download it |
-| `GET`, `PUT /settings` | Which profile new assets get |
+| `GET`, `PUT /settings` | Which profile new assets get (`defaultProfileId`), the block message (`blockMessage`, `null` for the default words) and Notify me (`notifyMe`); `GET` also answers `notifyRequests`, the viewers waiting per title |
 | `GET`, `PUT /assets/{assetId}` | An asset's profile, narrowing and effective rights |
 | `POST /assign` | `{ "profileId", "assetIds": [...] }`, up to 1,000 assets |
 | `POST /check` | `{ "assetId", "country", "appId", "use" }`: what the rights alone answer |

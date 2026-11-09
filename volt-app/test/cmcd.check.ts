@@ -342,7 +342,7 @@ process.env.QOE_RAW_DIR = mkdtempSync(join(tmpdir(), 'qoe-raw-'));
     const dist = (/resource "aws_cloudfront_distribution" "cdn" \{([\s\S]*?)\n\}/.exec(tf) ?? [])[1] ?? '';
     const behaviours = (dist.match(/(ordered_cache_behavior"? |default_cache_behavior )\{/g) ?? []).length;
     const attached = (dist.match(/response_headers_policy_id = aws_cloudfront_response_headers_policy\.delivery\.id/g) ?? []).length;
-    ok(behaviours === 4 && attached === 4, `every delivery behaviour (${behaviours}) has it (${attached})`);
+    ok(behaviours >= 4 && attached === behaviours, `every delivery behaviour (${behaviours}) has it (${attached})`);
     const alb = readFileSync(join(ROOT, '../deploy/terraform/scaling_alb.tf'), 'utf8');
     ok(/"\/api\/cmcd", "\/api\/cmcd\/\*"/.test(alb), 'the load balancer sends /api/cmcd to the public API tier');
     const { scaleConfig } = await import('../src/scale/config');

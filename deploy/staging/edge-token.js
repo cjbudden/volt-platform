@@ -13,7 +13,9 @@
 //  viewer's country is the X-Test-Country header, as everywhere on staging.
 //
 //  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked),
-//  "503" (no key yet: the scheduler has not synced).
+//  "503" (no key yet: the scheduler has not synced). `refusal` gives the
+//  words for the refusal's body, the same as the CloudFront Function's
+//  (build queue P2-2): `return 403 $edge_refusal;` in nginx.conf.template.
 // ============================================================================
 import fs from 'fs';
 import crypto from 'crypto';
@@ -38,28 +40,47 @@ function claimsOf(body) {
   }
 }
 
-// uri: the request path; cc: the viewer's country; store: the keys; now: epoch seconds
-function check(uri, cc, store, now) {
+var NOPE = 'Not available';
+var EXPIRED = 'This link has expired';
+var REGION = 'Not available in your region';
+var GONE = 'No longer available';
+
+// uri: the request path; cc: the viewer's country; store: the keys; now: epoch seconds.
+// Answers [verdict, words]: "ok", "403" or "503", and what a refusal says.
+function decide(uri, cc, store, now) {
   var m = TOK.exec(uri);
-  if (!m) return '403';
+  if (!m) return ['403', NOPE];
   var c = claimsOf(m[1]);
-  if (!c || typeof c.p !== 'string' || typeof c.a !== 'string') return '403';
+  if (!c || typeof c.p !== 'string' || typeof c.a !== 'string') return ['403', NOPE];
   var key = store['k:pt'];
-  if (!key) return '503';
+  if (!key) return ['503', 'Try again shortly'];
   var want = crypto.createHmac('sha256', key).update(m[1]).digest('hex').slice(0, 32);
-  if (want !== m[2]) return '403';
-  if (now + 60 < c.n || !(now < c.e)) return '403';
+  if (want !== m[2]) return ['403', NOPE];
+  if (now + 60 < c.n || !(now < c.e)) return ['403', EXPIRED];
   var rest = m[3];
-  if (!c.p || rest.indexOf(c.p) !== 0 || rest.indexOf('/../') >= 0) return '403';
+  if (!c.p || rest.indexOf(c.p) !== 0 || rest.indexOf('/../') >= 0) return ['403', NOPE];
   cc = (cc || '').toUpperCase();
-  if (c.c && cc && c.c !== cc) return '403';
+  if (c.c && cc && c.c !== cc) return ['403', REGION];
   var rv = store['r:' + c.a];
-  if (rv && c.n <= Number(rv)) return '403';
-  return 'ok';
+  if (rv && c.n <= Number(rv)) return ['403', GONE];
+  return ['ok', ''];
+}
+
+function check(uri, cc, store, now) {
+  return decide(uri, cc, store, now)[0];
+}
+
+function words(uri, cc, store, now) {
+  return decide(uri, cc, store, now)[1];
 }
 
 function verdict(r) {
   return check(r.uri, r.headersIn['X-Test-Country'] || '', readStore(), Math.floor(Date.now() / 1000));
 }
 
-export default { verdict, check };
+// Read only on a refusal (nginx evaluates js_set variables when used).
+function refusal(r) {
+  return words(r.uri, r.headersIn['X-Test-Country'] || '', readStore(), Math.floor(Date.now() / 1000)) + '\n';
+}
+
+export default { verdict, check, refusal, words };

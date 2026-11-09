@@ -21,7 +21,7 @@ import { usePageNotice, useNotify, FormStatus } from '../notices'
 import { ConfirmDialog } from '../listActions'
 import { COUNTRIES, countryName, toCountryCode } from '../lib/countries'
 import {
-  rightsApi, type RightsProfile, type ProfileInput, type RightsAppType, type Use, type AccessType, type RightsWindow,
+  rightsApi, type RightsProfile, type RightsSettings, type ProfileInput, type RightsAppType, type Use, type AccessType, type RightsWindow,
   USE_LABEL, USES, ACCESS_LABEL, ACCESS_TYPES, APP_LABEL, APP_TYPES, appTypeOf, territorySummary, windowSummary, daysLeft,
 } from '../rights/rightsApi'
 import { AppChip, AppTypeGlyph } from '../rights/RightsIcons'
@@ -31,6 +31,70 @@ export default function RightsPage({ path }: { path: string }) {
   const id = path.split('/').filter(Boolean)[1] ?? null
   if (id) return <ProfileEditor key={id} id={id === 'new' ? null : decodeURIComponent(id)} />
   return <RightsList />
+}
+
+// ---------------------------------------------------------------------------
+//  Where a title cannot play: the block message and Notify me (build queue P2-2)
+// ---------------------------------------------------------------------------
+function BlockMessageCard({ settings, canEdit, onSaved }: { settings: RightsSettings; canEdit: boolean; onSaved: (s: RightsSettings) => void }) {
+  const [msg, setMsg] = useState(settings.blockMessage ?? '')
+  const [busy, setBusy] = useState(false)
+  const notify = useNotify()
+  useEffect(() => { setMsg(settings.blockMessage ?? '') }, [settings.blockMessage])
+  const shown = msg.trim() || settings.blockMessageDefault
+  const dirty = (msg.trim() || null) !== (settings.blockMessage ?? null)
+  async function save(b: { blockMessage?: string | null; notifyMe?: boolean }, done: string) {
+    setBusy(true)
+    try { onSaved(await rightsApi.setBlock(b)); notify({ kind: 'ok', message: done }) }
+    catch (e: any) { notify({ kind: 'error', message: e.message }) }
+    finally { setBusy(false) }
+  }
+  const waiting = settings.notifyRequests
+  return (
+    <div className="card rt-sec rt-block" style={{ marginTop: 16 }}>
+      <div>
+        <h2>Where a title cannot play</h2>
+        <p className="rt-help">Viewers outside a title's territories, or outside its rights, see it locked with this message instead of a missing title or a broken player. Every Volt player and your own apps get the same words from the play gate.</p>
+      </div>
+      <div className="rt-block-grid">
+        <div className="rt-block-form">
+          <label className="rt-block-lbl" htmlFor="rt-block-msg">Message</label>
+          <input id="rt-block-msg" className="inp" maxLength={200} disabled={!canEdit || busy} value={msg} placeholder={settings.blockMessageDefault}
+            onChange={e => setMsg(e.target.value)} />
+          <span className="rt-sub">{msg.trim() ? `${msg.trim().length} of 200 characters` : 'Empty: the default words'}</span>
+          <label className="rt-check">
+            <input type="checkbox" disabled={!canEdit || busy} checked={settings.notifyMe}
+              onChange={e => save({ notifyMe: e.target.checked }, e.target.checked ? 'Players now offer Notify me.' : 'Players no longer offer Notify me.')} />
+            <span><b>Offer "Notify me if it becomes available"</b><br /><span className="rt-sub">Viewers leave their email (or are known by their sign-in). They are kept per title below.</span></span>
+          </label>
+          {canEdit && (
+            <div className="rt-block-actions">
+              <button className="btn primary" disabled={!dirty || busy} onClick={() => save({ blockMessage: msg.trim() || null }, 'Viewers see the new message from now on.')}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M5 12l5 5L20 7" /></svg>Save message</button>
+              {settings.blockMessage && <button className="btn" disabled={busy} onClick={() => save({ blockMessage: null }, 'Back to the default words.')}>Use the default</button>}
+            </div>
+          )}
+        </div>
+        <div className="rt-block-preview" aria-label="What a viewer sees">
+          <span className="rt-sub">What a viewer sees</span>
+          <div className="rt-block-screen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+            <b>{shown}</b>
+            {settings.notifyMe && <span className="rt-block-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>Notify me</span>}
+          </div>
+        </div>
+      </div>
+      {(settings.notifyMe || waiting.total > 0) && (
+        <div className="rt-block-waiting">
+          <h3>Waiting to be told <span className="rt-sub">{waiting.total.toLocaleString()} request{waiting.total === 1 ? '' : 's'}</span></h3>
+          {waiting.titles.length ? (
+            <ul>{waiting.titles.map(t => <li key={t.assetId}><span>{t.title ?? 'A title no longer in the library'}</span><b>{t.count.toLocaleString()}</b></li>)}</ul>
+          ) : <p className="rt-help">Nobody yet.</p>}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +127,7 @@ function RightsList() {
   const canEdit = access.can('rights', 'manage')
   const [list, setList] = useState<RightsProfile[] | null>(null)
   const [apps, setApps] = useState<{ id: string; name: string }[]>([])
-  const [def, setDef] = useState<{ defaultProfileId: string; builtins: { open: string; closed: string } } | null>(null)
+  const [def, setDef] = useState<RightsSettings | null>(null)
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
   const notify = useNotify()
@@ -173,6 +237,8 @@ function RightsList() {
         )}
       </div>
       <p className="rt-help" style={{ marginTop: 10 }}>Built-in profiles cannot be changed or deleted. A profile in use cannot be deleted: move its assets to another profile first.</p>
+
+      {def && <BlockMessageCard settings={def} canEdit={canEdit} onSaved={setDef} />}
     </>
   )
 }
