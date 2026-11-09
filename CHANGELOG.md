@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.71.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · Hybrid Sites: Files encoded at a site now get their ingest sidecar too: when your ingest rules write a .json or .xml sidecar, the site agent writes it beside the original at the site, naming the file as it is there. The watchfolder does not take it in again, and a file of that name you already have is never replaced.
+
 ## 0.70.0 (2026-11-09)
 
 ### Product (in customer release notes)
