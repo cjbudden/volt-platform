@@ -91,7 +91,7 @@ export function siteTargetKinds(): string[] {
 }
 
 /** The type an upload records, from the name: video, or audio for an audio asset (H2b-4). */
-function mediaTypeOf(name: string): string {
+export function mediaTypeOf(name: string): string {
   const audio: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac' };
   return audio[extname(name).toLowerCase()] ?? videoTypeOf(name);
 }

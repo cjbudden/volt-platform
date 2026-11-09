@@ -45,6 +45,16 @@ const PLACEMENT: Record<string, { label: string; help: string }> = {
   encode_site: { label: 'Encode at site', help: 'Video and audio are encoded by the site agent at the site and only the packaged output is uploaded; the original stays on your storage. Images, captions and loops are uploaded as usual.' },
 }
 
+/** Fallback times offered for an Encode at site folder (Hybrid Sites, H5). Null waits for the site. */
+const FALLBACK_CHOICES: { minutes: number | null; label: string }[] = [
+  { minutes: null, label: 'Wait for the site' },
+  { minutes: 15, label: 'Encode in the cloud after 15 minutes' },
+  { minutes: 30, label: 'Encode in the cloud after 30 minutes' },
+  { minutes: 60, label: 'Encode in the cloud after 1 hour' },
+  { minutes: 240, label: 'Encode in the cloud after 4 hours' },
+  { minutes: 1440, label: 'Encode in the cloud after 1 day' },
+]
+
 const STATUS: Record<string, { label: string; tone: string; help: string }> = {
   seen:        { label: 'Waiting',     tone: 'var(--brand,#3f7bff)', help: 'Classified, waiting for the next ingest pass. A caption or metadata file waits up to 24 hours for its video.' },
   ingested:    { label: 'In library',  tone: 'var(--ok,#4ade80)',    help: 'A library record was created for this file: Image Library, Media Library (a video shows its encode there) or Loops & Fillers.' },
@@ -636,6 +646,30 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
             </select>
             <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
               {PLACEMENT[folder.placement ?? 'upload_cloud']?.help}
+            </span>
+          </div>
+        )}
+        {/* CLOUD FALLBACK (Hybrid Sites, H5). Off unless a person picks a time:
+            the original stays on the customer's storage unless they choose to
+            let it go to the cloud when the site cannot encode it. */}
+        {folder.kind === 'site' && folder.placement === 'encode_site' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }} htmlFor="wf-fallback">If the site does not encode it</label>
+            <select id="wf-fallback" className="inp sel-sm" style={{ width: 'auto', maxWidth: '100%' }}
+              value={String((folder as any).fallback_minutes ?? '')} disabled={!canManage}
+              onChange={async (e) => {
+                try { await api.patchWatchfolder(folder.id, { fallbackMinutes: e.target.value ? Number(e.target.value) : null }); setErr(''); load() }
+                catch (er: any) { setErr(String(er?.message ?? er)) }
+              }}>
+              {FALLBACK_CHOICES.map((c) => (
+                <option key={String(c.minutes)} value={c.minutes ?? ''}>{c.label}</option>
+              ))}
+              {(() => { const m = (folder as any).fallback_minutes; return m && !FALLBACK_CHOICES.some((c) => c.minutes === m) ? <option value={m}>Encode in the cloud after {m} minutes</option> : null })()}
+            </select>
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>
+              {(folder as any).fallback_minutes
+                ? 'If no server of the site starts the encode in that time, the agent sends the original to Volt and it is encoded in the cloud. The item records why.'
+                : 'The item waits until a server of the site encodes it. The original never leaves your storage.'}
             </span>
           </div>
         )}

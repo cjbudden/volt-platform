@@ -58,6 +58,7 @@ import { pgCompanionStore, videoImageTypes } from '../services/watchfolder/store
 import { hasLicence, requireLicence } from '../services/sites/licences';
 import { defaultRulesFor, typesOfPattern, customOrdinal, defaultOrdinals, type FileType } from '../services/watchfolder/defaults';
 import { PLACEMENTS, PLACEMENTS_BUILT } from '../services/sites/siteWatchfolders';
+import { fallbackMinutesOf } from '../services/sites/siteFallback';
 import { ApiError } from '../util/http';
 
 /**
@@ -163,7 +164,7 @@ export const watchfoldersRouter = Router();
 watchfoldersRouter.use(requireAuth);
 
 const FOLDER_EDITABLE = ['name', 'kind', 'config', 'default_target_kind', 'quarantine_path',
-  'enabled', 'ladder_group_id', 'placement', 'rights_profile_id'];
+  'enabled', 'ladder_group_id', 'placement', 'rights_profile_id', 'fallback_minutes'];
 
 /** A rights profile named on a folder must be one of the account's (build queue R1). */
 async function ownRightsProfile(acct: string, id: unknown): Promise<string | null> {
@@ -208,6 +209,8 @@ const createSchema = z.object({
   /** kind 'site': the Hybrid Site whose agent watches the folder, and where the work runs. */
   siteId: z.string().nullable().optional(),
   placement: z.string().nullable().optional(),
+  /** kind 'site', Encode at site: minutes an encode may wait for the site before it is sent to the cloud. Null waits (H5). */
+  fallbackMinutes: z.any().optional(),
   defaultTargetKind: z.string().nullable().optional(),
   quarantinePath: z.string().default('_review'),
   /** The ladder every video file this folder accepts is encoded to. Null falls
@@ -256,26 +259,28 @@ watchfoldersRouter.post('/', asyncHandler(async (req, res) => {
   if (b.defaultTargetKind) assertTargetKind(b.defaultTargetKind, 'files the rules do not catch');
   let site: { id: string; name: string } | null = null;
   let placement: string | null = null;
+  let fallback: number | null = null;
   if (b.kind === 'site') {
     site = await siteFor(accountId(req), b.siteId);
     placement = b.placement ?? 'upload_cloud';
     assertPlacement(placement);
+    fallback = fallbackMinutesOf(b.fallbackMinutes);
     if (!String(b.config?.path ?? '').trim()) throw badRequest('An on-prem folder needs its path on the site host (config.path)');
   }
   const who = actor(req);
   const row = await one<any>(
-    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id, site_id, placement, rights_profile_id)
-     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8,$9,$10,$11) RETURNING *`,
+    `INSERT INTO watchfolders(account_id, name, kind, config, default_target_kind, quarantine_path, created_by, updated_by, ladder_group_id, site_id, placement, rights_profile_id, fallback_minutes)
+     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$7,$8,$9,$10,$11,$12) RETURNING *`,
     [accountId(req), b.name, b.kind, JSON.stringify(b.config), b.defaultTargetKind ?? null,
      b.quarantinePath, who.userId, b.ladderGroupId ?? null, site?.id ?? null, placement,
-     await ownRightsProfile(accountId(req), (req.body ?? {}).rightsProfileId)]
+     await ownRightsProfile(accountId(req), (req.body ?? {}).rightsProfileId), fallback]
   );
   const rules = b.defaultRules ? await addDefaults(row) : [];
   // The site's agents pick up a new folder on their next config pull.
   if (site) await query(`UPDATE sites SET config_version = config_version + 1 WHERE id = $1`, [site.id]);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: 'create', entityType: 'watchfolder', entityId: row.id,
-    snapshot: { name: b.name, kind: b.kind, ...(site ? { site: site.name, placement } : {}) } });
+    snapshot: { name: b.name, kind: b.kind, ...(site ? { site: site.name, placement, fallbackMinutes: fallback } : {}) } });
   res.status(201).json({ ...row, site_name: site?.name ?? null, rules });
 }));
 
@@ -319,6 +324,12 @@ watchfoldersRouter.patch('/:id', asyncHandler(async (req, res) => {
     if (cur.kind !== 'site') throw badRequest('Only an on-prem folder has a placement');
     assertPlacement(b.placement);
     patch.placement = b.placement;
+  }
+  if ('fallbackMinutes' in b) {
+    // Only an on-prem folder has a site to fall back from (H5). Kept when the
+    // placement changes, so switching back to Encode at site keeps the choice.
+    if (cur.kind !== 'site') throw badRequest('Only an on-prem folder has a fallback time');
+    patch.fallback_minutes = fallbackMinutesOf(b.fallbackMinutes);
   }
   const who = actor(req);
   // patchEntity, not a bare UPDATE: it versions, audits, and publishes the live

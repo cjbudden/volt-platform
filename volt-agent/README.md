@@ -77,3 +77,9 @@ A file registered from an Encode at site folder gets its ingest sidecar
 (`<file>.json` or `.xml`, when the ingest rules ask for one) written beside it
 by the agent (0.10.0 on). The agent writes only that name, never over a
 different file already there, and the folder's next scan skips it.
+
+When an Encode at site folder has a fallback time and no server of the site
+takes an encode within it, Volt asks for the original (0.11.0 on): the agent
+sends it on the same resumable upload (`fallback 1` in the upload metadata)
+and Volt encodes it in the cloud. The file stays in the folder. A file that is
+gone, or changed size, is reported instead and the item says why.

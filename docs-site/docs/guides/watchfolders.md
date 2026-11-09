@@ -60,7 +60,7 @@ What happens to a file in an on-prem folder:
 - A caption that arrives before its video waits for it, up to 24 hours, without being uploaded twice. If it then goes to **Needs review**, the agent moves the file into the review folder **at the site**; until it has, the entry says "Waiting for the site agent to move it into the review folder".
 - A file over its limit is not uploaded at all: an image over the folder's size limit is marked **Failed**, a caption or metadata file over 25 MB goes to **Needs review** at the site.
 
-The folder's page says which site it is on (**On** and the site's name) and when the agent last looked at it. There is no **Scan now**: the agent looks at the folder every few seconds. **Where it is encoded** is **Upload and encode in the cloud** (the default, described above) or **Encode at site**: the site's servers encode its videos and audio, only the finished streams are uploaded, and the original stays at the site. Images, captions, slates and loops are uploaded either way. How it works and what the servers need is in [Hybrid Sites](hybrid-sites.md#encoding-at-the-site).
+The folder's page says which site it is on (**On** and the site's name) and when the agent last looked at it. There is no **Scan now**: the agent looks at the folder every few seconds. **Where it is encoded** is **Upload and encode in the cloud** (the default, described above) or **Encode at site**: the site's servers encode its videos and audio, only the finished streams are uploaded, and the original stays at the site. Images, captions, slates and loops are uploaded either way. How it works and what the servers need is in [Hybrid Sites](hybrid-sites.md#encoding-at-the-site). With **Encode at site**, **If the site does not encode it** says what happens when no server of the site takes an encode: **Wait for the site** (the default; the original never leaves your storage), or **Encode in the cloud after** a time from 15 minutes to 1 day, when the agent sends the original and Volt encodes it ([how the fallback works](hybrid-sites.md#when-the-site-does-not-encode-it-fall-back-to-the-cloud)).
 
 A watchfolder can also be a folder in a storage bucket instead of a path (set up through the API, see [Through the API](#through-the-api)). Where your Volt runs on AWS, a bucket folder under `watch/` in Volt's own bucket is taken in as soon as a file finishes uploading, usually within seconds, and Volt also looks through every bucket folder once an hour in case a file was missed.
 
@@ -257,7 +257,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "the site agent could not move it to the review folder" | Volt sent an on-prem file to review, but it was no longer in the watchfolder at the site | Find the file at the site, or **Dismiss** the entry |
 | "the site agent could not move it back" | After **Reprocess**, the file was no longer in the review folder at the site | Put the file back in the watchfolder at the site yourself, or **Dismiss** the entry |
 | "the encode at the site could not be queued" on an item in an **Encode at site** folder | The site was disabled, or this Volt keeps finished streams in a storage bucket, where encoding at the site is not available yet | Enable the site, or set the folder to **Upload and encode in the cloud** and copy the file in again |
-| An item in an **Encode at site** folder stays **Processing** | No approved, **Online** server of the site is taking the encode, or none has the encoder set up | Check the site's servers on [Sites](hybrid-sites.md) and start the agent with `VOLT_ENCODER_IMAGE` |
+| An item in an **Encode at site** folder stays **Processing** | No approved, **Online** server of the site is taking the encode, or none has the encoder set up | Check the site's servers on [Sites](hybrid-sites.md) and start the agent with `VOLT_ENCODER_IMAGE`, or set **If the site does not encode it** to a time so it is encoded in the cloud instead |
 
 ## Through the API
 
@@ -288,7 +288,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   "https://your-volt-host/api/watchfolders"
 ```
 
-An on-prem folder (Hybrid Sites add-on). Without the add-on the answer is `403` with the code `licence_required`; `placement` is `upload_cloud` (the default: the agent uploads, Volt encodes) or `encode_site` (video and audio are encoded at the site and only the finished streams uploaded).
+An on-prem folder (Hybrid Sites add-on). Without the add-on the answer is `403` with the code `licence_required`; `placement` is `upload_cloud` (the default: the agent uploads, Volt encodes) or `encode_site` (video and audio are encoded at the site and only the finished streams uploaded). With `encode_site`, `fallbackMinutes` (5 to 10080, or `null` to wait for the site, the default) is how long an encode may wait at the site before the original is sent and encoded in the cloud; set it when you create the folder or with `PATCH /api/watchfolders/{id}`. The folder returns it as `fallback_minutes`.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

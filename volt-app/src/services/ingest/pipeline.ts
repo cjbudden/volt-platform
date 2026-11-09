@@ -397,11 +397,14 @@ export async function deliverWebhooks(accountId: string, payload: IngestPayload,
 
 /** Queue the encode for an asset whose ingest is now complete. Idempotent by dedupe key. */
 export async function queueEncodeFor(assetId: string): Promise<string | null> {
-  const a = await one<any>(`SELECT v.id, v.account_id, v.source_key, v.ladder_group_id, v.encode_job_id, v.ingest->'siteSource' AS site_source, j.state AS job_state
+  const a = await one<any>(`SELECT v.id, v.account_id, v.source_key, v.ladder_group_id, v.encode_job_id, v.ingest->'siteSource' AS site_source, v.ingest->'siteFallback' AS site_fallback, j.state AS job_state
                               FROM vod_assets v LEFT JOIN jobs j ON j.id = v.encode_job_id WHERE v.id = $1`, [assetId]);
   // An original kept at a site (Encode at site, H4-3) is encoded there: the
   // same queue a registration starts, never a cloud encode with no source.
   if (!a?.source_key && a?.site_source?.siteId) {
+    // The site has been asked for the original (cloud fallback, H5): the
+    // encode is queued in the cloud when it arrives, not at the site again.
+    if (['requested', 'uploading'].includes(String(a.site_fallback?.state ?? ''))) return null;
     if (a.encode_job_id && ['queued', 'running', 'succeeded'].includes(String(a.job_state))) return a.encode_job_id;
     const { requestSiteEncode } = await import('../sites/siteEncode');
     const job = await requestSiteEncode({ vodAssetId: a.id, accountId: a.account_id, siteId: a.site_source.siteId, sitePath: a.site_source.sitePath, ladderGroupId: a.ladder_group_id ?? null });

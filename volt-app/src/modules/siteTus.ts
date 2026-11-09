@@ -26,12 +26,14 @@ import { openSession, MAX_UPLOAD_BYTES, abortSession, type UploadSession } from 
 import { authenticateSite, type SitePrincipal } from '../services/sites/sites';
 import { licenceRequired } from '../services/sites/licences';
 import { itemForUpload, attachUpload, closeUploadedItem, requireApprovedHost, landSiteFile } from '../services/sites/siteWatchfolders';
+import { fallbackItemForUpload, fallbackUploadOpened, isFallbackUpload, landFallbackSource } from '../services/sites/siteFallback';
 import { PgTusStore, landTus, toInfo } from './tus';
 
 interface SiteWho { accountId: string; userId: null; site: SitePrincipal }
 
 class SiteTusStore extends PgTusStore {
   async create(who: SiteWho, length: number, md: Record<string, string>): Promise<TusInfo> {
+    if (md.fallback === '1') return this.createFallback(who, length, md);
     const { item, target, existingUpload, contentType } = await itemForUpload(who.site, md.itemId, length);
     if (existingUpload) {
       const s = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [existingUpload]);
@@ -57,6 +59,36 @@ class SiteTusStore extends PgTusStore {
       const s = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [kept]);
       if (s) return toInfo(s, { filename: s.filename, itemId: String(item.id) });
     }
+    return toInfo(session, { filename: base, itemId: String(item.id) });
+  }
+
+  /**
+   * THE ORIGINAL OF AN ENCODE AT SITE FILE, sent because the site did not
+   * encode it within the folder's fallback time (H5, siteFallback.ts). Opened
+   * for the item like any site upload, as a 'site_file' session: no new
+   * Media Library record, the asset the file was registered as gets it.
+   */
+  private async createFallback(who: SiteWho, length: number, md: Record<string, string>): Promise<TusInfo> {
+    const { item, existingUpload, contentType } = await fallbackItemForUpload(who.site, md.itemId, length);
+    if (existingUpload) {
+      const s = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [existingUpload]);
+      if (s) return toInfo(s, { filename: s.filename, itemId: String(item.id) });
+    }
+    const base = String(item.object_key).split('/').pop() || 'upload.bin';
+    const { session } = await openSession({
+      accountId: who.accountId, openedBy: null, purpose: 'site_file',
+      name: base.replace(/\.[^.]+$/, '').slice(0, 200), filename: base, contentType,
+      totalBytes: Math.max(1, length), ladderGroupId: item.ladder_group_id ?? null,
+      relativePath: item.object_key, source: item.watchfolder_id, metadata: null,
+    });
+    await query(`UPDATE upload_sessions SET chunk_count = 0, updated_at = now() WHERE id = $1`, [session.id]);
+    const kept = await attachUpload(Number(item.id), session.id);
+    if (kept !== session.id) {
+      await abortSession(session, 'a second upload for the same original').catch(() => {});
+      const s = await one<UploadSession>(`SELECT * FROM upload_sessions WHERE id = $1`, [kept]);
+      if (s) return toInfo(s, { filename: s.filename, itemId: String(item.id) });
+    }
+    await fallbackUploadOpened(Number(item.id));
     return toInfo(session, { filename: base, itemId: String(item.id) });
   }
 
@@ -88,6 +120,10 @@ export const siteTusRouter = createTusRouter({
   },
   onComplete: async (info, _who, sha) => {
     const s = await one<any>(`SELECT purpose FROM upload_sessions WHERE id = $1`, [info.id]);
+    if (s?.purpose === 'site_file' && await isFallbackUpload(info.id)) {
+      await landFallbackSource(info.id, siteTusStore.dataPath(info), sha);
+      return;
+    }
     if (s?.purpose === 'site_file') {
       await landSiteFile(info.id, siteTusStore.dataPath(info), sha);
       return;

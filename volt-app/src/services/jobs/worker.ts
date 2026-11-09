@@ -103,6 +103,11 @@ export function startWorker(opts: {
 
   const reap = setInterval(() => {
     reapExpiredLeases().catch((e) => console.error('[jobs] reap error', e));
+    // Encodes waiting at a site past their folder's fallback time go to the
+    // cloud (Hybrid Sites, H5). Next to the reaper because both judge jobs
+    // that stopped moving; loaded here so the queue does not import sites.
+    import('../sites/siteFallback').then((m) => m.sweepSiteFallbacks())
+      .catch((e) => console.error('[jobs] site fallback sweep error', e));
   }, reapMs);
 
   poll.unref?.();

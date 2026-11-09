@@ -30,6 +30,8 @@
  *   GET    /api/site-agent/watchfolders/:id/uploads            accepted files still to upload, with their open upload
  *   GET    /api/site-agent/watchfolders/:id/registrations      Encode at site: accepted video and audio still to register (H4-3)
  *   POST   /api/site-agent/watchfolders/:id/registrations/:itemId  { sizeBytes, checksum, head, probe } register one; the file stays at the site
+ *   GET    /api/site-agent/watchfolders/:id/fallbacks          Encode at site: originals to send because the site did not encode them in time (H5)
+ *   POST   /api/site-agent/watchfolders/:id/fallbacks/:itemId  { ok: false, error } the original could not be sent
  *                                                         (the answer carries `sidecar`, the ingest sidecar to write beside it there: H4-7)
  *   GET    /api/site-agent/watchfolders/:id/returns            refused files an operator sent back
  *   POST   /api/site-agent/watchfolders/:id/returns/:itemId    { ok, error } the file was moved back, or not
@@ -269,6 +271,21 @@ siteAgentRouter.get('/watchfolders/:id/registrations', asyncHandler(async (req, 
 siteAgentRouter.post('/watchfolders/:id/registrations/:itemId', asyncHandler(async (req, res) => {
   const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
   res.status(201).json(await W.registerSiteItem(p, req.params.id, req.params.itemId, req.body ?? {}));
+}));
+
+// Cloud fallback (H5): originals the site is asked to send, and the report
+// when one cannot be sent. The file itself goes up on /api/site-agent/tus
+// with Upload-Metadata `fallback 1`.
+siteAgentRouter.get('/watchfolders/:id/fallbacks', asyncHandler(async (req, res) => {
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
+  const { pendingFallbacks } = await import('../services/sites/siteFallback');
+  res.json({ items: await pendingFallbacks(p, req.params.id) });
+}));
+
+siteAgentRouter.post('/watchfolders/:id/fallbacks/:itemId', asyncHandler(async (req, res) => {
+  const p = hybridOnly(await S.authenticateSite(req.headers.authorization));
+  const { fallbackFailed } = await import('../services/sites/siteFallback');
+  res.json(await fallbackFailed(p, req.params.id, req.params.itemId, req.body?.error ?? null));
 }));
 
 siteAgentRouter.get('/watchfolders/:id/returns', asyncHandler(async (req, res) => {

@@ -190,7 +190,7 @@ About 10 to 14 build sessions of the size the recent FAST and SSAI builds took, 
 | 2. On-prem watchfolder, upload to cloud | H2 | Built (see below) |
 | 3. Job lease, then Mirror and Archive | H3, H3-2, H3-3 | Job lease built (H3); Mirror and Archive first part built (H3-2, see below): folder targets, copies of originals, verification and re-checks; the rest is H3-3 |
 | 4. Site encoding | H4 to H4-4 | Built: the cloud side (H4, v0.65.0), the agent's worker (H4-2, v0.66.0), Encode at site on on-prem watchfolders (H4-3, see below). Still to do (H4-4): the package straight into the bucket on AWS, streaming large package files, the Mac Docker runs |
-| 5. Fallback, DRM proxy and docs | H5 | Not started |
+| 5. Fallback, DRM proxy and docs | H5, H5-2 | Fallback to cloud encoding built (H5, 9 Nov 2026); DRM key proxy, Workflows stages and docs in H5-2 |
 
 **Phase 1 as built (H1).**
 

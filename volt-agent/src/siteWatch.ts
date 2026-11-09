@@ -24,6 +24,10 @@
 //       The ingest sidecar (the same file an upload gets beside it in the
 //       cloud) is written beside the original here (H4-7).
 //       Images, captions, slates and loops still upload as in step 4.
+//    4c. Cloud fallback (H5): when no server of the site took an encode
+//       within the folder's fallback time, Volt asks for the original; the
+//       agent sends it on the same resumable upload and the cloud encodes
+//       it. The file stays here too. A file that is gone is reported.
 //    5. Move into the review folder the files the CLOUD sent to review (a
 //       caption with no video after 24 hours, one over 25 MB): it decided,
 //       but the file is here (H2b-5).
@@ -121,6 +125,8 @@ export interface FolderPass {
   sidecars: string[];
   /** Files moved into the review folder because the cloud sent them there. */
   reviewed: number;
+  /** Encode at site: originals sent to Volt because the site did not encode them in time (H5). */
+  fellBack: string[];
 }
 
 class AgentHttpError extends Error { constructor(msg: string, public status: number, public code?: string) { super(msg); } }
@@ -194,7 +200,7 @@ export async function siteFolders(ctx: WatchCtx): Promise<SiteFolder[]> {
 export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<FolderPass> {
   const call = client(ctx);
   const log = ctx.log ?? ((s) => console.log(s));
-  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0, registered: [], sidecars: [] };
+  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0, registered: [], sidecars: [], fellBack: [] };
   try {
     // 1. The outbox.
     const waiting = ctx.memory.outbox.filter((o) => o.folderId === folder.id);
@@ -259,6 +265,41 @@ export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<Fol
         } catch (e: any) {
           out.uploadErrors.push({ objectKey: r.objectKey, error: String(e?.message ?? e) });
           log(`[watch] ${folder.name}: ${r.objectKey} not registered: ${e?.message ?? e} (tried again next pass)`);
+        }
+      }
+    }
+
+    // 4c. Cloud fallback (Encode at site, H5): originals Volt asks for because
+    //     no server of the site took their encode within the folder's
+    //     fallback time. Sent on the same resumable upload, marked as the
+    //     original of the item; the file stays here as well. A cloud from
+    //     before H5 has no such list (404): nothing to do.
+    if (folder.placement === 'encode_site') {
+      const asked = (await call('GET', `/api/site-agent/watchfolders/${folder.id}/fallbacks`)
+        .catch((e) => { if (e instanceof AgentHttpError && e.status === 404) return null; throw e; }))?.items ?? [];
+      for (const u of asked) {
+        const abs = join(folder.path, String(u.objectKey).split('/').join(sep));
+        const st = await stat(abs).catch(() => null);
+        if (!st || st.size !== u.sizeBytes) {
+          // The original is gone or was replaced: Volt cannot encode it from
+          // here or there, so say so once and let the asset tell a person.
+          const why = !st ? 'the file is no longer in the folder' : `the file is ${st.size} bytes now and was ${u.sizeBytes} when it was registered`;
+          await call('POST', `/api/site-agent/watchfolders/${folder.id}/fallbacks/${u.itemId}`, { ok: false, error: why }).catch(() => {});
+          out.uploadErrors.push({ objectKey: u.objectKey, error: `not sent for the cloud encode: ${why}` });
+          log(`[watch] ${folder.name}: ${u.objectKey} not sent for the cloud encode: ${why}`);
+          continue;
+        }
+        try {
+          const base = ctx.server.replace(/\/+$/, '');
+          await tusUploadFile(abs, {
+            endpoint: `${base}/api/site-agent/tus`, token: ctx.credential(), metadata: { itemId: String(u.itemId), fallback: '1' },
+            resumeUrl: u.upload?.url ? base + u.upload.url : null, chunkBytes: ctx.chunkBytes, retries: ctx.retries, fetch: ctx.fetch,
+          });
+          out.fellBack.push(u.objectKey);
+          log(`[watch] ${folder.name}: ${u.objectKey} sent to Volt to be encoded in the cloud (the site did not encode it in time)`);
+        } catch (e: any) {
+          out.uploadErrors.push({ objectKey: u.objectKey, error: String(e?.message ?? e) });
+          log(`[watch] ${folder.name}: ${u.objectKey} upload for the cloud encode stopped: ${e?.message ?? e} (resumes next pass)`);
         }
       }
     }
