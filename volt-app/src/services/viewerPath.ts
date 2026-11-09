@@ -92,8 +92,11 @@ export function vodAvailabilityRow(assetId: string): Promise<any | null> {
     `vodavail:${assetId}`,
     { ttlSec: C().rulesTtlSec, tags: [`asset:${assetId}`] },
     () => one<any>(
+      // The public status (build queue P1) is computed from these same fields
+      // on the play path: review, media, listing and archive are read here too.
       `SELECT availability_state, availability, availability_sources, available_from, available_until, published, schema_id, channel_id, event_id,
-              rights_profile_id, rights_narrow, created_at, first_aired_at
+              rights_profile_id, rights_narrow, created_at, first_aired_at,
+              review_state::text AS review_state, media_state, master_key, listed_from, unlisted, archived_at, withdrawn_by
          FROM vod_assets WHERE id = $1`, [assetId])
   );
 }

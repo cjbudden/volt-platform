@@ -264,6 +264,9 @@ async function guidedAsset(req: Request) {
   if (!UUID.test(id)) throw notFound();
   const asset = await assetFor(id);
   if (!asset?.master_key) throw notFound();
+  // Only an Available title plays (build queue P1): anything else is not found.
+  const ps = await (await import('../services/publicStatus')).publicDecision(id);
+  if (ps?.status !== 'available') throw notFound();
   const rule = await ruleForAsset(asset.account_id, asset.schema_id);
   if (!rule) throw notFound();
   const ver = await guidedVersion(asset, rule);

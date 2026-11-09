@@ -28,6 +28,7 @@ import { manifestUrls } from '../services/shareLinks';
 import { mp3FeedFor, publicMp3Path } from '../services/radio/mp3Feed';
 import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
 import { adsForPlay } from '../services/vodAds';
+import { publicDecision, publiclyVisible } from '../services/publicStatus';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -313,6 +314,23 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   const geo = viewerGeo(req, b.geo);
   note.kind = kind; note.geo = geo ?? null;
   let edgeSec = cacheable ? scaleConfig.edge.availabilityMaxAgeSec : 0;
+
+  // THE PUBLIC VISIBILITY RULE (build queue P1, services/publicStatus.ts). An
+  // on-demand asset that is not public (draft, in review, processing,
+  // restricted, expired, archived) is answered exactly as an id that never
+  // existed, so the gate says nothing about unpublished content. A Scheduled
+  // title past its Listed from date is a teaser: what it is and when, never a
+  // token. The answer is cached at the edge no longer than it stays true.
+  if (kind === 'vod') {
+    const now = new Date();
+    const ps = await publicDecision(b.assetId, now);
+    if (!ps || !publiclyVisible(ps, now)) return { status: 404, body: { error: 'unknown asset' }, edgeSec: cacheable ? 5 : 0 };
+    if (ps.until) edgeSec = Math.max(0, Math.min(edgeSec, Math.floor((ps.until.getTime() - now.getTime()) / 1000)));
+    if (ps.status === 'scheduled') {
+      return { status: 403, edgeSec, body: { available: false, mode: 'scheduled', reason: 'Not available yet.',
+        availableFrom: ps.effectiveFrom?.toISOString() ?? null, meta: await metaFor(key.account_id, kind, b.assetId) } };
+    }
+  }
   if (edgeSec > 0 && kind === 'channel') {
     const w = await currentProgrammeWindow(b.assetId);
     edgeSec = Math.min(edgeSec, Math.floor((w.until - Date.now()) / 1000));
@@ -515,7 +533,8 @@ availabilityRouter.post(
   asyncHandler(async (req, res) => {
     const b = availSchema.parse(req.body);
     const a = await timedDecide(req, b, { cacheable: false }, 'POST');
-    if (a.status === 401 || a.status === 403 || a.status === 404) throw new ApiError(a.status, a.body.error);
+    // A Scheduled teaser (403, mode scheduled) is an answer, not an error: it carries when and what.
+    if ((a.status === 401 || a.status === 403 || a.status === 404) && a.body?.mode !== 'scheduled') throw new ApiError(a.status, a.body.error);
     send(res, a);
   })
 );
@@ -570,8 +589,17 @@ accessRouter.post(
     // Same ownership rule as /availability. This endpoint mints no token, but
     // it answers the same question, so without the check it was the quieter
     // half of the same cross-tenant oracle.
-    if (!ASSET_UUID_RE.test(b.assetId) || !(await assetKindFor(key.account_id, b.assetId))) {
-      throw new ApiError(404, 'unknown asset');
+    const ck = ASSET_UUID_RE.test(b.assetId) ? await assetKindFor(key.account_id, b.assetId) : null;
+    if (!ck) throw new ApiError(404, 'unknown asset');
+    // The public visibility rule, as on the play gate (build queue P1).
+    if (ck === 'vod') {
+      const ps = await publicDecision(b.assetId);
+      if (!ps || !publiclyVisible(ps)) throw new ApiError(404, 'unknown asset');
+      if (ps.status === 'scheduled') {
+        res.json({ allowed: false, assetId: b.assetId, reasons: ['Not available yet.'], replacementAssetId: null, mode: 'scheduled',
+          availableFrom: ps.effectiveFrom?.toISOString() ?? null });
+        return;
+      }
     }
     const vi = await viewerInputs(req, b, key.account_id, app, viewerGeo(req, b.geo));
     const rights = await evaluateAccess(b.assetId, viewerGeo(req, b.geo), { appId: key.app_id, appType: appTypeOf(app?.type, app?.surface), entitled: vi.entitled, accountId: key.account_id, viewer: vi.viewer, viewerCtx: vi.viewerCtx });

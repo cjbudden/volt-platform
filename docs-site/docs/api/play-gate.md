@@ -62,10 +62,17 @@ If the viewer has just bought a pass, the gate checks their purchases again befo
 | `200` | `replacement` | A blackout or rights window: play the replacement it names (`assetId` is the replacement's, with its own `delivery`) | The replacement, and `reason` if you show one |
 | `402` | `paywall` | A pass or purchase is needed. `products` lists them; `meta` says what it is | The offers and Buy |
 | `403` | `sign_in` | Members only | Sign in |
-| `451` | `blocked` | Not available here or now (geo, schedule, rights). `reason` says which | Not available |
+| `403` | `scheduled` | An on-demand title announced ahead of its release (its **Listed from** date has passed). `availableFrom` says when it opens and `meta` what it is; there is no token and no `delivery` | Coming soon, with the date |
+| `451` | `blocked` | Not available here (geo, the rights' territories or apps, a blackout). `reason` says which | Not available |
 | `403` | | The app's key does not work on this site, or the app is off: `error` says which | Nothing: fix the app's settings |
 | `401` | | The key is not valid | Nothing: fix the key |
-| `404` | | No such asset in the key's account | Not found |
+| `404` | | No such asset in the key's account, or an on-demand title that is not public (see below) | Not found |
+
+### Only public titles answer
+
+An on-demand title is public only while it is **Available**: published, its media ready, inside its publishing window and inside its rights. A title announced ahead of its release is public from its **Listed from** date as a teaser (the `scheduled` answer above). Everything else (a draft, a title in review, still processing, restricted by its rights, scheduled and not yet listed, expired, archived or deleted) gets exactly the answer an id that never existed gets: `404 unknown asset`, with nothing else in the body. So the gate never says whether unpublished content exists. Volt's console and the admin API still see every title and its status.
+
+The anonymous answer is cached at the edge no longer than it stays true: a title whose window ends at 20:00 stops playing at 20:00, and one that opens at 20:00 plays from 20:00.
 
 ### 4. Check without playing
 
@@ -74,7 +81,7 @@ For a catalogue screen, ask for a yes or no without minting a token:
 ```bash file=play-gate/catalogue-check.sh
 ```
 
-`reasons` lists why not, when the answer is no. `mode` is what the gate would answer.
+`reasons` lists why not, when the answer is no. `mode` is what the gate would answer (`scheduled`, with `availableFrom`, for a title announced ahead of its release). A title that is not public answers `404 unknown asset` here too.
 
 ### 5. The playback token
 
@@ -124,7 +131,8 @@ A viewer who paid for the title (and, if the rule says so, a signed-in member) g
 | `403 blocked: referrer/origin required for this web app` | No `Origin` or `Referer`, for example a server-side call with a web key | Call from the page, or use a `server` app |
 | `401 invalid publishable key` | A revoked or mistyped key, or a secret key | Use the app's current `pk_live_...` key |
 | `401 This session belongs to another account` | The viewer signed in with another account's app | Use the same account's key and session |
-| `404 unknown asset` | Not an id in this account (or not an id at all) | Check the id; ids from another account always answer 404 |
+| `404 unknown asset` | Not an id in this account (or not an id at all), or an on-demand title that is not public now: a draft, in review, processing, restricted, expired or archived | Check the id; ids from another account always answer 404. In Volt, check the title is published and its dates and rights cover now |
+| `403` with `mode: "scheduled"` | The title is announced but not open yet | Show it as coming soon; ask again from `availableFrom` |
 | Members get `sign_in` although your app knows them | A `viewer` or `entitled` sent in the body is ignored from browsers and phones | Sign them in, or use the [token exchange](authentication.md) from your server |
 | `200` with `delivery: null` | The live channel is off air, or its output is not ready | Show "not on air" and try again |
 | `200` with `ads` and `delivery.dash: null` | The title has ad breaks for this viewer, carried in the HLS address: the ads are guided, or the title has no DASH encode | Play `delivery.hls` |

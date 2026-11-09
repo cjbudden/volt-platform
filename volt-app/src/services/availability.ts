@@ -160,6 +160,8 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
        published = true, portal_visible = $7, updated_at = now()
      WHERE id = $1 RETURNING *`,
     [assetId, JSON.stringify({ ...s, targets }), JSON.stringify(plan.sources), state, from, until, portal]);
+  // The public status follows at once (build queue P1), not at the next sweep.
+  await (await import('./publicStatus')).refreshPublicStatus(assetId);
   // COPY RULES for publish (Mirror and Archive, H3-3). Never fails the publish.
   await (await import('./archive/archive')).copyOnRule(accountId, assetId, 'publish');
   return { asset: updated, plan, publications: pubs, state };
@@ -173,6 +175,7 @@ export async function withdraw(assetId: string, by: string, reason?: string): Pr
       WHERE id = $1 RETURNING *`, [assetId, `${by}${reason ? `: ${reason}` : ''}`.slice(0, 300)]);
   if (!row) return null;
   await query(`UPDATE publications SET status = 'withdrawn' WHERE vod_asset_id = $1 AND status IN ('published', 'pending')`, [assetId]);
+  await (await import('./publicStatus')).refreshPublicStatus(assetId);
   return row;
 }
 
@@ -186,7 +189,7 @@ export async function republish(assetId: string, by: string): Promise<PublishOut
  * The clock: open scheduled windows, close expired ones. Run on the scheduler
  * tick; cheap because of the partial index on the two moving states.
  */
-export async function sweepAvailability(): Promise<{ opened: number; expired: number }> {
+export async function sweepAvailability(): Promise<{ opened: number; expired: number; statuses?: number }> {
   const opened = await query(
     `UPDATE vod_assets SET availability_state = 'available', updated_at = now()
       WHERE availability_state = 'scheduled' AND available_from <= now() RETURNING id`);
@@ -196,7 +199,11 @@ export async function sweepAvailability(): Promise<{ opened: number; expired: nu
   for (const r of expired) {
     await query(`UPDATE publications SET status = 'removed' WHERE vod_asset_id = $1 AND status = 'published'`, [r.id]).catch(() => {});
   }
-  return { opened: opened.length, expired: expired.length };
+  // The public status (build queue P1): the rows just opened or closed, and
+  // any row whose next moment has come or that changed since it was computed.
+  const statuses = await (await import('./publicStatus')).sweepPublicStatus()
+    .catch((e: any) => { console.warn('[availability] public status sweep failed:', e?.message ?? e); return 0; });
+  return { opened: opened.length, expired: expired.length, statuses };
 }
 
 /**

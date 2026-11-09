@@ -206,6 +206,9 @@ rightsRouter.put('/profiles/:id', asyncHandler(async (req, res) => {
     `UPDATE rights_profiles SET ${COLS.map((k, i) => `${k} = $${i + 3}`).join(', ')}, updated_at = now() WHERE id = $1 AND account_id = $2 RETURNING *`,
     [p.id, acct, ...COLS.map((k) => (c as any)[k])]);
   invalidateRights(p.id);
+  // Its assets' public status is computed again on the next sweep (build queue P1):
+  // a new window or territory list can make a title restricted or available.
+  await query(`UPDATE vod_assets SET status_at = NULL WHERE rights_profile_id = $1`, [p.id]);
   // Rule collections that read the provider or the profile are matched again soon (build queue C1).
   if ((p.provider ?? null) !== (row.provider ?? null)) {
     await import('../services/collectionRules').then((m) => m.markStale(acct, ['provider'])).catch(() => {});
