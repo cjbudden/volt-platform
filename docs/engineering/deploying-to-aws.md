@@ -77,7 +77,8 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
 3. **Deploy the release** with `node scripts/deploy/deploy.mjs <env>` (build
    queue D1; `deploy/terraform/README.md` section 3): images tagged
    `v<version>-<sha>`, migrations once as a one-off task, services moved and
-   smoke-tested, rolled back on failure, `release/deployments.json` written.
+   smoke-tested, rolled back on failure, and the deployment recorded in
+   release/deployments.json (written by the first deploy, so not in a fresh checkout).
    `--rollback` goes back to the previous recorded state; `--dry-run` prints
    every change. Images, to the repositories the stack created: the
    control plane (`volt-app`), the encoder (`volt-encoder`, also tagged as the

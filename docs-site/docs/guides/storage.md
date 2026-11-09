@@ -129,7 +129,7 @@ With the **Mirror and Archive** add-on, account administrators see a **Mirror an
 2. Give it a **Name** and choose the **Site** whose servers write the copies.
 3. Choose the **Kind**:
    - **A folder or NAS share**: the **Folder on the site's server**, as that server sees it, for example `/mnt/nas/archive`.
-   - **An S3-compatible store (MinIO and similar)**: the **Store address** as the site's server reaches it, the **Bucket**, optionally a **Folder in the bucket** and a **Region**, and the **Key name**. The store's keys are never typed into Volt: they stay on the site's server under that name (see [Copies to an object store](hybrid-sites.md#copies-to-an-object-store)).
+   - **An S3-compatible store (MinIO and similar)**: the **Store address** as the site's server reaches it, the **Bucket**, optionally a **Folder in the bucket** and a **Region**, and the **Key name**. The store's keys are never typed into Volt: they stay on the site's server under that name (see [Copies to an object store](../workflows/mirror-and-archive.md#copies-to-an-object-store)).
 4. Optionally set a **Speed cap (Mbit/s)** so copies leave room for live contribution, and how often copies are **read back** (every 30 days unless you change it; empty means only when you ask).
 5. Choose **Add target**.
 
@@ -162,6 +162,7 @@ What is copied, and when, is set by copy rules in [Publishing Rules](publishing-
 | [Analytics](analytics.md) | Reports are built from the viewer data that **Event data** keeps |
 | [Sites](hybrid-sites.md) | Mirror and Archive copies are written by the servers at your sites |
 | [Publishing Rules](publishing-rules.md) | Copy rules decide which originals are copied to which storage target, and when |
+| [Copies of your media at your own sites](../workflows/mirror-and-archive.md) | The Mirror and Archive flow end to end, from a site to a verified copy |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -194,7 +195,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Couldn't load storage.** | The page could not be read | Choose **Retry** or **Refresh** |
 | No **Mirror and Archive** section | The account does not have the add-on, or you are not an account administrator | Ask Volt about the add-on, or an administrator for access |
 | **Add a storage target** is missing and the section points to **Sites** | No site exists yet | Create a site and add a server in [Sites](hybrid-sites.md) |
-| A copy stays **Queued** with *No keys named ...* | The site's server has no keys under the target's key name | Add them on every server of the site ([how](hybrid-sites.md#copies-to-an-object-store)); the copy retries by itself |
+| A copy stays **Queued** with *No keys named ...* | The site's server has no keys under the target's key name | Add them on every server of the site ([how](../workflows/mirror-and-archive.md#copies-to-an-object-store)); the copy retries by itself |
 | A copy stays **Queued** with *is not there (is the share mounted?)* | The folder is not on the site's server, or the share is not mounted | Mount it at the target's folder; the copy retries by itself |
 | A copy shows **Corrupt** or **Missing** | A check found it changed or gone at the target | Find what changed it at the site; copy it again |
 

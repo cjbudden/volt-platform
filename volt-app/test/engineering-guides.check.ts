@@ -20,7 +20,7 @@ function ok(cond: unknown, msg: string) {
 }
 
 const ROOT = join(__dirname, '../..');
-const TOPICS = ['architecture.md', 'running-on-the-mac.md', 'check-suites.md', 'build-queue.md', 'releasing.md', 'docs-site.md', 'deploying-to-aws.md'];
+const TOPICS = ['architecture.md', 'running-on-the-mac.md', 'check-suites.md', 'build-queue.md', 'releasing.md', 'docs-site.md', 'deploying-to-aws.md', 'site-agent-api.md'];
 
 /** A throwaway repository: a volt-app with one suite and one npm script, and guides. */
 function fakeRepo(guides: Record<string, string>) {
@@ -52,7 +52,7 @@ const good = [
   const real = checkEngineering({ root: ROOT });
   ok(real.errors.length === 0, `no problems in docs/engineering${real.errors.length ? ': ' + real.errors.join(' | ') : ''}`);
   for (const t of TOPICS) ok(existsSync(join(ROOT, 'docs/engineering', t)), `the ${t.replace('.md', '')} guide is there`);
-  ok(real.checked.guides === TOPICS.length + 1, `${real.checked.guides} guides read (seven topics and the index)`);
+  ok(real.checked.guides === TOPICS.length + 1, `${real.checked.guides} guides read (eight topics and the index)`);
   ok(real.checked.paths >= 150, `${real.checked.paths} paths checked against the tree`);
   ok(real.checked.commands >= 50, `${real.checked.commands} commands checked`);
   ok(real.seen.some((s: string) => s.startsWith('volt-app $ node scripts/check.js')), 'a check.js command is checked from volt-app, following its cd');

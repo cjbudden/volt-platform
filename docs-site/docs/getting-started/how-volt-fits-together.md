@@ -97,6 +97,7 @@ These are the paths most work follows. Each has its own step-by-step guide.
 | [**A radio station with now playing**](../workflows/radio-now-playing.md) | Radio (the station and its log), EPG, Recordings |
 | [**Captions and graphics on a live stream**](../workflows/captions-graphics-live.md) | Captions (engine and languages), Channels or Events (turned on per stream), Graphics (templates and live control) |
 | [**Securing a live stream**](../workflows/secure-live-stream.md) | Account settings and EPG (where it can be watched), API Keys & Apps (which apps can play it), Payments and Users & Roles (who can watch) |
+| [**Copies of your media at your own sites**](../workflows/mirror-and-archive.md) | Sites (your servers), Storage (storage targets and copies), Publishing Rules (copy rules), Media Library and Recordings (what is copied) |
 
 Underneath every flow, **Dashboard**, **Live Streams** and **Multiview** show what is running, **Storage** and **Workflows** show what is being kept and done, and the **Audit log** records who changed what.
 

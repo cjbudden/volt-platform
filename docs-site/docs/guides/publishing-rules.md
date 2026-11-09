@@ -99,7 +99,7 @@ With the **Mirror and Archive** add-on, every rung has an **Archive copies** fie
 1. Under **Archive copies** (tick it first on a rung other than the account default), each storage target is listed. Tick **When it lands** to copy the original as soon as an upload or watch folder file has landed, **When it is published** to copy it on publishing, or both.
    Tick **Nightly** to copy, once a day, anything the rule covers that the target does not hold yet: items that came in before the rule existed, and any copy that was missed. Nightly copies wait for the off-peak window like any other.
    Once a target is ticked for items, **Copy** says what goes there: **Original** (ticked unless you untick it), **Sidecars**, **Clips**, **HLS/DASH package**, or any mix. Sidecars are a metadata file (`<name>.json`), the caption files as they were delivered (`<name>.en.srt`), any other files that came with the item, and its poster, each named after the original so they sort beside it. Clips are for items cut from a recording (clips, full-event replays and exports), which have no original of their own: the clip's file exactly as Volt made it (the MP4, or the M4A or MP3 of an audio clip) with a metadata file beside it, named like recordings, `Title-Channel-YYYYMMDD-HHMM` from where the clip starts in the channel's time zone. With **When it lands** a clip is copied as soon as its file has been made. The HLS/DASH package is every rendition and segment as one folder that plays as it is; ticking it shows beside the box what that costs in room (on our test library about 1.7 times the original, from 0.1 to 6 times, a few hundred files). It is offered for every target: a folder target gets it as a folder, an S3-compatible store as one folder of objects under the target's folder in the bucket. At least one stays ticked.
-   On the account default and on a channel's, station's or event's own rung there is also **Recordings**: tick it to archive the recording itself. Each programme becomes one file when it ends (each clock hour, in the channel's time zone, when the channel has no guide), taken from the top rendition and joined without re-encoding, with a metadata file of the same name beside it. See [Recordings in the archive](hybrid-sites.md#recordings-in-the-archive).
+   On the account default and on a channel's, station's or event's own rung there is also **Recordings**: tick it to archive the recording itself. Each programme becomes one file when it ends (each clock hour, in the channel's time zone, when the channel has no guide), taken from the top rendition and joined without re-encoding, with a metadata file of the same name beside it. See [Recordings in the archive](../workflows/mirror-and-archive.md#recordings-in-the-archive).
 2. Optionally tick **Copy only between** and set a start and end time and a time zone, for example 22:00 to 06:00 in `Australia/Sydney`. A copy asked for outside the window waits for it to open.
 3. Choose **Save publishing rule**.
 
@@ -115,6 +115,7 @@ Each original, each sidecar, each clip, each package, and each programme or hour
 | [Review](review.md) | **Require an approved review before publishing** waits for an approval there |
 | [API Keys & Apps](api-keys-and-apps.md) | Registered apps are the publishing points you can choose |
 | [Storage](storage.md) | Copy rules name the Mirror and Archive storage targets made there, and its copies show what the rules did |
+| [Copies of your media at your own sites](../workflows/mirror-and-archive.md) | The Mirror and Archive flow end to end, from a site to a verified copy |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -161,7 +162,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `DELETE /api/publishing-rules/{scopeKind}/{scopeId}` | Removes a content type or stream rung; the account default cannot be removed |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | A single asset's own rung |
 
-With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest, on publish or nightly (`schedule`), what is copied (`what`: any of `source`, `sidecars`, `clips` and `packages`; the original alone when left out), whether recordings are archived (`recording`), and an optional off-peak window. See [Copy by rule](hybrid-sites.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
+With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest, on publish or nightly (`schedule`), what is copied (`what`: any of `source`, `sidecars`, `clips` and `packages`; the original alone when left out), whether recordings are archived (`recording`), and an optional off-peak window. See [Copy by rule](../workflows/mirror-and-archive.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
 
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

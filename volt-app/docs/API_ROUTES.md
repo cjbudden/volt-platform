@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**910 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 709 · Platform API: 32 · Machine-to-machine: 39 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**912 routes.** Public API: 86 · Sign-in (no session yet): 7 · Admin API: 709 · Platform API: 32 · Machine-to-machine: 41 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1406,6 +1406,8 @@ Encoders, engines, add-ons, payment providers. Each has its own secret.
 | OPTIONS | `/api/site-agent/tus/:id` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | PATCH | `/api/site-agent/tus/:id` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | GET | `/api/site-agent/watchfolders` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| GET | `/api/site-agent/watchfolders/:id/fallbacks` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
+| POST | `/api/site-agent/watchfolders/:id/fallbacks/:itemId` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/watchfolders/:id/items` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | POST | `/api/site-agent/watchfolders/:id/known` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |
 | GET | `/api/site-agent/watchfolders/:id/quarantine-keys` | site host credential (Bearer vsite_...); enrol takes a one-time enrolment token | callback |  |

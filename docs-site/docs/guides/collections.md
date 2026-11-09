@@ -54,7 +54,7 @@ A collection that already holds every title you ticked is marked **in it**, and 
 ### Add media by rules
 
 1. Open the collection and tick **Add media by rules** on the **Rules** card.
-2. Choose **Match all** or **Match any**, then build each condition: a field, a test that fits it, and a value. Text can be *is*, *contains* or *starts with*; numbers *=*, *<*, *>* or *between*; dates *before*, *after*, *between* or *within the last* so many days, weeks or months; lists, content types and rights profiles *is any of*; tags *has any of*, *has all of* or *has none of*.
+2. Choose **Match all** or **Match any**, then build each condition: a field, a test that fits it, and a value. Text can be *is*, *contains* or *starts with*; numbers *=*, *\<*, *>* or *between*; dates *before*, *after*, *between* or *within the last* so many days, weeks or months; lists, content types and rights profiles *is any of*; tags *has any of*, *has all of* or *has none of*.
 3. Use **Group** for a mix, for example: Genre is Sport, and (first aired within the last 14 days, or tags have any of *classic*).
 4. Watch the count under the rules: it shows how many titles match now, with a few of them, as you type.
 5. Choose **Save rules**. The whole library is matched at once.

@@ -15,6 +15,7 @@ rules (`docs-site/MAINTAINING.md`).
 | [Releasing](releasing.md) | you are writing a change note or cutting a version |
 | [The docs site](docs-site.md) | you are changing a customer guide, a screenshot or a code sample |
 | [Deploying to AWS](deploying-to-aws.md) | you are preparing or running the cloud deployment |
+| [The site agent API](site-agent-api.md) | you are changing what `volt-agent` and the cloud say to each other on a Hybrid Site |
 
 The design documents these guides point into are listed in `DOCS.md` (the
 project map). The status of every capability is in `VOLT_BUILD_STATUS.md`.

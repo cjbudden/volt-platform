@@ -154,4 +154,4 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json
   -d '{"mode":"on","adServerId":"<your ad server>","policy":{"schedule":"vmap","vmapUrl":"https://ads.example.com/vmap?cid=[CONTENT_ID]&dur=[CONTENT_DURATION]&cues=[CUE_POINTS]"},"houseAds":[{"assetId":"<a short promo>"}]}'
 ```
 
-What the play gate returns for a title with ads, and how a player of your own handles them, is in [The play gate](../api/play-gate.md#on-demand-ads). Every route is in the [API reference](/api-reference).
+What the play gate returns for a title with ads, and how a player of your own handles them, is in [The play gate](../api/play-gate.md#6-on-demand-ads). Every route is in the [API reference](/api-reference).

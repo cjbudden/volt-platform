@@ -1,6 +1,6 @@
 {
   "_comment": "Which guide covers each part of Volt (build queue 1.14-G0). sections: every console nav item (scripts/check-coverage.mjs reads the nav from the console source and fails when one is missing here or listed here but gone). workflows: how sections work together. developer: the customer developer topics. pages: the cross-cutting pages. 'guides' are paths under docs/. 'batch' is the build-queue item that writes them; a batch listed in 'required' must have every entry covered by guides that follow the template, so each guides item adds its batch here when it is done. 'internal' entries are for Volt staff and never get a customer guide.",
-  "required": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G8", "H1", "R1"],
+  "required": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G8", "H1", "H5-3", "R1"],
   "templates": {
     "section": ["What it is for", "Before you start", "Step by step", "How it connects", "Who can do it", "Troubleshooting", "Through the API"],
     "workflow": ["What it is for", "Before you start", "The flow", "Step by step", "Who can do it", "Troubleshooting", "Through the API"],
@@ -29,7 +29,7 @@
     { "key": "encoding", "label": "Encoding Profiles", "batch": "G3", "guides": ["guides/encoding-profiles.md"] },
     { "key": "watchfolders", "label": "Watchfolders", "batch": "G3", "guides": ["guides/watchfolders.md"] },
     { "key": "storage", "label": "Storage", "batch": "G3", "guides": ["guides/storage.md"] },
-    { "key": "sites", "label": "Sites", "batch": "H1", "guides": ["guides/hybrid-sites.md"] },
+    { "key": "sites", "label": "Sites", "batch": "H1", "guides": ["guides/hybrid-sites.md", "guides/running-a-site.md"] },
     { "key": "workflows", "label": "Workflows", "batch": "G3", "guides": ["guides/workflows.md"] },
     { "key": "content-types", "label": "Content Types", "batch": "G3", "guides": ["guides/content-types.md"] },
     { "key": "genres", "label": "Genres", "batch": "G8", "guides": ["guides/genres.md"] },
@@ -61,7 +61,8 @@
     { "key": "fast-from-library", "title": "A FAST channel from the library", "batch": "G5", "guides": ["workflows/fast-from-library.md"] },
     { "key": "radio-now-playing", "title": "A radio station with now playing", "batch": "G5", "guides": ["workflows/radio-now-playing.md"] },
     { "key": "captions-graphics-live", "title": "Captions and graphics on a live stream", "batch": "G5", "guides": ["workflows/captions-graphics-live.md"] },
-    { "key": "upload-to-published", "title": "From upload to published", "batch": "G5", "guides": ["workflows/upload-to-published.md"] }
+    { "key": "upload-to-published", "title": "From upload to published", "batch": "G5", "guides": ["workflows/upload-to-published.md"] },
+    { "key": "mirror-and-archive", "title": "Copies of your media at your own sites", "batch": "H5-3", "guides": ["workflows/mirror-and-archive.md"] }
   ],
   "developer": [
     { "key": "apps-and-keys", "title": "Getting started with apps and keys", "batch": "G6", "guides": ["api/apps-and-keys.md"] },
