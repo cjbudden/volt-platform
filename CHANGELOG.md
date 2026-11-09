@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.78.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · Analytics: Volt now counts every viewer turned away for a region or for the rights, per title and country, beside the plays where the title is licensed, and titles asked for after their window closed. Read it with GET /api/analytics/rights-demand, as JSON or CSV; the report in the console follows.
+
+### Internal
+
+- added · Analytics: rights-demand suite (40 checks): refusals counted with no write until the minute's flush, the edge's country refusals, unique viewers by hash, the report and CSV, tenancy. cdn-logs now expects five logged CDN behaviours (P2's tokenised /t/*).
+
 ## 0.77.0 (2026-11-09)
 
 ### Product (in customer release notes)
