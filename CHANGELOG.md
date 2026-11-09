@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.75.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · Media Library: Every title now has a public status worked out by Volt, with the reason and when it changes next: draft, in review, processing, scheduled, available, restricted by its rights, expired or archived. It follows publishing, withdrawing and the end of a window within a minute, and is ready for the Availability tab coming next.
+- changed · Play gate: Only published titles that are available now are public. The play gate and the access check answer a draft, a title in review, still processing, outside its rights, expired or archived exactly as an id that does not exist (404), so nothing about unpublished content can be learned from them. A title announced ahead of its release answers 403 with mode scheduled and when it opens.
+
+### Internal
+
+- added · Tests: public-status.check.ts: every public status, the public visibility rule on every public route, the sweep and a warm play gate with no database reads.
+
 ## 0.74.0 (2026-11-09)
 
 ### Product (in customer release notes)
