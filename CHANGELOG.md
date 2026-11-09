@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.76.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · Playback: On-demand play addresses now carry a signed token that the CDN checks on every request. A copied link stops working in another country, at the end of the title's window, and within about a minute of the title being withdrawn or archived. Players need no change: play the addresses the play gate returns as they are.
+
+### Internal
+
+- added · Playback: edge-tokens suite (60 checks): the token library, the CloudFront Function and the staging njs edge on the same cases, the play gate with tokens off and on, revocation and the edge store sync. Staging nginx loads njs and checks /t/ paths; Terraform edge_tokens variable and /t/* behaviours.
+
 ## 0.75.1 (2026-11-09)
 
 ### Internal
