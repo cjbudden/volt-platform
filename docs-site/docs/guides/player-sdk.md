@@ -141,7 +141,7 @@ With `VoltJourney` your app also tells Volt how the viewer got to the play butto
 - **`search(results, query)`** counts a search. The query is left out unless you set `searchQuery: 'hash'`, and then only a SHA-256 of it is sent. **`paywall(product)`** and **`purchase('success' | 'failed' | 'cancelled', product)`** mark the paywall. **`track(name, props)`** sends a custom event (up to 20 names per app session, ten short props each).
 - **Privacy.** `consent: false` sends, keeps and forwards nothing until `setConsent(true)`; `setConsent(false)` stops again. No user ids, no advertising ids, no IP address. After 30 minutes in the background a new app session starts.
 
-An app that does not use the SDK can send the same events itself: see [Journey to play](../api/playback-reporting.md#5-journey-to-play-how-viewers-got-to-the-play-button).
+An app that does not use the SDK can send the same events itself: see [Journey to play](../api/playback-reporting.md#6-journey-to-play-how-viewers-got-to-the-play-button).
 
 ## Events: countdown, phases and paid access
 

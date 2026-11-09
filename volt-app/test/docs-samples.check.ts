@@ -306,6 +306,11 @@ const LEFTOVER = /your-volt-host|\b(pk|sk)_live_\.\.\.|whsec_\.\.\.|<[a-z][^<>="
   const jst = Object.fromEntries((r.out[0]?.steps ?? []).map((x: any) => [x.step, x.sessions]));
   ok(r.out[0]?.sessions === sessionsBefore + 1 && jst.open === r.out[0]?.sessions && jst.play >= 1 && jst.detail >= 1, 'journeys: the app session is counted, up to play pressed', r.out[0]);
   ok(r.out[1]?.rows?.some((x: any) => x.entry === 'row' && x.detail === 'Trending' && x.journeys >= 1 && x.plays >= 1), 'journeys: the play is credited to the Trending row', r.out[1]);
+  // Rights demand (build queue P2-3): the report's shape, whatever the seed refused.
+  r = await run('playback-reporting/rights-demand.sh');
+  ran('playback-reporting/rights-demand.sh', r);
+  ok(/^\d{4}-\d{2}-\d{2}$/.test(r.out[0]?.from ?? '') && typeof r.out[0]?.totals?.blockedViewers === 'number' && typeof r.out[0]?.totals?.plays === 'number'
+    && Array.isArray(r.out[0]?.byCountry), 'rights-demand: the last 30 days, totals and countries', r.out[0]);
 
   // ========================================================================
   console.log('== webhooks, then an upload that fires one ==');

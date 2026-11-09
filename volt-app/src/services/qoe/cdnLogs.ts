@@ -48,6 +48,8 @@ import { parseCmcdLine, type CmcdValue } from './cmcdParse';
 import { appendRaw, readDay, type RawRow } from './rawStore';
 import { deviceClass } from './ua';
 import * as sk from './sketch';
+import { edgeDemandOf, recordDemand } from '../availabilityDemand';
+import { verifyEdgeToken } from '../edgeTokens';
 
 /**
  * The fields asked of CloudFront, in the order AWS documents them for
@@ -384,6 +386,12 @@ export async function handleCdnLines(lines: string[], rate: number, deps: CdnDep
   for (const [acct, items] of byAcct) {
     await appendRaw(acct, items.map((x) => x.raw), 'cdn');
     for (const x of items) sink.add(acct, x.l, w, x.skey, x.sid);
+    // A token refused at the edge for the country it was asked from is
+    // regional demand, counted with the gate's own refusals (P2-3).
+    for (const x of items) {
+      const d = x.l.status === 403 ? edgeDemandOf(x.l, (t, uri, cc, nowSec) => verifyEdgeToken(t, uri, { country: cc, nowSec })) : null;
+      if (d) recordDemand({ accountId: acct, assetId: d.assetId, assetKind: 'vod', country: x.l.country, reason: d.reason, source: 'edge', at: x.l.at, viewer: d.sid ? `sid:${d.sid}` : x.skey, weight: w });
+    }
     kept += items.length;
   }
   cdnStats.kept += kept; cdnStats.unreadable += unreadable; cdnStats.unattributed += unattributed;

@@ -115,7 +115,30 @@ For trend lines, `GET /api/analytics/qoe/series` returns minute buckets for the 
 
 `GET /api/analytics/qoe/sessions` lists views, newest first, with the same window and filters as the overview; `problem` narrows it to `error` (ended by an error), `failed` (never started), `stalled`, `exited` (left before the first frame) or `ad` (left during an ad). `GET /api/analytics/qoe/sessions/{sid}` returns every report of that play attempt in the player's order (`events`, each with `label`, `kind`, `problem`, `offsetMs`), the states as `spans`, the reports that never arrived (`missingSequence`), the view rows made of them (`views`), the play gate's answers for it (`gate`) and the server-side ad beacons sent for it (`beacons`). Another account's session answers `404`.
 
-### 5. Journey to play: how viewers got to the play button
+### 5. Rights demand: who was refused where
+
+Every answer of the play gate is counted for the Rights demand report: refusals for a region or for the rights are demand from a place a title is not licensed for, allowed answers are plays. The CDN's own refusals count too: a tokenised address asked for from another country than the one it was made for. A title asked for after its window closed is counted as demand after the window, although the gate answers it as an unknown title. Counts are kept per day, title, country and reason; a viewer is kept only as a hash of their viewer id, play session or address and user agent, never an address. The figures are at most a minute behind.
+
+```bash file=playback-reporting/rights-demand.sh
+```
+
+```json
+{
+  "from": "2026-10-11",
+  "to": "2026-11-09",
+  "totals": { "blockedViewers": 4200, "blockedRequests": 6810, "plays": 3100, "afterWindowRequests": 120 },
+  "byCountry": [
+    { "country": "JP", "blockedViewers": 4200, "blockedRequests": 6810, "plays": 0, "afterWindowRequests": 0 },
+    { "country": "NZ", "blockedViewers": 0, "blockedRequests": 0, "plays": 3100, "afterWindowRequests": 120 }
+  ]
+}
+```
+
+`GET /api/analytics/rights-demand` takes `from` and `to` (UTC days, `YYYY-MM-DD`; the last 30 days unless you say, at most 400), `assetId`, `country`, `kind` (`vod`, `channel` or `event`) and `limit` (titles, 50 unless you say, at most 200). Besides `totals` and `byCountry` it answers `byTitle` (most blocked viewers first, each with its `title`, `kind` and, for on-demand titles, its `window`: `state` `upcoming`, `open` or `expired`, the playable `from` and `until`, the rights dates and territories), `trend` (one row per day) and `otherRefusals` (sign in, payment, scheduled and the rest, by reason). With `assetId`, each country also says whether the title is `licensed` there, so blocked viewers sit beside plays in licensed places. `format=csv` returns the same period by title and country for a spreadsheet.
+
+Answers the CDN serves from its cache never reach Volt, so a refusal it repeats from the cache is not counted again; unique viewers are exact either way. Blocked viewers are counted from the day the count started (9 Nov 2026, release 0.78.0).
+
+### 6. Journey to play: how viewers got to the play button
 
 Volt can join the way a viewer reached a play (the app opened, a row, a detail page, search, a deep link or a push) to what happened after it: the play gate, payment, the startup and the watch time. It is not a general analytics tool: a fixed set of about ten events, and Google Analytics or your own tool keeps doing page analytics. The Volt SDK sends them with `VoltJourney` (see [Player SDK](../guides/player-sdk.md#journey-to-play)); an app of its own posts them as JSON lines with its publishable key:
 

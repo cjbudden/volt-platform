@@ -184,6 +184,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/analytics/qoe/journeys` | Journey to play: the funnel from app open to first frame |
 | `GET /api/analytics/qoe/discovery` | Where plays come from (`by=entry` or `by=detail`) and titles viewed and never played |
 | `GET /api/analytics/qoe/definitions` | How each figure is measured |
+| `GET /api/analytics/rights-demand` | Rights demand: viewers refused for a region or the rights, by country and title, beside plays where the title is licensed (`from`, `to`, `assetId`, `country`, `kind`, `format=csv`) |
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**914 routes.** Public API: 88 · Sign-in (no session yet): 7 · Admin API: 709 · Platform API: 32 · Machine-to-machine: 41 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**915 routes.** Public API: 88 · Sign-in (no session yet): 7 · Admin API: 710 · Platform API: 32 · Machine-to-machine: 41 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -301,6 +301,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/analytics/retention` | admin session (Bearer) or account secret key | analytics: view |  |
 | PUT | `/api/analytics/retention` | admin session (Bearer) or account secret key | analytics: manage |  |
 | POST | `/api/analytics/retention/sweep` | admin session (Bearer) or account secret key | analytics: manage |  |
+| GET | `/api/analytics/rights-demand` | admin session (Bearer) or account secret key | analytics: view |  |
 | GET | `/api/analytics/usage` | admin session (Bearer) or account secret key | analytics: view |  |
 
 ### `/api/apps`

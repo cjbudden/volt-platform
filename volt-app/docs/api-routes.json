@@ -406,6 +406,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/analytics/rights-demand",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "analytics: view",
+  "viewerTier": false,
+  "group": "/api/analytics"
+ },
+ {
+  "method": "GET",
   "path": "/api/analytics/usage",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

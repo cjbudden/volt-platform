@@ -36,7 +36,7 @@ export interface GateRow {
 }
 
 /** What decide() learned on the way, so the reason can be told apart (modules/apps.ts). */
-export interface GateNote { accountId?: string; appId?: string | null; kind?: string | null; geo?: string | null; rights?: any }
+export interface GateNote { accountId?: string; appId?: string | null; kind?: string | null; geo?: string | null; rights?: any; viewer?: string | null; vodStatus?: string | null }
 
 const UUID = /^[0-9a-f-]{36}$/i;
 

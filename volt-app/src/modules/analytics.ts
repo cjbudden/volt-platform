@@ -13,6 +13,9 @@ import { asyncHandler, badRequest, ApiError } from '../util/http';
 import { verifyPlaybackToken } from '../services/apiKeys';
 import { retentionStatus, setRawRetention, sweepAnalytics } from '../services/analyticsRetention';
 import { ingest, liveConcurrency } from '../services/analytics';
+import { demandPeriod, rightsDemandCsv, rightsDemandReport } from '../services/availabilityDemand';
+import { publicDecision } from '../services/publicStatus';
+import { rightsForAssetId } from '../services/rightsProfiles';
 
 // ---- public beacon (playback-token auth) -----------------------------------
 export const analyticsBeaconRouter = Router();
@@ -281,6 +284,71 @@ analyticsRouter.get(
       by_device: merge('by_device'),
       by_geo: merge('by_geo'),
     });
+  })
+);
+
+/** The names of an account's titles, channels and events by id (another account's ids come back empty). */
+async function demandTitles(acct: string, ids: string[]): Promise<Map<string, { title: string; kind: string }>> {
+  const m = new Map<string, { title: string; kind: string }>();
+  const uu = ids.filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+  if (!uu.length) return m;
+  const rows = await query<any>(
+    `SELECT c.id::text AS id, c.name AS title, 'channel' AS kind FROM channels c JOIN groups g ON g.id = c.group_id
+      WHERE g.account_id = $1 AND c.id = ANY($2::uuid[])
+     UNION ALL
+     SELECT e.id::text, e.name, 'event' FROM events e JOIN groups g ON g.id = e.group_id
+      WHERE g.account_id = $1 AND e.id = ANY($2::uuid[])
+     UNION ALL
+     SELECT v.id::text, v.title, 'vod' FROM vod_assets v
+       LEFT JOIN channels c2 ON c2.id = v.channel_id LEFT JOIN events e2 ON e2.id = v.event_id
+       LEFT JOIN groups g3 ON g3.id = COALESCE(c2.group_id, e2.group_id)
+      WHERE COALESCE(g3.account_id, v.account_id) = $1 AND v.id = ANY($2::uuid[])`, [acct, uu]);
+  for (const r of rows) m.set(r.id, { title: r.title, kind: r.kind });
+  return m;
+}
+
+/** A title's playable window and territories, for the report's overlay. */
+async function demandWindow(assetId: string) {
+  const [ps, r] = await Promise.all([publicDecision(assetId), rightsForAssetId(assetId)]);
+  if (!ps || !r) return null;
+  return { status: ps.status, from: ps.effectiveFrom, until: ps.effectiveUntil, rightsFrom: r.from, rightsUntil: r.until,
+    territoryMode: r.territoryMode, territories: r.territories, blockTerritories: r.blockTerritories };
+}
+
+/**
+ * RIGHTS DEMAND (build queue P2-3, PUBLISHING_POLICIES.md "Rights demand"):
+ * who was refused where, for which title, beside the plays where it is
+ * licensed. Blocked means the play gate refused for a region or the rights,
+ * or the CDN refused a token asked for from another country; unique viewers
+ * are counted from hashed viewer keys, never addresses. Read from the daily
+ * rollups only (services/availabilityDemand.ts), up to a minute behind.
+ *   ?from=YYYY-MM-DD&to=YYYY-MM-DD (default the last 30 days, at most 400)
+ *   &assetId= &country= &kind=vod|channel|event &limit= (titles, default 50)
+ *   &format=csv  by title and country, for a spreadsheet
+ */
+analyticsRouter.get(
+  '/rights-demand',
+  asyncHandler(async (req, res) => {
+    const q = z.object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      assetId: z.string().uuid().optional(),
+      country: z.string().regex(/^[A-Za-z]{2}$/).optional(),
+      kind: z.enum(['vod', 'channel', 'event']).optional(),
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      format: z.enum(['json', 'csv']).optional(),
+    }).safeParse(req.query);
+    if (!q.success) throw badRequest(q.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+    const acct = accountId(req);
+    const period = demandPeriod(q.data);
+    const dq = { ...period, assetId: q.data.assetId ?? null, country: q.data.country ?? null, kind: q.data.kind ?? null, limit: q.data.limit };
+    if (q.data.format === 'csv') {
+      res.setHeader('content-type', 'text/csv; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="rights-demand-${period.from}-to-${period.to}.csv"`);
+      res.send(await rightsDemandCsv(acct, dq, demandTitles));
+      return;
+    }
+    res.json(await rightsDemandReport(acct, dq, { titles: demandTitles, windowOf: demandWindow }));
   })
 );
 

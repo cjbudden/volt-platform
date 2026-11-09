@@ -63,7 +63,9 @@ function walk(dir: string): string[] {
     const dist = cf.slice(cf.indexOf('resource "aws_cloudfront_distribution" "cdn"'));
     const behaviours = (dist.match(/(default_cache_behavior|ordered_cache_behavior) \{|dynamic "ordered_cache_behavior"/g) ?? []).length;
     const logged = (dist.match(/realtime_log_config_arn\s+= local\.cdn_logs \? aws_cloudfront_realtime_log_config\.cdn\[0\]\.arn : null/g) ?? []).length;
-    ok(behaviours === 4 && logged === 4, 'every behaviour of the delivery distribution logs (segments, playlists, DASH, variants)', { behaviours, logged });
+    // Five since P2 added the tokenised /t/* behaviours (dynamic block): their
+    // 403s are what the Rights demand report counts at the edge (P2-3).
+    ok(behaviours === 5 && logged === 5, 'every behaviour of the delivery distribution logs (segments, playlists, DASH, variants, tokenised /t/*)', { behaviours, logged });
     const set = [...tf.matchAll(/name = "(CDN_LOG_[A-Z_]+)"/g)].map((m) => m[1]).sort();
     const src = readFileSync(join(ROOT, 'volt-app/src/services/qoe/cdnStream.ts'), 'utf8');
     const read = [...new Set([...src.matchAll(/process\.env\.(CDN_LOG_[A-Z_]+)/g)].map((m) => m[1]))].sort();

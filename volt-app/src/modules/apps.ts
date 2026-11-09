@@ -27,6 +27,7 @@ import { config, mediaBaseUrl } from '../config';
 import { manifestUrls } from '../services/shareLinks';
 import { mp3FeedFor, publicMp3Path } from '../services/radio/mp3Feed';
 import { classifyGate, recordGate, type GateNote } from '../services/qoe/gateLog';
+import { recordDemand } from '../services/availabilityDemand';
 import { adsForPlay } from '../services/vodAds';
 import { publicDecision, publiclyVisible } from '../services/publicStatus';
 import { edgeTokensMode, mintEdgeToken, policyClassOf, tokenPrefix, withToken } from '../services/edgeTokens';
@@ -277,6 +278,15 @@ async function timedDecide(req: Request, b: GateInput, opts: { cacheable: boolea
     recordGate({ account_id: note.accountId, app_id: note.appId ?? null, sid: b.sid ?? null, at: Date.now(), method, status,
       mode: body?.mode ?? null, reason: c.reason, layer: c.layer, rule_id: c.ruleId, asset_id: b.assetId, asset_kind: note.kind ?? null,
       country: note.geo ?? null, ms: performance.now() - t0 });
+    // The Rights demand report's counts (P2-3): added up in memory, written
+    // once a minute, never on this path. Who: the signed-in viewer, else the
+    // player's session, else address and user agent (hashed there, not kept).
+    // A title of this account asked for after its window closed (expired, or
+    // restricted by its rights dates) is answered as unknown, so nothing
+    // leaks; it is still counted, under its status, as demand after the window.
+    const after = c.reason === 'unknown_asset' && (note.vodStatus === 'expired' || note.vodStatus === 'restricted') ? note.vodStatus : null;
+    recordDemand({ accountId: note.accountId, assetId: b.assetId, assetKind: note.kind ?? null, country: note.geo ?? null,
+      reason: after ?? c.reason, source: 'gate', viewer: note.viewer ?? (b.sid ? `sid:${b.sid}` : `ip:${req.ip ?? ''}|${req.headers['user-agent'] ?? ''}`) });
   };
   try {
     const a = await decide(req, b, opts, note);
@@ -331,6 +341,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     const now = new Date();
     const ps = await publicDecision(b.assetId, now);
     vodStatus = ps;
+    note.vodStatus = ps?.status ?? null;
     if (!ps || !publiclyVisible(ps, now)) return { status: 404, body: { error: 'unknown asset' }, edgeSec: cacheable ? 5 : 0 };
     if (ps.until) edgeSec = Math.max(0, Math.min(edgeSec, Math.floor((ps.until.getTime() - now.getTime()) / 1000)));
     if (ps.status === 'scheduled') {
@@ -354,6 +365,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   // for server-side apps): from a browser or phone it is whatever the user
   // typed, and it used to unlock members-only and paid content.
   const vi = await viewerInputs(req, b, key.account_id, app, geo);
+  if (vi.claims?.sub) note.viewer = `v:${vi.claims.sub}`;
   if (vi.signedIn) { cacheable = false; edgeSec = 0; }
   let rights = await evaluateAccess(b.assetId, geo, { appId: key.app_id, appType: appTypeOf(app.type, app.surface), entitled: vi.entitled, accountId: key.account_id, viewer: vi.viewer, viewerCtx: vi.viewerCtx });
   // Just bought it? The token's entitlement snapshot predates the purchase:

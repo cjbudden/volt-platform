@@ -2570,6 +2570,32 @@
     }
    }
   },
+  "/api/analytics/rights-demand": {
+   "get": {
+    "operationId": "getAnalyticsRightsDemand",
+    "summary": "Get analytics rights demand",
+    "tags": [
+     "Analytics"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** analytics: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/analytics/usage": {
    "get": {
     "operationId": "getAnalyticsUsage",
