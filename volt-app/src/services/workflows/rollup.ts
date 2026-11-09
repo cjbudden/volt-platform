@@ -36,7 +36,8 @@ import { analyticsPool } from '../qoe/analyticsDb';
 import { add, merge, quantile, type Sketch } from '../qoe/sketch';
 import { codeFromMessage, normaliseCode } from '../jobs/errorCode';
 import { OWNED, ACCOUNT } from '../jobs/owner';
-import { HOOKS, JOB_STAGES, LANES, REPORT_SKIPS_JOBS, STAGES } from './map';
+import { licencesOf } from '../sites/licences';
+import { HOOKS, JOB_STAGES, REPORT_SKIPS_JOBS, mapFor } from './map';
 
 const LOCK = 72010003; // 72010001 schema, 72010002 nightly replay (qoe)
 const MINUTE = 60_000;
@@ -189,11 +190,20 @@ export async function rollupWindow(from: number, to: number): Promise<{ rows: nu
   from = floorMin(from); to = floorMin(to);
   if (to <= from) return { rows: 0, days: [] };
   const f = new Date(from), t = new Date(to);
+  // A copy job (Mirror and Archive) names its copy, not an asset or a stream,
+  // so OWNED alone finds no account for it and it was never counted. The
+  // copy row carries the account. Joined here only, not in OWNED: the jobs
+  // API would then list copy jobs, whose payload describes the customer's
+  // storage target (build queue H5-2).
   const jobs = await query<any>(
-    `SELECT j.type, j.state, j.attempts, j.error_code, j.last_error, j.created_at, j.started_at, j.finished_at, ${ACCOUNT} AS account_id
+    `SELECT j.type, j.state, j.attempts, j.error_code, j.last_error, j.created_at, j.started_at, j.finished_at,
+            COALESCE(${ACCOUNT}, ac.account_id) AS account_id
      ${OWNED}
+      LEFT JOIN archive_copies ac ON ${ACCOUNT} IS NULL AND j.type LIKE 'archive.%'
+            AND ac.id = CASE WHEN j.payload->>'copyId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                             THEN (j.payload->>'copyId')::uuid END
       WHERE j.finished_at >= $1 AND j.finished_at < $2 AND j.state IN ('succeeded','failed','cancelled')
-        AND ${ACCOUNT} IS NOT NULL`, [f, t]);
+        AND COALESCE(${ACCOUNT}, ac.account_id) IS NOT NULL`, [f, t]);
   const events = await query<any>(
     `SELECT account_id, hook, data, created_at FROM workflow_events
       WHERE created_at >= $1 AND created_at < $2 AND hook = ANY($3)`, [f, t, [...EVENT_RUN_HOOKS]]);
@@ -318,13 +328,16 @@ export async function workflowReport(accountId: string, range: Range, now = Date
       : `SELECT source, kind, hook, stage, day::timestamptz AS t, runs, succeeded, failed, cancelled, retries, run_sketch, wait_sketch, codes
            FROM wf_days WHERE account_id = $1 AND day >= $2::date`,
     [accountId, since])).rows;
+  // What this account sees (H5-2): an add-on's stages only when licensed.
+  const view = mapFor(await licencesOf(accountId));
+  const visible = new Set(view.stages.map((s) => s.id));
 
   const stageOf = (r: any) => (r.source === 'job' ? r.stage : r.source === 'event' && !JOB_FED.has(r.stage) ? r.stage : null);
   const byStage = new Map<string, Agg>();
   const other = new Map<string, Agg>();
   const addons = new Map<string, Agg & { addonId: string; hook: string }>();
   const series = new Map<string, { t: string; lane: string; runs: number; failed: number }>();
-  const laneOf: Record<string, string> = Object.fromEntries(STAGES.map((s) => [s.id, s.lane]));
+  const laneOf: Record<string, string> = Object.fromEntries(view.stages.map((s) => [s.id, s.lane]));
   for (const r of rows) {
     if (r.source === 'addon') {
       const k = `${r.kind}|${r.hook}`;
@@ -332,7 +345,13 @@ export async function workflowReport(accountId: string, range: Range, now = Date
       addons.set(k, fold(a, r) as any);
       continue;
     }
-    if (r.source === 'job' && !r.stage) { other.set(r.kind, fold(other.get(r.kind) ?? empty(), r)); continue; }
+    // A row rolled up before its job type had a stage takes the stage it has
+    // now, so a newly claimed type (the site jobs, H5-2) moves onto the map
+    // for the whole range without rebuilding the rollups. A stage the
+    // account no longer sees (a licence removed) keeps its work, under other
+    // jobs, so the totals do not lose it.
+    if (r.source === 'job' && !r.stage) r.stage = JOB_STAGES[r.kind] ?? '';
+    if (r.source === 'job' && (!r.stage || !visible.has(r.stage))) { other.set(r.kind, fold(other.get(r.kind) ?? empty(), r)); continue; }
     const st = stageOf(r);
     if (!st) continue;
     byStage.set(st, fold(byStage.get(st) ?? empty(), r));
@@ -354,9 +373,9 @@ export async function workflowReport(accountId: string, range: Range, now = Date
 
   return {
     range, bucket: perMinute ? 'hour' : 'day', since: since.toISOString(), until: new Date(now).toISOString(),
-    lanes: LANES,
+    lanes: view.lanes,
     totals: { runs: total.runs, failed: total.failed, retries: total.retries, errorRate: pct(total.failed, total.runs) },
-    stages: STAGES.map(({ impl: _impl, ...s }) => ({
+    stages: view.stages.map(({ impl: _impl, ...s }) => ({
       ...s, fedBy: JOB_FED.has(s.id) ? 'jobs' : (HOOKS.some((h) => h.stage === s.id && EVENT_RUN_HOOKS.has(h.id)) ? 'events' : 'none'),
       ...figures(byStage.get(s.id) ?? empty()),
     })),

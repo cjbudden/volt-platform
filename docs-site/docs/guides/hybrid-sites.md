@@ -193,7 +193,7 @@ Choose **Disable site**. Its servers are refused until you choose **Enable site*
 | [Watchfolders](watchfolders.md) | Folders at a site, watched by the site's agent with the folder's rules; accepted files are uploaded and taken in by Volt |
 | [Storage](storage.md) | Mirror and Archive storage targets at a site, and the copies kept on them, with their state |
 | [Publishing Rules](publishing-rules.md) | Copy rules decide what is copied to a site's storage, and when |
-| [Workflows](workflows.md) | Work done at a site will appear on the map with its own success and error rates (a later release of the add-on) |
+| [Workflows](workflows.md) | Work done at a site has its own lane, **Your sites**, on the map and in the report: **Encode at site** and **Archive copies**, each with its runs, error rate, times, retries and most common error |
 | [Audit log](audit-log.md) | Sites, enrolment tokens, approvals, rejections and new credentials are recorded |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.

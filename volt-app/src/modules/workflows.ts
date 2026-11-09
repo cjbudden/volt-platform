@@ -25,7 +25,8 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound, unauthorized } from '../util/http';
-import { LANES, STAGES, EDGES, HOOKS, HOOK_IDS, MANUAL_SUBJECTS } from '../services/workflows/map';
+import { HOOKS, HOOK_IDS, MANUAL_SUBJECTS, mapFor } from '../services/workflows/map';
+import { licencesOf } from '../services/sites/licences';
 import { resolveSubject } from '../services/workflows/subjects';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { createRun, applyUpdate, authoriseCallback, cancelRun, pingAddon, newSecret } from '../services/workflows/runs';
@@ -47,10 +48,13 @@ workflowsRouter.get('/map', asyncHandler(async (req, res) => {
   const hookCounts = await query<any>(
     `SELECT hook, count(*)::int AS n, max(created_at) AS last_at FROM workflow_events
       WHERE account_id = $1 AND created_at > now() - interval '24 hours' GROUP BY hook`, [acct]);
+  // Stages of a licensed add-on (Hybrid Sites, Mirror and Archive) only for
+  // an account licensed for it (build queue H5-2).
+  const { lanes, stages, edges } = mapFor(await licencesOf(acct));
   res.json({
     // A stage's `impl` names the source files behind it, for engineers reading
     // services/workflows/map.ts; it is not part of the API (build queue 1.14-G3a-2).
-    lanes: LANES, stages: STAGES.map(({ impl: _impl, ...s }) => s), edges: EDGES,
+    lanes, stages: stages.map(({ impl: _impl, ...s }) => s), edges,
     hooks: HOOKS.map((h) => ({
       ...h,
       fired24h: hookCounts.find((c) => c.hook === h.id)?.n ?? 0,

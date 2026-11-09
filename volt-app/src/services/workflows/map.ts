@@ -11,6 +11,8 @@
 //  dashboard says "planned" rather than offering a trigger that never fires.
 // ============================================================================
 
+import type { Licence } from '../sites/licences';
+
 export type SubjectType = 'channel' | 'event' | 'recording' | 'vod_asset';
 
 export interface HookDef {
@@ -30,6 +32,12 @@ export interface StageDef {
   description: string;
   /** Module(s) that implement it, for the reader who wants the code. */
   impl: string;
+  /**
+   * The licensed add-on the stage belongs to (services/sites/licences.ts).
+   * An add-on that is not licensed is not there, so an account without it
+   * does not see the stage on the map or in the report (`mapFor`).
+   */
+  licence?: Licence;
 }
 
 export interface LaneDef { id: string; label: string; description: string }
@@ -38,6 +46,7 @@ export const LANES: LaneDef[] = [
   { id: 'live', label: 'Live', description: 'A channel or event from source to viewer, recorded as it runs.' },
   { id: 'post', label: 'Post-production', description: 'What happens to recorded and uploaded media before it is published.' },
   { id: 'file', label: 'File ingest', description: 'Uploaded and watch-folder files on their way into the library.' },
+  { id: 'site', label: 'Your sites', description: 'Work done by the Volt agent on your own servers: encoding at the site, and copies to your own storage.' },
 ];
 
 export const STAGES: StageDef[] = [
@@ -56,6 +65,16 @@ export const STAGES: StageDef[] = [
   { id: 'upload',   lane: 'file', col: 0, label: 'Upload',          impl: 'uploads.ts, tus.ts, watchfolder', description: 'Files arrive by upload, cloud picker or watch folder.' },
   { id: 'rules',    lane: 'file', col: 1, label: 'Ingest rules',    impl: 'ingest/rules.ts', description: 'Naming, content type, duplicates and metadata rules decide what the file becomes.' },
   { id: 'vodenc',   lane: 'file', col: 2, label: 'Encode',          impl: 'jobs/handlers/vodEncode.ts', description: 'The file is encoded to the account ladder and packaged.' },
+
+  // HYBRID SITES (build queue H5-2). Jobs in a site's pool, leased by the
+  // agent on the customer's servers (services/sites/siteJobs.ts). Encode at
+  // site sits under the cloud encode it replaces. The copies sit past Publish
+  // with one arrow from it: a copy rule also fires on ingest and on a
+  // schedule, and recordings are copied as they close, but arrows from
+  // Ingest rules and Record would cross the whole map; its description says
+  // so instead.
+  { id: 'siteenc',  lane: 'site', col: 2, label: 'Encode at site',  impl: 'sites/siteEncode.ts, volt-agent/src/siteEncode.ts', licence: 'hybrid_sites', description: 'A file kept at your site is probed and encoded there by the Volt agent, and the package is checked in the cloud before it can play.' },
+  { id: 'archive',  lane: 'site', col: 10, label: 'Archive copies', impl: 'archive/archive.ts, archive/recordings.ts, volt-agent/src/siteArchive.ts', licence: 'mirror_archive', description: 'Originals, sidecars, clips, packages and recordings are copied to your own storage when a file is ingested or published, on a schedule, and as recordings close. Each copy is read back to check it.' },
 ];
 
 /** Arrows between stages, including where one lane feeds another. */
@@ -63,6 +82,8 @@ export const EDGES: Array<[string, string]> = [
   ['source', 'encode'], ['encode', 'package'], ['package', 'deliver'], ['package', 'record'],
   ['record', 'thumbs'], ['record', 'clip'], ['clip', 'qc'], ['qc', 'review'], ['review', 'publish'],
   ['upload', 'rules'], ['rules', 'vodenc'], ['vodenc', 'qc'],
+  ['rules', 'siteenc'], ['siteenc', 'qc'],
+  ['publish', 'archive'],
 ];
 
 export const HOOKS: HookDef[] = [
@@ -96,9 +117,34 @@ export const JOB_STAGES: Record<string, string> = {
   'clip.extract': 'clip',
   'qc.run': 'qc',
   'social.publish': 'publish',
+  // Hybrid sites (H5-2). Before this they were listed under other jobs, and
+  // copies not at all: their jobs name the copy, not the asset (rollup.ts).
+  'site.vod-probe': 'siteenc',
+  'site.vod-encode': 'siteenc',
+  'archive.copy': 'archive',
+  'archive.copy-folder': 'archive',
+  'archive.verify': 'archive',
+  'archive.verify-folder': 'archive',
+  'archive.recording': 'archive',
 };
 /** Job types the report never counts (see JOB_STAGES). */
 export const REPORT_SKIPS_JOBS = new Set(['addon.dispatch']);
+
+/**
+ * The map as one account sees it: stages of an add-on it is not licensed for
+ * are left out, with their arrows, and a lane with no stage left goes too.
+ * The base workflow has no licence, so an account with no add-on sees the
+ * three lanes it always did.
+ */
+export function mapFor(licences: readonly string[]): { lanes: LaneDef[]; stages: StageDef[]; edges: Array<[string, string]> } {
+  const stages = STAGES.filter((s) => !s.licence || licences.includes(s.licence));
+  const ids = new Set(stages.map((s) => s.id));
+  return {
+    lanes: LANES.filter((l) => stages.some((s) => s.lane === l.id)),
+    stages,
+    edges: EDGES.filter(([a, b]) => ids.has(a) && ids.has(b)),
+  };
+}
 
 /** Subject types that can be sent to an add-on by hand. */
 export const MANUAL_SUBJECTS: SubjectType[] = ['recording', 'vod_asset'];

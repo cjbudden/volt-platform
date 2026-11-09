@@ -219,6 +219,17 @@ hour (24h) or day.
   stop is a failure, code `stream_fault`), `recording.completed` (its
   `durationMs` is the time), `review.decided`. Source, Package, Deliver and
   Ingest rules have neither and say so.
+- **Site stages (build queue H5-2).** A fourth lane, `site` ("Your sites"):
+  `siteenc` (`site.vod-probe`, `site.vod-encode`) for Hybrid Sites and
+  `archive` (`archive.copy`, `archive.copy-folder`, `archive.verify`,
+  `archive.verify-folder`, `archive.recording`) for Mirror and Archive. A
+  stage with `licence` is shown only to an account licensed for it
+  (`mapFor` in `map.ts`, used by `GET /map` and the report); a lane with no
+  stage left is dropped. Copy jobs name their copy, not an asset, so the
+  rollup also finds the account through `archive_copies` (`payload.copyId`);
+  that join is the rollup's only, not the jobs API's. A row rolled up before
+  its job type had a stage takes the stage it has now at read time, and a
+  stage the account no longer sees reports its work under other jobs.
 - **Error codes.** The worker now stores a code with every failure
   (`services/jobs/errorCode.ts`: the error's own code, else a few message
   shapes such as `timeout`, `source_missing`, `tool_exit`, `http_503`, else

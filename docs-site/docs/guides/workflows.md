@@ -13,7 +13,7 @@ Workflows shows the path every channel, recording and uploaded file follows thro
 
 ## What it is for
 
-- **The map.** The pipeline in three lanes: **Live** (Source, Encode, Package, Deliver, Record), **Post-production** (Thumbnails, Clip, QC, Review, Publish) and **File ingest** (Upload, Ingest rules, Encode). Hover over a stage to read what it does.
+- **The map.** The pipeline in three lanes: **Live** (Source, Encode, Package, Deliver, Record), **Post-production** (Thumbnails, Clip, QC, Review, Publish) and **File ingest** (Upload, Ingest rules, Encode). An account with the Hybrid Sites or Mirror and Archive add-on has a fourth lane, **Your sites**: **Encode at site** (files encoded by the Volt agent on your own servers) and **Archive copies** (copies to your own storage, and the checks that read them back). Each add-on brings only its own stage. Hover over a stage to read what it does.
 - **Hooks.** Moments along the way when Volt can call an add-on:
 
   | Hook | On the stage | Fires when |
@@ -61,7 +61,7 @@ The **Report** tab shows how each stage has done, on the same map.
 5. Under the map, **Runs and error rate per lane** draws each lane's runs per day (per hour for 24 hours) with the failed part in red; hover over a bar for its numbers.
 6. **Add-on runs** lists each add-on by the hook that started it (**Sent by hand** for runs started from a recording or asset), with the same figures. **Other background work** lists work Volt does that belongs to no stage on the map, such as frame indexes.
 
-Where the numbers come from: Thumbnails, Clip, QC, Publish, Upload and the file Encode count the work Volt queues for them, and a retry counts as one run with a retry, not as a second run. Encode in the Live lane counts each stream run when it stops, and a stop for a fault is a failure. Record counts recordings as they complete, with their length as the time. Review counts decisions. The figures are brought up to date once a minute, so a run that has just finished appears within about two minutes; the line beside the range buttons says how fresh they are.
+Where the numbers come from: Thumbnails, Clip, QC, Publish, Upload and the file Encode count the work Volt queues for them, and a retry counts as one run with a retry, not as a second run. Encode in the Live lane counts each stream run when it stops, and a stop for a fault is a failure. Record counts recordings as they complete, with their length as the time. Review counts decisions. Encode at site counts each probe and encode a site's servers finish, a FAST ladder variant made at the site included; when a file falls back to cloud encoding, its waiting site encode counts as cancelled, and the cloud encode then counts under the file Encode. Archive copies counts every copy, package copy, read-back check and recording copy, under the account the copy belongs to. If an add-on is taken off the account, the work its stage counted moves to **Other background work**, so the totals stay whole. The figures are brought up to date once a minute, so a run that has just finished appears within about two minutes; the line beside the range buttons says how fresh they are.
 
 ### Add an add-on service
 
