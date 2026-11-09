@@ -72,3 +72,8 @@ jobs planned for NVENC go only to hosts with an NVIDIA GPU (and get
 `--gpus all`). Without Docker, `VOLT_ENCODER_BIN=<volt-encoder/bin>` runs the
 script with this host's own python3, ffmpeg and packager. Each attempt works in
 `~/.volt-agent/encode` (or `VOLT_SITE_SCRATCH`), removed when the job ends.
+
+A file registered from an Encode at site folder gets its ingest sidecar
+(`<file>.json` or `.xml`, when the ingest rules ask for one) written beside it
+by the agent (0.10.0 on). The agent writes only that name, never over a
+different file already there, and the folder's next scan skips it.

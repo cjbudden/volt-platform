@@ -30,6 +30,7 @@
  *   GET    /api/site-agent/watchfolders/:id/uploads            accepted files still to upload, with their open upload
  *   GET    /api/site-agent/watchfolders/:id/registrations      Encode at site: accepted video and audio still to register (H4-3)
  *   POST   /api/site-agent/watchfolders/:id/registrations/:itemId  { sizeBytes, checksum, head, probe } register one; the file stays at the site
+ *                                                         (the answer carries `sidecar`, the ingest sidecar to write beside it there: H4-7)
  *   GET    /api/site-agent/watchfolders/:id/returns            refused files an operator sent back
  *   POST   /api/site-agent/watchfolders/:id/returns/:itemId    { ok, error } the file was moved back, or not
  *   GET    /api/site-agent/watchfolders/:id/reviews            files the cloud sent to review, to move into the review folder (H2b-5)

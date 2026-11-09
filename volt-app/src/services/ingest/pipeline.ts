@@ -8,6 +8,7 @@
 //  today and by the watchfolder and remote-source workers next.
 // ============================================================================
 import { renameSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { query, one } from '../../db';
 import { resolveEffectiveFields } from '../../modules/metadataSchemas';
@@ -20,6 +21,9 @@ import { buildPayload, sidecarKey, toXml, signWebhook, type IngestPayload } from
 import { config } from '../../config';
 import { S3Destination, type Destination } from './destinations';
 import { realS3 } from './s3';
+
+/** The largest ingest sidecar sent to a site for a registered original (a payload is a few KB; this bounds the registration answer). */
+export const SITE_SIDECAR_MAX_BYTES = 256 * 1024;
 
 let s3dest: Destination | null = null;
 /** The configured object destination, or null when objects stay local. Injectable for tests. */
@@ -254,11 +258,20 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     }
     naming.key = key; naming.filename = key.split('/').pop()!;
   }
+  // A SITE-KEPT ORIGINAL IS NOT RENAMED (it stays where it was dropped), so
+  // the payload, its webhook and its sidecar name it as it is at the site,
+  // not by the name the rules would have given a file here (H4-7: the sidecar
+  // written beside it there must describe that file).
+  if (siteSource) {
+    naming.key = siteSource.objectKey;
+    naming.filename = siteSource.objectKey.split('/').pop()!;
+    naming.dir = siteSource.objectKey.includes('/') ? siteSource.objectKey.slice(0, siteSource.objectKey.lastIndexOf('/')) : '';
+  }
 
   // Object store: the local vod-src copy stays for the encoder; when S3 is
   // the destination the object and its sidecar go there too and the library
   // records the S3 uri as the object key.
-  let store = 'local'; let objectUri: string | null = null;
+  let store = siteSource ? 'site' : 'local'; let objectUri: string | null = null;
   const dest = !siteSource && (status === 'ingested' || status === 'awaiting_metadata') ? await objectDestination().catch(() => null) : null;
   if (dest) {
     try { const put = await dest.put(finalPath, `${f.accountId}/${naming.key}`, extracted.type.mime); objectUri = put.uri; store = dest.store; }
@@ -280,6 +293,24 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     resolved, duplicate, metadata: merged.metadata, metadataSources: merged.sources, extracted, unmapped: merged.unmapped,
   });
 
+  // THE INGEST SIDECAR OF A FILE KEPT AT A SITE (build queue H4-7). An upload's
+  // sidecar is written beside its original here; a registered original is not
+  // here, so the sidecar is made now and kept on the asset, and the site agent
+  // writes it beside the original at the site (the registration answer carries
+  // it). Same name and the same text as for an upload. Its SHA-256 lets the
+  // site's next scan know the file as Volt's own, not as a new drop.
+  let siteSidecar: { name: string; format: 'json' | 'xml'; mediaType: string; sha256: string; text: string } | null = null;
+  if (siteSource && status !== 'rejected' && duplicate.outcome !== 'skip' && s.sidecar !== 'none') {
+    const text = s.sidecar === 'xml' ? toXml(payload) : JSON.stringify(payload, null, 2);
+    if (Buffer.byteLength(text) <= SITE_SIDECAR_MAX_BYTES) {
+      siteSidecar = {
+        name: sidecarKey(siteSource.objectKey, s.sidecar), format: s.sidecar,
+        mediaType: s.sidecar === 'xml' ? 'application/xml' : 'application/json',
+        sha256: createHash('sha256').update(text).digest('hex'), text,
+      };
+    } else console.warn('[ingest] the sidecar of a site-kept original is too large to send to the site; not written', f.assetId);
+  }
+
   await query(
     `UPDATE vod_assets
         SET original_filename = $2, original_path = $3, sha256 = $4, mime = $5, ingest = $6,
@@ -287,7 +318,7 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
             source_key = $10, awaiting_metadata = $11, updated_at = now()
       WHERE id = $1`,
     [f.assetId, f.originalName, f.relativePath ?? null, f.sha256, extracted.type.mime,
-     JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store, ...(siteSource ? { siteSource } : {}) }),
+     JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store, ...(siteSource ? { siteSource } : {}), ...(siteSidecar ? { siteSidecar } : {}) }),
      JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, siteSource ? null : finalPath, missing.length ? missing : null]);
 
   let sidecarPath: string | null = null;

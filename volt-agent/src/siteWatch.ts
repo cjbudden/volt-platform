@@ -21,6 +21,8 @@
 //       uploaded. The agent REGISTERS it: size, checksum, the first bytes
 //       and the encoder's probe. The cloud runs the ingest on those facts and
 //       queues the encode at this site; the original stays where it is.
+//       The ingest sidecar (the same file an upload gets beside it in the
+//       cloud) is written beside the original here (H4-7).
 //       Images, captions, slates and loops still upload as in step 4.
 //    5. Move into the review folder the files the CLOUD sent to review (a
 //       caption with no video after 24 hours, one over 25 MB): it decided,
@@ -29,7 +31,8 @@
 //  OUTBOUND ONLY, like the rest of the agent: every step is a call to the
 //  cloud with the host credential; nothing listens.
 // ============================================================================
-import { stat, open } from 'node:fs/promises';
+import { stat, open, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join, sep } from 'node:path';
 import {
   scanFolder, checksumFile, moveToQuarantine,
@@ -67,6 +70,32 @@ async function headOf(abs: string, n: number): Promise<Buffer> {
 }
 
 /**
+ * WRITE THE INGEST SIDECAR beside a registered original (H4-7). The cloud
+ * names it; the agent only ever writes `<original>.json` or `<original>.xml`
+ * in the original's own folder, whatever it is told. Written to `.part` first
+ * (which the scanner treats as in flight) and renamed, so a scan never reads
+ * half of it. A file already there with the same text is left alone; one with
+ * other content is the customer's and is kept, never replaced.
+ */
+export async function writeSidecar(folderPath: string, objectKey: string, sc: { name: string; text: string; sha256: string })
+  : Promise<'written' | 'same' | 'kept'> {
+  if (sc.name !== `${objectKey}.json` && sc.name !== `${objectKey}.xml`) throw new Error(`refused a sidecar named "${sc.name}" for ${objectKey}`);
+  const body = Buffer.from(sc.text, 'utf8');
+  if (createHash('sha256').update(body).digest('hex') !== String(sc.sha256).toLowerCase()) throw new Error('the sidecar text does not match its checksum');
+  const abs = join(folderPath, sc.name.split('/').join(sep));
+  const there = await readFile(abs).catch(() => null);
+  if (there) return createHash('sha256').update(there).digest('hex') === String(sc.sha256).toLowerCase() ? 'same' : 'kept';
+  const tmp = `${abs}.part`;
+  await writeFile(tmp, body, { flag: 'w' });
+  try {
+    // link + unlink would refuse an existing file atomically, but some NAS
+    // shares have no hard links; the check above and a rename are enough here.
+    await rename(tmp, abs);
+  } catch (e) { await unlink(tmp).catch(() => {}); throw e; }
+  return 'written';
+}
+
+/**
  * What the agent remembers. Nothing here is the truth (the cloud holds the
  * queue and the uploads); it only saves work:
  *   sums     path -> checksum for a file whose size and mtime have not moved,
@@ -88,6 +117,8 @@ export interface FolderPass {
   returned: number; uploaded: string[]; uploadErrors: { objectKey: string; error: string }[];
   /** Encode at site: files registered this pass (they stay here). */
   registered: string[];
+  /** Encode at site: ingest sidecars written beside registered originals this pass. */
+  sidecars: string[];
   /** Files moved into the review folder because the cloud sent them there. */
   reviewed: number;
 }
@@ -163,7 +194,7 @@ export async function siteFolders(ctx: WatchCtx): Promise<SiteFolder[]> {
 export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<FolderPass> {
   const call = client(ctx);
   const log = ctx.log ?? ((s) => console.log(s));
-  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0, registered: [] };
+  const out: FolderPass = { folderId: folder.id, name: folder.name, returned: 0, uploaded: [], uploadErrors: [], reviewed: 0, registered: [], sidecars: [] };
   try {
     // 1. The outbox.
     const waiting = ctx.memory.outbox.filter((o) => o.folderId === folder.id);
@@ -207,6 +238,24 @@ export async function passFolder(ctx: WatchCtx, folder: SiteFolder): Promise<Fol
             { sizeBytes: r.sizeBytes, checksum: r.checksum, head: head.toString('base64'), probe });
           out.registered.push(r.objectKey);
           log(`[watch] ${folder.name}: ${r.objectKey} registered${done?.asset?.title ? ` as "${done.asset.title}"` : ''}, encoded here`);
+          // The ingest sidecar goes beside the original HERE, as an upload's
+          // goes beside it in the cloud (H4-7). A fault writing it does not
+          // undo the registration; it is reported with the pass.
+          if (done?.sidecar) {
+            try {
+              const w = await writeSidecar(folder.path, String(r.objectKey), done.sidecar);
+              if (w === 'written') {
+                out.sidecars.push(done.sidecar.name);
+                ctx.memory.known[`${folder.id}:${done.sidecar.name}:${done.sidecar.sha256}`] = true;
+                log(`[watch] ${folder.name}: ${done.sidecar.name} written beside it`);
+              } else if (w === 'kept') {
+                log(`[watch] ${folder.name}: ${done.sidecar.name} not written: a different file of that name is already there and is kept`);
+              }
+            } catch (e: any) {
+              out.uploadErrors.push({ objectKey: done.sidecar.name, error: `the ingest sidecar could not be written: ${e?.message ?? e}` });
+              log(`[watch] ${folder.name}: ${done.sidecar.name} could not be written: ${e?.message ?? e}`);
+            }
+          }
         } catch (e: any) {
           out.uploadErrors.push({ objectKey: r.objectKey, error: String(e?.message ?? e) });
           log(`[watch] ${folder.name}: ${r.objectKey} not registered: ${e?.message ?? e} (tried again next pass)`);

@@ -217,7 +217,17 @@ export async function recordDecision(p: SitePrincipal, folderId: string, raw: an
 export async function isKnown(p: SitePrincipal, folderId: string, objectKey: unknown, checksum: unknown) {
   requireApprovedHost(p);
   const f = await siteFolder(p, folderId);
-  return pgItemStore.isKnown(f.id, relKey(objectKey, 'objectKey'), String(checksum ?? ''));
+  const key = relKey(objectKey, 'objectKey');
+  if (await pgItemStore.isKnown(f.id, key, String(checksum ?? ''))) return true;
+  const sum = String(checksum ?? '').toLowerCase();
+  // VOLT'S OWN INGEST SIDECAR (H4-7): the agent wrote it beside an original
+  // registered from this folder. With the exact text Volt made it is not a new
+  // drop (the companion rule would otherwise attach it to its own video); a
+  // file edited since is decided like any other.
+  return !!(await one<any>(
+    `SELECT 1 AS x FROM watchfolder_items i JOIN vod_assets a ON a.id = i.vod_asset_id
+      WHERE i.watchfolder_id = $1 AND a.ingest->'siteSidecar'->>'name' = $2 AND a.ingest->'siteSidecar'->>'sha256' = $3 LIMIT 1`,
+    [f.id, key, sum]));
 }
 
 export async function quarantineKeysInUse(p: SitePrincipal, folderId: string) {
@@ -645,9 +655,15 @@ export async function registerSiteItem(p: SitePrincipal, folderId: string, itemI
 }
 
 async function registrationOf(it: any) {
-  const a = await one<any>(`SELECT id, title, media_state, encode_job_id, ingest->>'status' AS ingest_status FROM vod_assets WHERE id = $1`, [it.vod_asset_id]);
+  const a = await one<any>(
+    `SELECT id, title, media_state, encode_job_id, ingest->>'status' AS ingest_status, ingest->'siteSidecar' AS sidecar FROM vod_assets WHERE id = $1`, [it.vod_asset_id]);
+  const sc = a?.sidecar && typeof a.sidecar === 'object' ? a.sidecar : null;
   return {
     itemId: Number(it.id), status: it.status, reason: it.reason, vodAssetId: it.vod_asset_id,
     asset: a ? { id: a.id, title: a.title, mediaState: a.media_state, ingest: a.ingest_status, encodeJobId: a.encode_job_id } : null,
+    // The ingest sidecar for the agent to write beside the original at the
+    // site (H4-7): the name relative to the folder, the text and its SHA-256.
+    // Null when the ingest rules ask for none (or the rules could not run).
+    sidecar: sc ? { name: String(sc.name), mediaType: String(sc.mediaType), sha256: String(sc.sha256), text: String(sc.text) } : null,
   };
 }
