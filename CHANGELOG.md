@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.74.0 (2026-11-09)
+
+### Product (in customer release notes)
+
+- added · Documentation: New guide, Copies of your media at your own sites: Mirror and Archive from end to end, from a site and a storage target through copy rules to verified copies, with object-store keys, recordings in the archive, re-checks, troubleshooting and the API in one place. The Sites guide now points to it.
+- added · Documentation: New page, Running a site, for whoever runs the servers at a site: installing and enrolling the agent, running it as a service, upgrading, credentials, shares and storage, reading its logs, and what to check when a site goes quiet.
+- fixed · Documentation: The API reference no longer shows a raw storage address in the storage targets description, the Collections guide renders again, and a broken link in the on-demand ads guide is fixed.
+
+### Internal
+
+- added: Engineering guide docs/engineering/site-agent-api.md, the reference for every site agent route, held to the app by the new site-agent-api check suite (14 assertions); the route inventory now lists the two Encode at site fallback routes.
+
 ## 0.73.0 (2026-11-09)
 
 ### Product (in customer release notes)
