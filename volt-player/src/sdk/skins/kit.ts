@@ -26,8 +26,6 @@ const P: Record<string, string> = {
   play: 'M8 5.14v13.72a1 1 0 0 0 1.52.85l10.8-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z',
   pause: 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z',
   replay: 'M12 5V2L7 6l5 4V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z',
-  back10: 'M11.5 6V3L7 7l4.5 4V8a5 5 0 1 1-5 5H4.5a7 7 0 1 0 7-7zM9.6 16.5h-1v-3.3l-.9.3v-.8l1.8-.6h.1zm4.5-1.6c0 1.1-.6 1.7-1.5 1.7s-1.5-.6-1.5-1.7v-.7c0-1.1.6-1.7 1.5-1.7s1.5.6 1.5 1.7zm-1-.8c0-.6-.2-.9-.5-.9s-.5.3-.5.9v.9c0 .6.2.9.5.9s.5-.3.5-.9z',
-  fwd10: 'M12.5 6V3L17 7l-4.5 4V8a5 5 0 1 0 5 5h2a7 7 0 1 1-7-7zM9.6 16.5h-1v-3.3l-.9.3v-.8l1.8-.6h.1zm4.5-1.6c0 1.1-.6 1.7-1.5 1.7s-1.5-.6-1.5-1.7v-.7c0-1.1.6-1.7 1.5-1.7s1.5.6 1.5 1.7zm-1-.8c0-.6-.2-.9-.5-.9s-.5.3-.5.9v.9c0 .6.2.9.5.9s.5-.3.5-.9z',
   // The waves start at x 15, two clear of the speaker, so they read as sound and not part of it.
   volume: 'M4 9v6h4l5 4V5L8 9zm13 3A4 4 0 0 0 15 8.5v7a4 4 0 0 0 2-3.5zM15 4.3v2.1a6 6 0 0 1 0 11.2v2.1a8 8 0 0 0 0-15.4z',
   // The speaker of `volume`, and an X centred at (18.5, 12) spanning x 15-22, so it
@@ -50,6 +48,19 @@ const P: Record<string, string> = {
   stats: 'M4 20h4V10H4zm6 0h4V4h-4zm6 0h4v-7h-4z',
 };
 
+// LINE ICONS: drawn with strokes, as [path, stroke width] pairs. The skip
+// buttons are line icons so the "10" sits inside the ring with clear space
+// around it: the filled versions ran the digits into the arc and read as cut
+// off at control-bar size (20 to 22 px). Both use the same digits.
+const TEN: [string, number][] = [
+  ['M8.5 11.1 10 10v6', 1.6],
+  ['M13.9 10c-1 0-1.6 1.1-1.6 3s.6 3 1.6 3 1.6-1.1 1.6-3-.6-3-1.6-3z', 1.6],
+];
+const S: Record<string, [string, number][]> = {
+  back10: [['M4 13a8 8 0 1 0 8-8H8.5', 2], ['M10.5 2.5 8 5l2.5 2.5', 2], ...TEN],
+  fwd10: [['M20 13a8 8 0 1 1-8-8h3.5', 2], ['M13.5 2.5 16 5l-2.5 2.5', 2], ...TEN],
+};
+
 export function icon(name: string, size = 22): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
   const s = document.createElementNS(ns, 'svg');
@@ -57,6 +68,20 @@ export function icon(name: string, size = 22): SVGSVGElement {
   s.setAttribute('width', String(size));
   s.setAttribute('height', String(size));
   s.setAttribute('aria-hidden', 'true');
+  const line = S[name];
+  if (line) {
+    s.setAttribute('fill', 'none');
+    s.setAttribute('stroke', 'currentColor');
+    s.setAttribute('stroke-linecap', 'round');
+    s.setAttribute('stroke-linejoin', 'round');
+    for (const [d, w] of line) {
+      const p = document.createElementNS(ns, 'path');
+      p.setAttribute('d', d);
+      p.setAttribute('stroke-width', String(w));
+      s.appendChild(p);
+    }
+    return s;
+  }
   const p = document.createElementNS(ns, 'path');
   p.setAttribute('d', P[name] ?? P.play);
   p.setAttribute('fill', 'currentColor');

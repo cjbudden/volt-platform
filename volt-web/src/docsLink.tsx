@@ -34,7 +34,8 @@ export function DocsButton() {
   return (
     <div className="icon-btn" title="Documentation" aria-busy={busy}
       {...pressable(() => { setBusy(true); openDocs(notify).finally(() => setBusy(false)) }, { label: 'Documentation' })}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.2a2.5 2.5 0 014.8.9c0 1.7-2.4 2.2-2.4 3.6" /><path d="M12 17h.01" /></svg>
+      {/* An open book: this opens the documentation, not in-app help. */}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 7v13" /><path d="M3 5.5A1.5 1.5 0 014.5 4H9a3 3 0 013 3 3 3 0 013-3h4.5A1.5 1.5 0 0121 5.5v11a1.5 1.5 0 01-1.5 1.5H15a3 3 0 00-3 2 3 3 0 00-3-2H4.5A1.5 1.5 0 013 16.5z" /></svg>
     </div>
   )
 }
