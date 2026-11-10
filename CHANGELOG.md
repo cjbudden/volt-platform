@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.79.0 (2026-11-10)
+
+### Product (in customer release notes)
+
+- added · Analytics: A new Rights demand view in Analytics shows who was turned away for a region or the rights: a world map and ranked tables of blocked viewers by country and title, the daily trend beside the plays where each title is licensed, and a CSV download. Choose a title to see its window, where it is licensed and where it is wanted.
+
+### Internal
+
+- added · Analytics: Browser check for the Rights demand view (volt-web/scripts/check-rights-demand.mjs, 36 checks at 1440 and 390 px) and thirty days of refusals in the docs seed.
+
 ## 0.78.0 (2026-11-09)
 
 ### Product (in customer release notes)
