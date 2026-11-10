@@ -232,6 +232,15 @@ const check = (m: string, got: unknown, want: unknown) => {
       [tr2.j.settings.protection.drm, tr2.j.ignored.map((i: any) => `${i.field}:${i.lockedBy}`), tr2.j.settings.distribution.mp4Download], [true, ['protection.drm:schema'], true]);
     check('and the conflict that leaves is shown on the title', tr2.j.conflicts.map((c: any) => c.code), ['drm_mp4']);
 
+    // ---- a save that changes nothing changes no title (P3-2): a stored rung
+    // comes back from jsonb with its keys in another order than it was sent
+    const paywall = { protection: { waf: 'standard' }, paywall: { tier: 'gold', priceCents: 500, currency: 'AUD' }, geo: { mode: 'block', countries: ['US'] } };
+    check('the account saves a paywall and a geo block', (await call('PUT', '/api/publishing-rules/account', { settings: paywall, lockedFields: [] })).s, 200);
+    const same = await call('PUT', '/api/publishing-rules/account?dryRun=1', { settings: paywall, lockedFields: [] });
+    check('a dry run of the same rung again: every title governed, none changed', [same.j.impact.assets > 0, same.j.impact.changed], [true, 0]);
+    check('P.stableJson ignores key order, not values', [P.stableJson({ a: 1, b: { c: 2, d: [1, { f: 1, e: 2 }] } }) === P.stableJson({ b: { d: [1, { e: 2, f: 1 }], c: 2 }, a: 1 }), P.stableJson({ a: [1, 2] }) === P.stableJson({ a: [2, 1] })], [true, false]);
+    check('the account goes back to its WAF profile alone', (await call('PUT', '/api/publishing-rules/account', { settings: { protection: { waf: 'standard' } }, lockedFields: [] })).s, 200);
+
     // ---- tenancy
     check('another account\'s content type cannot be given a rule', (await call('PUT', `/api/publishing-rules/schema/${theirs}`, { settings: {} })).s, 404);
     check('another account\'s title cannot be traced', (await call('GET', `/api/publishing-rules/resolve?assetId=${s1}`, undefined, them.tok)).s, 404);

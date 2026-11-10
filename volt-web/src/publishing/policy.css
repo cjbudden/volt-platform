@@ -1,0 +1,41 @@
+/* Publishing policy editor (build queue P3-2). Uses the console tokens in index.css. */
+.pol-presets{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;font-size:var(--fs-sm)}
+.pol-presets .pol-preset-name{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:var(--brand-dim);color:#9db9ff;font-size:var(--fs-xs);font-weight:600}
+.pol-sec{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.pol-sec-h{display:flex;align-items:center;gap:8px;margin:0;font-size:var(--fs-body);font-weight:600}
+.pol-sec-h svg{color:var(--muted)}
+.pol-sec-hint{margin:-4px 0 2px;color:var(--muted);font-size:var(--fs-sm)}
+/* Name, value and padlock; the value drops under the name on a phone and
+   for the access rules, which need the whole width. */
+.pol-row{display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr) auto;grid-template-areas:"name val lock";gap:10px;align-items:start;padding:8px 10px;border-radius:8px;border:1px solid var(--border)}
+.pol-compact .pol-row{grid-template-columns:minmax(0,150px) minmax(0,1fr) auto}
+.pol-row.wide,.pol-compact .pol-row.wide{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name lock" "val val"}
+.pol-row .pol-head{grid-area:name;min-width:0}
+.pol-row .pol-val{grid-area:val}
+.pol-row .pol-lock{grid-area:lock}
+.pol-row.on{background:rgba(63,123,255,.06);border-color:rgba(63,123,255,.35)}
+.pol-row.locked{background:var(--panel-2)}
+.pol-row.block{border-color:var(--down)}
+.pol-row.warn{border-color:var(--warn)}
+.pol-row .pol-name{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:600}
+.pol-row .pol-src{font-size:var(--fs-micro);color:var(--faint);margin-top:4px;display:flex;align-items:center;gap:4px}
+.pol-row .pol-src.lock{color:var(--warn)}
+.pol-row .pol-val{font-size:var(--fs-sm);color:var(--faint);min-width:0;overflow-wrap:anywhere}
+.pol-row .pol-note{margin-top:6px;font-size:var(--fs-xs);color:var(--warn);display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pol-lock{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--faint);cursor:pointer}
+.pol-lock[aria-pressed="true"]{color:var(--warn);border-color:var(--warn);background:var(--panel-2)}
+.pol-lock:disabled{cursor:default;opacity:.7}
+.pol-check{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:12px 14px;border-radius:var(--radius-sm);background:var(--panel-2);border:1px solid var(--border);font-size:var(--fs-sm)}
+.pol-check .pol-check-h{display:flex;align-items:center;gap:8px;font-weight:600}
+.pol-check .pol-impact{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted)}
+.pol-check .pol-impact b{color:var(--text);font-variant-numeric:tabular-nums}
+.pol-msg{display:flex;gap:8px;align-items:flex-start}
+.pol-msg svg{flex:none;margin-top:2px}
+.pol-msg.block{color:var(--down)}
+.pol-msg.warn{color:var(--warn)}
+.pol-msg .pol-titles{display:block;color:var(--muted);font-size:var(--fs-xs);margin-top:2px}
+.pol-confirm{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid var(--warn);background:var(--panel-2);font-size:var(--fs-sm)}
+.pol-confirm .pol-foot{display:flex;flex-wrap:wrap;gap:8px}
+@media (max-width:640px){
+  .pol-row,.pol-compact .pol-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name lock" "val val"}
+}

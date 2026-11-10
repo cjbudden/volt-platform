@@ -366,7 +366,27 @@
       "guide": "guides/publishing-rules.md",
       "path": "/publishing",
       "waitFor": "h1",
-      "alt": "The Publishing Rules page: the publishing points, the account default with each of its fields, and the lists of content type and channel, event or station overrides"
+      "alt": "The Publishing Rules page: the publishing points, and the account default with a preset picker and its Lifecycle and Access sections, each field with its padlock"
+    },
+    {
+      "name": "publishing-policy-locks",
+      "guide": "guides/publishing-rules.md",
+      "path": "/publishing",
+      "waitFor": "[data-rule-editor=account] [data-policy-section=protection]",
+      "clip": "[data-rule-editor=account] [data-policy-section=protection]",
+      "settleMs": 800,
+      "alt": "The Protection section of the account default: DRM, playback token lifetime, WAF profile, allowed referrer domains and concurrent streams, with DRM's padlock closed"
+    },
+    {
+      "name": "publishing-policy-check",
+      "guide": "guides/publishing-rules.md",
+      "path": "/publishing",
+      "waitFor": "[data-rule-editor=account] [data-policy-check] [data-impact]",
+      "click": ["[data-rule-editor=account] [data-policy-field=\"protection.drm\"] input[type=checkbox]"],
+      "waitAfter": "[data-rule-editor=account] [data-policy-conflict=block]",
+      "clip": "[data-rule-editor=account] [data-policy-check]",
+      "settleMs": 800,
+      "alt": "Before you save, under the account default with DRM ticked: the titles it governs, how many are published and how many the save changes, and the conflict that blocks the save, DRM with MP4 download allowed"
     },
     {
       "name": "ingest-rules",

@@ -7,9 +7,9 @@ guide: section
 
 # Publishing Rules
 
-Publishing Rules decides what a publish does: where on-demand content goes, when it becomes available and when it expires, who can watch it, and whether a review or a quality check must pass first. You set an **account default** here, and a content type, a channel, an event, a station or a single item can override any part of it.
+Publishing Rules decides what a publish does: where on-demand content goes, when it becomes available and when it expires, who can watch it, how it is protected, what else may be done with it, how long it is kept, and whether a review or a quality check must pass first. You set an **account default** here, and a content type, a channel, an event, a station or a single item can override any part of it, unless a rung above has locked it.
 
-![The Publishing Rules page: the publishing points, the account default with each of its fields, and the lists of content type and channel, event or station overrides](/img/screens/publishing-rules.png)
+![The Publishing Rules page: the publishing points, and the account default with a preset picker and its Lifecycle and Access sections, each field with its padlock](/img/screens/publishing-rules.png)
 
 ## What it is for
 
@@ -25,6 +25,8 @@ Publishing Rules decides what a publish does: where on-demand content goes, when
 
   The higher rung wins: an item's own value beats its channel's, which beats its content type's, which beats the account default.
 - **A gate before publishing.** Require an approved review, or block publishing while a quality check has failed.
+- **Locks.** Lock a field on a rung and nothing beneath it can change it: lock DRM on for the account and no content type, stream or item can turn it off.
+- **Problems caught before they are saved.** Every change is checked as you make it. A combination that cannot work (DRM with MP4 download, say) stops the save; one that is risky is saved with a warning; and you see how many titles the change affects before you save it.
 
 Administrators set the default; the people who run a channel, an event or the library set the overrides.
 
@@ -45,7 +47,7 @@ Administrators set the default; the people who run a channel, an event or the li
 
 ### Set the account default
 
-1. Under **Account default**, every field shows its current value. On this rung there is nothing to tick: change the values directly.
+1. Under **Account default**, every field shows its current value, grouped in five sections: **Lifecycle**, **Access**, **Protection**, **Distribution** and **Retention**. On this rung there is nothing to tick: change the values directly.
 
    | Field | Choices |
    |---|---|
@@ -59,16 +61,71 @@ Administrators set the default; the people who run a channel, an event or the li
    | **Paywall** | Tick **Paywall**, then a tier, a price in cents and a three-letter currency |
    | **Publish gate** | **Require an approved review before publishing** and **Block publishing while QC has failed** |
    | **Archive copies** | With the Mirror and Archive add-on, for account administrators: which storage targets the original is copied to, and when. See [Copy originals to your own storage](#copy-originals-to-your-own-storage) |
+   | **DRM** | **Encrypt with DRM**. It changes the files, so turning it on or off for published titles asks first (see [Turn DRM on or off for published titles](#turn-drm-on-or-off-for-published-titles)) |
+   | **Playback token lifetime** | Minutes a playback link stays valid; empty for the platform default |
+   | **WAF profile** | **Off**, **Standard** (VPN and proxy flagged) or **Rights-managed** (VPN, proxy, hosting and Tor blocked) |
+   | **Allowed referrer domains** | The sites a player may be embedded on, such as `example.com, *.example.com`; empty for any site |
+   | **Concurrent streams** | How many streams one viewer may play at once; empty for no limit |
+   | **MP4 download**, **Share links**, **FAST eligible**, **Sitemap and schema.org** | Whether a published title may be downloaded as MP4, shared with a link, scheduled on FAST channels, and listed in the sitemap |
+   | **Retention**, **Retention days**, **Retention counts from** | **Keep forever**, or **Keep for a number of days** counted from when it came in, became available or stops being available |
+   | **Legal hold allowed**, **Archive storage tier** | Whether a title may be put on legal hold, and the storage it moves to when archived |
 
-2. Choose **Save publishing rule**. **Saved.** appears beside the button.
+   Protection, distribution and retention are stored and checked now; applying them where content is played, downloaded and kept comes in later releases.
+2. Check **Before you save** under the fields (see [Before you save](#before-you-save-conflicts-and-impact)).
+3. Choose **Save publishing rule**. **Saved.** appears beside the button, or **Saved, with 1 warning.** when a warning stands.
 
 ### Override it for a content type, a stream or an item
 
 1. Open the rule where it lives (see the table above). On a channel, event or station, open its settings and choose the **Access** tab. An event or station has to be created before its rule can be set.
 2. Grey values are inherited; under each field name it says where the value comes from, for example **inherits: account default** or **inherits: content type rule**.
 3. Tick a field to set it here. It changes to **set here** and its controls appear. The line at the top counts how many fields are set on this rung.
-4. Choose **Save publishing rule**.
-5. To go back to inheriting everything, untick the fields and save, or choose **Remove this rule (inherit everything)** (on a content type or a stream).
+4. A field that a rung beneath this one has locked shows a closed padlock and **Locked by the account default** (or the rung that locked it). It cannot be ticked here.
+5. Choose **Save publishing rule**.
+6. To go back to inheriting everything, untick the fields and save, or choose **Remove this rule (inherit everything)** (on a content type or a stream).
+
+### Lock a field
+
+![The Protection section of the account default: DRM, playback token lifetime, WAF profile, allowed referrer domains and concurrent streams, with DRM's padlock closed](/img/screens/publishing-policy-locks.png)
+
+1. On the account default, a content type or a stream, choose the padlock at the end of a field's row. It closes and the line at the top counts the fields locked here.
+2. Choose **Save publishing rule**.
+
+Every rung beneath now shows the field with **Locked by** and this rung's name, and cannot change it. A rung that already set its own value for that field says **This rung still sets a value of its own, which the lock overrides**; choose **Clear it** there, because its save is refused until it is cleared. Choose the padlock again to unlock. A single item has no padlocks: it is the last rung, so there is nothing beneath it to lock.
+
+### Start from a preset
+
+1. Choose **Start from a preset…** above the sections and pick one:
+
+   | Preset | Sets |
+   |---|---|
+   | **Open** | Published when ready, free worldwide, no DRM, MP4 download and share links allowed |
+   | **Members** | Sign-in required, worldwide, no DRM |
+   | **Geo-locked** | Free, only in the countries you choose, Standard WAF profile |
+   | **Premium** | Paid, DRM, no MP4 download |
+   | **Rights-managed** | Only in the countries you choose, catalogue only, DRM, Rights-managed WAF profile, no MP4 download |
+
+2. The preset's fields are copied onto the rung and **Started from** names it. Change any of them as usual. For Geo-locked and Rights-managed, choose the countries under **Geo access**.
+3. Choose **Save publishing rule**. **Forget the preset** keeps the fields and drops the name.
+
+### Before you save: conflicts and impact
+
+![Before you save, under the account default with DRM ticked: the titles it governs, how many are published and how many the save changes, and the conflict that blocks the save](/img/screens/publishing-policy-check.png)
+
+As you change a rung, **Before you save** checks it:
+
+- **Governs** the titles this rung decides for, how many of them are **published**, and how many the save **changes**. When DRM changes, it also counts the published titles **to be packaged again**.
+- A red line is a **conflict that blocks the save**, for example DRM with MP4 download allowed. The rows it names are outlined, **Save publishing rule** is greyed out and **Fix the conflicts marked above to save.** appears beside it.
+- An amber line is a **warning**: the rule can be saved, and it is worth a look, for example a country restriction without a WAF profile.
+- A line that starts with a number of titles is about those titles in particular, with up to five of them named, for example a rights-managed rule on a title that has no rights window.
+
+### Turn DRM on or off for published titles
+
+Turning DRM on or off changes the files, so published titles must be packaged again.
+
+1. Change **DRM** and choose **Save publishing rule**.
+2. A box says how many published titles will be packaged again. Choose **Package again and save**, or **Cancel** to leave the rule as it was.
+
+Titles keep their current protection until they have been packaged again.
 
 ### See every override
 
@@ -128,6 +185,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | See a channel, event or station's rule (its **Access** tab) | View on that kind of stream (TV channels, Radio stations, Events or FAST channels), or Account settings: View |
 | Change a channel, event or station's rule | Manage on that kind of stream (an Event Manager sets their events' rules, a Radio Manager their stations'), or Account settings: Manage |
 | Change a single asset's rule | Media library & publishing: Manage |
+| Lock a field, or start from a preset | The same as changing that rung |
 | See and set **Archive copies** | Account administrator (owner or admin), with the Mirror and Archive add-on |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
@@ -149,6 +207,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | Viewers are told "Not available in your region." | Access rules cover the content, but none matches the viewer's country | Add a rule for that country, or a last rule for **WORLD** |
 | **Archive copies** says **No storage targets yet.** | No storage target has been made | Add one on the [Storage](storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page |
 | Publishing an asset is refused because of the publish gate | **Publish gate** requires an approved review, or QC has failed | See [Review](review.md), or change the gate |
+| **Save publishing rule** is greyed out and **Fix the conflicts marked above to save.** | A red line under **Before you save** blocks the save | Change one of the fields it names; the check runs again as you do |
+| **... is locked by the account default: it cannot be changed here.** | This rung sets a field a rung beneath locked | Choose **Clear it** on that row, or unlock the field where it was locked |
+| A field shows **Locked by** and cannot be ticked | A rung beneath this one locked it | Change it on that rung, or unlock it there |
+| A box asks to package titles again | The change turns DRM on or off for published titles | Choose **Package again and save**, or **Cancel** |
 
 ## Through the API
 

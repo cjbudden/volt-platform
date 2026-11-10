@@ -176,6 +176,18 @@ export interface Impact {
 
 type RuleRow = { id: string; scope_kind: 'account' | 'schema' | 'owner'; scope_id: string | null; settings: RuleSettings; locked_fields: string[]; preset_key: string | null; name?: string | null };
 
+/**
+ * JSON with object keys sorted, for comparing two policies. A stored rung
+ * comes back from jsonb with its keys in jsonb's order (shortest first), while
+ * the same rung as sent is in the order it was written, so a plain
+ * JSON.stringify counted every title as changed by a save that changed
+ * nothing (found by the console's impact preview, build queue P3-2).
+ */
+export function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_k, x) => x && typeof x === 'object' && !Array.isArray(x)
+    ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as any)[k]])) : x);
+}
+
 /** Resolve a title against a set of rule rows (all the account's, in memory). */
 export function resolveWith(rows: RuleRow[], a: { id?: string; schema_id?: string | null; channel_id?: string | null; event_id?: string | null; availability_override?: RuleSettings | null }): Resolved {
   const owner = a.channel_id ?? a.event_id ?? null;
@@ -235,7 +247,7 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
     const [was, now] = pair;
     const live = ['available', 'scheduled'].includes(t.availability_state);
     if (live) impact.published++;
-    if (JSON.stringify(was.settings) !== JSON.stringify(now.settings)) impact.changed++;
+    if (stableJson(was.settings) !== stableJson(now.settings)) impact.changed++;
     if (live && !!was.settings.protection.drm !== !!now.settings.protection.drm) impact.repackage++;
     // The title's rights, from the cached profile, as the play gate sees them.
     const pid = t.rights_profile_id ?? '';

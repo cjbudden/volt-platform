@@ -11,13 +11,27 @@
 //  Targets are chosen from the client's own publishing points: the catalogue,
 //  its registered apps, and the social accounts it has configured. Nothing
 //  else is offered, and the API refuses anything else.
+//
+//  A rung is shown as the five sections of a policy (build queue P3-2,
+//  publishing/PolicyFields.tsx): Lifecycle, Access, Protection, Distribution
+//  and Retention. Each field has a padlock: a locked field cannot be changed
+//  by the rungs beneath, and a field locked beneath this one is shown with
+//  the rung that locked it and cannot be set here. A preset copies its
+//  fields onto the rung. As the form changes it is checked with a dry run of
+//  the save (?dryRun=1): blocking conflicts stop Save, warnings are saved and
+//  shown, and the impact says how many titles the save changes. A save that
+//  changes DRM on published titles asks first (409 confirm_repackage).
 // ============================================================================
 import { useEffect, useMemo, useState } from 'react'
-import { api, type RuleSettings, type RuleKey, type ResolvedRules, type PublishingPoints, type PublishTarget, type Rung, type ArchiveTarget } from './api'
+import { api, type RuleKey, type RuleScope, type PublishingPoints, type PublishTarget, type Rung, type ArchiveTarget } from './api'
 import { useAccess } from './access'
 import { navigate } from './router'
 import { AccessRulesEditor } from './AccessRulesEditor'
+import { policyApi, policyRefusal, type PolicySettings, type ResolvedPolicy, type Preset, type PresetKey, type DryRun, type Impact } from './publishing/policyApi'
+import { SECTIONS, SECTION_FIELD_LABEL, isSectionField, getVal, withVal, statedIds, baselineOf, describeSection, SectionFieldControl, Padlock, SectionGlyph, type FieldId } from './publishing/PolicyFields'
+import './publishing/policy.css'
 
+const RUNG_ORDER: Rung[] = ['baseline', 'account', 'schema', 'owner', 'asset']
 const RUNG_LABEL: Record<Rung, string> = {
   baseline: 'platform default', account: 'account default', schema: 'content type rule', owner: 'channel / event / station rule', asset: 'this item',
 }
@@ -74,117 +88,255 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
   compact?: boolean
   onSaved?: () => void
 }) {
+  const asset = scopeKind === 'asset'
   const [points, setPoints] = useState<PublishingPoints | null>(null)
-  const [resolved, setResolved] = useState<ResolvedRules | null>(null)
-  const [own, setOwn] = useState<RuleSettings>({})
+  const [resolved, setResolved] = useState<ResolvedPolicy | null>(null)
+  const [own, setOwn] = useState<PolicySettings>({})
+  // What this rung says besides its settings (build queue P3): the fields it
+  // locks for the rungs beneath, and the preset it started from. An asset is
+  // the last rung, so it locks nothing and keeps no preset.
+  const [locks, setLocks] = useState<string[]>([])
+  const [presetKey, setPresetKey] = useState<PresetKey | null>(null)
+  const [presets, setPresets] = useState<Preset[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  // The dry run of the rung as it stands in the form: conflicts and impact.
+  const [check, setCheck] = useState<DryRun | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkErr, setCheckErr] = useState('')
+  // A save that changes DRM on published titles waits for this confirmation.
+  const [confirm, setConfirm] = useState<{ message: string; impact: Impact | null } | null>(null)
   // Archive copies need the Mirror and Archive add-on and an administrator
   // (the storage targets they name are read through /api/archive).
   const { isAdminTier, me } = useAccess()
   const archiveOn = isAdminTier && !!me?.account?.licences?.includes('mirror_archive')
   const [archiveTargets, setArchiveTargets] = useState<ArchiveTarget[]>([])
   useEffect(() => { if (archiveOn) api.archiveTargets().then(r => setArchiveTargets(r.items)).catch(() => setArchiveTargets([])) }, [archiveOn])
-  const SHOWN = archiveOn ? KEYS : KEYS.filter(k => k !== 'archive')
+  useEffect(() => { if (!asset) policyApi.presets().then(setPresets).catch(() => setPresets([])) }, [asset])
 
   async function load() {
     try {
       const [p, r] = await Promise.all([api.publishingPoints(), api.resolvePublishing(resolveQuery)])
-      setPoints(p); setResolved(r)
-      if (scopeKind === 'asset') {
+      setPoints(p); setResolved(r as ResolvedPolicy)
+      if (asset) {
         const a = await api.vodAvailability(scopeId!)
-        setOwn(a.override ?? {})
+        setOwn((a.override ?? {}) as PolicySettings)
       } else {
-        const rule = await api.publishingRule(scopeKind, scopeId)
-        setOwn(rule.settings ?? {})
+        const rule = await policyApi.rule(scopeKind, scopeId)
+        setOwn(rule.settings ?? {}); setLocks(rule.locked_fields ?? []); setPresetKey(rule.preset_key ?? null)
       }
+      setLoaded(true)
     } catch (e: any) { setErr(e.message) }
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [scopeKind, scopeId, JSON.stringify(resolveQuery)])
 
-  // What this rung inherits = the resolution WITHOUT this rung's own values.
-  const inherited = useMemo(() => {
-    if (!resolved) return null
-    const below = resolved.rungs.filter(r => r.rung !== scopeKind)
-    const settings: any = {}; const sources: any = {}
-    for (const k of KEYS) { settings[k] = (resolved.settings as any)[k]; sources[k] = resolved.sources[k] }
-    // If the server's resolution included this rung's stored values, roll them back to the rung beneath.
-    for (const k of KEYS) {
-      if (resolved.sources[k] !== scopeKind) continue
-      let v: any = undefined; let src: Rung = 'baseline'
-      for (const r of below) { const s: any = r.settings ?? {}; if (s[k] !== undefined) { v = s[k]; src = r.rung } }
-      if (v === undefined) { settings[k] = undefined; sources[k] = 'baseline' } else { settings[k] = v; sources[k] = src }
-    }
-    return { settings, sources }
-  }, [resolved, scopeKind])
+  // The dry run, a moment after each change: blocks stop Save, warnings are
+  // shown and saved, and the impact says what the save would do to titles.
+  const body = JSON.stringify({ own, locks, presetKey })
+  useEffect(() => {
+    if (asset || !loaded) return
+    let gone = false
+    setChecking(true)
+    const t = setTimeout(async () => {
+      try {
+        const r = await policyApi.dryRun(scopeKind as RuleScope, scopeId, { settings: own, lockedFields: locks, presetKey })
+        if (!gone) { setCheck(r); setCheckErr('') }
+      } catch (e: any) { if (!gone) { setCheck(null); setCheckErr(e.message) } }
+      finally { if (!gone) setChecking(false) }
+    }, 450)
+    return () => { gone = true; clearTimeout(t) }
+    // eslint-disable-next-line
+  }, [body, loaded, asset, scopeKind, scopeId])
 
-  const overriding = (k: RuleKey) => own[k] !== undefined
-  const setKey = (k: RuleKey, v: any) => setOwn(o => { const n = { ...o }; if (v === undefined) delete n[k]; else (n as any)[k] = v; return n })
-  const toggle = (k: RuleKey) => {
-    if (overriding(k)) return setKey(k, undefined)
-    const start = inherited?.settings[k]
-    setKey(k, start === undefined ? DEFAULTS[k] : JSON.parse(JSON.stringify(start)))
+  const rank = (r: Rung) => RUNG_ORDER.indexOf(r)
+  const myRank = rank(scopeKind)
+
+  /** What this rung inherits for a field: its value and the rung it comes
+   *  from, from the rungs beneath this one only (the server's resolution
+   *  includes this rung's own values, which are rolled back here). */
+  const inheritedOf = (id: FieldId): { value: any; src: Rung } => {
+    if (!resolved) return { value: undefined, src: 'baseline' }
+    const below = resolved.rungs.filter(r => rank(r.rung) < myRank)
+    const src: Rung = isSectionField(id) ? (resolved.fieldSources?.[id] ?? 'baseline') : resolved.sources[id as RuleKey] ?? 'baseline'
+    if (rank(src) < myRank) return { value: isSectionField(id) ? getVal(resolved.settings, id) : (resolved.settings as any)[id], src }
+    let value: any = undefined; let from: Rung = 'baseline'
+    for (const r of below) { const v = getVal(r.settings as PolicySettings, id); if (v !== undefined) { value = v; from = r.rung } }
+    if (value === undefined) value = isSectionField(id) ? baselineOf(id) : DEFAULTS[id as RuleKey]
+    return { value, src: from }
+  }
+  /** The rung beneath this one that locked a field, if any. */
+  const lockedAbove = (id: FieldId): Rung | null => {
+    const by = resolved?.locks?.[id] ?? (isSectionField(id) ? resolved?.locks?.[id.split('.')[0]] : undefined)
+    return by && rank(by) < myRank ? by : null
   }
 
-  async function save() {
+  const shownKeys = archiveOn ? KEYS : KEYS.filter(k => k !== 'archive')
+  const shown = (id: FieldId) => isSectionField(id) || shownKeys.includes(id as RuleKey)
+  const overriding = (id: FieldId) => getVal(own, id) !== undefined
+  const setField = (id: FieldId, v: any) => setOwn(o => withVal(o, id, v))
+  const toggle = (id: FieldId) => {
+    if (overriding(id)) return setField(id, undefined)
+    const start = inheritedOf(id).value
+    setField(id, start === undefined ? (isSectionField(id) ? baselineOf(id) : DEFAULTS[id as RuleKey]) : JSON.parse(JSON.stringify(start)))
+  }
+  const flipLock = (id: FieldId) => setLocks(l => l.includes(id) ? l.filter(x => x !== id) : [...l, id])
+  function applyPreset(key: string) {
+    const p = presets.find(x => x.key === key)
+    if (!p) return
+    // A preset is a starting point: its fields are copied onto this rung and
+    // can be edited; fields it does not name keep what the rung had.
+    setOwn(o => { let n = o; for (const id of statedIds(p.settings)) n = withVal(n, id, JSON.parse(JSON.stringify(getVal(p.settings, id)))); return n })
+    setPresetKey(p.key)
+  }
+
+  // Which fields the current conflicts name, for the rows to show it.
+  const flagged = useMemo(() => {
+    const m = new Map<string, 'block' | 'warn'>()
+    for (const c of check?.conflicts ?? []) for (const f of c.fields) if (m.get(f) !== 'block') m.set(f, c.level === 'block' ? 'block' : 'warn')
+    return m
+  }, [check])
+
+  async function save(confirmed = false) {
     setBusy(true); setErr(''); setMsg('')
     try {
-      if (scopeKind === 'asset') await api.setVodAvailability(scopeId!, own)
-      else await api.putPublishingRule(scopeKind, scopeId, own)
-      setMsg('Saved.'); await load(); onSaved?.()
-    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
+      if (asset) { await api.setVodAvailability(scopeId!, own); setMsg('Saved.') }
+      else {
+        const r = await policyApi.save(scopeKind as RuleScope, scopeId, { settings: own, lockedFields: locks, presetKey, ...(confirmed ? { confirm: true } : {}) })
+        setConfirm(null)
+        setMsg(r.warnings?.length ? `Saved, with ${r.warnings.length} warning${r.warnings.length === 1 ? '' : 's'}.` : 'Saved.')
+      }
+      await load(); onSaved?.()
+    } catch (e: any) {
+      const refusal = policyRefusal(e)
+      if (refusal?.code === 'confirm_repackage') setConfirm({ message: refusal.message, impact: refusal.impact })
+      else {
+        setErr(e.message)
+        if (refusal?.impact) setCheck({ dryRun: true, saved: false, canSave: false, conflicts: refusal.conflicts, impact: refusal.impact })
+      }
+    } finally { setBusy(false) }
   }
 
-  if (!inherited || !points) return <div className="loading">{err || 'Loading publishing rules…'}</div>
-  const overrides = SHOWN.filter(overriding).length
+  if (!resolved || !points) return <div className="loading">{err || 'Loading publishing rules…'}</div>
+  const overrides = statedIds(own).filter(shown).length
+  const blocked = !!check && !check.canSave
+  const preset = presets.find(p => p.key === presetKey)
+
+  const row = (id: FieldId) => {
+    const on = overriding(id)
+    const lockBy = lockedAbove(id)
+    const inh = inheritedOf(id)
+    const label = isSectionField(id) ? SECTION_FIELD_LABEL[id] : KEY_LABEL[id as RuleKey]
+    const editable = !lockBy && (on || scopeKind === 'account')
+    const mine = locks.includes(id)
+    const flag = flagged.get(id)
+    const value = scopeKind === 'account' ? (getVal(own, id) ?? inh.value) : getVal(own, id)
+    const cls = ['pol-row', id === 'accessRules' ? 'wide' : '', on && !lockBy ? 'on' : '', lockBy ? 'locked' : '', flag ?? ''].filter(Boolean).join(' ')
+    return (
+      <div key={id} className={cls} data-policy-field={id} data-locked-by={lockBy ?? undefined} data-flag={flag}>
+        <div className="pol-head">
+          <label className="pol-name" style={{ cursor: scopeKind === 'account' || lockBy ? 'default' : 'pointer' }}>
+            {scopeKind !== 'account' && <input type="checkbox" checked={on} disabled={!!lockBy && !on} onChange={() => toggle(id)} aria-label={`Set ${label} here`} />}
+            {label}
+          </label>
+          {lockBy
+            ? <div className="pol-src lock"><Padlock size={12} />Locked by the {RUNG_LABEL[lockBy]}</div>
+            : scopeKind !== 'account' && <div className="pol-src">{on ? 'set here' : `inherits: ${RUNG_LABEL[inh.src]}`}</div>}
+        </div>
+        <div className="pol-val">
+          {editable
+            ? (isSectionField(id)
+              ? <SectionFieldControl id={id} value={value} onChange={v => setField(id, v)} />
+              : <FieldControl k={id as RuleKey} value={value} points={points} scopeKind={scopeKind} archiveTargets={archiveTargets} onChange={v => setField(id, v)} />)
+            : <div>{isSectionField(id) ? describeSection(id, inh.value) : describe(id as RuleKey, inh.value, points, archiveTargets)}</div>}
+          {lockBy && on && (
+            <div className="pol-note">
+              This rung still sets a value of its own, which the lock overrides.{!asset && ' Save is refused until it is cleared.'}
+              <button type="button" className="btn ghost sm" onClick={() => setField(id, undefined)}>Clear it</button>
+            </div>)}
+        </div>
+        {!asset && (
+          <button type="button" className="pol-lock" aria-pressed={!!lockBy || mine} disabled={!!lockBy}
+            data-lock={id}
+            aria-label={lockBy ? `${label} is locked by the ${RUNG_LABEL[lockBy]}` : mine ? `Unlock ${label}` : `Lock ${label}`}
+            title={lockBy ? `Locked by the ${RUNG_LABEL[lockBy]}` : mine ? 'Locked here: the rungs beneath cannot change it. Choose to unlock.' : 'Lock it, so the rungs beneath cannot change it'}
+            onClick={() => flipLock(id)}>
+            <Padlock open={!lockBy && !mine} />
+          </button>)}
+      </div>
+    )
+  }
+
   return (
-    <div>
+    <div className={compact ? 'pol-compact' : undefined} data-rule-editor={scopeKind}>
       {title && <div className="sec-label">{title}</div>}
       <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', marginBottom: 10 }}>
         {scopeKind === 'account'
           ? 'The account default. Every content type, channel, event and station inherits these unless it sets its own.'
-          : `Grey values are inherited. Switch a field on to set it here${scopeKind === 'asset' ? ' for this item only' : ''}; anything left off follows the rung beneath.`}
+          : `Grey values are inherited. Switch a field on to set it here${asset ? ' for this item only' : ''}; anything left off follows the rung beneath.`}
+        {!asset && ' The padlock locks a field, so the rungs beneath cannot change it.'}
         {overrides > 0 && <span> · {overrides} field{overrides === 1 ? '' : 's'} set here</span>}
+        {locks.length > 0 && <span> · {locks.length} locked</span>}
       </div>
-      <div style={{ display: 'grid', gap: 10 }}>
-        {SHOWN.map(k => {
-          const on = overriding(k)
-          const inhV = inherited.settings[k], inhSrc = inherited.sources[k]
-          return (
-            <div key={k} style={{ display: 'grid', gridTemplateColumns: k === 'accessRules' ? '1fr' : compact ? '150px 1fr' : '180px 1fr', gap: 10, alignItems: 'start', padding: '8px 10px', borderRadius: 8, background: on ? 'rgba(63,123,255,.06)' : 'transparent', border: `1px solid ${on ? 'rgba(63,123,255,.35)' : 'var(--border)'}` }}>
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-sm)', fontWeight: 600, cursor: scopeKind === 'account' ? 'default' : 'pointer' }}>
-                  {scopeKind !== 'account' && <input type="checkbox" checked={on} onChange={() => toggle(k)} />}
-                  {KEY_LABEL[k]}
-                </label>
-                {scopeKind !== 'account' && (
-                  <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', marginTop: 4 }}>
-                    {on ? 'set here' : `inherits: ${RUNG_LABEL[inhSrc as Rung]}`}
-                  </div>
-                )}
-              </div>
-              <div>
-                {(on || scopeKind === 'account') ? (
-                  <FieldControl k={k} value={scopeKind === 'account' ? (own[k] ?? inhV ?? DEFAULTS[k]) : own[k]} points={points} scopeKind={scopeKind}
-                    archiveTargets={archiveTargets} onChange={v => setKey(k, v)} />
-                ) : (
-                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--faint)' }}>{describe(k, inhV, points, archiveTargets)}</div>
-                )}
-              </div>
+      {!asset && presets.length > 0 && (
+        <div className="pol-presets" data-policy-presets>
+          <select className="inp sel-sm" aria-label="Start from a preset" value="" onChange={e => { if (e.target.value) applyPreset(e.target.value) }}>
+            <option value="">Start from a preset…</option>
+            {presets.map(p => <option key={p.key} value={p.key}>{p.name}: {p.summary}</option>)}
+          </select>
+          {preset && <span className="pol-preset-name" data-preset={preset.key}><SectionGlyph k="protection" size={13} />Started from {preset.name}</span>}
+          {preset && <button type="button" className="btn ghost sm" onClick={() => setPresetKey(null)}>Forget the preset</button>}
+          {preset && (preset.key === 'geo_locked' || preset.key === 'rights_managed') && !(own.geo?.countries ?? []).length &&
+            <span style={{ color: 'var(--warn)' }}>Choose the countries under Geo access.</span>}
+        </div>)}
+      {SECTIONS.map(sec => {
+        const ids = sec.fields.filter(shown)
+        if (!ids.length) return null
+        return (
+          <section key={sec.key} className="pol-sec" data-policy-section={sec.key}>
+            <h3 className="pol-sec-h"><SectionGlyph k={sec.key} />{sec.label}</h3>
+            <p className="pol-sec-hint">{sec.hint}</p>
+            {ids.map(row)}
+          </section>)
+      })}
+      {!asset && (check || checkErr || checking) && (
+        <div className="pol-check" data-policy-check aria-live="polite">
+          <div className="pol-check-h">Before you save{checking && <span style={{ color: 'var(--faint)', fontWeight: 400 }}> · checking…</span>}</div>
+          {checkErr && <div className="pol-msg block">{checkErr}</div>}
+          {check && <>
+            <div className="pol-impact" data-impact>
+              <span>Governs <b>{check.impact.assets}</b> title{check.impact.assets === 1 ? '' : 's'}</span>
+              <span><b>{check.impact.published}</b> published</span>
+              <span>Saving changes <b>{check.impact.changed}</b></span>
+              {check.impact.repackage > 0 && <span style={{ color: 'var(--warn)' }}><b>{check.impact.repackage}</b> published title{check.impact.repackage === 1 ? '' : 's'} to be packaged again</span>}
             </div>
-          )
-        })}
-      </div>
+            {check.conflicts.map((c, i) => <ConflictLine key={c.code + i} level={c.level} message={c.message} />)}
+            {check.impact.blocks.map(b => <ConflictLine key={'ib' + b.code} level="block" message={`${b.count} title${b.count === 1 ? '' : 's'}: ${b.message}`} titles={b.titles} />)}
+            {check.impact.warnings.map(w => <ConflictLine key={'iw' + w.code} level="warn" message={`${w.count} title${w.count === 1 ? '' : 's'}: ${w.message}`} titles={w.titles} />)}
+            {!check.conflicts.length && !check.impact.blocks.length && !check.impact.warnings.length && <div style={{ color: 'var(--muted)' }}>No conflicts.</div>}
+          </>}
+        </div>)}
+      {confirm && (
+        <div className="pol-confirm" role="alertdialog" aria-label="Confirm packaging again" data-policy-confirm>
+          <b>{confirm.impact?.repackage ?? ''} published title{confirm.impact?.repackage === 1 ? '' : 's'} to be packaged again</b>
+          <div>{confirm.message}</div>
+          <div className="pol-foot">
+            <button className="btn primary" disabled={busy} onClick={() => save(true)}>Package again and save</button>
+            <button className="btn ghost" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </div>)}
       {/* Wraps: in a stream's narrow settings drawer the buttons and the
           Saved line did not fit on one row. */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-        <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save publishing rule'}</button>
-        {scopeKind !== 'account' && scopeKind !== 'asset' && overrides > 0 && (
-          <button className="btn ghost" disabled={busy} onClick={async () => { setBusy(true); try { await api.deletePublishingRule(scopeKind, scopeId!); setOwn({}); await load(); onSaved?.() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}>
+        <button className="btn primary" disabled={busy || blocked || !!confirm} onClick={() => save()}
+          title={blocked ? 'Fix the conflicts marked above to save' : undefined}>{busy ? 'Saving…' : 'Save publishing rule'}</button>
+        {scopeKind !== 'account' && !asset && (overrides > 0 || locks.length > 0) && (
+          <button className="btn ghost" disabled={busy} onClick={async () => { setBusy(true); try { await api.deletePublishingRule(scopeKind, scopeId!); setOwn({}); setLocks([]); setPresetKey(null); await load(); onSaved?.() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}>
             Remove this rule (inherit everything)
           </button>
         )}
+        {blocked && <span style={{ color: 'var(--down)', fontSize: 'var(--fs-sm)' }}>Fix the conflicts marked above to save.</span>}
         {msg && <span style={{ color: 'var(--ok,#4ade80)', fontSize: 'var(--fs-sm)' }}>{msg}</span>}
         {err && <span style={{ color: '#fca5a5', fontSize: 'var(--fs-sm)' }}>{err}</span>}
         <span style={{ flex: 1 }} />
@@ -193,6 +345,19 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
       </div>
     </div>
   )
+}
+
+/** One conflict, with a block or warning icon and, for per-title ones, up to five titles. */
+function ConflictLine({ level, message, titles }: { level: 'block' | 'warn' | 'confirm'; message: string; titles?: { id: string; title: string }[] }) {
+  const P = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  return (
+    <div className={`pol-msg ${level === 'block' ? 'block' : 'warn'}`} data-policy-conflict={level}>
+      {level === 'block'
+        ? <svg width="15" height="15" viewBox="0 0 24 24" role="img" aria-label="Blocks saving" {...P}><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>
+        : <svg width="15" height="15" viewBox="0 0 24 24" role="img" aria-label="Warning" {...P}><path d="M12 3l9.5 17h-19z" /><path d="M12 10v4M12 17.5v.01" /></svg>}
+      <span>{message}
+        {titles?.length ? <span className="pol-titles">{titles.map(t => t.title).join(', ')}</span> : null}</span>
+    </div>)
 }
 
 const DEFAULTS: Record<RuleKey, any> = {

@@ -696,6 +696,9 @@ async function seedG8Sections() {
   const rule = { copies: [{ targetId: NAS, on: ['ingest', 'recording'] }, { targetId: OBJ, on: ['publish'] }], offPeak: { from: '22:00', to: '06:00', timeZone: 'Australia/Sydney' } };
   const upd = await query(`UPDATE publishing_rules SET settings = settings || jsonb_build_object('archive', $2::jsonb) WHERE account_id = $1 AND scope_kind = 'account' RETURNING id`, [ACCOUNT, JSON.stringify(rule)]);
   if (!upd.length) await query(`INSERT INTO publishing_rules(account_id, scope_kind, scope_id, settings) VALUES ($1,'account',NULL,jsonb_build_object('archive', $2::jsonb))`, [ACCOUNT, JSON.stringify(rule)]);
+  // The account default locks DRM (build queue P3-2), so the Publishing Rules
+  // guide shows a padlock in use.
+  await query(`UPDATE publishing_rules SET locked_fields = ARRAY['protection.drm'] WHERE account_id = $1 AND scope_kind = 'account'`, [ACCOUNT]);
 }
 
 /**

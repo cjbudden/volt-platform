@@ -15,6 +15,7 @@ import { PageHead } from '../scaffold'
 import { RuleEditor } from '../RuleEditor'
 import { navigate } from '../router'
 import { usePageNotice } from '../notices'
+import { statedIds, SECTION_FIELD_LABEL, Padlock } from '../publishing/PolicyFields'
 
 export default function PublishingPage() {
   const [rules, setRules] = useState<PublishingRule[] | null>(null)
@@ -61,7 +62,8 @@ export default function PublishingPage() {
         <RuleEditor scopeKind="account" scopeId={null} title="Account default" resolveQuery={{}} onSaved={load} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {/* Two lists side by side, one above the other on a phone. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 16 }}>
         <div className="card" style={{ padding: 18 }}>
           <div className="sec-label">By content type</div>
           {typeRules.length === 0 ? <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>No type overrides. Set one below, or from Content Types.</div>
@@ -102,13 +104,24 @@ export default function PublishingPage() {
   )
 }
 
-function RuleRow({ r, onOpen }: { r: PublishingRule; onOpen: () => void }) {
-  const keys = Object.keys(r.settings ?? {})
+// A row names what the rung sets in the console's words, how many fields it
+// locks for the rungs beneath, and the preset it started from (P3-2).
+function RuleRow({ r, onOpen }: { r: PublishingRule & { locked_fields?: string[]; preset_key?: string | null }; onOpen: () => void }) {
+  const said = statedIds(r.settings ?? {}).map(id => SECTION_FIELD_LABEL[id] ?? KEY_NAMES[id] ?? id)
+  const locked = r.locked_fields ?? []
   return (
-    <div onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 6, cursor: 'pointer' }}>
+    <button type="button" onClick={onOpen} data-rule-row={r.scope_name ?? ''} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 10px', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'inherit', marginBottom: 6, cursor: 'pointer' }}>
       <b style={{ fontSize: 'var(--fs-body)' }}>{r.scope_name}</b>
-      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>sets {keys.length ? keys.join(', ') : 'nothing'}</span>
+      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--faint)', minWidth: 0, overflowWrap: 'anywhere' }}>sets {said.length ? said.join(', ') : 'nothing'}</span>
+      {locked.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-micro)', color: 'var(--warn)' }}><Padlock size={12} />{locked.length} locked</span>}
+      {r.preset_key && <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--muted)' }}>from {PRESET_NAMES[r.preset_key] ?? r.preset_key}</span>}
       <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-micro)', color: 'var(--faint)' }}>v{r.version}</span>
-    </div>
+    </button>
   )
 }
+
+const KEY_NAMES: Record<string, string> = {
+  targets: 'Publish to', autoPublish: 'Auto-publish', availableFrom: 'Available from', expire: 'Expires', geo: 'Geo access', access: 'Access',
+  paywall: 'Paywall', gate: 'Publish gate', accessRules: 'Access rules', archive: 'Archive copies',
+}
+const PRESET_NAMES: Record<string, string> = { open: 'Open', members: 'Members', geo_locked: 'Geo-locked', premium: 'Premium', rights_managed: 'Rights-managed' }
