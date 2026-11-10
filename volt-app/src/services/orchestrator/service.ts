@@ -382,7 +382,11 @@ export class Orchestrator {
                FROM events e WHERE e.id=$1`,
             [id, this.topRendition(ctx), `${kind}/${id}`]
           );
-        } else {
+        } else if (ctx.owner.recording_enabled) {
+          // RECORDING OFF MEANS NO RECORDING ROW. This path opened the day's
+          // row for every channel, so a channel with recording off collected
+          // an empty "closed, kept" recording per day with nothing in it. The
+          // radio and restart paths already asked; now every path does.
           await this.ensureChannelDayRecording(c, id, this.topRendition(ctx), `${kind}/${id}`);
         }
         // STATUS AND INTENT, TOGETHER AND IN ONE TRANSACTION.
@@ -1362,8 +1366,10 @@ export class Orchestrator {
       );
       for (const r of closed) await this.finalizeRecording(r);
     }
-    // open today's recording for every live channel
-    const liveChans = await query<any>(`SELECT id FROM channels WHERE status='live'`);
+    // open today's recording for every live channel that records (recording
+    // off means no day row, as on start: see ensureChannelDayRecording's callers)
+    const liveChans = await query<any>(
+      `SELECT id FROM channels WHERE status='live' AND recording_enabled IS DISTINCT FROM false`);
     for (const ch of liveChans) {
       await tx((c) => this.ensureChannelDayRecording(c, ch.id, 'source', `channel/${ch.id}`));
     }
