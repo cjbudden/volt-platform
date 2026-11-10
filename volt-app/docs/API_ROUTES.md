@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**915 routes.** Public API: 88 · Sign-in (no session yet): 7 · Admin API: 710 · Platform API: 32 · Machine-to-machine: 41 · Delivery and previews (outside /api): 29 · Health and discovery: 8
+**917 routes.** Public API: 88 · Sign-in (no session yet): 7 · Admin API: 712 · Platform API: 32 · Machine-to-machine: 41 · Delivery and previews (outside /api): 29 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -870,7 +870,9 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: view |  |
 | PUT | `/api/publishing-rules/:scopeKind/:scopeId?` | admin session (Bearer) or account secret key | settings: manage |  |
+| GET | `/api/publishing-rules/fields` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/publishing-rules/points` | admin session (Bearer) or account secret key | settings or vod or channels or radio or events or fast: view |  |
+| GET | `/api/publishing-rules/presets` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/publishing-rules/resolve` | admin session (Bearer) or account secret key | settings or vod or channels or radio or events or fast: view |  |
 
 ### `/api/radio`

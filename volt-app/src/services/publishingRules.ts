@@ -60,9 +60,65 @@ export interface RuleSettings {
     copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars' | 'clips' | 'packages')[] }[];
     offPeak?: { from: string; to: string; timeZone?: string } | null;
   };
+  /** PROTECTION (build queue P3, PUBLISHING_POLICIES.md "What a policy
+   *  contains"). `drm` is an encode-time field: it changes the files, so a
+   *  change on published titles is confirmed with its count (P4 repackages).
+   *  The rest apply at delivery. Each field resolves on its own, so a content
+   *  type can lock DRM on and leave the WAF profile to the rungs below. */
+  protection?: {
+    drm?: boolean;
+    /** Playback token lifetime in seconds; null: the platform default (services/edgeTokens.ts). */
+    tokenLifetimeSec?: number | null;
+    /** off; standard (VPN and proxy flagged); rights_managed (VPN, proxy, hosting and Tor blocked or challenged). */
+    waf?: 'off' | 'standard' | 'rights_managed';
+    /** Domains a player may be embedded on; empty: any. */
+    referrers?: string[];
+    /** Streams one viewer may play at once; null: no limit. */
+    concurrentStreams?: number | null;
+  };
+  /** DISTRIBUTION (P3): what else may be done with a published title. */
+  distribution?: {
+    mp4Download?: boolean;
+    shareLinks?: boolean;
+    fastEligible?: boolean;
+    /** Listed in the schema.org data and the sitemap. */
+    sitemap?: boolean;
+  };
+  /** RETENTION (P3; the sweep is P5): how long a title is kept. */
+  retention?: {
+    keep?: 'forever' | 'days';
+    days?: number | null;
+    /** What the days count from. */
+    anchor?: 'ingest' | 'available_from' | 'available_until';
+    legalHoldAllowed?: boolean;
+    /** Storage class an archived title moves to; null: stays where it is. */
+    archiveTier?: 'infrequent' | 'glacier' | null;
+  };
 }
 export type RuleKey = keyof RuleSettings;
-export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate', 'accessRules', 'archive'];
+export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 'expire', 'geo', 'access', 'paywall', 'gate', 'accessRules', 'archive', 'protection', 'distribution', 'retention'];
+
+/** The sections whose fields resolve one by one rather than as a whole object. */
+export const SECTION_KEYS = ['protection', 'distribution', 'retention'] as const;
+export type SectionKey = typeof SECTION_KEYS[number];
+export const SECTION_FIELDS: Record<SectionKey, string[]> = {
+  protection: ['drm', 'tokenLifetimeSec', 'waf', 'referrers', 'concurrentStreams'],
+  distribution: ['mp4Download', 'shareLinks', 'fastEligible', 'sitemap'],
+  retention: ['keep', 'days', 'anchor', 'legalHoldAllowed', 'archiveTier'],
+};
+/** Every field a rung can lock: the plain keys and each section field ("protection.drm"). */
+export const LOCKABLE_FIELDS: string[] = [
+  ...RULE_KEYS.filter((k) => !(SECTION_KEYS as readonly string[]).includes(k)),
+  ...SECTION_KEYS.flatMap((sec) => SECTION_FIELDS[sec].map((f) => `${sec}.${f}`)),
+];
+/** How the console groups the fields into the five sections of a policy. */
+export const POLICY_SECTIONS: Record<'lifecycle' | 'access' | 'protection' | 'distribution' | 'retention', string[]> = {
+  lifecycle: ['autoPublish', 'availableFrom', 'expire', 'gate'],
+  access: ['accessRules', 'geo', 'access', 'paywall'],
+  protection: SECTION_FIELDS.protection.map((f) => `protection.${f}`),
+  distribution: ['targets', ...SECTION_FIELDS.distribution.map((f) => `distribution.${f}`), 'archive'],
+  retention: SECTION_FIELDS.retention.map((f) => `retention.${f}`),
+};
 
 /** The platform baseline under the account rung: catalogue only, manual, worldwide, free. */
 export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: RuleSettings['paywall'] } = {
@@ -76,34 +132,84 @@ export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: Rule
   gate: { requireReview: false, blockOnQcFail: false },
   accessRules: [],
   archive: { copies: [], offPeak: null },
+  // Today's behaviour, stated: nothing protected, everything allowed, kept forever.
+  protection: { drm: false, tokenLifetimeSec: null, waf: 'off', referrers: [], concurrentStreams: null },
+  distribution: { mp4Download: true, shareLinks: true, fastEligible: true, sitemap: true },
+  retention: { keep: 'forever', days: null, anchor: 'available_until', legalHoldAllowed: true, archiveTier: null },
 };
 
 export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'asset';
 
 export interface Resolved {
   settings: typeof BASELINE;
-  /** Which rung each key came from. */
+  /** Which rung each key came from (a section: the most specific rung that set any of its fields). */
   sources: Record<RuleKey, Rung>;
+  /** Which rung each section field came from ("protection.drm" -> "schema"). */
+  fieldSources: Record<string, Rung>;
+  /** Fields locked by a rung, and which one: lower rungs cannot change them. */
+  locks: Record<string, Rung>;
+  /** What a lower rung said about a locked field and was not listened to. */
+  ignored: { rung: Rung; field: string; lockedBy: Rung }[];
   /** The rule rows that took part, for the UI to show and link. */
-  rungs: { rung: Rung; id: string | null; scopeId: string | null; settings: RuleSettings }[];
+  rungs: { rung: Rung; id: string | null; scopeId: string | null; settings: RuleSettings; lockedFields?: string[]; name?: string | null; presetKey?: string | null }[];
 }
 
-/** Pure: lay the rungs (lowest first) over the baseline, per key. */
-export function resolveLadder(rungs: { rung: Rung; id?: string | null; scopeId?: string | null; settings: RuleSettings | null | undefined }[]): Resolved {
+/** The rungs from least to most specific, so a lock is set before what it locks. */
+export const RUNG_ORDER: Rung[] = ['baseline', 'account', 'schema', 'owner', 'asset'];
+
+type LadderInput = { rung: Rung; id?: string | null; scopeId?: string | null; settings: RuleSettings | null | undefined; lockedFields?: string[] | null; name?: string | null; presetKey?: string | null };
+
+/**
+ * Pure: lay the rungs (lowest first) over the baseline, per field. A section
+ * (protection, distribution, retention) is merged field by field, so a rung
+ * that states only `protection.drm` leaves the WAF profile to the others. A
+ * field a rung locks is final from that rung up: what a more specific rung
+ * says about it is ignored and reported, never applied.
+ */
+export function resolveLadder(rungs: LadderInput[]): Resolved {
   const settings: any = { ...BASELINE };
+  for (const sec of SECTION_KEYS) settings[sec] = { ...(BASELINE as any)[sec] };
   const sources = Object.fromEntries(RULE_KEYS.map((k) => [k, 'baseline'])) as Record<RuleKey, Rung>;
+  const fieldSources: Record<string, Rung> = {};
+  for (const sec of SECTION_KEYS) for (const f of SECTION_FIELDS[sec]) fieldSources[`${sec}.${f}`] = 'baseline';
+  const locks: Record<string, Rung> = {};
+  const ignored: Resolved['ignored'] = [];
   const used: Resolved['rungs'] = [];
+  const locked = (field: string, rung: Rung) => {
+    const by = locks[field] ?? (field.includes('.') ? locks[field.split('.')[0]] : undefined);
+    if (by && by !== rung) { ignored.push({ rung, field, lockedBy: by }); return true; }
+    return false;
+  };
   for (const r of rungs) {
-    const s = r.settings ?? {};
-    used.push({ rung: r.rung, id: r.id ?? null, scopeId: r.scopeId ?? null, settings: s });
+    const s: any = r.settings ?? {};
+    used.push({ rung: r.rung, id: r.id ?? null, scopeId: r.scopeId ?? null, settings: s,
+      ...(r.lockedFields?.length ? { lockedFields: r.lockedFields } : {}),
+      ...(r.name !== undefined ? { name: r.name } : {}), ...(r.presetKey !== undefined ? { presetKey: r.presetKey } : {}) });
     for (const k of RULE_KEYS) {
+      if ((SECTION_KEYS as readonly string[]).includes(k)) {
+        const sec = s[k];
+        if (!sec || typeof sec !== 'object') continue;
+        for (const f of SECTION_FIELDS[k as SectionKey]) {
+          if (!(f in sec) || sec[f] === undefined) continue;
+          const field = `${k}.${f}`;
+          if (locked(field, r.rung)) continue;
+          settings[k][f] = sec[f];
+          fieldSources[field] = r.rung;
+          sources[k] = r.rung;
+        }
+        continue;
+      }
       if (s[k] !== undefined && s[k] !== null || (k === 'paywall' && s.paywall === null && 'paywall' in s)) {
+        if (locked(k, r.rung)) continue;
         settings[k] = s[k];
         sources[k] = r.rung;
       }
     }
+    // Locks take effect for the rungs above this one. The asset rung is the
+    // last, so a lock there would lock nothing: it is not offered.
+    if (r.rung !== 'asset') for (const f of r.lockedFields ?? []) if (!locks[f]) locks[f] = r.rung;
   }
-  return { settings, sources, rungs: used };
+  return { settings, sources, fieldSources, locks, ignored, rungs: used };
 }
 
 /** Load the rungs that apply to an asset and resolve them. */
@@ -113,7 +219,7 @@ export async function resolveForAsset(accountId: string, asset: {
 }): Promise<Resolved> {
   const ownerId = asset.channel_id ?? asset.event_id ?? null;
   const rows = await query<any>(
-    `SELECT id, scope_kind, scope_id, settings FROM publishing_rules
+    `SELECT id, scope_kind, scope_id, settings, locked_fields, name, preset_key FROM publishing_rules
       WHERE account_id = $1 AND (
         scope_kind = 'account'
         OR (scope_kind = 'schema' AND scope_id = $2::uuid)
@@ -121,10 +227,11 @@ export async function resolveForAsset(accountId: string, asset: {
     [accountId, asset.schema_id ?? null, ownerId]);
   const pick = (kind: string) => rows.find((r) => r.scope_kind === kind);
   const acc = pick('account'), sch = pick('schema'), own = pick('owner');
+  const meta = (r: any) => r ? { lockedFields: r.locked_fields ?? [], name: r.name ?? null, presetKey: r.preset_key ?? null } : {};
   return resolveLadder([
-    { rung: 'account', id: acc?.id, scopeId: null, settings: acc?.settings },
-    { rung: 'schema', id: sch?.id, scopeId: asset.schema_id ?? null, settings: sch?.settings },
-    { rung: 'owner', id: own?.id, scopeId: ownerId, settings: own?.settings },
+    { rung: 'account', id: acc?.id, scopeId: null, settings: acc?.settings, ...meta(acc) },
+    { rung: 'schema', id: sch?.id, scopeId: asset.schema_id ?? null, settings: sch?.settings, ...meta(sch) },
+    { rung: 'owner', id: own?.id, scopeId: ownerId, settings: own?.settings, ...meta(own) },
     { rung: 'asset', id: asset.id ?? null, scopeId: asset.id ?? null, settings: asset.availability_override ?? {} },
   ]);
 }

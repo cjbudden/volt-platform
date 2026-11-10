@@ -156,13 +156,52 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|
 | `GET /api/publishing-rules` | Every rung that has been set, with its name |
 | `GET /api/publishing-rules/points` | The catalogue, apps and social accounts you can publish to |
-| `GET /api/publishing-rules/resolve` | What an item would get: pass `assetId`, or `schemaId` with `channelId` or `eventId` |
+| `GET /api/publishing-rules/resolve` | What an item would get: pass `assetId`, or `schemaId` with `channelId` or `eventId`. Every field comes with the rung it came from, the locks and which rung set them, and for an item its conflicts |
+| `GET /api/publishing-rules/presets` | The five starting policies: Open, Members, Geo-locked, Premium and Rights-managed |
+| `GET /api/publishing-rules/fields` | The five sections of a policy, the fields a rung can lock, and their names |
 | `GET /api/publishing-rules/{scopeKind}/{scopeId}` | One rung: `account` (no id), `schema` (a content type) or `owner` (a channel, event or station) |
-| `PUT /api/publishing-rules/{scopeKind}/{scopeId}` | Sets a rung (`{"settings": {...}}`) |
+| `PUT /api/publishing-rules/{scopeKind}/{scopeId}` | Sets a rung (`{"settings": {...}}`, and optionally `lockedFields`, `name` and `presetKey`). Add `?dryRun=1` to see what the save would do without saving it |
 | `DELETE /api/publishing-rules/{scopeKind}/{scopeId}` | Removes a content type or stream rung; the account default cannot be removed |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | A single asset's own rung |
 
 With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest, on publish or nightly (`schedule`), what is copied (`what`: any of `source`, `sidecars`, `clips` and `packages`; the original alone when left out), whether recordings are archived (`recording`), and an optional off-peak window. See [Copy by rule](../workflows/mirror-and-archive.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
+
+### Policy sections, locks and presets
+
+A rung can also say how content is protected, what else may be done with it and how long it is kept. Each field is optional; one left out comes from the rung beneath, field by field, so a content type can set DRM and leave everything else to the account default.
+
+| Section | Fields |
+|---|---|
+| `protection` | `drm` (on or off), `tokenLifetimeSec` (how long a playback token lasts; left out, the platform default), `waf` (`off`, `standard`: VPN and proxy flagged, or `rights_managed`), `referrers` (domains a player may be embedded on), `concurrentStreams` |
+| `distribution` | `mp4Download`, `shareLinks`, `fastEligible`, `sitemap` (listed in the sitemap and schema.org data) |
+| `retention` | `keep` (`forever` or `days`), `days`, `anchor` (counted from `ingest`, `available_from` or `available_until`), `legalHoldAllowed`, `archiveTier` |
+
+These fields are stored and resolved now. Applying them where content is played, downloaded and kept comes in later steps: DRM packaging when a title is encoded, the WAF profiles, and the retention sweep.
+
+**Locks.** `lockedFields` lists the fields the rungs beneath may not change, by name (`geo`, or a section field such as `protection.drm`; a whole section locks all its fields). A rung that tries to change a locked field is refused with the lock and its rung named, and what an item says about a locked field is ignored; `resolve` lists it under `ignored`.
+
+**Presets.** Copy a preset's `settings` into a rung and send its key as `presetKey`. Geo-locked and Rights-managed leave the countries for you to choose.
+
+**Conflicts.** A save is checked before anything is stored, against the rule itself and against every item the rung governs:
+
+| Combination | Answer |
+|---|---|
+| DRM on and MP4 download allowed | Refused: MP4 export is not possible for DRM content |
+| DRM on and a social account to publish to | Refused: social platforms need a clear MP4 |
+| Expires before it becomes available | Refused: the window is empty |
+| Retention shorter than the time an item is available, or retention on items that never expire | Refused: content would be deleted while live |
+| Rights-managed on an item whose rights have no window | Refused, with the items named |
+| A field locked by a rung above | Refused, naming the lock |
+| DRM turned on or off for published items | `409` with the code `confirm_repackage` and the count; send it again with `"confirm": true` |
+| Geo restriction without a WAF profile; geo or limited rights with a social account; **Only in these countries** with none chosen; a publish window reaching outside the rights window | Saved, with a warning in `warnings` |
+
+A refusal answers `422` with the code `policy_conflict`; `details` holds the conflicts and the impact. The impact, also what a dry run returns, counts the items the rung governs, how many are published, how many change, and how many would need packaging again. Published items keep what they were published with until they are published again.
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"settings": {"access": "paid", "protection": {"drm": true}, "distribution": {"mp4Download": false}}, "presetKey": "premium", "lockedFields": ["protection.drm"]}' \
+  "https://your-volt-host/api/publishing-rules/schema/$CONTENT_TYPE_ID?dryRun=1"
+```
 
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

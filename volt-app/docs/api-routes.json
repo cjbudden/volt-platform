@@ -5077,10 +5077,28 @@
  },
  {
   "method": "GET",
+  "path": "/api/publishing-rules/fields",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
   "path": "/api/publishing-rules/points",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "settings or vod or channels or radio or events or fast: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/presets",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
   "viewerTier": false,
   "group": "/api/publishing-rules"
  },
