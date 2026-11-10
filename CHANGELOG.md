@@ -2,6 +2,20 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.83.0 (2026-11-10)
+
+### Product (in customer release notes)
+
+- added · Publishing Rules: A publishing rule's playback token lifetime and allowed referrer domains now apply when titles are played: a player on a site the rule does not list is told the title is not available on this site, and play links last as long as the rule says.
+- added · Publishing Rules: Turning off MP4 download or share links in a publishing rule now stops the MP4 being downloaded (in Downloads and from share links) and stops share links being made or opened for the titles it governs, including titles already published.
+- improved · Media library: Episodes show their series and season, and the title you save is the asset's title: library cards and rows show what an item belongs to above its own title ("Caminandes (S1)" over "Episode 2"), the asset drawer's header reads "Caminandes (S1) · Episode 2", and changing the Title in the metadata now renames the asset everywhere instead of leaving the name the file arrived with. Assets saved before this are brought into line once.
+- fixed · Loops & Fillers: Loops & Fillers shows the FAST channels that play an item: a loop or slate chosen as a FAST channel's brand loop, slate or ident is listed under Used by (on the list and on its details page) with what the channel uses it for and whether the channel's copy is ready, instead of reading "Not used".
+- fixed · Recordings: A channel with recording off no longer collects empty recordings: starting it and the daily roll-over no longer open a day's recording when recording is off, and the empty ones already made (nothing recorded, nothing cut from them) are removed. Days recorded before recording was turned off are kept as they were.
+
+### Internal
+
+- added · Tests: New check suite publishing-delivery (47 checks): the protection and distribution fields applied at the play gate, downloads and share links, taken up after a rule change, with no database read on a warm gate.
+
 ## 0.82.0 (2026-11-10)
 
 ### Product (in customer release notes)
