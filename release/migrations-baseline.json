@@ -1,6 +1,6 @@
 {
   "_comment": "Migrations and boot schema statements that have shipped (build queue D2). check-migrations.mjs does not judge them again but refuses an edit or removal. release.mjs adds each release's files; nothing else should change this file.",
-  "release": "0.79.0",
+  "release": "0.80.0",
   "migrations": {
     "0001_init.sql": "0c5653a0d33cd6f7e0bc826365d65f4779430f01c74274f4379697d45edfd0fc",
     "0002_jobs.sql": "6b3d27e80a234d1d568bf2391823fa7d87e5da1673582d78ff34c53052244d3c",
@@ -137,7 +137,8 @@
     "0149_public_status_index.sql": "e769fef661d0f2b7fa32313ed37d2e6e991b97bd5b1295cab910b7348ea3e231",
     "0150_vod_ad_rules_cache.sql": "ae1d7c28fb95a2d558bcac79082915fa3809db65ccf9065b7cf9b933ca3beb19",
     "0151_edge_revocations.sql": "f0f164489a18b8286733afe4cc9b7188dae89bb9a054088af7c71fe25ce9f466",
-    "0152_block_message_and_notify.sql": "c3078f7b4c31549d2bd6ff63fa3c9040853f66ed72e17830bbe5ad0dbb3a6193"
+    "0152_block_message_and_notify.sql": "c3078f7b4c31549d2bd6ff63fa3c9040853f66ed72e17830bbe5ad0dbb3a6193",
+    "0153_publishing_policy_sections.sql": "fad99689dfff709bac40d5c82b89991bbc48e59b40885fcbc66d55cbe5034eed"
   },
   "bootSchema": [
     "0443d7e75c3053e006f05e5c5a4f98cceb18844321c9eb5fec2840994b46b008",
