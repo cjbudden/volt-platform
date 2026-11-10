@@ -35,6 +35,7 @@ import { rightsForAsset } from '../services/rightsProfiles';
 import { limit } from '../scale/ratelimit';
 import { blockSettings, addNotifyRequest, type NotifyReason } from '../services/blockMessage';
 import { vodAvailabilityRow } from '../services/viewerPath';
+import { deliveryPolicyOf, referrerRefusal } from '../services/deliveryPolicy';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -344,6 +345,18 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     note.vodStatus = ps?.status ?? null;
     if (!ps || !publiclyVisible(ps, now)) return { status: 404, body: { error: 'unknown asset' }, edgeSec: cacheable ? 5 : 0 };
     if (ps.until) edgeSec = Math.max(0, Math.min(edgeSec, Math.floor((ps.until.getTime() - now.getTime()) / 1000)));
+    // ALLOWED REFERRER DOMAINS (the title's rule, Protection; build queue
+    // P3-4b), from the stamp in the cached availability row: no read when
+    // warm. Before the teaser too, so a site that may not embed the title
+    // learns nothing about it. A shared answer may depend only on the Origin
+    // (in the edge cache key), so one checked against a Referer is not shared.
+    const policy = deliveryPolicyOf((await vodAvailabilityRow(b.assetId))?.availability);
+    if (policy.referrers.length) {
+      if (!origin) { cacheable = false; edgeSec = 0; }
+      const refusal = referrerRefusal(policy.referrers, { origin, referrer, webApp: app.type === 'web' });
+      if (refusal) return { status: 403, edgeSec: cacheable ? 5 : 0,
+        body: { available: false, mode: 'blocked', code: 'referrer', error: `blocked: ${refusal}`, reason: refusal, message: 'Not available on this site' } };
+    }
     if (ps.status === 'scheduled') {
       const bs = await blockSettings(key.account_id);
       const from = ps.effectiveFrom?.toISOString() ?? null;
@@ -452,9 +465,10 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     if (prefix) {
       const row = await vodAvailabilityRow(b.assetId);
       const prof = row ? await rightsForAsset(row) : null;
+      // The title's rule may set the token's lifetime (Protection, P3-4b); otherwise the policy class decides.
       const et = mintEdgeToken({ assetId: b.assetId, prefix, country: geo ?? null, sid: b.sid ?? null,
         policyClass: policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }),
-        effectiveUntil: vodStatus?.effectiveUntil ?? null });
+        effectiveUntil: vodStatus?.effectiveUntil ?? null, lifetimeSec: deliveryPolicyOf(row?.availability).tokenLifetimeSec });
       delivery = { ...delivery, hls: withToken(delivery.hls, et.token), dash: withToken(delivery.dash, et.token) };
       // A shared (edge-cached) answer never outlives the token in it.
       if (edgeSec > 0) edgeSec = Math.max(0, Math.min(edgeSec, et.claims.e - et.claims.n - 60));

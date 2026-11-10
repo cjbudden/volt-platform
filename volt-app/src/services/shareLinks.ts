@@ -70,7 +70,12 @@ export const ACCESS_PERIODS: Record<string, number> = {
 
 /** Reason codes a resolve can fail with (kept stable for the page + tests). */
 export type ShareDenyReason = 'not_found' | 'revoked' | 'expired' | 'view_cap' | 'pin_required' | 'pin_wrong'
-  | 'code_required' | 'code_wrong' | 'code_expired' | 'geo_blocked';
+  | 'code_required' | 'code_wrong' | 'code_expired' | 'geo_blocked'
+  /** The title's publishing rule does not allow share links (Distribution, build queue P3-4b). */
+  | 'sharing_off';
+
+/** The words a person making a link sees when the title's rule does not allow sharing. */
+export const SHARING_OFF_MESSAGE = "This title's publishing rule does not allow share links. Change Share links under Distribution in its rule to share it.";
 
 export interface ShareRow {
   id: string; account_id: string; resource_kind: ShareResourceKind; resource_id: string;
@@ -243,6 +248,13 @@ export interface CreateShareInput {
 export async function createShareLink(inp: CreateShareInput): Promise<{ id: string; url: string; token: string; expiresAt: string; emailed: number }> {
   const resource = await loadResource(inp.resourceKind, inp.resourceId, inp.accountId);
   if (!resource) throw Object.assign(new Error('resource not found in this account'), { status: 404 });
+  // SHARE LINKS ALLOWED? (the title's rule, Distribution; build queue P3-4b).
+  // On-demand titles only: live channels and events have no publishing rule stamp.
+  if (inp.resourceKind === 'vod') {
+    const { deliveryPolicyFor } = await import('./deliveryPolicy');
+    const policy = await deliveryPolicyFor(inp.resourceId, inp.accountId);
+    if (policy && !policy.shareLinks) throw Object.assign(new Error(SHARING_OFF_MESSAGE), { status: 403, code: 'sharing_off' });
+  }
   const authMode = inp.authMode ?? (inp.pin ? 'pin' : 'none');
   const recipients = (inp.recipients ?? []).map((r) => r.trim()).filter(Boolean);
   if (authMode === 'email_pin' && recipients.length === 0) {
@@ -340,6 +352,13 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
 
   const resource = await loadResource(row.resource_kind, row.resource_id, row.account_id);
   if (!resource) return { ok: false, reason: 'not_found' };
+  // A link made before the title's rule turned sharing off stops working
+  // (Distribution, build queue P3-4b): read from the title's stamp.
+  if (row.resource_kind === 'vod') {
+    const { deliveryPolicyFor } = await import('./deliveryPolicy');
+    const policy = await deliveryPolicyFor(row.resource_id, row.account_id);
+    if (policy && !policy.shareLinks) return { ok: false, reason: 'sharing_off' };
+  }
 
   // geo/rights: same gate as public playback (VOD has an assetId to evaluate)
   // ACCOUNT-WIDE GEO (services/geoAccess.ts): a share link is the account's

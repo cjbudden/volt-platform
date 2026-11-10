@@ -76,14 +76,21 @@ export function edgeTokenKey(): string {
  * How long a token lives before its window clamps it. No renewal exists yet,
  * so a restricted title's token must outlast a long viewing: 4 hours; open
  * content 24 hours (it still ends on its exact date through the clamp). A
- * publishing policy's token lifetime (P3) will replace these defaults.
+ * publishing rule's token lifetime (Protection, build queue P3-4b) replaces
+ * these for the titles it governs: the play gate passes it as `lifetimeSec`.
  */
 export function tokenLifetimeSec(k: PolicyClass): number {
   const n = (v: string | undefined, dflt: number) => { const x = Number(v); return Number.isFinite(x) && x >= 60 ? Math.floor(x) : dflt; };
   return k === 'open' ? n(process.env.EDGE_TOKEN_OPEN_TTL_SEC, 24 * 3600) : n(process.env.EDGE_TOKEN_TTL_SEC, 4 * 3600);
 }
-/** The longest a token can live: how long a revocation must be kept at the edge. */
-export const maxTokenLifetimeSec = () => Math.max(tokenLifetimeSec('open'), tokenLifetimeSec('rights'));
+/** The longest token lifetime a publishing rule may set (modules/publishingRules.ts allows 30 s to 24 h). */
+export const POLICY_MAX_TOKEN_LIFETIME_SEC = 86_400;
+/**
+ * The longest a token can live: how long a revocation must be kept at the
+ * edge. A rule may set up to a day whatever the defaults are, so a revocation
+ * is kept at least that long, or a long-lived token would outlast it.
+ */
+export const maxTokenLifetimeSec = () => Math.max(tokenLifetimeSec('open'), tokenLifetimeSec('rights'), POLICY_MAX_TOKEN_LIFETIME_SEC);
 
 const b64u = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
 const sig = (key: string, body: string) => createHmac('sha256', key).update(body).digest('hex').slice(0, 32);
@@ -100,9 +107,12 @@ export function signEdgeToken(c: EdgeClaims, key = edgeTokenKey()): string {
 export function mintEdgeToken(o: {
   assetId: string; prefix: string; country?: string | null; policyClass: PolicyClass; drm?: boolean; sid?: string | null;
   effectiveUntil?: Date | null; nowSec?: number; key?: string;
+  /** The title's rule's token lifetime (Protection); null or absent: the policy class default. */
+  lifetimeSec?: number | null;
 }): { token: string; claims: EdgeClaims } {
   const n = o.nowSec ?? Math.floor(Date.now() / 1000);
-  let e = n + tokenLifetimeSec(o.policyClass);
+  const life = o.lifetimeSec && o.lifetimeSec > 0 ? Math.min(Math.floor(o.lifetimeSec), POLICY_MAX_TOKEN_LIFETIME_SEC) : tokenLifetimeSec(o.policyClass);
+  let e = n + life;
   if (o.effectiveUntil) e = Math.min(e, Math.floor(o.effectiveUntil.getTime() / 1000));
   const claims: EdgeClaims = { a: o.assetId, p: o.prefix, c: (o.country ?? '').toUpperCase(), k: o.policyClass, d: o.drm ? 1 : 0, ...(o.sid ? { s: o.sid } : {}), n, e };
   return { token: signEdgeToken(claims, o.key), claims };

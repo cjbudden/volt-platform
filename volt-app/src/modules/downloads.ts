@@ -11,6 +11,12 @@
 //         { format: 'mp4' | 'mp3' | 'm4a' } -> { url, filename, expiresAt }
 //    GET  /api/downloads/file?t=<token>   the file itself       (the token is the access)
 //
+//  THE TITLE'S RULE (Distribution, build queue P3-4b): when its publishing
+//  rule says MP4 download is off (Premium and Rights-managed do, and DRM
+//  forces it), the MP4 is not handed out here either: a clear MP4 of a title
+//  the rule protects is the copy the rule exists to stop. The audio files are
+//  not the MP4 and are not affected. The list says why the MP4 is missing.
+//
 //  WHY A LINK AND NOT THE FILE. A browser downloads a big file by navigating
 //  to it, and a navigation cannot carry the console's bearer token. So the
 //  authorised POST mints a five-minute, single-file token, and the file route
@@ -24,9 +30,12 @@ import { z } from 'zod';
 import { one } from '../db';
 import { config } from '../config';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, badRequest, notFound } from '../util/http';
+import { asyncHandler, badRequest, notFound, ApiError } from '../util/http';
 import { writeAudit, actor } from '../services/audit';
 import { isEncodeBucketKey, readThroughKey, openObject, objectSize } from '../services/media/clipsStore';
+import { deliveryPolicyFor } from '../services/deliveryPolicy';
+
+const MP4_OFF = "This title's publishing rule does not allow MP4 download. Change MP4 download under Distribution in its rule to take a copy.";
 
 const AUD = 'volt-download';
 const TTL_SEC = 300;
@@ -131,11 +140,14 @@ export const downloadsRouter = Router();
 downloadsRouter.use(requireAuth);
 
 downloadsRouter.get('/vod/:id', asyncHandler(async (req, res) => {
-  const a = await ownedAsset(String(req.params.id), accountId(req));
+  const acct = accountId(req);
+  const a = await ownedAsset(String(req.params.id), acct);
   if (!a) throw notFound('VOD asset not found');
+  const mp4 = a.progressive_key ? (await deliveryPolicyFor(a.id, acct))?.mp4Download !== false : true;
   res.json({
     files: await Promise.all(FILES.filter((f) => a[f.col]).map(async (f) => ({
       format: f.format, label: f.label, filename: downloadName(a.title, f.ext), bytes: await sizeOf(a[f.col]),
+      ...(f.format === 'mp4' && !mp4 ? { allowed: false, reason: MP4_OFF } : {}),
     }))),
   });
 }));
@@ -148,6 +160,8 @@ downloadsRouter.post('/vod/:id/link', asyncHandler(async (req, res) => {
   const { format } = linkSchema.parse(req.body ?? {});
   const spec = FILES.find((f) => f.format === format)!;
   if (!a[spec.col]) throw badRequest(`There is no ${format.toUpperCase()} file for this item. Ask for one on the Encode tab.`);
+  if (format === 'mp4' && (await deliveryPolicyFor(a.id, acct))?.mp4Download === false)
+    throw Object.assign(new ApiError(403, MP4_OFF), { code: 'mp4_off' });
   const t = jwt.sign({ a: a.id, f: format, acct }, config.jwt.accessSecret, { audience: AUD, expiresIn: TTL_SEC });
   const { userId, label } = actor(req);
   await writeAudit(null, { accountId: acct, userId, label, action: 'download', entityType: 'vod_asset', entityId: a.id,

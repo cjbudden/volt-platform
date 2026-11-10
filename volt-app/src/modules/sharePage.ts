@@ -164,7 +164,7 @@ function codePrompt(wrong){
   $('#code').addEventListener('keydown',e=>{if(e.key==='Enter')$('#codeGo').click()});
 }
 function stateMsg(reason){
-  const map={geo_blocked:'This preview is not available in your region.',expired:'This link has expired.',revoked:'This link has been revoked.',view_cap:'This link has reached its view limit.',not_found:'This link is not valid.'};
+  const map={geo_blocked:'This preview is not available in your region.',expired:'This link has expired.',revoked:'This link has been revoked.',view_cap:'This link has reached its view limit.',not_found:'This link is not valid.',sharing_off:'Sharing has been turned off for this title.'};
   $('#app').innerHTML='<div class="state"><h1>Link no longer available</h1><p>'+esc(map[reason]||'This preview can no longer be viewed.')+'</p></div>';
 }
 function pinPrompt(wrong){

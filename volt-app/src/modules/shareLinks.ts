@@ -20,7 +20,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, badRequest, notFound } from '../util/http';
+import { asyncHandler, badRequest, notFound, ApiError } from '../util/http';
 import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage } from '../util/listQuery';
 import {
   createShareLink, openShare, findShareByToken, loadResource, ACCESS_PERIODS,
@@ -74,6 +74,7 @@ shareLinksRouter.post('/', asyncHandler(async (req, res) => {
   }).catch((e) => {
     if (e.status === 404) throw notFound('resource not found in this account');
     if (e.status === 400) throw badRequest(e.message);
+    if (e.code === 'sharing_off') throw Object.assign(new ApiError(403, e.message), { code: 'sharing_off' });
     throw e;
   });
   // the raw token/url is returned ONCE here and never again
@@ -205,6 +206,14 @@ publicShareRouter.get('/api/share/:token/download/:element', asyncHandler(async 
   if (row.access_type !== 'allow_download') throw badRequest('download not permitted for this link');
   if (el === 'hi_res' && !row.allow_hi_res) throw badRequest('hi-res download not permitted');
   if (el === 'metadata' && !row.allow_metadata) throw badRequest('metadata download not permitted');
+  // MP4 DOWNLOAD ALLOWED? (the title's rule, Distribution; build queue P3-4b).
+  // The hi-res file is an MP4 leaving Volt, so the rule decides even when the
+  // link was made allowing it. The metadata file is not a copy of the title.
+  if (el === 'hi_res' && row.resource_kind === 'vod') {
+    const { deliveryPolicyFor } = await import('../services/deliveryPolicy');
+    const policy = await deliveryPolicyFor(row.resource_id, row.account_id);
+    if (policy && !policy.mp4Download) return res.status(403).json({ ok: false, reason: 'mp4_off', error: "This title's publishing rule does not allow MP4 download." });
+  }
   const resource = await loadResource(row.resource_kind, row.resource_id, row.account_id);
   if (!resource) throw notFound('resource');
   if (el === 'metadata') {

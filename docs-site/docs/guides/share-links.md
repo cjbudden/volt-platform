@@ -109,6 +109,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | The viewer sees **Preview not live right now** | The stream is not being produced | Start it, then ask them to choose **Check again** |
 | The viewer sees **This link has reached its view limit.** | It has been opened in as many visits as allowed (a new tab, browser or device is a new visit; a reload is not) | Create a new link, with more views if needed |
 | The viewer sees **This link has expired.** or **This link has been revoked.** | Its time ran out, or someone revoked it | Create a new link |
+| The viewer sees **Sharing has been turned off for this title.** | The publishing rule of the Media Library item the link is for turned **Share links** off after the link was made | Turn **Share links** on in that rule ([Publishing Rules](publishing-rules.md#what-the-protection-and-distribution-fields-do)) if it may be shared |
 | The viewer sees **This link is not valid.** | The address is incomplete, or the stream no longer exists | Check the address was copied in full; create a new link |
 | The viewer sees **This preview is not available in your region.** | Your account limits where content can be watched | Adjust it in [Account settings](account-settings.md), or share with someone in an allowed region |
 | **That PIN was not correct.** or **That code was not correct.** | The viewer typed it wrong | Send the PIN again; for a code, they can choose **Use a different email / send a new code** |
@@ -123,7 +124,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/share-links/{id}` | One link |
 | `POST /api/share-links/{id}/revoke` | Stops it at once |
 
-`resourceKind` is `channel` (also for radio stations), `event` or `vod` (a Media Library item, which the console does not share yet). Set the length with `ttlSec`, and optionally `maxViews`, `label`, `message`, `recipients`, `authMode` (`none`, `pin` or `email_pin`) with `pin`, and `sendEmail`.
+`resourceKind` is `channel` (also for radio stations), `event` or `vod` (a Media Library item, which the console does not share yet). A `vod` item follows its publishing rule: when **Share links** is off, creating a link answers `403` with `code: "sharing_off"`, and a link made before answers `410` with `reason: "sharing_off"`; when **MP4 download** is off, the link's hi-res download answers `403` with `reason: "mp4_off"` (the metadata file is still offered). Set the length with `ttlSec`, and optionally `maxViews`, `label`, `message`, `recipients`, `authMode` (`none`, `pin` or `email_pin`) with `pin`, and `sendEmail`.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

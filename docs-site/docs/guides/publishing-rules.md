@@ -70,7 +70,7 @@ Administrators set the default; the people who run a channel, an event or the li
    | **Retention**, **Retention days**, **Retention counts from** | **Keep forever**, or **Keep for a number of days** counted from when it came in, became available or stops being available |
    | **Legal hold allowed**, **Archive storage tier** | Whether a title may be put on legal hold, and the storage it moves to when archived |
 
-   Protection, distribution and retention are stored and checked now; applying them where content is played, downloaded and kept comes in later releases.
+   **Playback token lifetime**, **Allowed referrer domains**, **MP4 download** and **Share links** apply where titles are played and handed out (see [What the protection and distribution fields do](#what-the-protection-and-distribution-fields-do)). **Concurrent streams**, **FAST eligible**, **Sitemap and schema.org**, the WAF profile and retention are stored and checked now and take effect in later releases.
 2. Check **Before you save** under the fields (see [Before you save](#before-you-save-conflicts-and-impact)).
 3. Choose **Save publishing rule**. **Saved.** appears beside the button, or **Saved, with 1 warning.** when a warning stands.
 
@@ -135,9 +135,21 @@ A saved rule reaches the titles that are already published within about a minute
 - **Available from**, **Expires**, **Geo access**, **Access**, **Paywall** and the access rules take effect on the published titles the rule governs.
 - **Expires** counts from when each title was published, not from when the rule changed. A title published three days ago under a new rule of **After a number of days**: 1 ends at once, which is why **Before you save** counts it as **unavailable now**. Play links already handed out stop working too.
 - **Publish to** is not changed for titles already published: where a title went is kept, and nothing is posted to a social account again. The new publishing points apply the next time a title is published.
+- **Playback token lifetime**, **Allowed referrer domains**, **MP4 download** and **Share links** take effect on the published titles too: a share link made before sharing was turned off stops opening.
 - **DRM** changes the files, so it waits for the titles to be packaged again (see above).
 - Withdrawn and draft titles are not touched; they take the rule when they are published.
 - Removing a content type's or a stream's rule hands its published titles to the rungs above, the same way.
+
+### What the protection and distribution fields do
+
+| Field | Where it applies | What a viewer or colleague sees |
+|---|---|---|
+| **Playback token lifetime** | Every play link handed out for a title | The link stops working after that many minutes (or at the end of the title's window, if sooner), and the player asks for a new one. Up to 24 hours; empty for the platform default |
+| **Allowed referrer domains** | The play check every player makes before it plays | A player on a page of a listed site plays the title. On any other site the title does not play and the player is told **Not available on this site**. `*.example.com` covers `example.com` and every site under it. Phone, TV and server apps are not embedded in a page, so they still play; a web app must be on a listed site |
+| **MP4 download** | **Downloads** in the Media Library, and the hi-res download on a share link | Off: the MP4 is refused with **This title's publishing rule does not allow MP4 download.**, even on a share link that allowed downloads. The sound files (MP3 and AAC) and the metadata file are not affected |
+| **Share links** | Making a share link, and opening one | Off: **Share** is refused with **This title's publishing rule does not allow share links.**, and a link made before shows **Sharing has been turned off for this title.** |
+
+A title that is not published yet is judged by its rule as it stands: you cannot share or download the MP4 of a draft whose rule turns them off.
 
 ### See every override
 
@@ -223,6 +235,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **... is locked by the account default: it cannot be changed here.** | This rung sets a field a rung beneath locked | Choose **Clear it** on that row, or unlock the field where it was locked |
 | A field shows **Locked by** and cannot be ticked | A rung beneath this one locked it | Change it on that rung, or unlock it there |
 | A box asks to package titles again | The change turns DRM on or off for published titles | Choose **Package again and save**, or **Cancel** |
+| A player on your site shows **Not available on this site** | The title's rule lists **Allowed referrer domains** and your site is not one of them | Add the site's domain to the rule (`*.example.com` for every site under it) |
+| **This title's publishing rule does not allow MP4 download.** | The rule that governs the title turns **MP4 download** off (Premium and Rights-managed do) | Turn **MP4 download** on in that rule if the title may leave as a file, or download the sound file instead |
+| **This title's publishing rule does not allow share links.** | The rule that governs the title turns **Share links** off | Turn **Share links** on in that rule |
 | A published title stopped being available after a rule was saved | Its window under the new rule ended before today, or opens later; **Before you save** counted it as **unavailable now** | Change **Expires** or **Available from** on the rule, or give the title its own dates in the Media Library |
 
 ## Through the API
@@ -251,7 +266,7 @@ A rung can also say how content is protected, what else may be done with it and 
 | `distribution` | `mp4Download`, `shareLinks`, `fastEligible`, `sitemap` (listed in the sitemap and schema.org data) |
 | `retention` | `keep` (`forever` or `days`), `days`, `anchor` (counted from `ingest`, `available_from` or `available_until`), `legalHoldAllowed`, `archiveTier` |
 
-These fields are stored and resolved now. Applying them where content is played, downloaded and kept comes in later steps: DRM packaging when a title is encoded, the WAF profiles, and the retention sweep.
+`tokenLifetimeSec`, `referrers`, `mp4Download` and `shareLinks` apply where titles are played and handed out: the edge token's lifetime, a `403` with `code: "referrer"` from the [play gate](../api/play-gate.md) for a page on another site, a `403` with `code: "mp4_off"` from `POST /api/downloads/vod/{id}/link` and the share link hi-res download, and a `403` with `code: "sharing_off"` from `POST /api/share-links` (a link made before answers `410` with `reason: "sharing_off"`). The rest are stored and resolved now and apply in later steps: concurrent streams, FAST eligibility, the sitemap and schema.org, DRM packaging when a title is encoded, the WAF profiles, and the retention sweep.
 
 **Locks.** `lockedFields` lists the fields the rungs beneath may not change, by name (`geo`, or a section field such as `protection.drm`; a whole section locks all its fields). A rung that tries to change a locked field is refused with the lock and its rung named, and what an item says about a locked field is ignored; `resolve` lists it under `ignored`.
 

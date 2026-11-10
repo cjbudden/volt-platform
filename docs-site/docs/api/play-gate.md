@@ -64,6 +64,7 @@ If the viewer has just bought a pass, the gate checks their purchases again befo
 | `403` | `sign_in` | Members only | Sign in |
 | `403` | `scheduled` | An on-demand title announced ahead of its release (its **Listed from** date has passed). `until` (and `availableFrom`, its older name) says when it opens and `meta` what it is; there is no token and no `delivery` | Coming soon, with the date |
 | `451` | `blocked` | Not available where the viewer is. `code` is `region` (a geo rule) or `rights` (the rights' territories or apps, a blackout); `reason` says which rule; `meta` says what it is | The title locked, with `message` |
+| `403` | `blocked` | `code: "referrer"`: the title's publishing rule lists the sites it may be embedded on, and this page is not on one of them (or a web app's request named no page). `reason` names the site | **Not available on this site**, from `message` |
 | `403` | | The app's key does not work on this site, or the app is off: `error` says which | Nothing: fix the app's settings |
 | `401` | | The key is not valid | Nothing: fix the key |
 | `404` | | No such asset in the key's account, or an on-demand title that is not public (see below) | Not found |
@@ -141,7 +142,7 @@ https://cdn.example.com/t/eyJhIjoi...0c1f.../vod/<title>/master.m3u8
 
 Play the address exactly as it is. Every manifest and segment request goes through the token, because segments are named relative to the manifest; your player needs no extra code, and Safari's own HLS player works too. The CDN checks the token on each request and answers `403` when:
 
-- the token has expired. It lasts four hours (24 hours for free titles with no rules for who may watch), and never past the end of the title's window, so playback ends on the second the window closes;
+- the token has expired. It lasts as long as the title's publishing rule says (**Playback token lifetime**, up to 24 hours); without one, four hours (24 hours for free titles with no rules for who may watch). Never past the end of the title's window, so playback ends on the second the window closes;
 - the request comes from another country than the one the gate answered for (a copied link sent abroad);
 - the title stopped being public after the token was handed out (withdrawn, archived, its rights ended early). Within about a minute, every earlier token for it stops working.
 
@@ -155,6 +156,7 @@ The body of the CDN's `403` says why in plain words: *This link has expired*, *N
 | Response | Means | Do |
 |---|---|---|
 | `403 blocked: origin '...' not in allow-list` | The request came from a site the app does not allow | Add the site to the app, including staging sites |
+| `403` with `code: "referrer"` | The title's publishing rule only allows some sites (**Allowed referrer domains**) and the page is not on one | Embed it on a listed site, or add the site to the rule ([Publishing Rules](../guides/publishing-rules.md#what-the-protection-and-distribution-fields-do)) |
 | `403 blocked: referrer/origin required for this web app` | No `Origin` or `Referer`, for example a server-side call with a web key | Call from the page, or use a `server` app |
 | `401 invalid publishable key` | A revoked or mistyped key, or a secret key | Use the app's current `pk_live_...` key |
 | `401 This session belongs to another account` | The viewer signed in with another account's app | Use the same account's key and session |
