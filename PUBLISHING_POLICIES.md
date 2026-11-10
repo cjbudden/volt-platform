@@ -12,7 +12,7 @@ A publishing policy is one named bundle that decides when an asset can be seen, 
 
 That split is the core of the design. Today the user has to reason across a publish flag, a publish window, access rules, geo, DRM and retention separately. In the new model they see one **Public status** per asset, such as *Scheduled: available 12 Nov 18:00 (from Sports match policy)* or *Restricted: rights window ended 1 Nov*, with every setting traced back to where it came from.
 
-Policies attach at account, content type, metadata rule, owner (channel or event) and asset level. The most specific wins per field, and a higher level can lock a field so it cannot be loosened lower down. One evaluator answers every request: catalogue APIs, the play URL gate, the edge, DRM licences, FAST, share links and social.
+Policies attach at account, content type, owner (channel or event), metadata rule and asset level. The most specific wins per field, and a higher level can lock a field so it cannot be loosened lower down. One evaluator answers every request: catalogue APIs, the play URL gate, the edge, DRM licences, FAST, share links and social.
 
 ## What exists today and what changes
 
@@ -117,8 +117,8 @@ Policies attach at five levels. Each field is resolved separately, and the most 
 
 1. **Account default**: always exists (Open preset for a new account). Covers users who only ever want publish and nothing else.
 2. **Content type**: for example Sports match, Episode, Clip, Worship service.
-3. **Metadata rule**: an ordered list of conditions on metadata, tags, collection or source, for example *competition = EPL* or *tag = embargoed*. The first matching rule applies, and the asset shows which one matched.
-4. **Owner**: the channel or event the asset came from (the existing owner rung).
+3. **Owner**: the channel or event the asset came from (the existing owner rung).
+4. **Metadata rule**: an ordered list of conditions on metadata, tags, collection or source, for example *competition = EPL* or *tag = embargoed*. The first matching rule applies, and the asset shows which one matched. It sits above the owner (decided 11 Nov): rights and commercial terms follow the content, not the channel it came from, so an EPL match is treated the same from a channel, an event or an upload. Owner-specific behaviour is still possible with a *source = <channel or event>* condition.
 5. **Asset**: an individual override, shown as a visible exception on the asset and in a filter on the library.
 
 **Locks.** A level can lock a field so lower levels cannot change it. Typical use: the Premium content type locks DRM on; the account locks the rights-managed WAF profile for anything with a rights window. A locked field shows a padlock and its source.
@@ -334,6 +334,6 @@ Collections are the one editorial grouping, replacing playlists: manual, rule-ba
 
 - [x] Decided 3 Nov: token-free access is an option for content with no per-viewer conditions (see Scale and caching, point 8).
 - [x] Decided 3 Nov: viewers in a blocked region see the asset locked with a block message, and blocked requests are counted for the Rights demand report.
-- [ ] Does a metadata rule sit above or below the owner rung? This draft puts owner (channel or event) as more specific.
+- [x] Decided 11 Nov: a metadata rule is more specific than the owner rung, so the order is account < content type < owner < metadata rule < asset. A metadata rule beats the channel or event a title came from; a title override still beats both.
 - [ ] Where do rights windows come from: typed per asset, inherited from the owner or series, or an import from a rights system?
 - [ ] Should archive move media to a colder S3 tier automatically, and is restore time acceptable?
