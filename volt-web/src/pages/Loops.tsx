@@ -195,7 +195,7 @@ function UploadRow({ u, onDone }: { u: UploadItem; onDone: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-const USER_KIND: Record<string, string> = { channel: 'Channel', radio: 'Station', event: 'Event' }
+const USER_KIND: Record<string, string> = { channel: 'Channel', radio: 'Station', event: 'Event', fast: 'FAST channel' }
 
 /** The streams that fall back to an asset, each a link to that stream. */
 function UsedBy({ users }: { users: FillerUser[] | undefined }) {
@@ -475,7 +475,8 @@ function LoopsList() {
                     onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>Details</a>
                   <button className="btn ghost" style={{ marginLeft: 6 }}
                     onClick={async () => {
-                      const users = a.used_by ?? []
+                      // A FAST channel plays its own copy, so deleting this does not take its loop away.
+                      const users = (a.used_by ?? []).filter(u => u.kind !== 'fast')
                       if (!users.length) {
                         if (!confirm(`Delete "${a.name}"? This can't be undone.`)) return
                         try { await api.deleteFillerAsset(a.id); load() } catch (ex: any) { fail(ex.message) }

@@ -3098,7 +3098,8 @@ export interface FillerProbe {
     scan: 'progressive' | 'interlaced' | null; pixFmt: string | null; colour: string | null; bitDepth: number | null; bitrateKbps: number | null; still: boolean }
   audio: null | { codec: string; profile: string | null; channels: number | null; layout: string | null; sampleRate: number | null; bitrateKbps: number | null; tracks: number }
 }
-export interface FillerUser { kind: 'channel' | 'radio' | 'event'; id: string; name: string; href: string }
+/** `fast`: a FAST channel playing it as its brand loop, slate or an ident (shown, but not a fallback). */
+export interface FillerUser { kind: 'channel' | 'radio' | 'event' | 'fast'; id: string; name: string; href: string }
 /** A fallback still held as a pasted address (usually an Image Library image). */
 export interface FillerElsewhere {
   ref: string

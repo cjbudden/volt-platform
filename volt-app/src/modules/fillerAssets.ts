@@ -68,7 +68,7 @@ export async function assertFillerAsset(acc: string, id: string | null | undefin
   if (fa.status !== 'ready') throw conflict(`That slate or loop is still ${fa.status}; choose it once it is ready`);
 }
 
-export interface FillerUser { kind: 'channel' | 'radio' | 'event'; id: string; name: string; href: string }
+export interface FillerUser { kind: 'channel' | 'radio' | 'event' | 'fast'; id: string; name: string; href: string }
 
 const userOf = (r: any): FillerUser => r.owner === 'event'
   ? { kind: 'event', id: r.id, name: r.name, href: `/events/${r.id}` }
@@ -97,6 +97,54 @@ export async function usageFor(acc: string, ids: string[]): Promise<Map<string, 
     out.set(r.asset, list);
   }
   return out;
+}
+
+/**
+ * FAST CHANNELS THAT PLAY THIS. A FAST channel does not point at a filler
+ * asset: choosing one (Build > Brand & filler) makes a hidden library copy
+ * (services/fast/fillerBridge.ts, metadata.fillerAssetId) and the channel's ad
+ * policy names THAT copy as its brand loop, slate or an ident. So the
+ * channel-and-event usage above never saw it, and a loop playing on a FAST
+ * channel read "Not used" here. Found through the copy, so a pick made from the
+ * Media Library list of the same copy counts too.
+ */
+export interface FastUse { channelId: string; name: string; status: string; copyId: string; roles: string[] }
+export async function fastUseFor(acc: string, ids: string[]): Promise<Map<string, FastUse[]>> {
+  const out = new Map<string, FastUse[]>();
+  if (!ids.length) return out;
+  const rows = await query<any>(
+    `SELECT v.metadata->>'fillerAssetId' AS filler, v.id AS copy, c.id, c.name, c.status::text AS status,
+            ca.policy->'brand'->>'loopAssetId' = v.id::text AS is_loop,
+            ca.policy->>'slateAssetId' = v.id::text AS is_slate,
+            COALESCE(ca.policy->'brand'->'identIds' ? v.id::text, false) AS is_ident,
+            COALESCE((ca.policy->>'breaksUseLoop')::boolean, false) AS breaks_use_loop
+       FROM vod_assets v
+       JOIN channel_ads ca ON ca.policy->'brand'->>'loopAssetId' = v.id::text
+                           OR ca.policy->>'slateAssetId' = v.id::text
+                           OR COALESCE(ca.policy->'brand'->'identIds' ? v.id::text, false)
+       JOIN channels c ON c.id = ca.channel_id
+       JOIN groups g ON g.id = c.group_id AND g.account_id = $1
+      WHERE v.account_id = $1 AND v.metadata->>'fillerAssetId' = ANY($2::text[])
+      ORDER BY c.name`, [acc, ids]);
+  for (const r of rows) {
+    const roles: string[] = [];
+    if (r.is_loop) roles.push('Brand loop', ...(r.breaks_use_loop ? ['Unsold ad breaks'] : []));
+    if (r.is_slate) roles.push('Slate');
+    if (r.is_ident) roles.push('Ident');
+    const list = out.get(r.filler) ?? [];
+    list.push({ channelId: r.id, name: r.name, status: r.status, copyId: r.copy, roles });
+    out.set(r.filler, list);
+  }
+  return out;
+}
+
+/** For the list's Used by column: FAST channels beside the streams. Not used for delete (see there). */
+async function withFast(acc: string, ids: string[], usage: Map<string, FillerUser[]>): Promise<Map<string, FillerUser[]>> {
+  const fast = await fastUseFor(acc, ids).catch(() => new Map<string, FastUse[]>());
+  for (const [id, list] of fast) {
+    usage.set(id, [...(usage.get(id) ?? []), ...list.map((f): FillerUser => ({ kind: 'fast', id: f.channelId, name: f.name, href: `/fast/${f.channelId}` }))]);
+  }
+  return usage;
 }
 
 /**
@@ -221,7 +269,7 @@ fillerAssetsRouter.get(
     const whereCount = `FROM filler_assets WHERE account_id = $1${countWhereSql(pl)}`;  // totals ignore the cursor
     const rows = await query<any>(`SELECT * ${where} ${pageSql(pl)}`, params);
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
-    const usage = await usageFor(accountId(req), rows.map((r: any) => r.id));
+    const usage = await withFast(accountId(req), rows.map((r: any) => r.id), await usageFor(accountId(req), rows.map((r: any) => r.id)));
     for (const r of rows) r.used_by = usage.get(r.id) ?? [];
     res.json(finishPage(req, res, pl, rows, total));
   })
@@ -238,7 +286,7 @@ fillerAssetsRouter.get(
   asyncHandler(async (req, res) => {
     const row = await one<any>(`SELECT * FROM filler_assets WHERE id=$1 AND account_id=$2`, [req.params.id, accountId(req)]);
     if (!row) throw notFound('Filler asset not found');
-    row.used_by = (await usageFor(accountId(req), [row.id])).get(row.id) ?? [];
+    row.used_by = (await withFast(accountId(req), [row.id], await usageFor(accountId(req), [row.id]))).get(row.id) ?? [];
     res.json(row);
   })
 );
@@ -307,7 +355,18 @@ fillerAssetsRouter.get(
     const row = await one<any>(`SELECT * FROM filler_assets WHERE id=$1 AND account_id=$2`, [req.params.id, acc]);
     if (!row) throw notFound('Filler asset not found');
     const streams = await streamUse(acc, row.id, row.source_key);
+    // FAST channels play their own copy, encoded for the channel's ladder by its
+    // prepare step: report that copy's readiness as the FAST page does.
+    const fastUse = (await fastUseFor(acc, [row.id])).get(row.id) ?? [];
+    const { readiness } = await import('../services/fast/prepare');
+    const fast = [];
+    for (const f of fastUse) {
+      const r = (await readiness(f.channelId).catch(() => [] as any[])).find((x: any) => x.assetId === f.copyId) ?? null;
+      fast.push({ ...f, href: `/fast/${f.channelId}`,
+        copy: r ? { state: r.state, why: r.why ?? null, progress: r.progress ?? null, note: r.note ?? null, failed: !!r.failed } : null });
+    }
     res.json({
+      fast,
       asset: row,
       media: row.source_key ? `/${String(row.source_key).replace(/^\//, '')}` : null,
       streams,

@@ -33,7 +33,22 @@ interface Details {
     & Pick<FillerAsset, 'poster_key' | 'poster_source' | 'poster_candidates' | 'sprite' | 'thumb_status' | 'thumb_error' | 'probe'>
   media: string | null
   streams: StreamUse[]
+  /** FAST channels playing it: each plays a copy made for its own ladder (Build > Brand & filler). */
+  fast?: FastUse[]
   summary: { streams: number; ready: number; outOfDate: number; failed: number; renditions: number }
+}
+
+interface FastUse {
+  channelId: string; name: string; status: string; href: string; roles: string[]
+  copy: { state: 'ready' | 'preparing' | 'needs-prepare' | 'no-source'; why: string | null; progress: number | null; note: string | null; failed: boolean } | null
+}
+function FastCopyPill({ c }: { c: FastUse['copy'] }) {
+  if (!c) return <span className="tag idle" title="The channel has not listed it yet: open the channel's Build page">Not prepared</span>
+  if (c.failed) return <span className="tag down" title={c.why ?? undefined}>Prepare failed</span>
+  if (c.state === 'ready') return <span className="tag live">Ready</span>
+  if (c.state === 'preparing') return <span className="tag sched">Preparing{c.progress != null ? ` ${Math.round(c.progress)}%` : ''}</span>
+  if (c.state === 'no-source') return <span className="tag down" title={c.why ?? undefined}>No source</span>
+  return <span className="tag warn" title={c.why ?? undefined}>Needs preparing</span>
 }
 
 const KIND = { slate: 'Slate', loop: 'Loop' } as const
@@ -258,6 +273,7 @@ export default function LoopDetail({ id }: { id: string }) {
   if (!d) return <div className="loading">Loading…</div>
   const a = d.asset
   const sel = d.streams.find((s) => s.id === playing && s.build?.preview) ?? null
+  const fast = d.fast ?? []
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -328,7 +344,9 @@ export default function LoopDetail({ id }: { id: string }) {
             {sel?.build?.preview
               ? <BuildPlayer key={sel.id} src={sel.build.preview} renditions={sel.build.renditions} />
               : <div style={{ aspectRatio: '16 / 9', display: 'grid', placeItems: 'center', background: 'var(--panel-2)', borderRadius: 8, color: 'var(--faint)', textAlign: 'center', padding: 16 }}>
-                  {d.streams.length ? 'No stream has a finished copy of this yet.' : 'Choose this as a channel or event fallback, and Volt builds a copy to match its ladder.'}
+                  {d.streams.length ? 'No stream has a finished copy of this yet.'
+                    : fast.length ? `${fast.map((f) => f.name).join(', ')} ${fast.length === 1 ? 'plays' : 'play'} this as ${fast.length === 1 ? 'a FAST channel' : 'FAST channels'}, from a copy made for ${fast.length === 1 ? 'its' : 'each'} own ladder: see Used by below.`
+                    : 'Choose this as a channel or event fallback, or as a FAST channel\'s brand loop or slate, and Volt builds a copy to match its ladder.'}
                 </div>}
           </div>
         </section>
@@ -341,7 +359,19 @@ export default function LoopDetail({ id }: { id: string }) {
       <section className="card">
         <div className="card-h"><h3>Used by</h3><span className="sub">Each stream gets its own copy, encoded to its ladder and segment length</span></div>
         <div className="card-b" style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          {d.streams.length === 0 && <div style={{ color: 'var(--faint)' }}>No channel, station or event uses this as its fallback.</div>}
+          {d.streams.length === 0 && fast.length === 0 && <div style={{ color: 'var(--faint)' }}>No channel, station, event or FAST channel uses this.</div>}
+          {fast.map((f) => (
+            <div key={`fast-${f.channelId}`} style={{ borderTop: '1px solid var(--border)', padding: '12px 0', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+                <a href={f.href} onClick={(e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(f.href) }} style={{ fontWeight: 600 }}>{f.name}</a>
+                <span className="tag type">FAST channel</span>
+                <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>{f.roles.join(' · ')} · {f.status}</span>
+                <FastCopyPill c={f.copy} />
+              </div>
+              {f.copy?.why && f.copy.state !== 'ready' && <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>{f.copy.why}</div>}
+              <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Plays a copy made for the channel's own ladder. Change it under the channel's Build &gt; Brand &amp; filler.</div>
+            </div>
+          ))}
           {d.streams.map((s) => (
             <div key={s.id} style={{ borderTop: '1px solid var(--border)', padding: '12px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
