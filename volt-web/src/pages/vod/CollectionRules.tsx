@@ -18,9 +18,9 @@ import { useNotify } from '../../notices'
 type FieldType = 'text' | 'number' | 'date' | 'list' | 'ref' | 'tags' | 'boolean'
 interface Field { key: string; label: string; type: FieldType; group: string; values?: { value: string; label: string }[]; unit?: string }
 interface Op { op: string; label: string; arity: 0 | 1 | 2 | 'list' | 'within' }
-interface Catalogue { fields: Field[]; operators: Record<FieldType, Op[]>; orders: { value: string; label: string }[] }
+export interface Catalogue { fields: Field[]; operators: Record<FieldType, Op[]>; orders: { value: string; label: string }[] }
 interface Cond { field: string; op: string; value?: any }
-interface Group { match: 'all' | 'any'; conditions: (Cond | Group)[] }
+export interface Group { match: 'all' | 'any'; conditions: (Cond | Group)[] }
 const isGroup = (x: any): x is Group => x && Array.isArray(x.conditions)
 const J = (b: unknown) => ({ body: JSON.stringify(b) })
 
@@ -40,7 +40,7 @@ export function useCatalogue() {
 }
 
 /** A sensible first value when the field or operator changes. */
-function blankValue(f: Field | undefined, op: Op | undefined): any {
+export function blankValue(f: Field | undefined, op: Op | undefined): any {
   if (!f || !op || op.arity === 0) return undefined
   if (op.arity === 'within') return { count: 7, unit: 'day' }
   if (op.arity === 'list') return []
@@ -57,7 +57,7 @@ function complete(c: Cond, cat: Catalogue): boolean {
   if (op.arity === 2) return Array.isArray(c.value) && c.value.every((v: any) => String(v ?? '').trim() !== '')
   return String(c.value ?? '').trim() !== ''
 }
-function allComplete(g: Group, cat: Catalogue): boolean {
+export function allComplete(g: Group, cat: Catalogue): boolean {
   return g.conditions.length > 0 && g.conditions.every((c) => (isGroup(c) ? allComplete(c, cat) : complete(c, cat)))
 }
 
@@ -142,7 +142,8 @@ function CondRow({ c, cat, onChange, onRemove, id }: { c: Cond; cat: Catalogue; 
     </div>)
 }
 
-function GroupBox({ g, cat, depth, onChange, onRemove, path }: { g: Group; cat: Catalogue; depth: number; onChange: (g: Group) => void; onRemove?: () => void; path: string }) {
+// Also the condition builder of publishing metadata rules (publishing/MetadataRules.tsx, P3-3).
+export function GroupBox({ g, cat, depth, onChange, onRemove, path }: { g: Group; cat: Catalogue; depth: number; onChange: (g: Group) => void; onRemove?: () => void; path: string }) {
   const first = cat.fields[0]
   const newCond = (): Cond => ({ field: first.key, op: cat.operators[first.type][0].op, value: blankValue(first, cat.operators[first.type][0]) })
   const set = (i: number, c: Cond | Group) => onChange({ ...g, conditions: g.conditions.map((x, j) => (j === i ? c : x)) })

@@ -23,6 +23,7 @@ import {
   type RuleSettings, type Rung, type Resolved,
 } from './publishingRules';
 import { effectiveRights, cachedProfile, type EffectiveRights } from './rightsProfiles';
+import { rungOf, loadRules, firstMatches, type MetadataRule } from './publishingMetadataRules';
 
 export type PresetKey = 'open' | 'members' | 'geo_locked' | 'premium' | 'rights_managed';
 export interface Preset { key: PresetKey; name: string; summary: string; settings: RuleSettings }
@@ -147,7 +148,7 @@ export function statedFields(s: RuleSettings): string[] {
   return out.filter((f) => LOCKABLE_FIELDS.includes(f) || LOCKABLE_FIELDS.includes(f.split('.')[0]));
 }
 
-export const rungLabel = (r: Rung) => ({ baseline: 'platform default', account: 'account default', schema: 'content type rule', owner: 'channel, event or station rule', asset: 'title' } as Record<Rung, string>)[r];
+export const rungLabel = (r: Rung) => ({ baseline: 'platform default', account: 'account default', schema: 'content type rule', owner: 'channel, event or station rule', metadata: 'metadata rule', asset: 'title' } as Record<Rung, string>)[r];
 const FIELD_LABELS: Record<string, string> = {
   targets: 'Publish to', autoPublish: 'Auto-publish', availableFrom: 'Available from', expire: 'Expires', geo: 'Geo access', access: 'Access',
   paywall: 'Paywall', gate: 'Publish gate', accessRules: 'Access rules', archive: 'Archive copies',
@@ -179,6 +180,7 @@ export interface Impact {
   warnings: { code: string; message: string; count: number; titles: { id: string; title: string }[] }[];
 }
 
+type MetaRow = Pick<MetadataRule, 'id' | 'name' | 'conditions' | 'settings' | 'locked_fields' | 'preset_key'>;
 type RuleRow = { id: string; scope_kind: 'account' | 'schema' | 'owner'; scope_id: string | null; settings: RuleSettings; locked_fields: string[]; preset_key: string | null; name?: string | null };
 
 /**
@@ -193,8 +195,13 @@ export function stableJson(v: unknown): string {
     ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as any)[k]])) : x);
 }
 
-/** Resolve a title against a set of rule rows (all the account's, in memory). */
-export function resolveWith(rows: RuleRow[], a: { id?: string; schema_id?: string | null; channel_id?: string | null; event_id?: string | null; availability_override?: RuleSettings | null }): Resolved {
+/**
+ * Resolve a title against a set of rule rows (all the account's, in memory)
+ * and the metadata rule it meets first, if any (build queue P3-3; the caller
+ * matches a batch at once with publishingMetadataRules.firstMatches).
+ */
+export function resolveWith(rows: RuleRow[], a: { id?: string; schema_id?: string | null; channel_id?: string | null; event_id?: string | null; availability_override?: RuleSettings | null },
+  matched?: MetaRow | null): Resolved {
   const owner = a.channel_id ?? a.event_id ?? null;
   const acc = rows.find((r) => r.scope_kind === 'account');
   const sch = a.schema_id ? rows.find((r) => r.scope_kind === 'schema' && r.scope_id === a.schema_id) : undefined;
@@ -204,6 +211,7 @@ export function resolveWith(rows: RuleRow[], a: { id?: string; schema_id?: strin
     { rung: 'account', scopeId: null, ...m(acc) },
     { rung: 'schema', scopeId: a.schema_id ?? null, ...m(sch) },
     { rung: 'owner', scopeId: owner, ...m(own) },
+    rungOf(matched),
     { rung: 'asset', id: a.id ?? null, scopeId: a.id ?? null, settings: a.availability_override ?? {} },
   ]);
 }
@@ -220,12 +228,22 @@ export function presetOf(r: Resolved): string | null {
  * governs once, then resolves in memory; titles that share a content type, an
  * owner and have no override of their own resolve once between them.
  */
-export async function policyImpact(accountId: string, scope: { kind: 'account' | 'schema' | 'owner'; id: string | null },
-  next: { settings: RuleSettings; lockedFields: string[]; presetKey: string | null }): Promise<Impact> {
+export async function policyImpact(accountId: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata'; id: string | null },
+  next: { settings: RuleSettings; lockedFields: string[]; presetKey: string | null },
+  /** A metadata-rule change (P3-3): the account's enabled metadata rules, in order, as they would be after it. */
+  opts: { metaAfter?: MetaRow[] } = {}): Promise<Impact> {
   const rows = await query<RuleRow>(`SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
   const after = rows.filter((r) => !(r.scope_kind === scope.kind && (r.scope_id ?? null) === (scope.id ?? null)));
-  after.push({ id: 'next', scope_kind: scope.kind, scope_id: scope.id, settings: next.settings, locked_fields: next.lockedFields, preset_key: next.presetKey });
-  const where = scope.kind === 'account' ? '' : scope.kind === 'schema' ? 'AND v.schema_id = $2' : 'AND (v.channel_id = $2 OR v.event_id = $2)';
+  if (scope.kind !== 'metadata')
+    after.push({ id: 'next', scope_kind: scope.kind, scope_id: scope.id, settings: next.settings, locked_fields: next.lockedFields, preset_key: next.presetKey });
+  // Which metadata rule each title meets now and after the save: a change to
+  // a rule's conditions or order moves titles between rules, so a metadata
+  // change is measured over the whole library.
+  const metaBefore: MetaRow[] = await loadRules(accountId, { enabledOnly: true });
+  const metaAfter = scope.kind === 'metadata' ? (opts.metaAfter ?? metaBefore) : metaBefore;
+  const matchedBefore = await firstMatches(accountId, null, metaBefore);
+  const matchedAfter = metaAfter === metaBefore ? matchedBefore : await firstMatches(accountId, null, metaAfter);
+  const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND v.schema_id = $2' : 'AND (v.channel_id = $2 OR v.event_id = $2)';
   // A title recorded from a channel or event belongs to the account through
   // its group (as in services/availability.ts assetAccount); an upload directly.
   const titles = await query<any>(
@@ -236,7 +254,7 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
        LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
-      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL ${where}`, scope.kind === 'account' ? [accountId] : [accountId, scope.id]);
+      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL ${where}`, where ? [accountId, scope.id] : [accountId]);
   const memo = new Map<string, [Resolved, Resolved]>();
   const profiles = new Map<string, any>();
   const impact: Impact = { assets: titles.length, published: 0, changed: 0, repackage: 0, publishedChanged: 0, unavailableNow: 0, blocks: [], warnings: [] };
@@ -249,9 +267,12 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
   };
   for (const t of titles) {
     const hasOverride = t.availability_override && Object.keys(t.availability_override).length > 0;
-    const key = hasOverride ? `a:${t.id}` : `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}`;
+    const mb = matchedBefore.get(t.id) ?? null, ma = matchedAfter.get(t.id) ?? null;
+    // A metadata rule governs the titles that meet it, before or after the save.
+    if (scope.kind === 'metadata' && scope.id && mb?.id !== scope.id && ma?.id !== scope.id) { impact.assets--; continue; }
+    const key = hasOverride ? `a:${t.id}` : `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}|${mb?.id ?? ''}|${ma === mb ? '=' : ma?.id ?? ''}`;
     let pair = memo.get(key);
-    if (!pair) { pair = [resolveWith(rows, t), resolveWith(after, t)]; memo.set(key, pair); }
+    if (!pair) { pair = [resolveWith(rows, t, mb), resolveWith(after, t, ma)]; memo.set(key, pair); }
     const [was, now] = pair;
     const live = ['available', 'scheduled'].includes(t.availability_state);
     if (live) impact.published++;

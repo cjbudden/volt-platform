@@ -429,8 +429,11 @@ export function restampPublished(was: any, plan: Resolved['settings'],
  * Mark the published titles a rung governs, for the sweep to stamp again.
  * One statement whatever the number of titles. Returns how many were marked.
  */
-export async function markPolicyStale(accountId: string, scope: { kind: 'account' | 'schema' | 'owner'; id: string | null }): Promise<number> {
-  const where = scope.kind === 'account' ? '' : scope.kind === 'schema' ? 'AND x.schema_id = $2' : 'AND (x.channel_id = $2 OR x.event_id = $2)';
+export async function markPolicyStale(accountId: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata'; id: string | null }): Promise<number> {
+  // A metadata rule can move any title of the account (its conditions or its
+  // place in the order changed), so its change marks them all; the restamp
+  // writes only the titles whose stamp really changes.
+  const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND x.schema_id = $2' : 'AND (x.channel_id = $2 OR x.event_id = $2)';
   // A title recorded from a channel or event belongs to the account through
   // its group (as in assetAccount); an upload directly.
   const rows = await query<any>(
@@ -441,7 +444,7 @@ export async function markPolicyStale(accountId: string, scope: { kind: 'account
        LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE x.id = v.id AND COALESCE(g.account_id, x.account_id) = $1
         AND x.availability_state IN ('scheduled', 'available') AND x.archived_at IS NULL ${where}
-      RETURNING v.id`, scope.kind === 'account' ? [accountId] : [accountId, scope.id]);
+      RETURNING v.id`, where ? [accountId, scope.id] : [accountId]);
   return rows.length;
 }
 
@@ -474,14 +477,19 @@ export async function restampStale(limit = 500, now: Date = new Date()): Promise
   const { resolveWith, stableJson } = await import('./publishingPolicies');
   const { invalidateTag } = await import('../scale/cache');
   const { refreshPublicStatus } = await import('./publicStatus');
-  // The account's rules are read once per batch, not once per title.
+  // The account's rules are read once per batch, not once per title, and the
+  // metadata rule each title meets first (P3-3) is one query per account.
   const rules = new Map<string, any[]>();
+  const matched = new Map<string, Map<string, any>>();
+  const { loadRules, firstMatches } = await import('./publishingMetadataRules');
   for (const a of rows) {
     out.checked++;
     try {
       if (!rules.has(a._account)) rules.set(a._account, await query<any>(
         `SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [a._account]));
-      const plan = resolveWith(rules.get(a._account)!, a);
+      if (!matched.has(a._account)) matched.set(a._account, await firstMatches(a._account,
+        rows.filter((r) => r._account === a._account).map((r) => r.id), await loadRules(a._account, { enabledOnly: true })));
+      const plan = resolveWith(rules.get(a._account)!, a, matched.get(a._account)!.get(a.id) ?? null);
       const rights = await rightsForAsset(a);
       const next = restampPublished(a.availability, plan.settings, { anchor: publishedAnchor(a, now), rights, now });
       const t = (x: any) => (x ? new Date(x).getTime() : null);

@@ -1,10 +1,12 @@
 // ============================================================================
 //  PUBLISHING RULES — the ladder in one place.
 //
-//    account default  <  content type  <  channel / event / station  <  item
+//    account default  <  content type  <  channel / event / station
+//      <  metadata rule  <  item
 //
 //  This page edits the bottom rung (the account default) and lists every rung
-//  above it that has been set, with a way to open each. The type rung is also
+//  above it that has been set, with a way to open each. The metadata rules
+//  (build queue P3-3) are edited here only: an ordered list, first match wins. The type rung is also
 //  editable from Content Types, the owner rung from each channel, station or
 //  event's Settings, and the item rung from the Media Library: same editor,
 //  same rules, four doors.
@@ -16,6 +18,7 @@ import { RuleEditor } from '../RuleEditor'
 import { navigate } from '../router'
 import { usePageNotice } from '../notices'
 import { statedIds, SECTION_FIELD_LABEL, Padlock } from '../publishing/PolicyFields'
+import { MetadataRulesCard } from '../publishing/MetadataRules'
 
 export default function PublishingPage() {
   const [rules, setRules] = useState<PublishingRule[] | null>(null)
@@ -38,7 +41,7 @@ export default function PublishingPage() {
   const withoutRule = types.filter(t => !typeRules.some(r => r.scope_id === t.id))
   return (
     <>
-      <PageHead title="Publishing Rules" sub="Where on-demand content goes when it is published, and how it stays available: geo, access, paywall, expiry. The account default applies to everything; a content type, a channel, an event or a station can override any part of it, and so can a single item." />
+      <PageHead title="Publishing Rules" sub="Where on-demand content goes when it is published, and how it stays available: geo, access, paywall, expiry. The account default applies to everything; a content type, a channel, an event or a station can override any part of it, a metadata rule can override those for the titles it matches, and a single item can override everything." />
 
       <div className="card" style={{ padding: 18, marginBottom: 16 }}>
         <div className="sec-label">Publishing points</div>
@@ -88,6 +91,8 @@ export default function PublishingPage() {
             : ownerRules.map(r => <RuleRow key={r.id} r={r} onOpen={() => setOpen({ kind: 'owner', id: r.scope_id!, name: r.scope_name ?? 'owner' })} />)}
         </div>
       </div>
+
+      <div style={{ marginTop: 16 }}><MetadataRulesCard /></div>
 
       {open && (
         <div className="card" style={{ padding: 18, marginTop: 16 }}>

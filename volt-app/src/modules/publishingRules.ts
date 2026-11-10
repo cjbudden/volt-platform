@@ -11,6 +11,7 @@
  *   GET  /api/publishing-rules/presets              the five starting policies (P3)
  *   GET  /api/publishing-rules/fields               the five sections, the lockable fields and their labels
  *   PUT  ...?dryRun=1                               the impact and conflicts of a save, nothing saved
+ *   /metadata-rules ...                             the metadata-rule rung (P3-3): see that section below
  *
  * A save (build queue P3, PUBLISHING_POLICIES.md) is refused with 422
  * `policy_conflict` when the policy has a blocking conflict, changes a field a
@@ -28,7 +29,7 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
-import { query, one } from '../db';
+import { query, one, tx } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, conflict } from '../util/http';
 import { actor, writeAudit } from '../services/audit';
@@ -37,6 +38,8 @@ import { PRESETS, policyConflicts, lockConflicts, policyImpact, fieldLabel, pres
 import { rightsForAssetId } from '../services/rightsProfiles';
 import { ApiError } from '../util/http';
 import { assetAccount } from '../services/availability';
+import { policyFieldsFor, validateConditions, loadRules, firstMatches, type MetadataRule } from '../services/publishingMetadataRules';
+import { RuleError, OPS } from '../services/collectionRules';
 
 export const publishingRulesRouter = Router();
 publishingRulesRouter.use(requireAuth);
@@ -242,6 +245,196 @@ publishingRulesRouter.get('/resolve', asyncHandler(async (req, res) => {
   res.json(await resolveForAsset(accountId(req), { schema_id: schemaId, channel_id: channelId, event_id: eventId }));
 }));
 
+// ------------------------------------------------------------------ metadata rules (P3-3)
+//
+//   GET    /api/publishing-rules/metadata-rules          the ordered rules, each with how many titles it governs
+//   GET    /api/publishing-rules/metadata-rules/fields   the fields and operators a rule can use, with choices
+//   POST   /api/publishing-rules/metadata-rules          add a rule at the end (?dryRun=1: its impact)
+//   PUT    /api/publishing-rules/metadata-rules/order    set the order: { ids: [first, second, ...] }
+//   POST   /api/publishing-rules/metadata-rules/test     { assetId }: which rule the title meets first
+//   GET    /api/publishing-rules/metadata-rules/:id      one rule
+//   PUT    /api/publishing-rules/metadata-rules/:id      change it (?dryRun=1: its impact)
+//   DELETE /api/publishing-rules/metadata-rules/:id      remove it
+//
+// Registered before /:scopeKind so "metadata-rules" is never read as a scope.
+// A change sends only what it changes: the console saves the name, the
+// conditions and on or off from the rule's header, and the policy from the
+// policy editor (settings, locks, preset), each keeping the rest.
+const metaRuleBody = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  conditions: z.unknown().optional(),
+  enabled: z.boolean().optional(),
+  settings: z.unknown().optional(),
+  lockedFields: z.array(z.string()).max(64).optional(),
+  presetKey: z.enum(['open', 'members', 'geo_locked', 'premium', 'rights_managed']).nullable().optional(),
+  confirm: z.boolean().optional(),
+});
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function ownMetaRule(acct: string, id: string): Promise<MetadataRule> {
+  if (!uuidRe.test(id)) throw notFound('Metadata rule not found');
+  const r = await one<MetadataRule>(`SELECT * FROM publishing_metadata_rules WHERE id = $1 AND account_id = $2`, [id, acct]);
+  if (!r) throw notFound('Metadata rule not found');
+  return r;
+}
+
+async function cleanConditions(acct: string, raw: unknown) {
+  const fields = await policyFieldsFor(acct);
+  try { return validateConditions(raw, fields); }
+  catch (e) { if (e instanceof RuleError) throw badRequest(`${e.message} (${e.path.replace(/^rules/, 'conditions')})`); throw e; }
+}
+
+/**
+ * Check a metadata rule as it would be saved: its own conflicts over the
+ * account default (with the account's locks in force), and what it does to
+ * the library with the rules in their order after the save.
+ */
+async function checkMetaRule(acct: string, id: string | null, rule: { name: string; conditions: any; enabled: boolean; settings: RuleSettings; lockedFields: string[]; presetKey: string | null }) {
+  const account = await one<any>(`SELECT settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1 AND scope_kind = 'account'`, [acct]);
+  const ladder = resolveLadder([
+    ...(account ? [{ rung: 'account' as const, settings: account.settings, lockedFields: account.locked_fields ?? [], presetKey: account.preset_key }] : []),
+    { rung: 'metadata' as const, settings: rule.settings, lockedFields: rule.lockedFields, presetKey: rule.presetKey },
+  ]);
+  const conflicts: Conflict[] = [
+    ...lockConflicts(rule.settings, 'metadata', account ? resolveLadder([{ rung: 'account', settings: {}, lockedFields: account.locked_fields ?? [] }]).locks : {}),
+    ...policyConflicts(ladder.settings, { presetKey: presetOf(ladder) }),
+  ];
+  const current = await loadRules(acct);
+  const me = { id: id ?? 'new', name: rule.name, conditions: rule.conditions, settings: rule.settings, locked_fields: rule.lockedFields, preset_key: rule.presetKey, enabled: rule.enabled };
+  const list = id ? current.map((r) => (r.id === id ? { ...r, ...me } : r)) : [...current, me as any];
+  const impact = await policyImpact(acct, { kind: 'metadata', id: me.id }, { settings: rule.settings, lockedFields: rule.lockedFields, presetKey: rule.presetKey },
+    { metaAfter: list.filter((r) => r.enabled) });
+  return { conflicts, impact };
+}
+
+async function saveMetaRule(req: any, res: any, existing: MetadataRule | null) {
+  const acct = accountId(req);
+  const b = metaRuleBody.parse(req.body ?? {});
+  const name = b.name ?? existing?.name;
+  if (!name) throw badRequest('name: a metadata rule needs a name');
+  if (b.conditions === undefined && !existing) throw badRequest('conditions: a metadata rule needs at least one condition');
+  const conditions = b.conditions === undefined ? existing!.conditions : await cleanConditions(acct, b.conditions);
+  const settings = await cleanSettings(acct, b.settings ?? existing?.settings ?? {});
+  const lockedFields = b.lockedFields !== undefined ? [...new Set(b.lockedFields)] : (existing?.locked_fields ?? []);
+  const bad = lockedFields.find((f) => !LOCKABLE_FIELDS.includes(f));
+  if (bad) throw badRequest(`lockedFields: "${bad}" is not a field that can be locked`);
+  const presetKey = b.presetKey !== undefined ? b.presetKey : (existing?.preset_key ?? null);
+  const enabled = b.enabled ?? existing?.enabled ?? true;
+  const { conflicts, impact } = await checkMetaRule(acct, existing?.id ?? null, { name, conditions, enabled, settings, lockedFields, presetKey });
+  const blocks = conflicts.filter((c) => c.level === 'block');
+  const warnings = conflicts.filter((c) => c.level !== 'block');
+  if (req.query.dryRun === '1' || req.query.dryRun === 'true') return res.json({ dryRun: true, saved: false, canSave: !blocks.length && !impact.blocks.length, conflicts, impact });
+  if (blocks.length || impact.blocks.length) {
+    const first = blocks[0]?.message ?? `${impact.blocks[0].count} title${impact.blocks[0].count === 1 ? '' : 's'}: ${impact.blocks[0].message}`;
+    throw policyRefusal(422, 'policy_conflict', first, { conflicts, impact });
+  }
+  if (impact.repackage && !b.confirm)
+    throw policyRefusal(409, 'confirm_repackage', `This changes DRM on ${impact.repackage} published title${impact.repackage === 1 ? '' : 's'}: their files must be packaged again. Send again with confirm to go ahead; they keep their current protection until then.`, { conflicts, impact });
+  const who = actor(req);
+  const row = existing
+    ? await one<any>(
+      `UPDATE publishing_metadata_rules SET name = $3, conditions = $4::jsonb, settings = $5::jsonb, locked_fields = $6, preset_key = $7, enabled = $8,
+              updated_by = $9, version = version + 1, updated_at = now()
+        WHERE id = $1 AND account_id = $2 RETURNING *`,
+      [existing.id, acct, name, JSON.stringify(conditions), JSON.stringify(settings), lockedFields, presetKey, enabled, who.userId])
+    : await one<any>(
+      `INSERT INTO publishing_metadata_rules(account_id, position, name, conditions, settings, locked_fields, preset_key, enabled, created_by, updated_by)
+       VALUES ($1, (SELECT COALESCE(max(position) + 1, 0) FROM publishing_metadata_rules WHERE account_id = $1), $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $8)
+       RETURNING *`,
+      [acct, name, JSON.stringify(conditions), JSON.stringify(settings), lockedFields, presetKey, enabled, who.userId]);
+  await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: existing ? 'update' : 'create',
+    entityType: 'publishing_metadata_rule', entityId: row.id,
+    changes: existing ? { name: { from: existing.name, to: name }, conditions: { from: existing.conditions, to: conditions }, settings: { from: existing.settings, to: settings }, enabled: { from: existing.enabled, to: enabled } } : undefined,
+    snapshot: existing ? undefined : row }).catch(() => {});
+  const { syncProductsFromRules } = await import('../services/entitlements');
+  await syncProductsFromRules(acct, settings.accessRules ?? [], row.id, null).catch((e) => console.warn('[publishing-rules] product sync failed', e));
+  const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind: 'metadata', id: row.id }) : 0;
+  res.status(existing ? 200 : 201).json({ ...row, warnings, impact, restamp: { marked } });
+}
+
+publishingRulesRouter.get('/metadata-rules', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const rules = await loadRules(acct);
+  // How many titles each rule governs now: the first one they meet.
+  const counts = new Map<string, number>();
+  for (const r of (await firstMatches(acct, null, rules.filter((x) => x.enabled))).values()) counts.set(r.id, (counts.get(r.id) ?? 0) + 1);
+  res.json({ items: rules.map((r) => ({ ...r, titles: counts.get(r.id) ?? 0 })) });
+}));
+
+publishingRulesRouter.get('/metadata-rules/fields', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const fields = await policyFieldsFor(acct);
+  const [types, profiles, channels, events, collections] = await Promise.all([
+    query<any>(`SELECT id AS value, name AS label FROM metadata_schemas WHERE account_id = $1 ORDER BY lower(name)`, [acct]),
+    query<any>(`SELECT id AS value, name AS label FROM rights_profiles WHERE account_id = $1 ORDER BY builtin NULLS LAST, lower(name)`, [acct]),
+    query<any>(`SELECT c.id AS value, c.name AS label FROM channels c JOIN groups g ON g.id = c.group_id WHERE g.account_id = $1 ORDER BY lower(c.name) LIMIT 500`, [acct]),
+    query<any>(`SELECT e.id AS value, e.name AS label FROM events e JOIN groups g ON g.id = e.group_id WHERE g.account_id = $1 ORDER BY e.created_at DESC LIMIT 500`, [acct]),
+    query<any>(`SELECT id::text AS value, name AS label FROM collections WHERE account_id = $1 ORDER BY lower(name) LIMIT 500`, [acct]),
+  ]);
+  const refs: Record<string, any[]> = { content_type: types, rights_profile: profiles, channel: channels, event: events };
+  res.json({
+    fields: fields.map(({ sql: _sql, ...f }) => ({ ...f, ...(f.ref ? { values: refs[f.ref] ?? [] } : {}), ...(f.key === 'collection' ? { values: collections } : {}) })),
+    operators: OPS,
+    orders: [],
+  });
+}));
+
+publishingRulesRouter.post('/metadata-rules', asyncHandler(async (req, res) => { await saveMetaRule(req, res, null); }));
+
+publishingRulesRouter.put('/metadata-rules/order', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const { ids } = z.object({ ids: z.array(z.string().regex(uuidRe)).max(500) }).parse(req.body ?? {});
+  const current = await loadRules(acct);
+  if (ids.length !== current.length || new Set(ids).size !== ids.length || !ids.every((id) => current.some((r) => r.id === id)))
+    throw badRequest('ids must name every metadata rule of the account once');
+  const who = actor(req);
+  await tx(async (c) => {
+    for (let i = 0; i < ids.length; i++) await c.query(`UPDATE publishing_metadata_rules SET position = $3, updated_at = now() WHERE id = $1 AND account_id = $2`, [ids[i], acct, i]);
+  });
+  await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'update', entityType: 'publishing_metadata_rule', entityId: ids[0] ?? acct,
+    changes: { order: { from: current.map((r) => r.id), to: ids } } }).catch(() => {});
+  // A new order can give a title a different first match.
+  const marked = current.map((r) => r.id).join() === ids.join() ? 0 : await restampAfterChange(acct, { kind: 'metadata', id: null });
+  res.json({ items: await loadRules(acct), restamp: { marked } });
+}));
+
+publishingRulesRouter.post('/metadata-rules/test', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const assetId = String(req.body?.assetId ?? '').trim();
+  if (!uuidRe.test(assetId)) throw badRequest('assetId: paste the id of a title (on its page, or in the Media Library)');
+  const found = await assetAccount(assetId);
+  if (!found || found.accountId !== acct) throw notFound('Asset not found');
+  const rules = await loadRules(acct);
+  const fields = await policyFieldsFor(acct);
+  // Each rule on its own, so the page can say which others it also meets.
+  const each = await Promise.all(rules.map(async (r) => ({ id: r.id, name: r.name, enabled: r.enabled,
+    matches: (await firstMatches(acct, [assetId], [r], fields)).has(assetId) })));
+  const first = each.find((r) => r.enabled && r.matches) ?? null;
+  const resolved = await resolveForAsset(acct, found.asset);
+  res.json({ asset: { id: assetId, title: found.asset.title ?? null }, matched: first ? { id: first.id, name: first.name, position: rules.findIndex((r) => r.id === first.id) + 1 } : null, rules: each, resolved });
+}));
+
+publishingRulesRouter.get('/metadata-rules/:id', asyncHandler(async (req, res) => {
+  res.json(await ownMetaRule(accountId(req), req.params.id));
+}));
+
+publishingRulesRouter.put('/metadata-rules/:id', asyncHandler(async (req, res) => {
+  await saveMetaRule(req, res, await ownMetaRule(accountId(req), req.params.id));
+}));
+
+publishingRulesRouter.delete('/metadata-rules/:id', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const r = await ownMetaRule(acct, req.params.id);
+  await query(`DELETE FROM publishing_metadata_rules WHERE id = $1 AND account_id = $2`, [r.id, acct]);
+  // Close the gap so positions stay 0..n-1.
+  await query(`UPDATE publishing_metadata_rules SET position = position - 1 WHERE account_id = $1 AND position > $2`, [acct, r.position]);
+  const who = actor(req);
+  await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'delete', entityType: 'publishing_metadata_rule', entityId: r.id, snapshot: r }).catch(() => {});
+  // Its titles fall to the next rule they meet, or to the rungs below.
+  await restampAfterChange(acct, { kind: 'metadata', id: r.id });
+  res.status(204).end();
+}));
+
 publishingRulesRouter.get('/:scopeKind/:scopeId?', asyncHandler(async (req, res) => {
   const { kind, id } = scopeOf(req.params);
   const row = await one<any>(
@@ -347,7 +540,7 @@ publishingRulesRouter.delete('/:scopeKind/:scopeId?', asyncHandler(async (req, r
  * without holding the response; the availability sweep does the rest, once a
  * minute (build queue P3-4). Never fails the save: the marks stay for the sweep.
  */
-async function restampAfterChange(acct: string, scope: { kind: 'account' | 'schema' | 'owner'; id: string | null }): Promise<number> {
+async function restampAfterChange(acct: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata'; id: string | null }): Promise<number> {
   const { markPolicyStale, restampFor } = await import('../services/availability');
   const marked = await markPolicyStale(acct, scope).catch((e) => { console.warn('[publishing-rules] marking titles failed', e?.message ?? e); return 0; });
   if (marked) setImmediate(() => { restampFor(20_000).catch((e) => console.warn('[publishing-rules] restamp failed, left for the sweep', e?.message ?? e)); });

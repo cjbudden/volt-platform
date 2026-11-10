@@ -20,7 +20,7 @@ Most of the engine is already in the Media Library build. This design reorganise
 
 | Area | Built today | Change |
 | --- | --- | --- |
-| Rule ladder | `publishing_rules`: account < content type < owner < asset, per-field inherit (`services/publishingRules.ts`) | Add a metadata-rule rung and field locks; rename to policies in the UI |
+| Rule ladder | `publishing_rules`: account < content type < owner < asset, per-field inherit; `publishing_metadata_rules` the metadata rung (P3-3) (`services/publishingRules.ts`) | Add a metadata-rule rung and field locks; rename to policies in the UI. Built: field locks (P3), the metadata-rule rung (P3-3, `services/publishingMetadataRules.ts`, account < content type < owner < metadata rule < asset) |
 | Publish flow | `services/availability.ts`: publish, withdraw, republish, 1/min sweep, auto-publish on build | Becomes the lifecycle engine; existing review states (in review, changes requested, approved, rejected) and QC gate become the optional review step; sweep also pushes state to the edge and fires the planned publication.published hook |
 | Access rules | FOR / IF / THEN / TERMS rows, first match wins (`services/accessRules.ts`) | Kept as is, becomes the Access section of a policy |
 | Geo and rights | `services/rights.ts` in `/availability` and `/access/check`; CloudFront geo + KVS for live | Add a contract rights window per asset, separate from the publish window |

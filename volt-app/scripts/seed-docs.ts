@@ -175,6 +175,7 @@ async function main() {
   await seedRights();
   await seedRightsDemand();
   await seedRuleCollection();
+  await seedMetadataRules();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -846,6 +847,30 @@ async function seedRuleCollection() {
   if (first && !already) {
     await query(`DELETE FROM collection_items WHERE collection_id = $1 AND vod_asset_id = $2`, [ID, first.vod_asset_id]);
     await query(`INSERT INTO collection_exclusions(collection_id, vod_asset_id, excluded_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [ID, first.vod_asset_id, ADMIN]);
+  }
+}
+
+/**
+ * METADATA RULES (build queue P3-3): two ordered rules on the Publishing
+ * Rules page, so the guide shows the list, the order and an open rule with
+ * its conditions and policy. Fixed ids: a rerun updates them in place.
+ */
+async function seedMetadataRules() {
+  const rows: [string, number, string, any, any, string[]][] = [
+    ['8d3f2b51-6c7e-4f90-8a1b-2c3d4e5f6b01', 0, 'Premier League matches',
+      { match: 'all', conditions: [{ field: 'tags', op: 'has_any', value: ['premier-league'] }] },
+      { geo: { mode: 'allow', countries: ['AU', 'NZ'] }, access: 'entitled', protection: { waf: 'standard' } }, ['geo']],
+    ['8d3f2b51-6c7e-4f90-8a1b-2c3d4e5f6b02', 1, 'Embargoed until broadcast',
+      { match: 'any', conditions: [{ field: 'tags', op: 'has_any', value: ['embargoed'] }, { field: 'genre', op: 'is', value: 'News' }] },
+      { distribution: { shareLinks: false, mp4Download: false } }, []],
+  ];
+  for (const [id, position, name, conditions, settings, locked] of rows) {
+    await query(
+      `INSERT INTO publishing_metadata_rules(id, account_id, position, name, conditions, settings, locked_fields, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$8)
+       ON CONFLICT (id) DO UPDATE SET position = EXCLUDED.position, name = EXCLUDED.name, conditions = EXCLUDED.conditions,
+                                      settings = EXCLUDED.settings, locked_fields = EXCLUDED.locked_fields`,
+      [id, ACCOUNT, position, name, JSON.stringify(conditions), JSON.stringify(settings), locked, ADMIN]);
   }
 }
 

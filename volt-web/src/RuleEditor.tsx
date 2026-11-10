@@ -23,17 +23,20 @@
 //  changes DRM on published titles asks first (409 confirm_repackage).
 // ============================================================================
 import { useEffect, useMemo, useState } from 'react'
-import { api, type RuleKey, type RuleScope, type PublishingPoints, type PublishTarget, type Rung, type ArchiveTarget } from './api'
+import { api, type RuleKey, type PublishingPoints, type PublishTarget, type Rung as ApiRung, type ArchiveTarget } from './api'
 import { useAccess } from './access'
 import { navigate } from './router'
 import { AccessRulesEditor } from './AccessRulesEditor'
-import { policyApi, policyRefusal, type PolicySettings, type ResolvedPolicy, type Preset, type PresetKey, type DryRun, type Impact } from './publishing/policyApi'
+import { policyApi, policyRefusal, type PolicyScope, type PolicySettings, type ResolvedPolicy, type Preset, type PresetKey, type DryRun, type Impact } from './publishing/policyApi'
 import { SECTIONS, SECTION_FIELD_LABEL, isSectionField, getVal, withVal, statedIds, baselineOf, describeSection, SectionFieldControl, Padlock, SectionGlyph, type FieldId } from './publishing/PolicyFields'
 import './publishing/policy.css'
 
-const RUNG_ORDER: Rung[] = ['baseline', 'account', 'schema', 'owner', 'asset']
+// The metadata rule (build queue P3-3) sits between the owner and the item:
+// the first of the account's ordered rules whose conditions a title meets.
+type Rung = ApiRung | 'metadata'
+const RUNG_ORDER: Rung[] = ['baseline', 'account', 'schema', 'owner', 'metadata', 'asset']
 const RUNG_LABEL: Record<Rung, string> = {
-  baseline: 'platform default', account: 'account default', schema: 'content type rule', owner: 'channel / event / station rule', asset: 'this item',
+  baseline: 'platform default', account: 'account default', schema: 'content type rule', owner: 'channel / event / station rule', metadata: 'metadata rule', asset: 'this item',
 }
 const KEY_LABEL: Record<RuleKey, string> = {
   targets: 'Publish to', autoPublish: 'Auto-publish', availableFrom: 'Available from', expire: 'Expires',
@@ -79,8 +82,8 @@ function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTa
 }
 
 export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, onSaved }: {
-  scopeKind: 'account' | 'schema' | 'owner' | 'asset'
-  /** For account: null. For asset: the asset id (saved through setVodAvailability). */
+  scopeKind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'
+  /** For account: null. For asset: the asset id (saved through setVodAvailability). For metadata: the rule's id. */
   scopeId: string | null
   title?: string
   /** How to ask the server what this rung inherits (the rungs beneath it). */
@@ -141,7 +144,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
     setChecking(true)
     const t = setTimeout(async () => {
       try {
-        const r = await policyApi.dryRun(scopeKind as RuleScope, scopeId, { settings: own, lockedFields: locks, presetKey })
+        const r = await policyApi.dryRun(scopeKind as PolicyScope, scopeId, { settings: own, lockedFields: locks, presetKey })
         if (!gone) { setCheck(r); setCheckErr('') }
       } catch (e: any) { if (!gone) { setCheck(null); setCheckErr(e.message) } }
       finally { if (!gone) setChecking(false) }
@@ -203,7 +206,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
     try {
       if (asset) { await api.setVodAvailability(scopeId!, own); setMsg('Saved.') }
       else {
-        const r = await policyApi.save(scopeKind as RuleScope, scopeId, { settings: own, lockedFields: locks, presetKey, ...(confirmed ? { confirm: true } : {}) })
+        const r = await policyApi.save(scopeKind as PolicyScope, scopeId, { settings: own, lockedFields: locks, presetKey, ...(confirmed ? { confirm: true } : {}) })
         setConfirm(null)
         setMsg(r.warnings?.length ? `Saved, with ${r.warnings.length} warning${r.warnings.length === 1 ? '' : 's'}.` : 'Saved.')
       }
@@ -222,6 +225,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
   const overrides = statedIds(own).filter(shown).length
   const blocked = !!check && !check.canSave
   const preset = presets.find(p => p.key === presetKey)
+  const matchedRule = resolved.rungs.find(r => (r.rung as Rung) === 'metadata' && r.id) as { name?: string | null } | undefined
 
   const row = (id: FieldId) => {
     const on = overriding(id)
@@ -277,6 +281,10 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
           : `Grey values are inherited. Switch a field on to set it here${asset ? ' for this item only' : ''}; anything left off follows the rung beneath.`}
         {!asset && ' The padlock locks a field, so the rungs beneath cannot change it.'}
         {overrides > 0 && <span> · {overrides} field{overrides === 1 ? '' : 's'} set here</span>}
+        {asset && matchedRule && <div data-matched-rule={matchedRule.name ?? ''} style={{ marginTop: 6, color: 'var(--text)' }}>
+          Metadata rule <b>{matchedRule.name}</b> applies to this item: what it sets wins over its content type and the channel, event or station it came from.
+          {' '}<a href="/publishing" onClick={e => { e.preventDefault(); navigate('/publishing') }}>Metadata rules</a>
+        </div>}
         {locks.length > 0 && <span> · {locks.length} locked</span>}
       </div>
       {!asset && presets.length > 0 && (
@@ -335,7 +343,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
         <button className="btn primary" disabled={busy || blocked || !!confirm} onClick={() => save()}
           title={blocked ? 'Fix the conflicts marked above to save' : undefined}>{busy ? 'Saving…' : 'Save publishing rule'}</button>
-        {scopeKind !== 'account' && !asset && (overrides > 0 || locks.length > 0) && (
+        {scopeKind !== 'account' && scopeKind !== 'metadata' && !asset && (overrides > 0 || locks.length > 0) && (
           <button className="btn ghost" disabled={busy} onClick={async () => { setBusy(true); try { await api.deletePublishingRule(scopeKind, scopeId!); setOwn({}); setLocks([]); setPresetKey(null); await load(); onSaved?.() } catch (e: any) { setErr(e.message) } finally { setBusy(false) } }}>
             Remove this rule (inherit everything)
           </button>
@@ -370,7 +378,7 @@ const DEFAULTS: Record<RuleKey, any> = {
   archive: { copies: [], offPeak: null },
 }
 
-function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = [] }: { k: RuleKey; value: any; points: PublishingPoints; onChange: (v: any) => void; scopeKind: 'account' | 'schema' | 'owner' | 'asset'; archiveTargets?: ArchiveTarget[] }) {
+function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = [] }: { k: RuleKey; value: any; points: PublishingPoints; onChange: (v: any) => void; scopeKind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'; archiveTargets?: ArchiveTarget[] }) {
   const inp = { className: 'inp', style: { fontSize: 'var(--fs-sm)', padding: '5px 8px' } as any }
   switch (k) {
     case 'archive':

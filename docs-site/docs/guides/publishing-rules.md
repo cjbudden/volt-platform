@@ -14,16 +14,17 @@ Publishing Rules decides what a publish does: where on-demand content goes, when
 ## What it is for
 
 - **One default for everything.** Set once where published content goes (the catalogue, your registered apps, your social accounts), how long it stays up, and the access, geo and paywall settings it carries.
-- **Overrides where they are needed.** A rule is a ladder of four rungs. Each rung stores only what it changes, and anything it leaves alone comes from the rung beneath:
+- **Overrides where they are needed.** A rule is a ladder of five rungs. Each rung stores only what it changes, and anything it leaves alone comes from the rung beneath:
 
   | Rung | Where you set it |
   |---|---|
   | Account default | Here, under **Account default** |
   | Content type | [Content Types](content-types.md), under **Publishing rule for this type**, or here under **By content type** |
   | Channel, event or station | The stream's settings, on the **Access** tab |
+  | Metadata rule | Here, under **Metadata rules**: the first rule whose conditions the item meets |
   | A single item | The asset in the [Media Library](media-library.md), under **What a publish does for this item** |
 
-  The higher rung wins: an item's own value beats its channel's, which beats its content type's, which beats the account default.
+  The higher rung wins: an item's own value beats the metadata rule it meets, which beats its channel's, which beats its content type's, which beats the account default.
 - **A gate before publishing.** Require an approved review, or block publishing while a quality check has failed.
 - **Locks.** Lock a field on a rung and nothing beneath it can change it: lock DRM on for the account and no content type, stream or item can turn it off.
 - **Problems caught before they are saved.** Every change is checked as you make it. A combination that cannot work (DRM with MP4 download, say) stops the save; one that is risky is saved with a warning; and you see how many titles the change affects before you save it.
@@ -82,6 +83,27 @@ Administrators set the default; the people who run a channel, an event or the li
 4. A field that a rung beneath this one has locked shows a closed padlock and **Locked by the account default** (or the rung that locked it). It cannot be ticked here.
 5. Choose **Save publishing rule**.
 6. To go back to inheriting everything, untick the fields and save, or choose **Remove this rule (inherit everything)** (on a content type or a stream).
+
+### Choose a policy by metadata
+
+A metadata rule gives a policy to every item whose metadata, tags, collections or source meet its conditions, for example every item tagged `premier-league`, or every item in the collection **Premium picks**. It wins over the item's content type and over the channel, event or station it came from, so an item gets the same terms whether it was recorded from a channel or uploaded. An item's own settings still win over it, and a field locked on the account default stays locked.
+
+![Metadata rules on the Publishing Rules page: two rules in order, each with its conditions, what it sets, how many titles it governs and arrows to move it, and the box to test a title](/img/screens/publishing-metadata-rules.png)
+
+1. On this page, under **Metadata rules**, choose **Add a rule**.
+2. Give it a name, then build its conditions as you would for a [rule-based collection](collections.md): a field, a test that fits it and a value, with **Match all** or **any**, and groups for mixed conditions. The fields are the item's own (title, tags, genre, length and more), its content type's fields, **Collection**, and where it came from (channel, event, how it was made).
+3. Choose **Add the rule**. It goes to the end of the list and opens.
+4. Under **It gets this policy**, tick the fields it sets, exactly as on any other rung, and choose **Save publishing rule**. **Before you save** counts the items it governs and how many published items take the change up.
+
+![A metadata rule opened: its name, its condition, and the start of its policy with Geo access set to Australia and New Zealand and locked](/img/screens/publishing-metadata-rule-open.png)
+
+**The order matters.** An item gets the first rule it meets, from the top of the list; the rules below it are not used for that item. Drag a rule to move it, or use its up and down arrows. Each rule shows how many items it governs now.
+
+**Test an item.** Paste an item's id into **Test a title** and choose **Test**. It says which rule the item meets and applies, which other rules it also meets (and that an earlier one applies), and the geo and access it then gets. The item's own publishing settings in the Media Library also name the metadata rule that applies to it.
+
+**Switch a rule off** by unticking **On** and choosing **Save name and conditions**: items go to the next rule they meet. **Remove this rule** takes it away for good, after you confirm.
+
+Published items take up a change within about a minute: a new or changed rule, a new order, and also a change to an item's own metadata, tags or collections that makes it meet a different rule. Nothing is posted to social accounts again.
 
 ### Lock a field
 
@@ -238,6 +260,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A player on your site shows **Not available on this site** | The title's rule lists **Allowed referrer domains** and your site is not one of them | Add the site's domain to the rule (`*.example.com` for every site under it) |
 | **This title's publishing rule does not allow MP4 download.** | The rule that governs the title turns **MP4 download** off (Premium and Rights-managed do) | Turn **MP4 download** on in that rule if the title may leave as a file, or download the sound file instead |
 | **This title's publishing rule does not allow share links.** | The rule that governs the title turns **Share links** off | Turn **Share links** on in that rule |
+| An item does not get the metadata rule you expect | It meets an earlier rule first, the rule is off, or the item's own settings set that field | Paste its id into **Test a title**: it names the rule that applies and every rule it meets. Move the rule up, switch it on, or clear the item's own value |
+| A metadata rule's field is ignored on an item | The account default locked that field | Unlock it on the account default, or leave it to the account default |
 | A published title stopped being available after a rule was saved | Its window under the new rule ended before today, or opens later; **Before you save** counted it as **unavailable now** | Change **Expires** or **Available from** on the rule, or give the title its own dates in the Media Library |
 
 ## Through the API
@@ -253,6 +277,15 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PUT /api/publishing-rules/{scopeKind}/{scopeId}` | Sets a rung (`{"settings": {...}}`, and optionally `lockedFields`, `name` and `presetKey`). Add `?dryRun=1` to see what the save would do without saving it |
 | `DELETE /api/publishing-rules/{scopeKind}/{scopeId}` | Removes a content type or stream rung; the account default cannot be removed |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | A single asset's own rung |
+| `GET /api/publishing-rules/metadata-rules` | The metadata rules in order (`position` 0 is checked first), each with `titles`: how many items it governs now |
+| `GET /api/publishing-rules/metadata-rules/fields` | The fields and tests a rule's conditions can use, with the choices for lists, content types, channels, events and collections |
+| `POST /api/publishing-rules/metadata-rules` | Adds a rule at the end: `{"name": "...", "conditions": {"match": "all", "conditions": [{"field": "tags", "op": "has_any", "value": ["premier-league"]}]}}`, optionally with `settings`, `lockedFields`, `presetKey` and `enabled`. `?dryRun=1` answers what it would do |
+| `PUT /api/publishing-rules/metadata-rules/{id}` | Changes a rule; send only what changes. Refused like any rung (`422 policy_conflict`, `409 confirm_repackage`); `?dryRun=1` as above |
+| `PUT /api/publishing-rules/metadata-rules/order` | Sets the order: `{"ids": [...]}`, every rule once |
+| `POST /api/publishing-rules/metadata-rules/test` | `{"assetId": "..."}`: the rule the item meets first (`matched`), every rule with whether it matches, and what the item resolves to |
+| `DELETE /api/publishing-rules/metadata-rules/{id}` | Removes a rule; its items go to the next rule they meet |
+
+In `resolve`, a metadata rule is the rung `metadata`, between `owner` and `asset`, with its `name`; fields it sets have `metadata` as their source.
 
 With the Mirror and Archive add-on a rung can also hold **copy rules** (`archive`): which storage targets an item's original is copied to on ingest, on publish or nightly (`schedule`), what is copied (`what`: any of `source`, `sidecars`, `clips` and `packages`; the original alone when left out), whether recordings are archived (`recording`), and an optional off-peak window. See [Copy by rule](../workflows/mirror-and-archive.md#copy-by-rule). Saving one without the add-on answers `403` with the code `licence_required`.
 

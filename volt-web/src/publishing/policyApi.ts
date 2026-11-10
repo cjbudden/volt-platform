@@ -40,15 +40,17 @@ export interface ResolvedPolicy extends ResolvedRules {
 }
 
 export interface PolicyBody { settings: PolicySettings; lockedFields: string[]; presetKey: PresetKey | null; confirm?: boolean }
-const path = (kind: RuleScope, id: string | null) => `/publishing-rules/${kind}${id ? '/' + id : ''}`
+/** The rungs a policy is saved on: the three of publishing_rules and a metadata rule (P3-3, by its id). */
+export type PolicyScope = RuleScope | 'metadata'
+const path = (kind: PolicyScope, id: string | null) => kind === 'metadata' ? `/publishing-rules/metadata-rules/${id}` : `/publishing-rules/${kind}${id ? '/' + id : ''}`
 
 export const policyApi = {
   presets: (): Promise<Preset[]> => req('/publishing-rules/presets'),
-  rule: (kind: RuleScope, id: string | null): Promise<PolicyRule> => req(path(kind, id)),
+  rule: (kind: PolicyScope, id: string | null): Promise<PolicyRule> => req(path(kind, id)),
   /** What saving would do, nothing saved. */
-  dryRun: (kind: RuleScope, id: string | null, b: PolicyBody): Promise<DryRun> =>
+  dryRun: (kind: PolicyScope, id: string | null, b: PolicyBody): Promise<DryRun> =>
     req(path(kind, id) + '?dryRun=1', { method: 'PUT', body: JSON.stringify(b) }),
-  save: (kind: RuleScope, id: string | null, b: PolicyBody): Promise<PolicyRule & { warnings: Conflict[]; impact: Impact }> =>
+  save: (kind: PolicyScope, id: string | null, b: PolicyBody): Promise<PolicyRule & { warnings: Conflict[]; impact: Impact }> =>
     req(path(kind, id), { method: 'PUT', body: JSON.stringify(b) }),
 }
 
@@ -58,4 +60,34 @@ export function policyRefusal(e: unknown): { code: 'policy_conflict' | 'confirm_
   const code = e.body.code
   if (code !== 'policy_conflict' && code !== 'confirm_repackage') return null
   return { code, message: e.message, conflicts: e.body.details?.conflicts ?? [], impact: e.body.details?.impact ?? null }
+}
+
+// ---------------------------------------------------------------------------
+//  Metadata rules (build queue P3-3): an ordered list of conditions, each
+//  choosing a policy; the first a title meets applies.
+// ---------------------------------------------------------------------------
+export interface MetaCond { field: string; op: string; value?: any }
+export interface MetaGroup { match: 'all' | 'any'; conditions: (MetaCond | MetaGroup)[] }
+export interface MetadataRule {
+  id: string; position: number; name: string; conditions: MetaGroup; settings: PolicySettings
+  locked_fields: string[]; preset_key: PresetKey | null; enabled: boolean; version: number
+  /** How many titles it governs now (the first rule they meet). */
+  titles?: number
+}
+export interface MetaTest {
+  asset: { id: string; title: string | null }
+  matched: { id: string; name: string; position: number } | null
+  rules: { id: string; name: string; enabled: boolean; matches: boolean }[]
+  resolved: ResolvedPolicy
+}
+const MR = '/publishing-rules/metadata-rules'
+export const metadataRulesApi = {
+  list: (): Promise<{ items: MetadataRule[] }> => req(MR),
+  fields: (): Promise<any> => req(`${MR}/fields`),
+  create: (b: { name: string; conditions: MetaGroup }): Promise<MetadataRule> => req(MR, { method: 'POST', body: JSON.stringify(b) }),
+  /** Name, conditions and on or off; the policy is saved through the editor (policyApi.save). */
+  update: (id: string, b: { name?: string; conditions?: MetaGroup; enabled?: boolean }): Promise<MetadataRule> => req(`${MR}/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  remove: (id: string): Promise<void> => req(`${MR}/${id}`, { method: 'DELETE' }),
+  order: (ids: string[]): Promise<{ items: MetadataRule[] }> => req(`${MR}/order`, { method: 'PUT', body: JSON.stringify({ ids }) }),
+  test: (assetId: string): Promise<MetaTest> => req(`${MR}/test`, { method: 'POST', body: JSON.stringify({ assetId }) }),
 }

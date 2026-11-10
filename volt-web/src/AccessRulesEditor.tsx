@@ -23,7 +23,7 @@ const inp = { className: 'inp', style: { fontSize: 'var(--fs-sm)', padding: '4px
 export function AccessRulesEditor({ value, onChange, scopeKind }: {
   value: AccessRule[]
   onChange: (rules: AccessRule[]) => void
-  scopeKind: 'account' | 'schema' | 'owner' | 'asset'
+  scopeKind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'
 }) {
   const [types, setTypes] = useState<ContentType[]>([])
   useEffect(() => { api.contentTypes().then(setTypes).catch(() => setTypes([])) }, [])

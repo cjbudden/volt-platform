@@ -389,6 +389,26 @@
       "alt": "Before you save, under the account default with DRM ticked: the titles it governs, how many are published and how many the save changes, and the conflict that blocks the save, DRM with MP4 download allowed"
     },
     {
+      "name": "publishing-metadata-rules",
+      "guide": "guides/publishing-rules.md",
+      "path": "/publishing",
+      "waitFor": "[data-metadata-rules] [data-rule-name]",
+      "clip": "[data-metadata-rules]",
+      "settleMs": 800,
+      "alt": "Metadata rules on the Publishing Rules page: two rules in order, each with its conditions, what it sets, how many titles it governs and arrows to move it, and the box to test a title"
+    },
+    {
+      "name": "publishing-metadata-rule-open",
+      "guide": "guides/publishing-rules.md",
+      "path": "/publishing",
+      "waitFor": "[data-metadata-rules] [data-rule-name]",
+      "click": ["[data-metadata-rules] li[data-rule-name=\"Premier League matches\"] .mr-open"],
+      "waitAfter": "[data-rule-editor=metadata] [data-policy-section=access]",
+      "clip": "[data-metadata-rules] li[data-rule-name=\"Premier League matches\"] .mr-body",
+      "settleMs": 800,
+      "alt": "A metadata rule opened: its name, its condition Tags has any of premier-league, and the start of its policy with Geo access set to Australia and New Zealand and locked"
+    },
+    {
       "name": "ingest-rules",
       "guide": "guides/ingest-rules.md",
       "path": "/ingest",

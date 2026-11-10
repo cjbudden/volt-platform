@@ -1,7 +1,13 @@
 // ============================================================================
 //  PUBLISHING RULES — the ladder, resolved per field.
 //
-//    account default  <  content type  <  channel / event / station  <  asset
+//    account default  <  content type  <  channel / event / station
+//      <  metadata rule  <  asset
+//
+//  The metadata rule (build queue P3-3, services/publishingMetadataRules.ts)
+//  is the first of the account's ordered rules whose conditions the title
+//  meets; it sits above the owner (Christian, 11 Nov) so terms follow the
+//  content, not the channel it came from.
 //
 //  Each rung is a partial: only the keys it states. resolve() lays them on top
 //  of the platform baseline in that order and remembers, per key, which rung
@@ -138,7 +144,7 @@ export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: Rule
   retention: { keep: 'forever', days: null, anchor: 'available_until', legalHoldAllowed: true, archiveTier: null },
 };
 
-export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'asset';
+export type Rung = 'baseline' | 'account' | 'schema' | 'owner' | 'metadata' | 'asset';
 
 export interface Resolved {
   settings: typeof BASELINE;
@@ -155,7 +161,7 @@ export interface Resolved {
 }
 
 /** The rungs from least to most specific, so a lock is set before what it locks. */
-export const RUNG_ORDER: Rung[] = ['baseline', 'account', 'schema', 'owner', 'asset'];
+export const RUNG_ORDER: Rung[] = ['baseline', 'account', 'schema', 'owner', 'metadata', 'asset'];
 
 type LadderInput = { rung: Rung; id?: string | null; scopeId?: string | null; settings: RuleSettings | null | undefined; lockedFields?: string[] | null; name?: string | null; presetKey?: string | null };
 
@@ -212,7 +218,11 @@ export function resolveLadder(rungs: LadderInput[]): Resolved {
   return { settings, sources, fieldSources, locks, ignored, rungs: used };
 }
 
-/** Load the rungs that apply to an asset and resolve them. */
+/**
+ * Load the rungs that apply to an asset and resolve them. A stored title (one
+ * with an id) also gets the first metadata rule it meets; a hypothetical one
+ * (a type and an owner, no title) cannot meet one.
+ */
 export async function resolveForAsset(accountId: string, asset: {
   id?: string; schema_id?: string | null; channel_id?: string | null; event_id?: string | null;
   availability_override?: RuleSettings | null;
@@ -228,10 +238,13 @@ export async function resolveForAsset(accountId: string, asset: {
   const pick = (kind: string) => rows.find((r) => r.scope_kind === kind);
   const acc = pick('account'), sch = pick('schema'), own = pick('owner');
   const meta = (r: any) => r ? { lockedFields: r.locked_fields ?? [], name: r.name ?? null, presetKey: r.preset_key ?? null } : {};
+  const { matchFor, rungOf } = await import('./publishingMetadataRules');
+  const matched = asset.id ? await matchFor(accountId, asset.id) : null;
   return resolveLadder([
     { rung: 'account', id: acc?.id, scopeId: null, settings: acc?.settings, ...meta(acc) },
     { rung: 'schema', id: sch?.id, scopeId: asset.schema_id ?? null, settings: sch?.settings, ...meta(sch) },
     { rung: 'owner', id: own?.id, scopeId: ownerId, settings: own?.settings, ...meta(own) },
+    rungOf(matched),
     { rung: 'asset', id: asset.id ?? null, scopeId: asset.id ?? null, settings: asset.availability_override ?? {} },
   ]);
 }
