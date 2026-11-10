@@ -169,6 +169,11 @@ export interface Impact {
   changed: number;
   /** Published titles whose DRM setting changes: their files must be repackaged (build queue P4). */
   repackage: number;
+  /** Published titles that take up the change within about a minute of the save (build queue P3-4). */
+  publishedChanged: number;
+  /** Titles playable now that would stop being playable at once: their window
+   *  now ends in the past, or opens in the future (P3-4). */
+  unavailableNow: number;
   /** Per-title problems the save would cause, by code, with up to five titles each. */
   blocks: { code: string; message: string; count: number; titles: { id: string; title: string }[] }[];
   warnings: { code: string; message: string; count: number; titles: { id: string; title: string }[] }[];
@@ -225,6 +230,7 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
   // its group (as in services/availability.ts assetAccount); an upload directly.
   const titles = await query<any>(
     `SELECT v.id, v.title, v.schema_id, v.channel_id, v.event_id, v.availability_override, v.availability_state, v.available_from, v.available_until,
+            v.availability->>'publishedAt' AS published_at,
             v.created_at, v.rights_profile_id, v.rights_narrow, v.first_aired_at
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
@@ -233,7 +239,9 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
       WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL ${where}`, scope.kind === 'account' ? [accountId] : [accountId, scope.id]);
   const memo = new Map<string, [Resolved, Resolved]>();
   const profiles = new Map<string, any>();
-  const impact: Impact = { assets: titles.length, published: 0, changed: 0, repackage: 0, blocks: [], warnings: [] };
+  const impact: Impact = { assets: titles.length, published: 0, changed: 0, repackage: 0, publishedChanged: 0, unavailableNow: 0, blocks: [], warnings: [] };
+  const { restampPublished, publishedAnchor } = await import('./availability');
+  const at = new Date();
   const tally = (list: Impact['blocks'], c: Conflict, t: any) => {
     let e = list.find((x) => x.code === c.code);
     if (!e) list.push(e = { code: c.code, message: c.message, count: 0, titles: [] });
@@ -253,6 +261,15 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
     const pid = t.rights_profile_id ?? '';
     if (!profiles.has(pid)) profiles.set(pid, await cachedProfile(t.rights_profile_id ?? null));
     const rights = effectiveRights(profiles.get(pid), t);
+    // Published titles take up the change (services/availability.ts
+    // restampPublished): the same window arithmetic says which stop at once.
+    if (live && stableJson(was.settings) !== stableJson(now.settings)) {
+      impact.publishedChanged++;
+      if (t.availability_state === 'available') {
+        const next = restampPublished(null, now.settings, { anchor: publishedAnchor({ availability: { publishedAt: t.published_at }, available_from: t.available_from }, at), rights, now: at });
+        if (next.state !== 'available') impact.unavailableNow++;
+      }
+    }
     const preset = presetOf(now);
     // Only what this save introduces is charged to it: a problem the title
     // already had under the rules as they stand is not a reason to refuse.

@@ -20,7 +20,8 @@ export interface Preset { key: PresetKey; name: string; summary: string; setting
 export type ConflictLevel = 'block' | 'warn' | 'confirm'
 export interface Conflict { code: string; level: ConflictLevel; fields: string[]; message: string }
 export interface ImpactEntry { code: string; message: string; count: number; titles: { id: string; title: string }[] }
-export interface Impact { assets: number; published: number; changed: number; repackage: number; blocks: ImpactEntry[]; warnings: ImpactEntry[] }
+/** publishedChanged and unavailableNow (build queue P3-4): published titles take up a save within about a minute. */
+export interface Impact { assets: number; published: number; changed: number; repackage: number; publishedChanged?: number; unavailableNow?: number; blocks: ImpactEntry[]; warnings: ImpactEntry[] }
 export interface DryRun { dryRun: true; saved: false; canSave: boolean; conflicts: Conflict[]; impact: Impact }
 
 /** A rung as stored, with what P3 added beside its settings. */

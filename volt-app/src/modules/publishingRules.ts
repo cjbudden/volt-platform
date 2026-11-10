@@ -19,6 +19,10 @@
  * titles until it is sent again with `confirm: true`. Warnings are saved and
  * returned with the rule.
  *
+ * A save or a removal that changes what published titles get marks them, and
+ * they take up the new rules within about a minute (build queue P3-4,
+ * services/availability.ts restampStale): `restamp.marked` says how many.
+ *
  * All scoped to the caller's account: a rung can only name the account's own
  * types, owners, apps and social accounts.
  */
@@ -319,7 +323,8 @@ publishingRulesRouter.put('/:scopeKind/:scopeId?', asyncHandler(async (req, res)
   // Every premium TERM is a product the providers sell: keep them in step.
   const { syncProductsFromRules } = await import('../services/entitlements');
   await syncProductsFromRules(acct, settings.accessRules ?? [], row.id, id).catch((e) => console.warn('[publishing-rules] product sync failed', e));
-  res.json({ ...row, warnings, impact });
+  const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind, id }) : 0;
+  res.json({ ...row, warnings, impact, restamp: { marked } });
 }));
 
 publishingRulesRouter.delete('/:scopeKind/:scopeId?', asyncHandler(async (req, res) => {
@@ -332,5 +337,19 @@ publishingRulesRouter.delete('/:scopeKind/:scopeId?', asyncHandler(async (req, r
   const who = actor(req);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: 'delete', entityType: 'publishing_rule', entityId: row.id, snapshot: { scope_kind: kind, scope_id: id } }).catch(() => {});
+  // Its titles fall back to the rungs above: published ones take that up too.
+  await restampAfterChange(accountId(req), { kind, id });
   res.status(204).end();
 }));
+
+/**
+ * Mark the published titles a changed rung governs and start the first batch
+ * without holding the response; the availability sweep does the rest, once a
+ * minute (build queue P3-4). Never fails the save: the marks stay for the sweep.
+ */
+async function restampAfterChange(acct: string, scope: { kind: 'account' | 'schema' | 'owner'; id: string | null }): Promise<number> {
+  const { markPolicyStale, restampFor } = await import('../services/availability');
+  const marked = await markPolicyStale(acct, scope).catch((e) => { console.warn('[publishing-rules] marking titles failed', e?.message ?? e); return 0; });
+  if (marked) setImmediate(() => { restampFor(20_000).catch((e) => console.warn('[publishing-rules] restamp failed, left for the sweep', e?.message ?? e)); });
+  return marked;
+}

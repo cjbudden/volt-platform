@@ -91,7 +91,11 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
   }
   // "Now" is taken after the window, as before: a window that opens at
   // publish must not read as a millisecond in the future (scheduled).
-  let { from, until } = windowFor(s);
+  // The moment of publishing is kept on the stamp (publishedAt): when a rule
+  // changes later, a window "for 30 days from publish" still counts from
+  // here, not from the change (restampPublished, build queue P3-4).
+  const publishedAt = new Date();
+  let { from, until } = windowFor(s, publishedAt);
   const now = new Date();
   if (rights.until && rights.until <= now) throw new NotPublishable('rights', `The rights window (${rights.profileName}) has ended.`);
   if (rights.from && from < rights.from) from = rights.from;
@@ -159,7 +163,7 @@ export async function publish(assetId: string, by: string, opts: { targets?: Tar
        withdrawn_at = NULL, withdrawn_by = NULL,
        published = true, portal_visible = $7, updated_at = now()
      WHERE id = $1 RETURNING *`,
-    [assetId, JSON.stringify({ ...s, targets }), JSON.stringify(plan.sources), state, from, until, portal]);
+    [assetId, JSON.stringify({ ...s, targets, publishedAt: publishedAt.toISOString() }), JSON.stringify(plan.sources), state, from, until, portal]);
   // The public status follows at once (build queue P1), not at the next sweep.
   await (await import('./publicStatus')).refreshPublicStatus(assetId);
   // COPY RULES for publish (Mirror and Archive, H3-3). Never fails the publish.
@@ -189,7 +193,7 @@ export async function republish(assetId: string, by: string): Promise<PublishOut
  * The clock: open scheduled windows, close expired ones. Run on the scheduler
  * tick; cheap because of the partial index on the two moving states.
  */
-export async function sweepAvailability(): Promise<{ opened: number; expired: number; statuses?: number }> {
+export async function sweepAvailability(): Promise<{ opened: number; expired: number; statuses?: number; restamped?: number }> {
   const opened = await query(
     `UPDATE vod_assets SET availability_state = 'available', updated_at = now()
       WHERE availability_state = 'scheduled' AND available_from <= now() RETURNING id`);
@@ -199,11 +203,15 @@ export async function sweepAvailability(): Promise<{ opened: number; expired: nu
   for (const r of expired) {
     await query(`UPDATE publications SET status = 'removed' WHERE vod_asset_id = $1 AND status = 'published'`, [r.id]).catch(() => {});
   }
+  // Published titles whose rules changed take up the new rules (build queue
+  // P3-4), before the public status pass below so it sees what they became.
+  const restamp = await restampFor(20_000)
+    .catch((e: any) => { console.warn('[availability] restamp after a rule change failed:', e?.message ?? e); return null; });
   // The public status (build queue P1): the rows just opened or closed, and
   // any row whose next moment has come or that changed since it was computed.
   const statuses = await (await import('./publicStatus')).sweepPublicStatus()
     .catch((e: any) => { console.warn('[availability] public status sweep failed:', e?.message ?? e); return 0; });
-  return { opened: opened.length, expired: expired.length, statuses };
+  return { opened: opened.length, expired: expired.length, statuses, restamped: restamp?.changed ?? 0 };
 }
 
 /**
@@ -338,5 +346,166 @@ export async function autoPublishOnBuild(assetId: string): Promise<'published' |
   } catch (e: any) {
     if (e instanceof NotPublishable) { console.log(`[availability] ${assetId} not auto-published: ${e.message}`); return 'skipped'; }
     throw e;
+  }
+}
+
+// ============================================================================
+//  A RULE CHANGE REACHES PUBLISHED TITLES (build queue P3-4,
+//  PUBLISHING_POLICIES.md "Encode-time vs delivery-time fields").
+//
+//  publish() stamps the resolved settings on the title, and the play gate
+//  reads that stamp, so before this a changed rule reached a published title
+//  only when someone published it again. Now a save marks the published
+//  titles the rule governs (markPolicyStale, one UPDATE) and the availability
+//  sweep, once a minute, stamps them again from the rules as they now stand,
+//  500 at a time (restampStale). The save also starts the first batch at
+//  once, so on most accounts the change is live before the editor closes.
+//
+//  What a restamp changes is the delivery-time part only: windows, access,
+//  geo, the access rules, the protection fields other than DRM, distribution
+//  and retention. It keeps:
+//    - where the title was published (targets): that was an act with its own
+//      publication rows, and posting to social accounts again is never done
+//      by a rule change;
+//    - DRM: it changes the files, so the title keeps the protection its files
+//      have until it is packaged again (P4), never a weaker one;
+//    - the moment it was published, which relative windows count from.
+// ============================================================================
+
+/** When the title was published, for windows that count from publishing. */
+export function publishedAnchor(row: { availability?: any; available_from?: any }, now = new Date()): Date {
+  const at = row.availability?.publishedAt;
+  if (at && !Number.isNaN(Date.parse(at))) return new Date(at);
+  // Stamped before publishedAt was kept: the window opened when it was
+  // published unless the rule named a date, so available_from is the closest.
+  return row.available_from ? new Date(row.available_from) : now;
+}
+
+/**
+ * PURE. The stamp, window and state a published title gets from `plan` (the
+ * rules as they now stand), given what it was published with (`was`), when
+ * it was published, its rights window and the time. The same cap as
+ * publish(): the window always stays inside the rights window.
+ */
+export function restampPublished(was: any, plan: Resolved['settings'],
+  o: { anchor: Date; rights: { from: Date | null; until: Date | null }; now: Date }):
+  { availability: any; from: Date; until: Date | null; state: 'scheduled' | 'available' | 'expired' } {
+  let { from, until } = windowFor(plan, o.anchor);
+  if (o.rights.from && from < o.rights.from) from = o.rights.from;
+  if (o.rights.until && (!until || until > o.rights.until)) until = o.rights.until;
+  const state = until && until <= o.now ? 'expired' : from > o.now ? 'scheduled' : 'available';
+  const prev = was && typeof was === 'object' ? was : {};
+  const availability = {
+    ...plan,
+    targets: Array.isArray(prev.targets) ? prev.targets : plan.targets,
+    // Encodes are packaged in the clear today (vodEncode records drm 'clear'),
+    // so a stamp from before the protection section had none.
+    protection: { ...plan.protection, drm: typeof prev.protection?.drm === 'boolean' ? prev.protection.drm : false },
+    publishedAt: o.anchor.toISOString(),
+  };
+  return { availability, from, until, state };
+}
+
+/**
+ * Mark the published titles a rung governs, for the sweep to stamp again.
+ * One statement whatever the number of titles. Returns how many were marked.
+ */
+export async function markPolicyStale(accountId: string, scope: { kind: 'account' | 'schema' | 'owner'; id: string | null }): Promise<number> {
+  const where = scope.kind === 'account' ? '' : scope.kind === 'schema' ? 'AND x.schema_id = $2' : 'AND (x.channel_id = $2 OR x.event_id = $2)';
+  // A title recorded from a channel or event belongs to the account through
+  // its group (as in assetAccount); an upload directly.
+  const rows = await query<any>(
+    `UPDATE vod_assets v SET policy_stale_at = now()
+       FROM vod_assets x
+       LEFT JOIN channels c ON c.id = x.channel_id
+       LEFT JOIN events   e ON e.id = x.event_id
+       LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE x.id = v.id AND COALESCE(g.account_id, x.account_id) = $1
+        AND x.availability_state IN ('scheduled', 'available') AND x.archived_at IS NULL ${where}
+      RETURNING v.id`, scope.kind === 'account' ? [accountId] : [accountId, scope.id]);
+  return rows.length;
+}
+
+export interface RestampResult { checked: number; changed: number; unavailable: number }
+
+/**
+ * Stamp up to `limit` marked titles again from the rules as they stand. The
+ * claim clears the mark in one statement with SKIP LOCKED, so two API tasks
+ * (the sweep on one, a save on another) never take the same title; a title
+ * that fails is marked again for the next sweep. Writes only what changed.
+ */
+export async function restampStale(limit = 500, now: Date = new Date()): Promise<RestampResult> {
+  const claimed = await query<{ id: string }>(
+    `UPDATE vod_assets SET policy_stale_at = NULL
+      WHERE id IN (SELECT id FROM vod_assets WHERE policy_stale_at IS NOT NULL
+                    ORDER BY policy_stale_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+      RETURNING id`, [limit]);
+  const out: RestampResult = { checked: 0, changed: 0, unavailable: 0 };
+  if (!claimed.length) return out;
+  const rows = await query<any>(
+    `SELECT v.id, v.schema_id, v.channel_id, v.event_id, v.availability_override, v.availability, v.availability_state,
+            v.available_from, v.available_until, v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at,
+            COALESCE(g.account_id, v.account_id) AS _account
+       FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id
+       LEFT JOIN events   e ON e.id = v.event_id
+       LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE v.id = ANY($1::uuid[]) AND v.availability_state IN ('scheduled', 'available') AND v.archived_at IS NULL`,
+    [claimed.map((r) => r.id)]);
+  const { resolveWith, stableJson } = await import('./publishingPolicies');
+  const { invalidateTag } = await import('../scale/cache');
+  const { refreshPublicStatus } = await import('./publicStatus');
+  // The account's rules are read once per batch, not once per title.
+  const rules = new Map<string, any[]>();
+  for (const a of rows) {
+    out.checked++;
+    try {
+      if (!rules.has(a._account)) rules.set(a._account, await query<any>(
+        `SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [a._account]));
+      const plan = resolveWith(rules.get(a._account)!, a);
+      const rights = await rightsForAsset(a);
+      const next = restampPublished(a.availability, plan.settings, { anchor: publishedAnchor(a, now), rights, now });
+      const t = (x: any) => (x ? new Date(x).getTime() : null);
+      const same = stableJson(a.availability ?? null) === stableJson(next.availability)
+        && t(a.available_from) === next.from.getTime() && t(a.available_until) === t(next.until) && a.availability_state === next.state;
+      if (same) continue;
+      const ended = next.state === 'expired';
+      const w = await one<any>(
+        `UPDATE vod_assets SET availability = $2::jsonb, availability_sources = $3::jsonb, availability_state = $4,
+                available_from = $5, available_until = $6,
+                published = CASE WHEN $4 = 'expired' THEN false ELSE published END,
+                portal_visible = CASE WHEN $4 = 'expired' THEN false ELSE portal_visible END,
+                updated_at = now()
+          WHERE id = $1 AND availability_state IN ('scheduled', 'available') RETURNING id`,
+        [a.id, JSON.stringify(next.availability), JSON.stringify(plan.sources), next.state, next.from, next.until]);
+      if (!w) continue;   // withdrawn or archived by a person meanwhile: theirs wins
+      // The window now ends in the past: closed as the sweep closes one.
+      if (ended) await query(`UPDATE publications SET status = 'removed' WHERE vod_asset_id = $1 AND status = 'published'`, [a.id]);
+      out.changed++;
+      if (next.state !== 'available' && a.availability_state === 'available') out.unavailable++;
+      // The play gate's cached row goes now; the public status follows, and
+      // revokes play tokens at the edge when the title stops being playable.
+      invalidateTag(`asset:${a.id}`);
+      await refreshPublicStatus(a.id, now);
+    } catch (e: any) {
+      console.warn(`[availability] restamp ${a.id} failed, left for the next sweep:`, e?.message ?? e);
+      await query(`UPDATE vod_assets SET policy_stale_at = now() WHERE id = $1`, [a.id]).catch(() => {});
+    }
+  }
+  return out;
+}
+
+/**
+ * Batches of 500 until nothing is marked or `budgetMs` has passed, so one
+ * sweep tick takes up a large change (about 5,000 titles in 20 s on the Mac)
+ * and still leaves the rest of the minute to the other sweeps.
+ */
+export async function restampFor(budgetMs: number): Promise<RestampResult> {
+  const t0 = Date.now();
+  const out: RestampResult = { checked: 0, changed: 0, unavailable: 0 };
+  for (;;) {
+    const b = await restampStale(500);
+    out.checked += b.checked; out.changed += b.changed; out.unavailable += b.unavailable;
+    if (!b.checked || Date.now() - t0 >= budgetMs) return out;
   }
 }

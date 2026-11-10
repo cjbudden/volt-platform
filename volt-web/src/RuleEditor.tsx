@@ -310,7 +310,11 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
               <span><b>{check.impact.published}</b> published</span>
               <span>Saving changes <b>{check.impact.changed}</b></span>
               {check.impact.repackage > 0 && <span style={{ color: 'var(--warn)' }}><b>{check.impact.repackage}</b> published title{check.impact.repackage === 1 ? '' : 's'} to be packaged again</span>}
+              {(check.impact.unavailableNow ?? 0) > 0 && <span style={{ color: 'var(--warn)' }} data-impact-unavailable><b>{check.impact.unavailableNow}</b> become{check.impact.unavailableNow === 1 ? 's' : ''} unavailable now</span>}
             </div>
+            {/* Published titles take up a save within about a minute (build queue P3-4). */}
+            {(check.impact.publishedChanged ?? 0) > 0 && <div style={{ color: 'var(--muted)' }} data-impact-published>
+              <b>{check.impact.publishedChanged}</b> published title{check.impact.publishedChanged === 1 ? '' : 's'} take{check.impact.publishedChanged === 1 ? 's' : ''} this up within a minute, without posting to social accounts again.</div>}
             {check.conflicts.map((c, i) => <ConflictLine key={c.code + i} level={c.level} message={c.message} />)}
             {check.impact.blocks.map(b => <ConflictLine key={'ib' + b.code} level="block" message={`${b.count} title${b.count === 1 ? '' : 's'}: ${b.message}`} titles={b.titles} />)}
             {check.impact.warnings.map(w => <ConflictLine key={'iw' + w.code} level="warn" message={`${w.count} title${w.count === 1 ? '' : 's'}: ${w.message}`} titles={w.titles} />)}

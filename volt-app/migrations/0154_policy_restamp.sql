@@ -1,0 +1,13 @@
+-- Build queue P3-4: a rule change reaches published titles
+-- (PUBLISHING_POLICIES.md, "Encode-time vs delivery-time fields").
+-- Add only: one nullable column, so tasks on the release before this one keep
+-- reading and writing vod_assets as they did.
+--
+-- A published title carries the settings it was published with
+-- (vod_assets.availability). When a rule that governs it changes, the title
+-- is marked here and the availability sweep stamps it again from the rules
+-- as they now stand, in batches, so a change that governs 50,000 titles is a
+-- single UPDATE when it is saved and a few minutes of small batches after,
+-- never 50,000 writes inside the save.
+-- NULL: nothing to do. A time: the moment it was marked.
+ALTER TABLE vod_assets ADD COLUMN IF NOT EXISTS policy_stale_at timestamptz;

@@ -114,6 +114,7 @@ Every rung beneath now shows the field with **Locked by** and this rung's name, 
 As you change a rung, **Before you save** checks it:
 
 - **Governs** the titles this rung decides for, how many of them are **published**, and how many the save **changes**. When DRM changes, it also counts the published titles **to be packaged again**.
+- When the save changes published titles, a line says how many **take this up within a minute**, and in amber how many **become unavailable now** because their window would end before today or open later (see [What a change does to published titles](#what-a-change-does-to-published-titles)).
 - A red line is a **conflict that blocks the save**, for example DRM with MP4 download allowed. The rows it names are outlined, **Save publishing rule** is greyed out and **Fix the conflicts marked above to save.** appears beside it.
 - An amber line is a **warning**: the rule can be saved, and it is worth a look, for example a country restriction without a WAF profile.
 - A line that starts with a number of titles is about those titles in particular, with up to five of them named, for example a rights-managed rule on a title that has no rights window.
@@ -126,6 +127,17 @@ Turning DRM on or off changes the files, so published titles must be packaged ag
 2. A box says how many published titles will be packaged again. Choose **Package again and save**, or **Cancel** to leave the rule as it was.
 
 Titles keep their current protection until they have been packaged again.
+
+### What a change does to published titles
+
+A saved rule reaches the titles that are already published within about a minute, with nothing to publish again:
+
+- **Available from**, **Expires**, **Geo access**, **Access**, **Paywall** and the access rules take effect on the published titles the rule governs.
+- **Expires** counts from when each title was published, not from when the rule changed. A title published three days ago under a new rule of **After a number of days**: 1 ends at once, which is why **Before you save** counts it as **unavailable now**. Play links already handed out stop working too.
+- **Publish to** is not changed for titles already published: where a title went is kept, and nothing is posted to a social account again. The new publishing points apply the next time a title is published.
+- **DRM** changes the files, so it waits for the titles to be packaged again (see above).
+- Withdrawn and draft titles are not touched; they take the rule when they are published.
+- Removing a content type's or a stream's rule hands its published titles to the rungs above, the same way.
 
 ### See every override
 
@@ -211,6 +223,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **... is locked by the account default: it cannot be changed here.** | This rung sets a field a rung beneath locked | Choose **Clear it** on that row, or unlock the field where it was locked |
 | A field shows **Locked by** and cannot be ticked | A rung beneath this one locked it | Change it on that rung, or unlock it there |
 | A box asks to package titles again | The change turns DRM on or off for published titles | Choose **Package again and save**, or **Cancel** |
+| A published title stopped being available after a rule was saved | Its window under the new rule ended before today, or opens later; **Before you save** counted it as **unavailable now** | Change **Expires** or **Available from** on the rule, or give the title its own dates in the Media Library |
 
 ## Through the API
 
@@ -257,7 +270,7 @@ These fields are stored and resolved now. Applying them where content is played,
 | DRM turned on or off for published items | `409` with the code `confirm_repackage` and the count; send it again with `"confirm": true` |
 | Geo restriction without a WAF profile; geo or limited rights with a social account; **Only in these countries** with none chosen; a publish window reaching outside the rights window | Saved, with a warning in `warnings` |
 
-A refusal answers `422` with the code `policy_conflict`; `details` holds the conflicts and the impact. The impact, also what a dry run returns, counts the items the rung governs, how many are published, how many change, and how many would need packaging again. Published items keep what they were published with until they are published again.
+A refusal answers `422` with the code `policy_conflict`; `details` holds the conflicts and the impact. The impact, also what a dry run returns, counts the items the rung governs (`assets`), how many are published (`published`), how many change (`changed`), how many would need packaging again (`repackage`), how many published items take the change up (`publishedChanged`) and how many of those stop being playable at once (`unavailableNow`). A save that changes published items marks them, and the answer's `restamp.marked` says how many; they take the new rules up within about a minute, keeping where they were published and their DRM until packaged again. Removing a rung does the same for its items.
 
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

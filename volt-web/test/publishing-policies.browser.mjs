@@ -1,6 +1,8 @@
 // PUBLISHING POLICIES in a real browser (build queue P3-2): the rule editor's
 // five sections, padlocks, presets, conflicts, the impact preview and the
-// repackage confirmation, on the Publishing Rules page.
+// repackage confirmation, on the Publishing Rules page. P3-4: the preview
+// says how many published titles take a change up and how many become
+// unavailable now, and the published titles do take the saved change up.
 //
 // Needs the API on the docs seed plus volt-web/test/publishing-policies.seed.ts
 // (a Documentary type with four titles, two published), and `npx vite` in
@@ -98,9 +100,34 @@ const shot = async (p, n) => { if (SHOTS) await p.screenshot({ path: `${SHOTS}/$
   ok(await p.getAttribute(`${T} [data-policy-field="protection.waf"]`, 'data-flag') === 'warn', '1440: the WAF row is marked as a warning')
   const tImpact = await p.locator(`${T} [data-impact]`).innerText()
   ok(/Governs 4 titles/.test(tImpact) && /2 published/.test(tImpact) && /Saving changes 4/.test(tImpact), `1440: the type's impact: ${tImpact.replace(/\s+/g, ' ')}`)
+  const takeUp = await p.locator(`${T} [data-impact-published]`).innerText()
+  ok(/2 published titles take this up within a minute, without posting to social accounts again/.test(takeUp), `1440: P3-4: the preview says the published titles take it up (${takeUp})`)
+  ok(await p.locator(`${T} [data-impact-unavailable]`).count() === 0, '1440: P3-4: nothing becomes unavailable, so that line is not shown')
   await shot(p, 'pp-1440-warn')
   await p.click(`${T} button:has-text("Save publishing rule")`)
   await p.waitForSelector(`${T} :text("Saved, with 1 warning.")`, { timeout: 10000 })
+  // P3-4: the two published Documentary titles take up the geo without being published again.
+  const listed = (await api(`/vod?limit=200`)).body
+  const docs = (Array.isArray(listed) ? listed : listed.items ?? []).filter((v) => ['A Quiet Valley', 'Harbour Market'].includes(v.title))
+  let applied = []
+  for (let i = 0; i < 40; i++) {
+    applied = await Promise.all(docs.map(async (v) => (await api(`/vod/${v.id}/availability`)).body))
+    if (applied.length === 2 && applied.every((a) => a.applied?.geo?.countries?.[0] === 'AU')) break
+    await p.waitForTimeout(250)
+  }
+  ok(applied.length === 2 && applied.every((a) => a.applied?.geo?.countries?.[0] === 'AU' && a.state === 'available'), `1440: P3-4: both published titles now carry the type's geo (${applied.map((a) => a.applied?.geo?.countries?.join('') ?? '-').join(', ')})`)
+
+  // P3-4: expiring a day after publishing would end both published titles now; shown, not saved.
+  await p.check(`${T} [data-policy-field="expire"] input[type=checkbox]`)
+  await p.selectOption(`${T} [data-policy-field="expire"] select`, 'days')
+  await p.fill(`${T} [data-policy-field="expire"] input[type=number]`, '1')
+  await settle(p, T)
+  const saved = (await api(`/publishing-rules/schema/${doc.id}`)).body
+  const dryX = (await api(`/publishing-rules/schema/${doc.id}?dryRun=1`, { method: 'PUT', body: JSON.stringify({ settings: { ...saved.settings, expire: { mode: 'days', days: 1 } }, lockedFields: saved.locked_fields, presetKey: saved.preset_key }) })).body
+  const gone = await p.locator(`${T} [data-impact-unavailable]`).innerText().catch(() => '')
+  ok(dryX.impact.unavailableNow === 2 && gone.replace(/\s+/g, ' ').includes('2 become unavailable now'), `1440: P3-4: the preview says ${dryX.impact.unavailableNow} become unavailable now (${gone})`)
+  await shot(p, 'pp-1440-unavailable')
+  ok((await api(`/publishing-rules/schema/${doc.id}`)).body.settings.expire === undefined, '1440: P3-4: nothing saved by the preview')
   const tr = (await api(`/publishing-rules/schema/${doc.id}`)).body
   ok(tr.preset_key === 'premium' && tr.settings.access === 'paid' && tr.settings.geo?.countries?.[0] === 'AU' && tr.settings.protection?.drm === undefined
     && JSON.stringify(tr.locked_fields) === '["distribution.mp4Download"]', `1440: the type saved as shown (preset ${tr.preset_key}, locks ${JSON.stringify(tr.locked_fields)})`)
