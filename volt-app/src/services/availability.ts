@@ -21,6 +21,7 @@ import { resolveForAsset, windowFor, type Target, type Resolved } from './publis
 import { evaluateAccessRules, type ViewerCtx, type AccessOutcome } from './accessRules';
 import { upsertViewer, viewerEntitlements } from './entitlements';
 import { touchViewer, cachedEntitlements, vodAvailabilityRow } from './viewerPath';
+import { collectionGate, kindsFor } from './collectionAccess';
 import { rightsForAsset, rightsForAssetId, evaluateRights, accessAllowed, accessKindsFor, appAllowed, appTypeOf, type RightsAppType } from './rightsProfiles';
 
 export interface PublishOutcome {
@@ -248,8 +249,24 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
   const rights = await rightsForAsset(a);
   const capped = evaluateRights(rights, { country: geo ?? null, appType: appType ?? null, appId: appId ?? null, use: 'on_demand' });
   if (!capped.allowed) return { allowed: false, reason: capped.reason, rights: true };
+  // COLLECTION ACCESS (build queue C2, services/collectionAccess.ts): the
+  // collections the title is in, compiled onto the cached row, most
+  // restrictive per app and region. It can only add a requirement: a title
+  // that a collection makes premium here needs one of its packages, and the
+  // rules below must still let the viewer in too. Rights cap it like the rest.
+  const cg = collectionGate(a.collection_access, { appId: appId ?? null, country: geo ?? null, viewer, entitled });
+  if (cg) {
+    if (!accessAllowed(rights, kindsFor(cg.cell))) return { allowed: false, reason: 'The rights do not allow this kind of access.', rights: true };
+    if (!cg.allowed) {
+      // Only what the rights allow to be sold is offered.
+      const sellable = cg.products.filter((t) => accessAllowed(rights, accessKindsFor('entitlement', undefined, [t])));
+      const rule = { allowed: false, reason: cg.reason, message: cg.message, products: sellable, packages: cg.cell.packages, layer: 'collection' } as any;
+      return { allowed: false, reason: cg.message, paywall: cg.reason === 'payment_required' ? sellable : null, rule };
+    }
+  }
+  const viaCollection = cg?.allowed ? cg.via : null;
   // Assets from before availability existed: `published` still decides.
-  if (st === 'draft') return accessAllowed(rights, ['free']) ? { allowed: true } : { allowed: false, reason: 'The rights do not allow free access.', rights: true };
+  if (st === 'draft') return cg?.allowed || accessAllowed(rights, ['free']) ? { allowed: true } : { allowed: false, reason: 'The rights do not allow free access.', rights: true };
   // Whatever lets the viewer in must be an access type the rights allow.
   const outsideRights = (kinds: ReturnType<typeof accessKindsFor>) => !accessAllowed(rights, kinds);
   const s = a.availability ?? {};
@@ -272,7 +289,8 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
       if (outcome.via !== 'no_rule') {
         const terms = rules.find((r: any) => r.id === outcome.ruleId)?.then.terms ?? null;
         if (outsideRights(accessKindsFor(outcome.via, undefined, terms))) return { allowed: false, reason: 'The rights do not allow this kind of access.', rights: true };
-        return { allowed: true, rule: outcome };
+        // Let in by a collection package as well: a paying viewer (ad-free).
+        return { allowed: true, rule: viaCollection === 'entitlement' ? { ...outcome, via: 'entitlement' } as AccessOutcome : outcome };
       }
     } else {
       // A paywall offers only what the rights allow to be sold.
@@ -295,7 +313,8 @@ export async function onDemandAccess(assetId: string, geo?: string, appId?: stri
     return { allowed: false, reason: s.access === 'paid' ? 'payment required' : 'entitlement required', paywall: s.paywall ?? null };
   }
   // A viewer let in by what they paid for: on-demand ads (services/vodAds) make them ad-free.
-  return (s.access === 'entitled' || s.access === 'paid') ? { allowed: true, rule: { allowed: true, via: 'entitlement' } as AccessOutcome } : { allowed: true };
+  // A package from a collection makes the viewer a paying one too (ad-free).
+  return (s.access === 'entitled' || s.access === 'paid' || viaCollection === 'entitlement') ? { allowed: true, rule: { allowed: true, via: 'entitlement' } as AccessOutcome } : { allowed: true };
 }
 
 /**

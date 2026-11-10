@@ -432,6 +432,8 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
       status,
       body: { available: false, mode: paywall ? 'paywall' : signIn ? 'sign_in' : 'blocked',
         reason: rights.reason, products: r.products ?? undefined, ruleId: r.rule?.ruleId ?? undefined,
+        // The collection packages that unlock it (build queue C2): buying any of them does.
+        packages: r.rule?.packages?.length ? r.rule.packages : undefined,
         message: paywall ? 'Buy or subscribe to watch' : signIn ? 'Sign in to watch' : 'Not available to you',
         // What it is, so the player can show the title and artwork behind a paywall or sign-in.
         meta: paywall || signIn ? await metaFor(key.account_id, kind, b.assetId) : undefined },

@@ -132,6 +132,15 @@ export function startScheduler(): () => void {
     10 * 60_000
   );
   colFull.unref?.();
+  // COLLECTION ACCESS (build queue C2, services/collectionAccess.ts): titles
+  // put into or taken out of a collection with access, or under one whose
+  // access changed, are compiled again every few seconds (SKIP LOCKED batches).
+  const colAccess = setInterval(
+    () => import('../collectionAccess').then((m) => m.drainAccessRechecks())
+      .catch((e) => console.error('[collections] access pass error', e)),
+    5_000
+  );
+  colAccess.unref?.();
 
   // MIRROR AND ARCHIVE RE-CHECKS (build queue H3-3): read verified archive
   // copies back on each target's cadence (recheck_days), a bounded batch

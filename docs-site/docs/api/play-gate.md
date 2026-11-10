@@ -60,7 +60,7 @@ If the viewer has just bought a pass, the gate checks their purchases again befo
 |---|---|---|---|
 | `200` | `play` | Play `delivery` | The stream |
 | `200` | `replacement` | A blackout or rights window: play the replacement it names (`assetId` is the replacement's, with its own `delivery`) | The replacement, and `reason` if you show one |
-| `402` | `paywall` | A pass or purchase is needed, by a rule or because the title's own access is paid. `products` lists them; `meta` says what it is | The offers and Buy |
+| `402` | `paywall` | A pass or purchase is needed, by a rule, because the title's own access is paid, or because a [collection](../guides/collections.md#access-by-app-and-region) sells it as a package in this app and country. `products` lists what this app sells; `packages` names the collections that unlock it (any one of them does); `meta` says what it is | The offers and Buy |
 | `403` | `sign_in` | Members only | Sign in |
 | `403` | `scheduled` | An on-demand title announced ahead of its release (its **Listed from** date has passed). `until` (and `availableFrom`, its older name) says when it opens and `meta` what it is; there is no token and no `delivery` | Coming soon, with the date |
 | `451` | `blocked` | Not available where the viewer is. `code` is `region` (a geo rule) or `rights` (the rights' territories or apps, a blackout); `reason` says which rule; `meta` says what it is | The title locked, with `message` |

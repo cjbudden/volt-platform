@@ -39,6 +39,12 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, conflict } from '../util/http';
 import { actorId } from '../util/actor';
 import { fieldsFor, validateRules, RuleError, recompute, preview, matchAssets, OPS, ORDERS, type Group } from '../services/collectionRules';
+import {
+  validateAccess, AccessError, looserThan, ancestorsOf, levelsOf, enqueueCollections, drainFor, syncPackageProducts, productKeyClashes,
+  appsOf, rightsConflict, cellFor, compileFor, holdsPackage, kindsFor, ALL_ACCESS, type CollectionAccess,
+} from '../services/collectionAccess';
+import { rightsForAsset, evaluateRights, appTypeOf, accessAllowed } from '../services/rightsProfiles';
+import { actor, writeAudit } from '../services/audit';
 
 export const collectionsRouter = Router();
 collectionsRouter.use(requireAuth);
@@ -194,6 +200,7 @@ collectionsRouter.get('/:id', asyncHandler(async (req, res) => {
   res.json({ id: c.id, parentId: c.parent_id, name: c.name, description: c.description, color: c.color, sortOrder: c.sort_order,
     createdAt: c.created_at, updatedAt: c.updated_at, itemCount: counts?.n ?? 0, path: await pathOf(c.id), children,
     rules: c.rules ?? null, orderBy: c.order_by, rulesCheckedAt: c.rules_checked_at, rulesCheckMs: c.rules_check_ms,
+    access: c.access ?? null,
     counts: { rule: counts?.rule ?? 0, manual: counts?.manual ?? 0, excluded: counts?.excluded ?? 0 } });
 }));
 
@@ -245,6 +252,8 @@ collectionsRouter.patch('/:id', asyncHandler(async (req, res) => {
         b.color !== undefined, b.color ?? null, b.sortOrder ?? null, rules !== undefined, rules === undefined ? null : JSON.stringify(rules), b.orderBy ?? null]);
     // Saved rules are matched at once, so the collection the person sees is already the new one.
     const matched = rules !== undefined ? await recompute(c.id) : null;
+    // Moved under another parent: it inherits other access now (build queue C2).
+    if (b.parentId !== undefined && b.parentId !== c.parent_id && (await enqueueCollections(await subtreeIds(c.id)))) await drainFor(2000);
     res.json({ ...r, ...(matched ? { matched } : {}) });
   } catch (e) {
     if (pgUnique(e)) throw conflict(`There is already a collection called "${b.name ?? c.name}" there.`);
@@ -289,7 +298,12 @@ const idsBody = z.object({ assetIds: z.array(uuid).min(1).max(MAX_BATCH) });
 collectionsRouter.post('/:id/items', asyncHandler(async (req, res) => {
   const c = await own(req, String(req.params.id));
   const b = idsBody.parse(req.body ?? {});
-  const ids = await ownedAssets(accountId(req), [...new Set(b.assetIds)]);
+  const owned = await ownedAssets(accountId(req), [...new Set(b.assetIds)]);
+  // THE RIGHTS CAP (build queue C2): a collection with access cannot be given
+  // a title the rights rule out for every app or territory it applies to, or
+  // for the access it asks for. Refused with the reason; the rest are added.
+  const refused = await rightsRefusals(accountId(req), c.id, owned);
+  const ids = owned.filter((id) => !refused.some((r) => r.assetId === id));
   const added = await tx(async (cl) => {
     const start = Number((await cl.query(`SELECT COALESCE(max(position) + 1, 0) AS n FROM collection_items WHERE collection_id = $1`, [c.id])).rows[0].n);
     const r = await cl.query(
@@ -304,7 +318,7 @@ collectionsRouter.post('/:id/items', asyncHandler(async (req, res) => {
     return r.rowCount ?? 0;
   });
   await query(`UPDATE collections SET updated_at = now() WHERE id = $1`, [c.id]);
-  res.json({ added, already: ids.length - added, notFound: b.assetIds.length - ids.length });
+  res.json({ added, already: ids.length - added, notFound: b.assetIds.length - owned.length, ...(refused.length ? { refused } : {}) });
 }));
 
 collectionsRouter.post('/:id/items/remove', asyncHandler(async (req, res) => {
@@ -358,4 +372,112 @@ collectionsRouter.put('/:id/items/order', asyncHandler(async (req, res) => {
     `UPDATE collection_items i SET position = x.ord - 1 FROM unnest($2::uuid[]) WITH ORDINALITY AS x(id, ord)
       WHERE i.collection_id = $1 AND i.vod_asset_id = x.id`, [c.id, b.assetIds]);
   res.json({ ordered: b.assetIds.length });
+}));
+
+// ------------------------------------------------------------------ access (build queue C2)
+
+/** Why the rights keep each of these titles out of a collection with access. */
+async function rightsRefusals(acct: string, collectionId: string, assetIds: string[]): Promise<{ assetId: string; reason: string }[]> {
+  if (!assetIds.length) return [];
+  const levels = await levelsOf(collectionId);
+  if (!levels.length) return [];
+  const apps = (await appsOf(acct)).map((a) => ({ id: a.id, name: a.name, rightsType: appTypeOf(a.type, a.surface) }));
+  const rows = await query<any>(`SELECT id, title, rights_profile_id, rights_narrow, created_at, first_aired_at FROM vod_assets WHERE id = ANY($1::uuid[])`, [assetIds]);
+  const out: { assetId: string; reason: string }[] = [];
+  for (const r of rows) {
+    const why = rightsConflict(levels, await rightsForAsset(r), apps);
+    if (why) out.push({ assetId: String(r.id), reason: why });
+  }
+  return out;
+}
+
+const accessView = (a: CollectionAccess | null) => a ?? null;
+
+/**
+ * The collection's access: its own (null: it says nothing and inherits), what
+ * its ancestors say (root first), and the account's apps to choose from.
+ */
+collectionsRouter.get('/:id/access', asyncHandler(async (req, res) => {
+  const c = await own(req, String(req.params.id));
+  const ancestors = await ancestorsOf(c.id, c.parent_id);
+  const apps = await appsOf(accountId(req));
+  const items = (await one<{ n: number }>(`SELECT count(DISTINCT vod_asset_id)::int AS n FROM collection_items WHERE collection_id = ANY($1::uuid[])`, [await subtreeIds(c.id)]))?.n ?? 0;
+  res.json({ id: c.id, access: accessView(c.access), inherits: !c.access, ancestors, default: ALL_ACCESS,
+    apps: apps.map((a) => ({ id: a.id, name: a.name, type: a.type })), items });
+}));
+
+/**
+ * Set or clear (null) the collection's access. A child can only tighten its
+ * parent's (422 naming where it would loosen). Premium products are made or
+ * updated, the collection's titles (and its sub-collections') compiled again.
+ */
+collectionsRouter.put('/:id/access', asyncHandler(async (req, res) => {
+  const c = await own(req, String(req.params.id));
+  const acct = accountId(req);
+  const raw = req.body?.access === undefined ? req.body : req.body.access;
+  let next: CollectionAccess | null = null;
+  if (raw !== null) {
+    try { next = validateAccess(raw, (await appsOf(acct)).map((a) => a.id)); }
+    catch (e) { if (e instanceof AccessError) { res.status(422).json({ error: e.message, code: 'invalid_access', problems: e.problems }); return; } throw e; }
+    const anc = await ancestorsOf(c.id, c.parent_id);
+    const looser = looserThan(next, anc.map((a) => a.access));
+    if (looser.length) { res.status(422).json({ error: looser[0], code: 'looser_than_parent', problems: looser, parents: anc.map((a) => ({ id: a.id, name: a.name })) }); return; }
+    const clash = await productKeyClashes(acct, c.id, next);
+    if (clash.length) { res.status(409).json({ error: `Another collection or rule already sells ${clash.join(', ')}. Give this package its own product keys.`, code: 'product_key_taken', keys: clash }); return; }
+  }
+  await query(`UPDATE collections SET access = $2::jsonb, updated_at = now() WHERE id = $1`, [c.id, next ? JSON.stringify(next) : null]);
+  const products = await syncPackageProducts(acct, c.id, next);
+  const who = actor(req);
+  await writeAudit(null, { accountId: acct, userId: who.userId, label: who.label, action: 'update', entityType: 'collection', entityId: c.id,
+    changes: { access: { from: c.access ?? null, to: next } } });
+  // Every title here and below is compiled again; the first batches now, so
+  // the play gate answers by the new access when this returns.
+  const queued = await enqueueCollections(await subtreeIds(c.id));
+  const compiled = queued ? await drainFor(3000) : 0;
+  res.json({ id: c.id, access: next, products, queued, compiled });
+}));
+
+/**
+ * VIEW AS: what a viewer in an app and a country gets for each title here.
+ * viewer = anonymous | member | package (with packageId: holding that
+ * collection's package). plays, sign_in, locked (with the packages),
+ * blocked_by_rights, and which collections decided. The console's View as
+ * panel and the asset page read the same answer.
+ */
+collectionsRouter.get('/:id/access/view-as', asyncHandler(async (req, res) => {
+  const c = await own(req, String(req.params.id));
+  const acct = accountId(req);
+  const appId = typeof req.query.appId === 'string' && req.query.appId ? req.query.appId : null;
+  const country = typeof req.query.country === 'string' && /^[A-Za-z]{2}$/.test(req.query.country) ? req.query.country.toUpperCase() : null;
+  const kind = req.query.viewer === 'member' || req.query.viewer === 'package' ? String(req.query.viewer) : 'anonymous';
+  const packageId = typeof req.query.packageId === 'string' ? req.query.packageId : null;
+  const apps = await appsOf(acct);
+  const app = appId ? apps.find((a) => a.id === appId) : null;
+  if (appId && !app) throw badRequest('Not an app of this account.');
+  const rows = await query<any>(
+    `SELECT DISTINCT ON (v.id) v.id, v.title, v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at
+       FROM collection_items i JOIN vod_assets v ON v.id = i.vod_asset_id
+      WHERE i.collection_id = ANY($1::uuid[]) ORDER BY v.id LIMIT 500`, [await subtreeIds(c.id)]);
+  // From the collections as they stand now (not the stored compile), so a
+  // person checking a change sees it before the queue has caught up.
+  const compiled = await compileFor(rows.map((r) => String(r.id)));
+  const viewer = { viewerId: kind === 'anonymous' ? null : 'view-as', groups: [],
+    entitlements: kind === 'package' && packageId ? [{ grants: { collectionIds: [packageId] } }] : [] };
+  const items = [];
+  for (const r of rows) {
+    const rights = await rightsForAsset(r);
+    const capped = evaluateRights(rights, { country, appType: app ? appTypeOf(app.type, app.surface) : null, appId, use: 'on_demand' });
+    const cell = cellFor(compiled.get(String(r.id)), appId, country);
+    let outcome: string;
+    if (!capped.allowed) outcome = 'blocked_by_rights';
+    else if (cell.access !== 'free' && !accessAllowed(rights, kindsFor(cell))) outcome = 'blocked_by_rights';
+    else if (cell.access === 'members') outcome = viewer.viewerId ? 'plays' : 'sign_in';
+    else if (cell.access === 'premium') outcome = holdsPackage(viewer as any, cell) ? 'plays' : 'locked';
+    else outcome = 'plays';
+    items.push({ assetId: r.id, title: r.title, outcome, access: cell.access, reason: !capped.allowed ? capped.reason : undefined,
+      packages: cell.packages, products: outcome === 'locked' ? cell.terms : undefined, decidedBy: cell.decidedBy });
+  }
+  const counts: Record<string, number> = {};
+  for (const i of items) counts[i.outcome] = (counts[i.outcome] ?? 0) + 1;
+  res.json({ app: app ? { id: app.id, name: app.name } : null, country, viewer: kind, packageId, counts, items });
 }));

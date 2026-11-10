@@ -17,6 +17,7 @@ Collections are your own groupings of library media: a collection per channel or
 - **Collections that keep themselves current.** Rules pick titles by their fields: title, genre, tags, length, content type, rights profile, provider, dates and your content types' own fields. New and changed media joins or leaves on its own.
 - **Running order.** Each collection holds its titles in an order you set, or sorted by a field such as newest first.
 - **Finding media.** The **Collections** rail beside the [Media Library](media-library.md) narrows the library to one collection, with or without its sub-collections, and every other filter still works inside it.
+- **Packages and access by app and region.** A collection can ask more of viewers in chosen apps and countries: that they sign in, or that they buy it as a package, priced per app. Every title in it is then locked there, whatever other collection it is in (see [Access by app and region](#access-by-app-and-region)).
 - **Programming a FAST channel.** In a [FAST](fast.md) channel's run order, pick a collection in the library and choose **Add the whole collection in its order**.
 
 Programmers and media librarians use it day to day.
@@ -105,6 +106,8 @@ Its sub-collections go with it. The titles in them stay in the Media Library and
 | [FAST](fast.md) | A run order takes a whole collection with **Add the whole collection in its order**: every title that can air, in the collection's order |
 | [Rights](rights.md) | Rules can pick titles by rights profile or provider |
 | [Content Types](content-types.md) | A content type's own fields can be used in rules |
+| [API keys and apps](api-keys-and-apps.md) | A collection's access names the apps it applies to and each app's own products |
+| [Publishing Rules](publishing-rules.md) | A title's own access rules still apply: a collection can only add to them |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -113,7 +116,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See collections and what is in them, browse the library by collection | Media library & publishing: View |
-| Make, rename, colour, move and remove collections, add titles, order them and take them out, set rules | Media library & publishing: Manage |
+| Make, rename, colour, move and remove collections, add titles, order them and take them out, set rules and access | Media library & publishing: Manage |
 
 Roles and levels are explained in [Roles and access](../getting-started/roles-and-access.md).
 
@@ -130,6 +133,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A title you took out comes back | It was added by hand somewhere else in the same collection, or someone chose **Let back in** | Take it out again; it stays out |
 | A rule collection has not picked up a change to a rights profile's provider yet | Provider changes are matched within ten minutes | Choose **Check now** |
 | A title in a collection has gone | It was deleted from the library, which takes it out of every collection | Nothing to do, or add a replacement |
+| "It asks for less than the parent in ... A child collection can only tighten its parent's access." | A sub-collection's access would let viewers in where its parent locks them | Ask the same or more than the parent there, or clear the sub-collection's access so it inherits |
+| A title is not added, with "The rights do not allow ..." | The collection has access that the title's rights rule out: apps, territories or premium access its rights profile does not allow | Add it to a collection without that access, or change the title's [rights](rights.md) |
+| "Another collection or rule already sells ..." | A product key names one product, and another collection or access rule uses it | Give this package its own product keys |
+| A title is locked although its own rules make it free | Another collection it is in asks more in that app and country: the strictest collection wins | Use **View as** through the API to see which collection decides, then take the title out of it or change that collection's access |
 
 ## Through the API
 
@@ -161,5 +168,35 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/js
   -d '{"rules": {"match": "all", "conditions": [{"field": "genre", "op": "is", "value": "Sport"}, {"field": "first_aired_at", "op": "within_last", "value": {"count": 14, "unit": "day"}}]}, "orderBy": "-first_aired_at"}' \
   "https://your-volt-host/api/collections/$COLLECTION_ID"
 ```
+
+### Access by app and region
+
+A collection says nothing about who may watch until you give it access. Access has three parts:
+
+- **Apps**: `"all"`, or the ids of the [apps](api-keys-and-apps.md) it applies to.
+- **Territories**: `world`, `allow` (only these countries) or `block` (everywhere but these), with the countries as two-letter codes.
+- **Rules**, region by region: the first rule naming the viewer's country (or `WORLD`) decides whether the title is `free`, `members` (signed in) or `premium`. A premium rule lists the products that unlock it in `terms`, and an app with its own store prices has its own list in `appTerms`, by app id. Saving makes or updates those products, so payments for them unlock the collection.
+
+Outside its apps and territories a collection asks nothing. Inside them, **the strictest collection wins**: a title in a collection that is premium for the iPhone app in the United Kingdom is premium there, even when another collection it is in is free. A viewer who has bought any of the packages that lock it can watch. A title's own [publishing rules](publishing-rules.md) still apply on top, and its [rights](rights.md) cap everything: a collection cannot unlock what the rights refuse, and a title whose rights rule out a collection's apps, territories or premium access is refused when you add it, with the reason.
+
+A sub-collection inherits its parent's access and can only tighten it: it can apply to fewer apps or countries and ask the same or more. A change reaches the titles at once, including those in sub-collections; a viewer whose country is not known is treated as being in the strictest region.
+
+| Request | Does |
+|---|---|
+| `GET /api/collections/{id}/access` | The collection's own access (`null` when it inherits), what its parents ask, the account's apps and how many titles it governs |
+| `PUT /api/collections/{id}/access` | Sets the access (`{"access": null}` clears it). `422` with `code: "looser_than_parent"` or `"invalid_access"` and the problems; `409` with `code: "product_key_taken"` |
+| `GET /api/collections/{id}/access/view-as?appId=…&country=GB&viewer=anonymous` | What a viewer gets for each title here: `plays`, `sign_in`, `locked` (with the packages and products), or `blocked_by_rights`, and which collections decided. `viewer` is `anonymous`, `member`, or `package` with `packageId` |
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"access": {"apps": "all", "territories": {"mode": "world", "countries": []}, "rules": [
+        {"countries": ["GB", "IE"], "access": "premium",
+         "terms": [{"productKey": "sport-pass-web", "kind": "period", "count": 1, "unit": "month", "priceCents": 999, "currency": "GBP"}],
+         "appTerms": {"<iPhone app id>": [{"productKey": "sport-pass-ios", "kind": "period", "count": 1, "unit": "month", "priceCents": 1099, "currency": "GBP"}]}},
+        {"countries": ["WORLD"], "access": "members"}]}}' \
+  "https://your-volt-host/api/collections/$COLLECTION_ID/access"
+```
+
+On the [play gate](../api/play-gate.md), a title a package locks answers `402` with `mode: "paywall"`, the `packages` that unlock it and the `products` this app sells; a members-only one answers `403` with `mode: "sign_in"`.
 
 Every route is in the [API reference](/api-reference).

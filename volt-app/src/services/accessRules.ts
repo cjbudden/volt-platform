@@ -74,6 +74,8 @@ export interface Grants {
   ruleId?: string;
   /** The owner or asset the rule was attached to (the meaning of 'this'). */
   anchorId?: string | null;
+  /** A collection package (build queue C2): unlocks what those collections make premium. */
+  collectionIds?: string[];
 }
 
 export type AccessOutcome =
