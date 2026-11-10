@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.85.0 (2026-11-10)
+
+### Product (in customer release notes)
+
+- added · Publishing Rules: Metadata rules: give a policy to every title whose metadata, tags, collections or source meet a set of conditions, for example every title tagged premier-league. The first rule a title meets applies, so you set the order by dragging; it wins over the content type and the channel, event or station the title came from, and Test a title shows which rule a title meets and what it then gets. Published titles take up a change within a minute.
+
+### Internal
+
+- added · Publishing Rules: publishing-metadata-rules check suite (54 assertions) and the docs seed's two metadata rules for the guide screenshots.
+
 ## 0.84.0 (2026-11-10)
 
 ### Product (in customer release notes)
