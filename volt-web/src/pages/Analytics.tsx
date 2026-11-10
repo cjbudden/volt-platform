@@ -4,6 +4,7 @@ import { PageError, usePageNotice } from '../notices'
 import { useRoute } from '../router'
 import OperatingReports, { AnalyticsViewSwitch } from './OperatingReports'
 import PlaybackReports from './PlaybackReports'
+import RightsDemand from './RightsDemand'
 
 /* ============================================================================
    ANALYTICS
@@ -74,13 +75,16 @@ function Stat({ label, value, sub, tone }: {
 // ---------------------------------------------------------------------------
 interface Series { key: string; label: string; color: string; values: number[] }
 
-function LineChart({ days, series, height = 200, format = fmtInt, unsealedFrom }: {
+export function LineChart({ days, series, height = 200, format = fmtInt, unsealedFrom, marks = [] }: {
   days: string[]
   series: Series[]
   height?: number
   format?: (n: number) => string
   /** Index from which days are not final. Drawn dashed, and said in words. */
   unsealedFrom?: number
+  /** Moments drawn as labelled vertical lines (a title's window opening and
+   *  closing on the Rights demand trend), by index into `days`. */
+  marks?: { index: number; label: string }[]
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -162,6 +166,16 @@ function LineChart({ days, series, height = 200, format = fmtInt, unsealedFrom }
                 stroke={s.color} strokeWidth={2} strokeDasharray="3 3"
                 strokeLinejoin="round" strokeLinecap="round" />
             )}
+          </g>
+        ))}
+
+        {marks.map(m => (
+          <g key={`${m.index}-${m.label}`}>
+            <line x1={x(m.index)} x2={x(m.index)} y1={PAD.t} y2={PAD.t + ih}
+              stroke="rgba(255,255,255,.45)" strokeWidth={1} strokeDasharray="2 3" />
+            <text x={x(m.index) + (x(m.index) > PAD.l + iw - 90 ? -4 : 4)} y={PAD.t + 10}
+              textAnchor={x(m.index) > PAD.l + iw - 90 ? 'end' : 'start'}
+              fill="var(--muted)" fontSize={10.5}>{m.label}</text>
           </g>
         ))}
 
@@ -255,12 +269,15 @@ function BarList({ title, data, empty, format = fmtInt }: {
 /** Hours: whole numbers once there are some, decimals below ten, so a short test is not shown as 0. */
 const fmtHours = (h: number) => h >= 10 ? Math.round(h).toLocaleString() : h > 0 ? h.toFixed(h < 1 ? 2 : 1) : '0'
 
-/** Three views of one question family: Audience (who watched), Operating
- *  (what ran, how long on air, why it stopped; /analytics/operating[/:id]) and
- *  Playback (what viewers actually saw, from the player's reports; /analytics/playback). */
+/** Four views of one question family: Audience (who watched), Operating
+ *  (what ran, how long on air, why it stopped; /analytics/operating[/:id]),
+ *  Playback (what viewers actually saw, from the player's reports; /analytics/playback)
+ *  and Rights demand (who was turned away for a region or the rights, and where
+ *  the title is licensed; /analytics/rights-demand). */
 export default function AnalyticsPage() {
   const route = useRoute()
   if (route.path.startsWith('/analytics/playback')) return <PlaybackReports />
+  if (route.path.startsWith('/analytics/rights-demand')) return <RightsDemand />
   return route.path.startsWith('/analytics/operating') ? <OperatingReports /> : <AudienceAnalytics />
 }
 

@@ -27,6 +27,7 @@ import { generateKey } from '../src/services/apiKeys';
 import { addSandbox } from '../src/services/social/index';
 import { ensureDefaultRoles } from '../src/auth/defaultRoles';
 import { config } from '../src/config';
+import { demandPool } from '../src/services/availabilityDemand';
 
 const ACCOUNT = '3de20755-af2b-46d0-8d24-f39afbf4b3a0';
 const ADMIN = '8342a24d-751f-46ca-9636-f72a8a1110ef';
@@ -172,6 +173,7 @@ async function main() {
   await seedFrames();
   await seedG8Sections();
   await seedRights();
+  await seedRightsDemand();
   await seedRuleCollection();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
@@ -749,6 +751,67 @@ async function seedRights() {
                    VALUES ($1, $2, 'email:' || $3, $3, $4, 'region', now() - ($5 || ' hours')::interval) ON CONFLICT (asset_id, who) DO NOTHING`,
         [ACCOUNT, assets[i].id, `viewer${k}@example.com`, cc, String(k * 3)]);
     }
+  }
+}
+
+/**
+ * RIGHTS DEMAND (build queue P2-4): thirty days of refusals and plays in the
+ * analytics database's daily rollups, written as the play gate's counter
+ * writes them, so the Rights demand report has a map, a trend and titles to
+ * show. The league title is licensed only in Australia and New Zealand and is
+ * wanted most in Britain, the United States and India; the films title is
+ * blocked in North America; the archive title plays only in Australia and is
+ * asked for after one programme's window closed; the news channel blacks out
+ * one programme in New Zealand. Hashed viewer keys are made up for the seed.
+ */
+async function seedRightsDemand() {
+  const p = await demandPool();
+  await p.query(`DELETE FROM availability_events WHERE account_id = $1`, [ACCOUNT]);
+  await p.query(`DELETE FROM availability_viewers WHERE account_id = $1`, [ACCOUNT]);
+  const assets = await query<{ id: string }>(
+    `SELECT v.id FROM vod_assets v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN groups g ON g.id = c.group_id
+      WHERE COALESCE(v.account_id, g.account_id) = $1 ORDER BY v.created_at DESC, v.id`, [ACCOUNT]);
+  if (assets.length < 6) return;
+  // [asset, kind, country, reason, viewers a day at the peak]
+  const plan: [string, string, string, string, number][] = [
+    [assets[0].id, 'vod', 'AU', 'allowed', 160], [assets[0].id, 'vod', 'NZ', 'allowed', 48],
+    [assets[0].id, 'vod', 'GB', 'geo', 42], [assets[0].id, 'vod', 'US', 'geo', 31], [assets[0].id, 'vod', 'IN', 'geo', 24],
+    [assets[0].id, 'vod', 'JP', 'geo', 9], [assets[0].id, 'vod', 'DE', 'geo', 6], [assets[0].id, 'vod', 'ZA', 'geo', 5],
+    [assets[0].id, 'vod', 'SG', 'geo', 4], [assets[0].id, 'vod', 'BR', 'geo', 2],
+    [assets[3].id, 'vod', 'AU', 'allowed', 70], [assets[3].id, 'vod', 'GB', 'allowed', 22], [assets[3].id, 'vod', 'FR', 'allowed', 8],
+    [assets[3].id, 'vod', 'US', 'rights', 27], [assets[3].id, 'vod', 'CA', 'rights', 11], [assets[3].id, 'vod', 'MX', 'geo', 3],
+    [assets[5].id, 'vod', 'AU', 'allowed', 40], [assets[5].id, 'vod', 'NZ', 'geo', 8], [assets[5].id, 'vod', 'GB', 'geo', 3],
+    [assets[5].id, 'vod', 'AU', 'expired', 4],
+    [NEWS, 'channel', 'AU', 'allowed', 120], [NEWS, 'channel', 'NZ', 'geo', 14], [NEWS, 'channel', 'ID', 'geo', 4],
+    [assets[1].id, 'vod', 'AU', 'payment', 6], [assets[2].id, 'vod', 'AU', 'sign_in', 3],
+  ];
+  const events: any[] = [], viewers: any[] = [];
+  for (let d = 29; d >= 0; d--) {
+    const day = new Date(Date.now() - d * 86400_000).toISOString().slice(0, 10);
+    // Weekends higher, a rise over the month, and today only part done.
+    const dow = new Date(day + 'T00:00:00Z').getUTCDay();
+    const w = (0.55 + 0.45 * (29 - d) / 29) * (dow === 0 || dow === 6 ? 1.35 : 1) * (1 + 0.15 * Math.sin(d * 1.7)) * (d === 0 ? 0.4 : 1);
+    plan.forEach(([asset, kind, cc, reason, peak], i) => {
+      const n = Math.max(0, Math.round(peak * w * (0.85 + 0.3 * Math.abs(Math.sin(i * 7 + d)))));
+      if (!n) return;
+      // Someone refused tries again: requests run ahead of viewers.
+      const requests = reason === 'allowed' ? n : Math.round(n * (1.6 + 0.4 * Math.abs(Math.sin(i + d))));
+      events.push({ account_id: ACCOUNT, day, asset_id: asset, asset_kind: kind, country: cc, reason, source: 'gate', requests });
+      if (reason === 'geo' || reason === 'rights') {
+        // A pool of regulars per country, so the period's unique count is less than the days' sum.
+        for (let k = 0; k < n; k++) viewers.push({ account_id: ACCOUNT, day, asset_id: asset, country: cc, reason, vh: `docs-${cc}-${i}-${(k * 7 + d * 3) % Math.max(n, Math.round(peak * 2.2))}` });
+      }
+    });
+  }
+  await p.query(
+    `INSERT INTO availability_events (account_id, day, asset_id, asset_kind, country, reason, source, requests)
+     SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(account_id uuid, day date, asset_id text, asset_kind text, country text, reason text, source text, requests float8)
+     ON CONFLICT DO NOTHING`, [JSON.stringify(events)]);
+  for (let i = 0; i < viewers.length; i += 5000) {
+    await p.query(
+      `INSERT INTO availability_viewers (account_id, day, asset_id, country, reason, vh)
+       SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(account_id uuid, day date, asset_id text, country text, reason text, vh text)
+       ON CONFLICT DO NOTHING`, [JSON.stringify(viewers.slice(i, i + 5000))]);
   }
 }
 

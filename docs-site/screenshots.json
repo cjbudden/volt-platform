@@ -392,6 +392,24 @@
       "alt": "The Audience view: watching now, views, unique viewers, watch hours and peak concurrent across the top, then views and unique viewers by day"
     },
     {
+      "name": "analytics-rights-demand",
+      "guide": "guides/analytics.md",
+      "path": "/analytics/rights-demand",
+      "waitFor": "path[data-country]",
+      "settleMs": 1500,
+      "alt": "The Rights demand view: the period and kind, blocked viewers, blocked requests, plays and requests after the window, then a world map shaded by blocked viewers"
+    },
+    {
+      "name": "analytics-rights-demand-title",
+      "guide": "guides/analytics.md",
+      "path": "/analytics/rights-demand",
+      "waitFor": "[data-testid=demand-titles] tbody tr",
+      "click": ["[data-testid=demand-titles] tbody tr >> nth=0"],
+      "waitAfter": "th:has-text('Licensed')",
+      "clip": "[data-demand-card=countries]",
+      "alt": "One title chosen: each country with its blocked viewers, blocked requests and plays, and whether the title is licensed there"
+    },
+    {
       "name": "plan-and-limits",
       "guide": "guides/plan-and-limits.md",
       "path": "/plan",

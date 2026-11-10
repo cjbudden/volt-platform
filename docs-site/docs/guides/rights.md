@@ -120,6 +120,6 @@ All under `/api/rights`, with an account token:
 | `POST /assign` | `{ "profileId", "assetIds": [...] }`, up to 1,000 assets |
 | `POST /check` | `{ "assetId", "country", "appId", "use" }`: what the rights alone answer |
 
-How many viewers each title turned away, by country, beside its plays where it is licensed: `GET /api/analytics/rights-demand` (see [Playback reporting](../api/playback-reporting.md#5-rights-demand-who-was-refused-where)). Refusals are counted from release 0.78.0; the report in the console comes next.
+How many viewers each title turned away, by country, beside its plays where it is licensed: `GET /api/analytics/rights-demand` (see [Playback reporting](../api/playback-reporting.md#5-rights-demand-who-was-refused-where)). Refusals are counted from release 0.78.0. In the console it is **Analytics**, **Rights demand** (see [Analytics](analytics.md#see-where-titles-are-wanted)).
 
 Uploads (`POST /api/uploads`), tus uploads (`rightsProfileId` metadata) and watchfolders (`rightsProfileId`) take a profile too. An app can be registered with `"surface": "embed"` or `"venue"` so the rights tell an embed player or venue screens apart.

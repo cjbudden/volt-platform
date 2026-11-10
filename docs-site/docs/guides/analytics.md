@@ -1,13 +1,13 @@
 ---
 title: Analytics
 sidebar_position: 0.45
-description: Who watched, what ran and for how long, and what viewers actually saw when they pressed play.
+description: Who watched, what ran and for how long, what viewers actually saw when they pressed play, and who was turned away for a region or the rights.
 guide: section
 ---
 
 # Analytics
 
-**Analytics** answers three questions about your account, each in its own view: who watched (**Audience**), what ran, for how long and why it stopped (**Operating**), and what viewers actually saw when they pressed play (**Playback**). Most people come here to see how many people watched over the last month, or to download a report of each stream's air time.
+**Analytics** answers four questions about your account, each in its own view: who watched (**Audience**), what ran, for how long and why it stopped (**Operating**), what viewers actually saw when they pressed play (**Playback**), and who wanted a title and was turned away for a region or the rights (**Rights demand**). Most people come here to see how many people watched over the last month, or to download a report of each stream's air time.
 
 ![The Audience view: watching now, views, unique viewers, watch hours and peak concurrent across the top, then views and unique viewers by day](/img/screens/analytics.png)
 
@@ -16,15 +16,17 @@ guide: section
 - **Audience.** Views, unique viewers, watch hours and the peak number watching at once, by day, with the split by device, country and app, and the most watched channels, events and on-demand items. **Watching now** is live and refreshes every 15 seconds.
 - **Operating.** Every channel, radio station and event that ran in a period: how many runs, hours run, hours on air, availability, unplanned stops and the time to recover from a fault. Open a stream for each run and why it ended. Download either as CSV.
 - **Playback.** The player's own reports from players built on the Volt SDK: whether playback started, how long it took, how often it stalled, the quality chosen, how smoothly the device played it, whether access checks or DRM got in the way, how far behind live viewers were, how ads played, how the CDN delivered (from its own logs, so viewers whose player sends no reports are counted too) and whether viewers stayed. Filter by content, device, app, country, network and more, rank the worst segments, and open any one viewer's session to see everything that happened to it, in order. Apps that send their journey events also show where viewers give up between opening the app and the first frame, and which rows, searches, links and notifications lead to watching.
+- **Rights demand.** How many viewers each title turned away because of where they were or what the rights allow, by country on a map and in a ranked table, with the trend, beside the plays where the title is licensed and the requests that came after its window closed. Choose a title to see where it is licensed and where it is wanted. Download it as CSV for a rights negotiation.
 
 Audience and Operating are read from daily totals that Volt keeps after the raw viewing events age out, so a report for last quarter still answers. Today is a partial day: it is drawn dashed and called **not final** until it closes.
 
-Programme and marketing staff use Audience; operations staff use Operating to prove availability and find faults; app and player teams use Playback.
+Programme and marketing staff use Audience; operations staff use Operating to prove availability and find faults; app and player teams use Playback; rights and acquisitions teams use Rights demand.
 
 ## Before you start
 
 - Something must have been watched or run. Audience fills from your players' viewing sessions; Operating from each run of a channel, station or event; Playback only from players built on the Volt SDK with its reporting (`cmcd`) on (see [Player SDK](player-sdk.md)), except **Delivery**, which comes from the CDN's logs of every request and so needs Volt running on AWS with the CDN's real-time logs on (they are by default); **Journey to play** and **Where plays come from** only from apps that also send their journey events (`VoltJourney` in the SDK, once the viewer's consent allows it).
-- Access: **Analytics & reports: View** to read any of the three views (see [Who can do it](#who-can-do-it)).
+- Rights demand counts refusals from release 0.78.0: there is nothing for earlier dates.
+- Access: **Analytics & reports: View** to read any of the four views (see [Who can do it](#who-can-do-it)).
 
 ## Step by step
 
@@ -123,6 +125,33 @@ Programme and marketing staff use Audience; operations staff use Operating to pr
 
 A timeline can be opened for as long as the player's raw reports are kept.
 
+### See where titles are wanted
+
+![The Rights demand view: the period and kind, blocked viewers, blocked requests, plays and requests after the window, then a world map shaded by blocked viewers](/img/screens/analytics-rights-demand.png)
+
+1. In **Analytics**, choose **Rights demand**.
+2. Choose **7 days**, **30 days**, **90 days** or **12 months**, or pick the two dates. Days are UTC. Choose **On demand**, **Channels** or **Events** to see one kind, or **All**.
+3. Read the totals across the top:
+
+   | Figure | Counts |
+   |---|---|
+   | **Blocked viewers** | Different people refused for their region or the rights in the period, each counted once however often they tried |
+   | **Blocked requests** | Every refusal, retries included |
+   | **Plays** | Plays that were allowed |
+   | **After the window** | Requests for a title after its window closed or it was withdrawn |
+
+4. **Where** shades each country by its blocked viewers: the brighter, the more. Choose **Plays** to shade by plays instead, to compare. Point at a country for its figures. Choose a country on the map, or in **Countries**, to see only it; choose it again, or the **×** on its name under the filters, to see them all.
+5. **Trend** shows blocked viewers and plays per day, and the requests after a window closed when there were any. Today is drawn dashed.
+6. **Countries** lists every country with blocked viewers, blocked requests and plays, most blocked viewers first. Countries too small to draw on the map (Singapore, Hong Kong, Malta and others) are in this list.
+7. **Titles** lists the titles most wanted, with their plays, the requests after their window and the state of the window: **Opens** (not available yet), **Open to** (and until when) or **Closed**.
+8. Choose a title to see it alone. A card shows its window, its rights dates and where it is licensed; **Countries** gains a **Licensed** column, so the countries asking for it sit beside the ones playing it; the trend marks the day its window opens and closes.
+9. **Other refusals** counts the refusals that are not regional demand: needs payment, needs sign in, not available yet, the window ended, withdrawn, the app's restrictions.
+10. **Download CSV** downloads the period by title and country, with the filters chosen.
+
+![One title chosen: each country with its blocked viewers, blocked requests and plays, and whether the title is licensed there](/img/screens/analytics-rights-demand-title.png)
+
+Only the country, the reason, the title and a one-way hash of the viewer are kept for this report, never an address. It is up to a minute behind.
+
 ## How it connects
 
 | Section | How it relates |
@@ -133,6 +162,7 @@ A timeline can be opened for as long as the player's raw reports are kept.
 | [Fleet & Usage](fleet-and-usage.md) | The billable server time behind the same runs |
 | [Account settings](account-settings.md), [Publishing Rules](publishing-rules.md) | Geo and access rules are what the **Blocked** figure counts |
 | [Player SDK](player-sdk.md) | Players built on it send the reports Playback reads |
+| [Rights](rights.md) | A title's rights profile decides where it may play; its refusals are what Rights demand counts, and its block message is what refused viewers see |
 
 See [How Volt fits together](../getting-started/how-volt-fits-together.md) for the whole map.
 
@@ -140,7 +170,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 
 | Task | Access needed |
 |---|---|
-| Read Audience, Operating and Playback, download CSV | Analytics & reports: View |
+| Read Audience, Operating, Playback and Rights demand, download CSV | Analytics & reports: View |
 
 The Report and Analytics Manager role has **Analytics & reports: Manage**. Event Managers, Radio Managers and System Viewers can read Analytics. Users without the access do not see **Analytics** in the sidebar.
 
@@ -166,7 +196,10 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Couldn't open that session** | The session is not in your account, or its raw reports are no longer kept | Choose a more recent session |
 | **No app sessions in this period.** under Journey to play | No app sent journey events, the viewers' consent does not allow it yet, or none in this period | Send them with `VoltJourney` in the Volt SDK (see [Player SDK](player-sdk.md)), or choose a longer period |
 | **The trend is not filtered by ...** | The minute-by-minute trend keeps only content, live or on demand, country, device class and CDN | The reports below it are filtered by everything chosen |
-| **Couldn't load analytics.** (or operating or playback reports) | The page could not reach Volt | Choose **Retry** |
+| **No viewer was turned away for a region or the rights in this period** | Nobody was refused for their region or the rights, and nothing played, in the dates chosen | Choose a longer period or **All**; refusals are counted from release 0.78.0 |
+| A country in **Countries** is not shaded on the map | It is too small to draw at this scale | Read it in **Countries** |
+| **Licensed** shows **–** | The row is a channel or event, which has no on-demand window, or the title's rights could not be read | Open the title in [Rights](rights.md) |
+| **Couldn't load analytics.** (or operating, playback or rights demand reports) | The page could not reach Volt | Choose **Retry** |
 
 ## Through the API
 
