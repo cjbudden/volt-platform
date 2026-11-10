@@ -23,6 +23,9 @@ export interface LibraryRow extends VodAssetRow {
   schema_org_type?: string | null
   origin?: 'recording' | 'clip' | 'upload' | 'watchfolder'
   metadata_completeness?: number | null
+  /** For types that belong to a series: its name and the season (libraryTitles.ts). */
+  series_title?: string | null
+  season_number?: string | number | null
   metadata_missing_required?: boolean
   top_height?: number | null
   video_codec?: string | null

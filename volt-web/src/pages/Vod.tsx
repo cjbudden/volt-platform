@@ -36,6 +36,7 @@ import { AssetStatusPanel, QcChecks, UsageBadge, USAGE_LABEL, hasNoMedia } from 
 import './vod/library.css'
 import { SourceFacts } from './vod/SourceFacts'
 import { AddToCollectionDialog, CollectionTree, ColIcon, NewCollection, collectionsApi, flatten, pathName, useCollections } from './vod/collections'
+import { longTitle, seriesLabel } from './vod/libraryTitles'
 
 /* ============================================================================
    MEDIA LIBRARY — everything that was cut or uploaded, and what state it is in.
@@ -785,7 +786,7 @@ export default function VodPage() {
           <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" style={panel.style} onKeyDown={(e) => { if (e.key === 'Escape') closeLinked() }}>
             <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />
             <div className="drawer-h">
-              <span className="t">{rows.find((r) => r.id === linked)?.title || 'Asset'}</span>
+              <span className="t">{longTitle(rows.find((r) => r.id === linked), 'Asset')}</span>
               <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />
               <button type="button" className="icon-btn" onClick={closeLinked} aria-label="Close" autoFocus>{LibIcon.close}</button>
             </div>
@@ -899,7 +900,7 @@ export default function VodPage() {
               <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" style={panel.style} onKeyDown={(e) => { if (e.key === 'Escape') guardOpen(null) }}>
                 <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />
                 <div className="drawer-h">
-                  <span className="t">{rows.find((r) => r.id === open)?.title || 'Untitled'}</span>
+                  <span className="t">{longTitle(rows.find((r) => r.id === open))}</span>
                   <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />
                   <button type="button" className="icon-btn" onClick={() => guardOpen(null)} aria-label="Close" autoFocus>{LibIcon.close}</button>
                 </div>
@@ -938,6 +939,7 @@ export default function VodPage() {
                         <div className="lib-title-cell">
                           <Keyscreen row={a} w={96} h={54} className="sm" />
                           <div className="min-w-0">
+                            {seriesLabel(a) && <div className="lib-faint" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{seriesLabel(a)}</div>}
                             <b>{a.title || 'Untitled'}</b>
                             <div><EncodeState a={x} />{a.usage_status && a.usage_status !== 'ready' && <> <UsageBadge row={a} /></>}</div>
                           </div>

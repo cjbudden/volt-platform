@@ -72,6 +72,16 @@ const HIDE_FAST_FILLER = `AND COALESCE(v.metadata->>'fastFiller', '') <> 'true'`
 const EFFECTIVE_FIELDS = `(CASE WHEN ms.id IS NULL THEN NULL ELSE COALESCE(msp.fields, '[]'::jsonb) || COALESCE(ms.fields, '[]'::jsonb) END)`;
 const MISSING_REQUIRED_SQL = missingRequiredCountSql(EFFECTIVE_FIELDS, 'ms.standard_key', 'v.metadata');
 const COMPLETENESS_SQL = completenessPctSql(EFFECTIVE_FIELDS, 'ms.standard_key', 'v.metadata');
+/**
+ * WHAT IT BELONGS TO, for types that are part of something bigger: the value of
+ * the type's field mapped to a schema.org property (partOfSeries, partOfSeason).
+ * Found by mapping rather than by key, so an account's own copy of a type, or
+ * its own series type, works without code. Plain values only: a content-link
+ * field holds an id, not a name.
+ */
+const partOfSql = (prop: 'partOfSeries' | 'partOfSeason') => `(SELECT NULLIF(btrim(v.metadata->>(f->>'key')), '')
+       FROM jsonb_array_elements(COALESCE(${EFFECTIVE_FIELDS}, '[]'::jsonb)) f
+      WHERE f->>'schemaOrg' = '${prop}' AND COALESCE(f->>'type', 'string') IN ('string', 'text', 'number', 'enum') LIMIT 1)`;
 const RENDITION_COUNT_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(v.encode_result->'kept') = 'array' THEN v.encode_result->'kept' END),
   (SELECT jsonb_array_length(op.rungs) FROM output_profiles op WHERE op.id = g.output_profile_id AND jsonb_typeof(op.rungs) = 'array'))`;
 /** CAN IT BE USED (services/assetReadiness.ts). The list and facets join the encode job as `j`. */
@@ -208,6 +218,9 @@ vodRouter.get(
               ${ORIGIN_SQL} AS origin,
               ${SOURCE_SQL} AS source, ${MEDIA_TYPE_SQL} AS media_type,
               ${COMPLETENESS_SQL} AS metadata_completeness,
+              -- THE SERIES AND SEASON an episode belongs to, for the library's
+              -- long title: "Caminandes (S1) · Episode 2" (libraryTitles.ts).
+              ${partOfSql('partOfSeries')} AS series_title, ${partOfSql('partOfSeason')} AS season_number,
               (${MISSING_REQUIRED_SQL} > 0) AS metadata_missing_required,
               ${RENDITION_COUNT_SQL} AS rendition_count,
               -- AUDIO ONLY, for the grid's square artwork and audio badge
@@ -850,7 +863,11 @@ vodRouter.put(
       [
         req.params.id,
         accountId(req),
-        body.title ?? null,
+        // THE ASSET IS NAMED BY ITS RECORD. A title saved in the metadata is the
+        // asset's title too, as the file-name reader, the EPG fill and the ingest
+        // form already do. Before, the library and its drawer kept showing the
+        // name the file arrived with after the Title field was changed.
+        body.title ?? (typeof cleanMeta?.title === 'string' && cleanMeta.title.trim() ? cleanMeta.title.trim() : null),
         body.published ?? null,
         schemaId,
         cleanMeta !== undefined ? JSON.stringify(cleanMeta) : null,

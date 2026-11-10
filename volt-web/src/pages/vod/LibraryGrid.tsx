@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'react'
 import type { LibraryRow } from './libraryApi'
 import { AvailabilityPill, Completeness, EncodeSummary, KindBadge, Keyscreen, TypeLabel, fmtDur } from './LibraryCells'
 import { UsageBadge, hasNoMedia } from './AssetStatus'
+import { seriesLabel } from './libraryTitles'
 
 export function LibraryGrid({ rows, selected, onToggle, onOpen, openId, lastOpenId, fresh }: {
   rows: LibraryRow[]; selected: Set<string>; onToggle: (id: string) => void; onOpen: (id: string) => void; openId: string | null
@@ -50,6 +51,7 @@ export function LibraryGrid({ rows, selected, onToggle, onOpen, openId, lastOpen
               <UsageBadge row={r} quiet overlay />
             </button>
             <div className="lib-card-b">
+              {seriesLabel(r) && <div className="lib-card-s" title={seriesLabel(r) ?? undefined}>{seriesLabel(r)}</div>}
               <div className="lib-card-t" title={r.title || 'Untitled'}>{r.title || 'Untitled'}</div>
               <div className="lib-card-row">
                 <TypeLabel row={r} />
