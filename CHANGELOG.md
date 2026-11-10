@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.82.0 (2026-11-10)
+
+### Product (in customer release notes)
+
+- changed · Publishing Rules: A saved publishing rule now reaches titles that are already published within about a minute, without publishing them again: dates, geo access, access and paywall change on them, and Before you save says how many published titles take the change up and how many become unavailable now. Where a title was published and its DRM are kept, and nothing is posted to social accounts again.
+- improved · Player: Clearer skip buttons and a documentation icon: the player's 10-second back and forward buttons now show the "10" inside the arrow with space around it, so it no longer looks cut off, and the documentation button in the console's top bar is now an open book instead of a question mark.
+
+### Internal
+
+- added · Publishing Rules: publishing-restamp check suite (39 checks) and P3-4 steps in the publishing policies browser check.
+
 ## 0.81.0 (2026-11-10)
 
 ### Product (in customer release notes)
