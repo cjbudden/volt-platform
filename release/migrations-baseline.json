@@ -1,6 +1,6 @@
 {
   "_comment": "Migrations and boot schema statements that have shipped (build queue D2). check-migrations.mjs does not judge them again but refuses an edit or removal. release.mjs adds each release's files; nothing else should change this file.",
-  "release": "0.80.0",
+  "release": "0.81.0",
   "migrations": {
     "0001_init.sql": "0c5653a0d33cd6f7e0bc826365d65f4779430f01c74274f4379697d45edfd0fc",
     "0002_jobs.sql": "6b3d27e80a234d1d568bf2391823fa7d87e5da1673582d78ff34c53052244d3c",

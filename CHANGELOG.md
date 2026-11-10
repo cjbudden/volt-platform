@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.81.0 (2026-11-10)
+
+### Product (in customer release notes)
+
+- fixed · Publishing Rules: A dry run of a publishing rule no longer counts every title as changed when the rule is saved again unchanged.
+- added · Publishing Rules: Before you save, a publishing rule is checked as you change it: how many titles it governs and changes, conflicts that stop the save (such as DRM with MP4 download) and warnings that do not. Turning DRM on or off for published titles asks first, with the number of titles to package again.
+- added · Publishing Rules: Publishing Rules are laid out as the five sections of a policy (Lifecycle, Access, Protection, Distribution and Retention), with DRM, playback token lifetime, WAF profile, referrer domains, concurrent streams, MP4 download, share links, FAST, sitemap and retention fields. Each field has a padlock: a locked field cannot be changed by the content types, streams or items beneath it, and they show who locked it. Start a rule from a preset (Open, Members, Geo-locked, Premium, Rights-managed).
+
+### Internal
+
+- added: Browser check volt-web/test/publishing-policies.browser.mjs (with its seed) for the publishing policy editor: sections, locks, presets, conflicts, impact and the repackage confirmation at 1440 and 390 px.
+
 ## 0.80.0 (2026-11-10)
 
 ### Product (in customer release notes)
