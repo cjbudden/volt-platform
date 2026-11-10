@@ -117,11 +117,13 @@ export async function fastUseFor(acc: string, ids: string[]): Promise<Map<string
             ca.policy->'brand'->>'loopAssetId' = v.id::text AS is_loop,
             ca.policy->>'slateAssetId' = v.id::text AS is_slate,
             COALESCE(ca.policy->'brand'->'identIds' ? v.id::text, false) AS is_ident,
+            ca.policy->>'geoAssetId' = v.id::text AS is_geo,
             COALESCE((ca.policy->>'breaksUseLoop')::boolean, false) AS breaks_use_loop
        FROM vod_assets v
        JOIN channel_ads ca ON ca.policy->'brand'->>'loopAssetId' = v.id::text
                            OR ca.policy->>'slateAssetId' = v.id::text
                            OR COALESCE(ca.policy->'brand'->'identIds' ? v.id::text, false)
+                           OR ca.policy->>'geoAssetId' = v.id::text
        JOIN channels c ON c.id = ca.channel_id
        JOIN groups g ON g.id = c.group_id AND g.account_id = $1
       WHERE v.account_id = $1 AND v.metadata->>'fillerAssetId' = ANY($2::text[])
@@ -131,6 +133,7 @@ export async function fastUseFor(acc: string, ids: string[]): Promise<Map<string
     if (r.is_loop) roles.push('Brand loop', ...(r.breaks_use_loop ? ['Unsold ad breaks'] : []));
     if (r.is_slate) roles.push('Slate');
     if (r.is_ident) roles.push('Ident');
+    if (r.is_geo) roles.push('Geo replacement');
     const list = out.get(r.filler) ?? [];
     list.push({ channelId: r.id, name: r.name, status: r.status, copyId: r.copy, roles });
     out.set(r.filler, list);

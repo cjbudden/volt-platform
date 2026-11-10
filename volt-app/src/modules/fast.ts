@@ -153,6 +153,41 @@ fastRouter.get('/channels/:id', asyncHandler(async (req, res) => {
     urls: { hls: channelPlaylistUrl(ch.id, 'master.m3u8'), dash: channelPlaylistUrl(ch.id, 'manifest.mpd'), session: `/fast/${ch.id}/s/{session}/master.m3u8` } });
 }));
 
+/**
+ * RIGHTS ON AIR (services/fast/rights.ts): the geo replacement, and each
+ * programme in the next two days whose title cannot be seen everywhere, with
+ * where it can be seen. Viewers elsewhere get the geo replacement (or are
+ * refused for that programme when there is none).
+ */
+fastRouter.get('/channels/:id/rights', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const { fastRightsReport } = await import('../services/fast/rights');
+  const r = await fastRightsReport(ch.id, 48);
+  const geo = r.geoReplacement;
+  const fa = geo?.fillerId ? await one<any>(`SELECT id, name, kind FROM filler_assets WHERE id = $1`, [geo.fillerId]) : null;
+  const cg = await one<any>(`SELECT geo_mode, geo_countries FROM channels WHERE id = $1`, [ch.id]);
+  res.json({
+    geoReplacement: geo ? { assetId: geo.assetId, fillerId: geo.fillerId, name: fa?.name ?? null, kind: fa?.kind ?? null } : null,
+    enforcedAs: r.enforcedAs, items: r.items,
+    channelGeo: { mode: cg?.geo_mode ?? 'worldwide', countries: cg?.geo_countries ?? [] },
+  });
+}));
+
+/**
+ * WHERE THE CHANNEL CAN BE WATCHED at all: the channel's own geo (the same
+ * columns a live channel uses, enforced by the play gate, the public route and
+ * the edge). Applies to the whole channel, above each title's own rights.
+ */
+const geoBody = z.object({ mode: z.enum(['worldwide', 'allow', 'block']), countries: z.array(z.string().regex(/^[A-Za-z]{2}$/)).max(250).default([]) });
+fastRouter.put('/channels/:id/geo', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const b = geoBody.parse(req.body ?? {});
+  const countries = [...new Set(b.countries.map((c) => c.toUpperCase()))].sort();
+  if (b.mode === 'allow' && !countries.length) throw badRequest('Name at least one country the channel can be watched in.');
+  await query(`UPDATE channels SET geo_mode = $2, geo_countries = $3, updated_at = now() WHERE id = $1`, [ch.id, b.mode, b.mode === 'worldwide' ? [] : countries]);
+  res.json({ mode: b.mode, countries: b.mode === 'worldwide' ? [] : countries });
+}));
+
 /** Is every asset the channel uses ready to air (packaged, splice-aligned, loudness, 1 s slate)? */
 fastRouter.get('/channels/:id/readiness', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));
@@ -459,6 +494,8 @@ fastRouter.post('/channels/:id/playout', asyncHandler(async (req, res) => {
 const fillerBody = z.object({
   slateFillerId: z.string().uuid().nullable().optional(),
   loopFillerId: z.string().uuid().nullable().optional(),
+  /** What viewers outside a title's rights see for that programme (services/fast/rights.ts). */
+  geoFillerId: z.string().uuid().nullable().optional(),
   breaksUseLoop: z.boolean().optional(),
 });
 fastRouter.put('/channels/:id/filler', asyncHandler(async (req, res) => {
@@ -479,6 +516,11 @@ fastRouter.put('/channels/:id/filler', asyncHandler(async (req, res) => {
       if (brand.loopAssetId && sources[brand.loopAssetId]) delete sources[brand.loopAssetId];
       if (b.loopFillerId) { const v = await vodForFiller(String(ch.account_id), b.loopFillerId); brand.loopAssetId = v.assetId; sources[v.assetId] = b.loopFillerId; }
       else brand.loopAssetId = null;
+    }
+    if (b.geoFillerId !== undefined) {
+      if (policy.geoAssetId && sources[policy.geoAssetId] && policy.geoAssetId !== brand.loopAssetId && policy.geoAssetId !== policy.slateAssetId) delete sources[policy.geoAssetId];
+      if (b.geoFillerId) { const v = await vodForFiller(String(ch.account_id), b.geoFillerId); policy.geoAssetId = v.assetId; sources[v.assetId] = b.geoFillerId; }
+      else policy.geoAssetId = null;
     }
   } catch (e: any) {
     if (e instanceof FillerError) throw e.status === 404 ? notFound(e.message) : conflict(e.message);

@@ -552,6 +552,104 @@ async function s3Get(key: string): Promise<string | null> {
 /** This box can read the stream's output from disk (the Mac), or it is in S3 (the cloud). */
 export const localOutput = (id: string) => existsSync(liveDirFor(id));
 
+// ---------------------------------------------------------------------------
+//  FAST CHANNELS (services/fast/rights.ts). A FAST channel has no encoder: its
+//  playout writes the playlists to <origin>/<id>/fast (the Mac) or
+//  channel/<id>/fast in the bucket, and its media segments are the titles'
+//  own, listed by root-relative URL. Its replacement is not fillerPrep's loop
+//  but the channel's GEO REPLACEMENT: a Loops & Fillers item packaged for the
+//  channel's ladder at the programmes' segment length, read here from its
+//  packaged playlists into the same Loop shape.
+// ---------------------------------------------------------------------------
+const fastMemo = new Map<string, { at: number; v: Promise<boolean> }>();
+export function isFastChannel(id: string): Promise<boolean> {
+  const hit = fastMemo.get(id);
+  if (hit && Date.now() - hit.at < 10_000) return hit.v;
+  const v = (async () => {
+    const { one } = await import('../db');
+    return (await one<any>(`SELECT origin FROM channels WHERE id = $1`, [id]).catch(() => null))?.origin === 'playlist';
+  })();
+  fastMemo.set(id, { at: Date.now(), v });
+  return v;
+}
+
+async function fastPlace(id: string): Promise<{ dir: string | null; prefix: string; base: string }> {
+  const { playoutDir } = await import('./fast/playoutRunner');
+  const { fastConfig, channelPrefix } = await import('./fast/media');
+  const dir = playoutDir(id);
+  if (existsSync(dir)) return { dir, prefix: channelPrefix(id), base: `/origin/${id}/fast/` };
+  return { dir: null, prefix: channelPrefix(id), base: fastConfig.cdn ? `${fastConfig.cdn.replace(/\/$/, '')}/${channelPrefix(id)}/` : '../../' };
+}
+
+/** Reads a packaged title's file by its key: the library's disk (/clips/...) or the bucket. */
+async function readLibrary(key: string): Promise<string | null> {
+  if (key.startsWith('/clips/')) return readFile(join(config.clips.dir, key.slice('/clips'.length)), 'utf8').catch(() => null);
+  if (config.env === 'production' && config.aws?.s3Bucket) return s3Get(key.replace(/^\//, ''));
+  return null;
+}
+
+/**
+ * The FAST channel's geo replacement as a Loop: one track per rendition of
+ * its packaging, keyed by the folder its init segment is in (the same key
+ * the channel's own segments give, since both are packaged to the channel's
+ * ladder). Null when the channel has no geo replacement or it is not packaged
+ * yet, which refuses the variant rather than serving the programme.
+ */
+export async function loadFastLoop(id: string): Promise<Loop | null> {
+  const { geoReplacementOf } = await import('./fast/rights');
+  const geo = await geoReplacementOf(id);
+  if (!geo) return null;
+  const { ladderMasters } = await import('./fast/ladder');
+  const { one } = await import('../db');
+  const masterKey = (await ladderMasters(id, [geo.assetId]).catch(() => null))?.masterFor(geo.assetId, 'ident')
+    ?? (await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [geo.assetId]))?.master_key ?? null;
+  if (!masterKey) return null;
+  const { fastConfig } = await import('./fast/media');
+  const prefix = masterKey.startsWith('/clips/') ? '' : (fastConfig.cdn ?? '').replace(/\/$/, '');
+  const folder = '/' + masterKey.replace(/^\//, '').split('/').slice(0, -1).join('/') + '/';
+  const abs = (u: string, dir: string) => (ABS.test(u) ? u : dir + u);
+  const master = await readLibrary(masterKey);
+  if (!master) return null;
+  const media = new Set<string>();
+  for (const line of master.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith('#EXT-X-MEDIA') && /URI="([^"]+)"/.test(t)) media.add(abs(t.match(/URI="([^"]+)"/)![1], folder));
+    else if (!t.startsWith('#')) media.add(abs(t, folder));
+  }
+  const tracks: Record<string, LoopTrack> = {};
+  let segmentSeconds = 0;
+  for (const m of media) {
+    const text = await readLibrary(m.replace(/^\/(?=clips\/)/, '/'));
+    if (!text) continue;
+    const dir = m.split('/').slice(0, -1).join('/') + '/';
+    const init = text.match(/#EXT-X-MAP:[^\n]*URI="([^"]+)"/)?.[1];
+    if (!init) continue;
+    const segs: { uri: string; dur: number }[] = [];
+    let dur = 0;
+    for (const line of text.split(/\r?\n/)) {
+      const t = line.trim();
+      if (t.startsWith('#EXTINF:')) dur = Number(t.slice(8).split(',')[0]) || 0;
+      else if (t && !t.startsWith('#')) { segs.push({ uri: prefix + abs(t, dir), dur }); dur = 0; }
+    }
+    if (!segs.length) continue;
+    const initUri = prefix + abs(init, dir);
+    const label = rendOf(initUri);
+    if (tracks[label]) continue;
+    const kind = label === 'audio' ? 'audio' : 'video';
+    tracks[label] = { kind, init: initUri, segments: segs };
+    if (kind === 'video' && !segmentSeconds) segmentSeconds = segs[0].dur;
+  }
+  if (!Object.keys(tracks).length) return null;
+  return {
+    segmentSeconds: segmentSeconds || Object.values(tracks)[0].segments[0].dur, base: '', tracks, hash: `${geo.assetId}:${masterKey}`,
+    read: async (u) => {
+      if (u.startsWith('/clips/')) return readFile(join(config.clips.dir, u.slice('/clips'.length))).catch(() => null);
+      return null;
+    },
+  };
+}
+
 /** One delivered file as the encoder wrote it, at most a second old. */
 export function readDelivered(kind: 'channel' | 'event', id: string, file: string): Promise<string | null> {
   if (!SOURCE_FILE.test(file) || file.includes('..')) return Promise.resolve(null);
@@ -561,6 +659,12 @@ export function readDelivered(kind: 'channel' | 'event', id: string, file: strin
   if (hit && Date.now() - hit.at < ttl) return hit.p;
   const p = (async () => {
     variantSourceStats.reads++;
+    if (kind === 'channel' && await isFastChannel(id)) {
+      const f = await fastPlace(id);
+      if (f.dir) return readFile(join(f.dir, file), 'utf8').catch(() => null);
+      if (config.env === 'production' && config.aws?.s3Bucket) return s3Get(`${f.prefix}/${file}`);
+      return null;
+    }
     if (localOutput(id)) return readFile(join(liveDirFor(id), file), 'utf8').catch(() => null);
     if (config.env === 'production' && config.aws?.s3Bucket) return s3Get(`${kind}/${id}/${file}`);
     return null;
@@ -581,6 +685,7 @@ export function segmentBase(kind: 'channel' | 'event', id: string): string {
 
 /** The stream's pre-built loop: the copy the encoder keeps beside its output, else fillerPrep's. */
 export async function loadLoop(kind: 'channel' | 'event', id: string): Promise<Loop | null> {
+  if (kind === 'channel' && await isFastChannel(id)) return loadFastLoop(id);
   const parse = (s: string | null, base: string): Loop | null => {
     if (!s) return null;
     try {
@@ -620,7 +725,7 @@ export async function renderVariant(inp: {
 }): Promise<{ body: string; type: string } | null> {
   const text = await deliveredText(inp.kind, inp.id, inp.file);
   if (text == null) return null;
-  const base = segmentBase(inp.kind, inp.id);
+  const base = inp.kind === 'channel' && await isFastChannel(inp.id) ? (await fastPlace(inp.id)).base : segmentBase(inp.kind, inp.id);
   if (inp.file.endsWith('.mpd')) {
     const loop = inp.timeline.length ? await loadLoop(inp.kind, inp.id) : null;
     const loopTrick = loop ? await loopTrickLabels(loop, trickLabelsOf(text)) : undefined;

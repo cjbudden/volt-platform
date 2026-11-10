@@ -19,7 +19,7 @@ import { ShareDrawer } from '../ShareDrawer'
 import { EmbedDrawer } from '../EmbedDrawer'
 import { LiveGraphicsButton } from '../graphics/LiveGraphicsButton'
 import { useAccess } from '../access'
-import { FastSettingsView, FastUrlsCard, FastGraphicsCard, FastQcDrawer, OnAirNowCard, brandMarkOf, settingsFromChannel } from '../fast/FastChannelPages'
+import { FastSettingsView, FastUrlsCard, FastGraphicsCard, FastQcDrawer, OnAirNowCard, brandMarkOf, settingsFromChannel, FastGeoReplacementCard } from '../fast/FastChannelPages'
 import { EpgStrip, ViewersCard, EventLog } from './ChannelDetail'
 import type { ChannelDetail as ChannelDetailData } from '../api'
 import type { FastChannelSettings } from '../fast/fastApi'
@@ -417,7 +417,7 @@ function FastBuilder({ id }: { id: string }) {
             </button>
           )}
           <LiveGraphicsButton channelId={id} />
-          <button className={`btn ghost icon-btn${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')} data-tip="Settings: title, description, logo, watermark, graphics, ladder, slate and loop" aria-label="Settings">
+          <button className={`btn ghost icon-btn${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')} data-tip="Settings: title, description, logo, where it can be watched, watermark, graphics, ladder" aria-label="Settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
           </button>
           {active && (
@@ -1346,7 +1346,7 @@ const BRAND_MODES: [BrandMode, string, string][] = [
  * THE CHANNEL'S BRAND: idents (stings, bumpers) that play between programmes,
  * and a brand loop that fills what is left of a gap instead of the slate.
  * Stored with the channel's break settings; every ident and the loop are
- * prepared with the channel like a house spot (On air > Media).
+ * prepared with the channel like a house spot (Overview > Media).
  */
 function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAsset[] } }) {
   const notify = useNotify()
@@ -1382,7 +1382,7 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
     const next = { mode: b.mode ?? brand.mode, identIds: b.identIds ?? brand.identIds, loopAssetId: b.loopAssetId !== undefined ? b.loopAssetId : brand.loopAssetId }
     try {
       setAds(await fastApi.saveAds(channelId, { brand: next }))
-      notify({ kind: 'ok', title: 'Saved.', message: next.mode === 'between' || brand.mode === 'between' ? 'Apply the lineup (Run order) for the guide to make room for the idents.' : 'The playout picks it up within a minute.' })
+      notify({ kind: 'ok', title: 'Saved.', message: next.mode === 'between' || brand.mode === 'between' ? 'Activate, or Rewrite guide, for the guide to make room for the idents.' : 'The playout picks it up within a minute.' })
     } catch (e: any) { notify({ kind: 'error', title: "Couldn't save.", message: e.message }) }
   }
   const short = lib.assets.filter(a => a.durationSec <= 30)
@@ -1457,6 +1457,7 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
           {!brand.loopAssetId && <div className="hintxt">Choose a brand loop to use it in ad breaks.</div>}
         </div>
       </div>
+      <FastGeoReplacementCard channelId={channelId} fillers={fillers} />
     </div>
   )
 }
@@ -1494,7 +1495,7 @@ function RundownCard({ channelId }: { channelId: string }) {
         </select></div>
       {err ? <div className="card-b"><Notice kind="error" variant="compact" message={err} /></div>
         : !rd ? <div className="card-b loading">Loading…</div>
-        : !rows.length ? <div className="card-b" style={{ color: 'var(--muted)' }}>Nothing scheduled in this window. Apply the lineup to write the guide.</div>
+        : !rows.length ? <div className="card-b" style={{ color: 'var(--muted)' }}>Nothing scheduled in this window. Activate the run order, or Rewrite guide, to write the guide.</div>
         : <div className="fast-run" role="list">
           {rows.map((r, i) => {
             const s = Date.parse(r.start), e = Date.parse(r.end)

@@ -109,6 +109,15 @@ export interface ReadinessRow {
   packaging?: 'main' | 'variant' | null; progress?: number | null; note?: string | null; failed?: boolean
 }
 
+/** GET /fast/channels/:id/rights */
+export interface FastRights {
+  geoReplacement: { assetId: string; fillerId: string | null; name: string | null; kind: 'slate' | 'loop' | null } | null
+  /** What a viewer outside a title's rights gets: the geo replacement, or nothing (refused) when none is chosen. */
+  enforcedAs: 'replace' | 'block'
+  items: { programmeId: string; title: string; assetId: string; startsAt: string; endsAt: string; allowed: string; window: { from: string | null; until: string | null } }[]
+  channelGeo: { mode: 'worldwide' | 'allow' | 'block'; countries: string[] }
+}
+
 const J = (b: unknown) => ({ body: JSON.stringify(b) })
 
 export const fastApi = {
@@ -138,7 +147,11 @@ export const fastApi = {
     apiReq(`/fast/channels/${channelId}/ladder`, { method: 'PUT', ...J({ ladderGroupId }) }),
   prepare: (channelId: string): Promise<{ queued: string[]; skipped: ReadinessRow[] }> => apiReq(`/fast/channels/${channelId}/prepare`, { method: 'POST', body: '{}' }),
   /** Slate and gap loop from Loops & Fillers (null takes one off). */
-  saveFiller: (channelId: string, b: { slateFillerId?: string | null; loopFillerId?: string | null; breaksUseLoop?: boolean }): Promise<ChannelAds & { prepared?: { queued: string[] } | null }> => apiReq(`/fast/channels/${channelId}/filler`, { method: 'PUT', ...J(b) }),
+  saveFiller: (channelId: string, b: { slateFillerId?: string | null; loopFillerId?: string | null; geoFillerId?: string | null; breaksUseLoop?: boolean }): Promise<ChannelAds & { prepared?: { queued: string[] } | null }> => apiReq(`/fast/channels/${channelId}/filler`, { method: 'PUT', ...J(b) }),
+  /** Rights on air: the geo replacement and the restricted programmes of the next two days (services/fast/rights.ts). */
+  rights: (channelId: string): Promise<FastRights> => apiReq(`/fast/channels/${channelId}/rights`),
+  /** Where the channel can be watched at all: worldwide, only the listed countries, or not in them. */
+  saveGeo: (channelId: string, b: { mode: 'worldwide' | 'allow' | 'block'; countries: string[] }): Promise<{ mode: string; countries: string[] }> => apiReq(`/fast/channels/${channelId}/geo`, { method: 'PUT', ...J(b) }),
   /** Start, restart or stop the channel's playout by hand. */
   playout: (channelId: string, action: 'start' | 'restart' | 'stop'): Promise<{ playout: string }> => apiReq(`/fast/channels/${channelId}/playout`, { method: 'POST', ...J({ action }) }),
   setOnAir: (channelId: string, on: boolean): Promise<{ onAir: boolean }> => apiReq(`/fast/channels/${channelId}/on-air`, { method: 'POST', ...J({ on }) }),

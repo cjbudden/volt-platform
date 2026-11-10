@@ -363,7 +363,7 @@ export async function loadEdgeDetail(kind: 'channel' | 'event', id: string, nowS
 
 async function loadEdgeRulesFromDb(kind: 'channel' | 'event', id: string, nowSec: number): Promise<{ rules: EdgeRules | null; programmes: ProgrammeRight[] }> {
   const owner = kind === 'channel'
-    ? await one<any>(`SELECT c.geo_mode, c.geo_countries, a.geo_access FROM channels c JOIN groups g ON g.id = c.group_id JOIN accounts a ON a.id = g.account_id WHERE c.id = $1`, [id])
+    ? await one<any>(`SELECT c.geo_mode, c.geo_countries, c.origin, a.geo_access FROM channels c JOIN groups g ON g.id = c.group_id JOIN accounts a ON a.id = g.account_id WHERE c.id = $1`, [id])
     : await one<any>(`SELECT NULL AS geo_mode, NULL AS geo_countries, a.geo_access FROM events e JOIN groups g ON g.id = e.group_id JOIN accounts a ON a.id = g.account_id WHERE e.id = $1`, [id]);
   if (!owner) return { rules: null, programmes: [] };
   const col = kind === 'channel' ? 'channel_id' : 'event_id';
@@ -373,6 +373,17 @@ async function loadEdgeRulesFromDb(kind: 'channel' | 'event', id: string, nowSec
       WHERE ${col} = $1 AND geo_mode IN ('block', 'allow')
         AND ends_at > to_timestamp($2) AND starts_at < to_timestamp($3)
       ORDER BY starts_at LIMIT 200`, [id, nowSec, nowSec + RIGHTS_HORIZON_SEC]);
+  // A FAST CHANNEL's titles carry their own rights (territories, FAST use,
+  // rights window): its guide becomes programme rights here, replaced with the
+  // channel's geo replacement (services/fast/rights.ts).
+  if (kind === 'channel' && owner.origin === 'playlist') {
+    const { loadFastRights } = await import('./fast/rights');
+    const fast = await loadFastRights(id, nowSec, RIGHTS_HORIZON_SEC);
+    if (fast.length) {
+      progs.push(...fast);
+      progs.sort((x, y) => new Date(x.starts_at as any).getTime() - new Date(y.starts_at as any).getTime());
+    }
+  }
   return {
     programmes: progs,
     rules: compileEdgeRules({

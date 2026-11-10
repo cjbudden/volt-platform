@@ -76,6 +76,11 @@ export async function assetsInUse(channelId: string): Promise<Map<string, Role>>
   }
   // the loop plays in gaps with or without idents (store.ts timelineFor)
   if (brand?.loopAssetId && !out.has(brand.loopAssetId)) out.set(brand.loopAssetId, 'loop');
+  // THE GEO REPLACEMENT (services/fast/rights.ts) stands in for a programme's
+  // segments one for one, so it is packaged like an ident: the channel's own
+  // segment length, broadcast loudness.
+  const geo = ads[0]?.policy?.geoAssetId;
+  if (typeof geo === 'string' && geo && !out.has(geo)) out.set(geo, 'ident');
   return out;
 }
 

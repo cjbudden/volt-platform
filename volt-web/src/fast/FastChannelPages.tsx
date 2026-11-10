@@ -24,7 +24,7 @@ import { WatermarkFields, wmDefaults, wmPatch, wmProblem, type WmForm } from '..
 import { GraphicsSettings, type GraphicsValue } from '../GraphicsSettings'
 import { gfx, type Assignment } from '../graphics/gfxApi'
 import { openLiveControl } from '../graphics/Graphics'
-import { fastApi, type FastChannelSettings, type RundownRow, type ChannelAds } from './fastApi'
+import { fastApi, type FastChannelSettings, type RundownRow, type ChannelAds, type FastRights } from './fastApi'
 import { signImage } from '../imageSigning'
 import { SourceFacts } from '../pages/vod/SourceFacts'
 import type { BrandMark } from '@volt/player'
@@ -207,6 +207,7 @@ export function FastSettingsView({ id, name: name0, s, hasGuide, onSaved }: {
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+        <FastGeoCard id={id} />
         <div className="card"><div className="card-h"><h3>Watermark</h3><span className="sub">the channel brand over the picture</span></div>
           <div className="card-b">
             <WatermarkFields value={wm} onChange={(p) => setWm(x => ({ ...x, ...p }))}
@@ -220,6 +221,119 @@ export function FastSettingsView({ id, name: name0, s, hasGuide, onSaved }: {
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button className="btn primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : dirty ? 'Save settings' : 'Saved'}</button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+//  WHERE THE CHANNEL CAN BE WATCHED (Settings). The channel's own geo, above
+//  every title's rights: a viewer outside it gets nothing from the channel.
+//  Each title's own rights are applied programme by programme on top of this,
+//  with the geo replacement chosen under Build > Brand & filler.
+// ============================================================================
+const parseCountries = (s: string) => [...new Set(s.split(/[\s,;]+/).map((x) => x.trim().toUpperCase()).filter((x) => /^[A-Z]{2}$/.test(x)))]
+
+export function FastGeoCard({ id }: { id: string }) {
+  const notify = useNotify()
+  const [saved, setSaved] = useState<{ mode: 'worldwide' | 'allow' | 'block'; countries: string[] } | null>(null)
+  const [mode, setMode] = useState<'worldwide' | 'allow' | 'block'>('worldwide')
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    fastApi.rights(id).then((r) => { setSaved(r.channelGeo); setMode(r.channelGeo.mode); setText(r.channelGeo.countries.join(', ')) }).catch(() => {})
+  }, [id])
+  if (!saved) return null
+  const countries = parseCountries(text)
+  const dirty = mode !== saved.mode || (mode !== 'worldwide' && countries.join(',') !== saved.countries.join(','))
+  const problem = mode === 'allow' && !countries.length ? 'Name at least one country.' : mode === 'block' && !countries.length ? 'Name the countries to block, or choose Worldwide.' : ''
+  const save = async () => {
+    setBusy(true)
+    try {
+      const r = await fastApi.saveGeo(id, { mode, countries })
+      setSaved(r as any); setText(r.countries.join(', '))
+      notify({ kind: 'ok', title: 'Where the channel can be watched is saved.', message: 'New plays follow it at once; the CDN takes up to a minute.' })
+    } catch (e: any) { notify({ kind: 'error', title: "Couldn't save where the channel can be watched.", message: e.message }) }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="card"><div className="card-h"><h3>Where it can be watched</h3><span className="sub">the whole channel, before each title's own rights</span></div>
+      <div className="card-b">
+        <div className="field"><label>Viewers</label>
+          <select className="inp" value={mode} onChange={(e) => setMode(e.target.value as any)}>
+            <option value="worldwide">Everywhere</option>
+            <option value="allow">Only in the countries listed</option>
+            <option value="block">Everywhere except the countries listed</option>
+          </select></div>
+        {mode !== 'worldwide' && (
+          <div className="field"><label>Countries</label>
+            <input className="inp" value={text} onChange={(e) => setText(e.target.value)} placeholder="AU, NZ" />
+            <div className="hintxt">Two-letter country codes, separated by commas{countries.length ? `: ${countries.join(', ')}` : ''}.</div></div>
+        )}
+        <div className="hintxt">A viewer outside this is refused the channel. Inside it, each programme still follows its title's own rights: viewers outside a title's territories get the channel's geo replacement for that programme (Build &gt; Brand &amp; filler).</div>
+        {problem && <Notice kind="warn" variant="compact" message={problem} />}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+          <button className="btn primary sm" disabled={busy || !dirty || !!problem} onClick={save}>{busy ? 'Saving…' : dirty ? 'Save' : 'Saved'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+//  GEO REPLACEMENT AND RIGHTS ON AIR (Build > Brand & filler). What a viewer
+//  outside a title's rights sees for that programme, and the programmes of the
+//  next two days whose titles cannot be seen everywhere (services/fast/rights.ts).
+// ============================================================================
+export function FastGeoReplacementCard({ channelId, fillers }: { channelId: string; fillers: FillerAsset[] }) {
+  const notify = useNotify()
+  const [r, setR] = useState<FastRights | null>(null)
+  const [busy, setBusy] = useState(false)
+  const load = () => fastApi.rights(channelId).then(setR).catch(() => {})
+  useEffect(() => { load() }, [channelId])
+  if (!r) return null
+  const pick = async (v: string) => {
+    setBusy(true)
+    try {
+      const x = await fastApi.saveFiller(channelId, { geoFillerId: v || null })
+      notify({ kind: 'ok', title: v ? 'Geo replacement saved.' : 'Geo replacement removed.',
+        message: v ? (x.prepared?.queued?.length ? 'It is being prepared for the channel\'s ladder (a few minutes); viewers outside a title\'s rights get it once it is ready.' : 'Viewers outside a title\'s rights get it within a minute.')
+          : 'Viewers outside a title\'s rights are now refused for that programme.' })
+      await load()
+    } catch (e: any) { notify({ kind: 'error', title: "Couldn't set the geo replacement.", message: e.message }) }
+    finally { setBusy(false) }
+  }
+  const when = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+  const value = r.geoReplacement?.fillerId ?? ''
+  return (
+    <div className="card">
+      <div className="card-h"><h3>Geo replacement</h3><span className="sub">what viewers outside a title's rights see</span></div>
+      <div className="card-b">
+        <div className="field"><label>Replace with</label>
+          <select className="inp" value={value} disabled={busy} onChange={(e) => pick(e.target.value)}>
+            <option value="">None: refuse those viewers for that programme</option>
+            {fillers.some((f) => f.kind === 'loop') && <optgroup label="Loops">{fillers.filter((f) => f.kind === 'loop').map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>}
+            {fillers.some((f) => f.kind === 'slate') && <optgroup label="Slates">{fillers.filter((f) => f.kind === 'slate').map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>}
+          </select>
+          <div className="hintxt">When a title on air is not cleared where a viewer is (its rights territories, its FAST rights or rights window, or the geo in its publishing rules), that viewer sees this for the length of the programme, then the channel again. Everyone else sees the programme. It is packaged for the channel's ladder like an ident.</div></div>
+        {r.items.length === 0
+          ? <div className="hintxt">Every title in the next two days can be seen everywhere the channel can.</div>
+          : (
+            <>
+              {r.enforcedAs === 'block' && <Notice kind="warn" variant="compact" message={`${r.items.length} programme${r.items.length === 1 ? '' : 's'} in the next two days ${r.items.length === 1 ? 'is' : 'are'} restricted. Without a geo replacement, viewers outside the rights are refused for ${r.items.length === 1 ? 'it' : 'them'}.`} />}
+              <div className="sec-label" style={{ marginTop: 10 }}>Restricted in the next two days</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {r.items.slice(0, 12).map((it) => (
+                  <div key={it.programmeId} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 'var(--fs-sm)' }}>
+                    <span className="mono" style={{ color: 'var(--faint)', minWidth: 92 }}>{when(it.startsAt)}</span>
+                    <span style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</span>
+                    <span style={{ color: 'var(--muted)', marginLeft: 'auto', whiteSpace: 'nowrap' }}>{it.allowed}</span>
+                  </div>
+                ))}
+                {r.items.length > 12 && <div className="hintxt">and {r.items.length - 12} more</div>}
+              </div>
+            </>
+          )}
       </div>
     </div>
   )

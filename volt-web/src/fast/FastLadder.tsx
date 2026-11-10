@@ -48,7 +48,7 @@ export function LadderField({ value, onChange, ladders }: { value: string; onCha
 }
 
 /**
- * On air > Ladder: what the channel is packaged to, how far along that is, and
+ * Overview > Ladder: what the channel is packaged to, how far along that is, and
  * a way to change it.
  */
 export function LadderCard({ channelId, ladder, ready, onChanged }: { channelId: string; ladder: FastLadder | null; ready: ReadinessRow[]; onChanged: () => void }) {
@@ -135,7 +135,7 @@ function ChannelLadderCard({ channelId }: { channelId: string }) {
     try {
       const r = await fastApi.setLadder(channelId, id)
       notify({ kind: 'ok', title: `The channel uses ${what ?? r.ladder?.groupName ?? 'the account default'}.`,
-        message: [r.prepared.queued.length ? `${r.prepared.queued.length} title(s) are being packaged to it.` : '', r.restartNeeded ? 'Restart the playout (On air) for viewers to get the new renditions.' : ''].filter(Boolean).join(' ') || undefined })
+        message: [r.prepared.queued.length ? `${r.prepared.queued.length} title(s) are being packaged to it.` : '', r.restartNeeded ? 'Restart the playout (the button at the top) for viewers to get the new renditions.' : ''].filter(Boolean).join(' ') || undefined })
       load()
     } catch (e: any) { notify({ kind: 'error', title: "Couldn't change the ladder.", message: e.message }) } finally { setBusy(false) }
   }

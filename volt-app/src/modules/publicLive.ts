@@ -520,6 +520,12 @@ publicLiveRouter.get('/live/:id/v/:key/:file', asyncHandler(async (req, res) => 
 publicLiveRouter.get('/channel/:id/v/:key/:file', asyncHandler(async (req, res) => {
   await serveVariant(req, res, 'channel', req.params.id, req.params.key, req.params.file);
 }));
+// A FAST CHANNEL behind the CDN: its playlists live at channel/<id>/fast/, so
+// the edge function rewrites a replaced viewer to /channel/<id>/v/<key>/fast/<file>
+// (services/fast/rights.ts). The same variant, read from the FAST output.
+publicLiveRouter.get('/channel/:id/v/:key/fast/:file', asyncHandler(async (req, res) => {
+  await serveVariant(req, res, 'channel', req.params.id, req.params.key, req.params.file);
+}));
 publicLiveRouter.get('/event/:id/v/:key/:file', asyncHandler(async (req, res) => {
   await serveVariant(req, res, 'event', req.params.id, req.params.key, req.params.file);
 }));
