@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.105.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Billing: Where your Volt provider bills through Volt, your plan fee, server time and any agreed charges or credits are gathered into one invoice per calendar month, issued on the 1st. Read this month so far and your invoices, with their lines, through the API (GET /api/billing), and download any invoice as CSV.
+
+### Internal
+
+- added · Billing: System Admin billing API: billing mode per deployment (VOLT_BILLING), billing handling and tax per account, the append-only charges ledger, the customer price list, manual charges and credits, the monthly close and marking contract invoices paid. New suite billing-ledger.
+
 ## 0.104.0 (2026-11-11)
 
 ### Product (in customer release notes)
