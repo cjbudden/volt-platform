@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.108.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Billing: Add-ons can be turned on, moved between packs and turned off through the API (GET, PUT and DELETE /api/billing/addons). Turning one on or moving to a bigger pack charges the full monthly price for the month; a smaller pack or off is at once with no refund; the included quantity starts again on the 1st. Add-on charges appear on your monthly invoice.
+
+### Internal
+
+- added: System Admin add-on catalogue API (add-ons with an included quantity, packs, licence link), monthly add-on renewals in the billing pass, allowance counting with a cached read, and the billing-addons check suite.
+
 ## 0.107.0 (2026-11-11)
 
 ### Product (in customer release notes)
