@@ -2291,7 +2291,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-11 - Publishing policies 2b-5: on-demand ad sessions under enforce (build queue P2-2e; vNEXT)
+## 2026-11-11 - Publishing policies 2b-5: on-demand ad sessions under enforce (build queue P2-2e; v0.94.0)
 
 What: under `VOLT_EDGE_TOKENS=enforce` a stitched ad session's playlists named the title's segments, and each ad's and house spot's (a conditioned creative is an asset under `/clips/vod/` or `/vod/` too), by plain address, so on-demand ads did not play under enforce. A stitched session belongs to one viewer, so its addresses now carry that viewer's tokens, one per folder.
 
