@@ -107,7 +107,7 @@ Published items take up a change within about a minute: a new or changed rule, a
 
 ### Lock a field
 
-![The Protection section of the account default: DRM, playback token lifetime, WAF profile, allowed referrer domains and concurrent streams, with DRM's padlock closed](/img/screens/publishing-policy-locks.png)
+![The Protection section of the account default: DRM, playback token lifetime, WAF profile, allowed referrer domains, concurrent streams and token-free playback, with DRM's padlock closed](/img/screens/publishing-policy-locks.png)
 
 1. On the account default, a content type or a stream, choose the padlock at the end of a field's row. It closes and the line at the top counts the fields locked here.
 2. Choose **Save publishing rule**.
@@ -149,6 +149,17 @@ Turning DRM on or off changes the files, so published titles must be packaged ag
 2. A box says how many published titles will be packaged again. Choose **Package again and save**, or **Cancel** to leave the rule as it was.
 
 Titles keep their current protection until they have been packaged again.
+
+### Play without tokens (token-free playback)
+
+Volt hands viewers on-demand addresses with a play token in them, and where your operator enforces tokens an address without one is refused. For content anyone may watch, such as free trailers or public service clips, a token adds nothing: **Token-free playback** in **Protection** lets those titles play by their plain address, so it can be shared, embedded or cached anywhere.
+
+1. On the account default, a content type, a stream or a metadata rule, tick **Play by plain address, without a play token** under **Token-free playback**.
+2. Check **Before you save** and choose **Save publishing rule**.
+
+It is only for content with nothing that depends on who or where the viewer is. **Before you save** blocks it, saying why, when the policy or a title it governs has any of these: **Geo access** or access rules limited to some countries, a rights profile that limits territories or apps, paid or entitled **Access**, a paywall or a premium rule, a sign-in or viewer group rule, a collection that asks for a sign-in or a package, **DRM**, **Allowed referrer domains** or a **Concurrent streams** limit. Your account's own country limit (Account settings) stops it too.
+
+A title that gains one of these later, for example from a rights profile or a change on the item itself, plays with tokens again within about a minute: the setting is ignored for it rather than letting anyone in. Token-free titles stop playing by their plain address when they stop being available (window ended, withdrawn, archived), within about a minute.
 
 ### What a change does to published titles
 
@@ -295,11 +306,13 @@ A rung can also say how content is protected, what else may be done with it and 
 
 | Section | Fields |
 |---|---|
-| `protection` | `drm` (on or off), `tokenLifetimeSec` (how long a playback token lasts; left out, the platform default), `waf` (`off`, `standard`: VPN and proxy flagged, or `rights_managed`), `referrers` (domains a player may be embedded on), `concurrentStreams` |
+| `protection` | `drm` (on or off), `tokenLifetimeSec` (how long a playback token lasts; left out, the platform default), `waf` (`off`, `standard`: VPN and proxy flagged, or `rights_managed`), `referrers` (domains a player may be embedded on), `concurrentStreams`, `tokenFree` (play by plain address, without a play token) |
 | `distribution` | `mp4Download`, `shareLinks`, `fastEligible`, `sitemap` (listed in the sitemap and schema.org data) |
 | `retention` | `keep` (`forever` or `days`), `days`, `anchor` (counted from `ingest`, `available_from` or `available_until`), `legalHoldAllowed`, `archiveTier` |
 
-`tokenLifetimeSec`, `referrers`, `mp4Download` and `shareLinks` apply where titles are played and handed out: the edge token's lifetime, a `403` with `code: "referrer"` from the [play gate](../api/play-gate.md) for a page on another site, a `403` with `code: "mp4_off"` from `POST /api/downloads/vod/{id}/link` and the share link hi-res download, and a `403` with `code: "sharing_off"` from `POST /api/share-links` (a link made before answers `410` with `reason: "sharing_off"`). The rest are stored and resolved now and apply in later steps: concurrent streams, FAST eligibility, the sitemap and schema.org, DRM packaging when a title is encoded, the WAF profiles, and the retention sweep.
+`tokenLifetimeSec`, `referrers`, `tokenFree`, `mp4Download` and `shareLinks` apply where titles are played and handed out: the edge token's lifetime, plain addresses from the [play gate](../api/play-gate.md#token-free-titles) for a token-free title, a `403` with `code: "referrer"` from the [play gate](../api/play-gate.md) for a page on another site, a `403` with `code: "mp4_off"` from `POST /api/downloads/vod/{id}/link` and the share link hi-res download, and a `403` with `code: "sharing_off"` from `POST /api/share-links` (a link made before answers `410` with `reason: "sharing_off"`). The rest are stored and resolved now and apply in later steps: concurrent streams, FAST eligibility, the sitemap and schema.org, DRM packaging when a title is encoded, the WAF profiles, and the retention sweep.
+
+**Token-free.** `tokenFree: true` is refused with `422` and `code: policy_conflict` (conflict `token_free_conditions`, naming what stops it) when the policy has a geo or access-rule country limit, paid or entitled access, a paywall, a premium, members or viewer group rule, DRM, referrers or a concurrent streams limit, and per title in the impact when a title's rights limit territories or apps or a collection asks for a sign-in or a package. A title stamped with it that gains one of these plays with tokens: `tokenFree` is ignored for it.
 
 **Locks.** `lockedFields` lists the fields the rungs beneath may not change, by name (`geo`, or a section field such as `protection.drm`; a whole section locks all its fields). A rung that tries to change a locked field is refused with the lock and its rung named, and what an item says about a locked field is ignored; `resolve` lists it under `ignored`.
 

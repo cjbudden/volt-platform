@@ -138,7 +138,7 @@ const check = (m: string, got: unknown, want: unknown) => {
     await query(`UPDATE vod_assets SET available_until = now() + interval '2 hours' WHERE id = $1`, [id]);
     await P.refreshPublicStatus(id); invalidateTag(`asset:${id}`);
     const c2 = claims((await SL.openShare(link.token, { geo: 'AU' }) as any).view.hls);
-    const end = Math.floor((await one<any>(`SELECT extract(epoch FROM available_until)::bigint AS e FROM vod_assets WHERE id = $1`, [id])).e);
+    const end = Math.floor((await one<any>(`SELECT floor(extract(epoch FROM available_until))::bigint AS e FROM vod_assets WHERE id = $1`, [id])).e);
     check('a title whose window ends before the link: the token ends with the window', c2.e, end);
     const lng = await SL.createShareLink({ accountId: a, createdBy: u, resourceKind: 'vod', resourceId: id, ttlSec: 3600 });
     const c3 = claims((await SL.openShare(lng.token, { geo: 'AU' }) as any).view.hls);
@@ -166,8 +166,10 @@ const check = (m: string, got: unknown, want: unknown) => {
     const compose = readFileSync(join(__dirname, '../../deploy/staging/docker-compose.yml'), 'utf8');
     check('staging compose: the edge is told the mode', /edge-token\.js/.test(compose) && (compose.match(/VOLT_EDGE_TOKENS: \$\{VOLT_EDGE_TOKENS:-issue\}/g) ?? []).length, 2);
     const cfSrc = readFileSync(join(__dirname, '../../deploy/edge/vod-plain-refuse.js'), 'utf8');
-    const cf = new Function(`${cfSrc}\nreturn handler;`)();
-    const out = cf({ request: { uri: `/vod/${id}/master.m3u8`, headers: {} } });
+    // P2-2c: the function reads the store for token-free titles; an empty store refuses every plain path.
+    (globalThis as any).__cfe = { kvs: () => ({ async get() { throw new Error('key not found'); } }) };
+    const cf = new Function(`${cfSrc.replace("import cf from 'cloudfront';", 'const cf = globalThis.__cfe;')}\nreturn handler;`)();
+    const out = await cf({ request: { uri: `/vod/${id}/master.m3u8`, headers: {} } });
     check('CloudFront refuse function: 403, the same words, not cached, inside 10 KB', [out.statusCode, out.body, out.headers['cache-control'].value, Buffer.byteLength(cfSrc) < 10240], [403, 'Not available', 'no-store', true]);
   } catch (e: any) {
     console.log('FAIL unexpected error -- ' + (e?.stack ?? e)); fail++;

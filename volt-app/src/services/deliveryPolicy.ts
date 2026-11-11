@@ -24,6 +24,12 @@
 //
 //  Concurrent streams, FAST eligibility and the sitemap and schema.org
 //  exposure are P3-4c.
+//
+//    protection.tokenFree         plain addresses for content no viewer
+//                                 condition applies to (build queue P2-2c):
+//                                 tokenFreeBlockers() says what stops it,
+//                                 tokenFreeNow() whether a title plays by a
+//                                 plain address right now
 // ============================================================================
 import { BASELINE, resolveForAsset } from './publishingRules';
 import { vodAvailabilityRow } from './viewerPath';
@@ -35,6 +41,8 @@ export interface DeliveryPolicy {
   referrers: string[];
   mp4Download: boolean;
   shareLinks: boolean;
+  /** What the stamp asks for; whether it applies is tokenFreeNow()'s answer. */
+  tokenFree: boolean;
 }
 
 /** The delivery fields of a stamp (or of resolved settings), with the baseline under anything missing. */
@@ -47,6 +55,7 @@ export function deliveryPolicyOf(settings: any): DeliveryPolicy {
     referrers: Array.isArray(p.referrers) ? p.referrers.map((r: unknown) => String(r).trim().toLowerCase()).filter(Boolean) : [],
     mp4Download: typeof d.mp4Download === 'boolean' ? d.mp4Download : base.distribution?.mp4Download !== false,
     shareLinks: typeof d.shareLinks === 'boolean' ? d.shareLinks : base.distribution?.shareLinks !== false,
+    tokenFree: p.tokenFree === true,
   };
 }
 
@@ -97,4 +106,84 @@ export function referrerRefusal(referrers: string[], req: { origin?: string | nu
   const host = hostNameOf(req.origin) ?? hostNameOf(req.referrer);
   if (!host) return req.webApp ? 'This title can only be played on its approved sites.' : null;
   return referrers.some((d) => domainMatches(d, host)) ? null : `This title cannot be played on ${host}.`;
+}
+
+// ---------------------------------------------------------------------------
+//  TOKEN-FREE PLAYBACK (build queue P2-2c)
+// ---------------------------------------------------------------------------
+/**
+ * A plain address plays for whoever has it: nothing checks the viewer. So a
+ * title may only be token-free when nothing about it depends on who or where
+ * the viewer is, or on how it is played. Each of these is a reason it cannot
+ * be (the codes are stable; the words are for people):
+ *
+ *   geo        the policy's geo, or an access rule, limits countries
+ *   account    the account's own geo limit (Account settings)
+ *   rights     the rights profile limits territories or apps
+ *   paywall    paid or entitled access, a paywall, or a premium rule
+ *   sign_in    an access rule or a collection asks viewers to sign in
+ *   collection a collection the title is in asks for a package or a sign-in
+ *   drm        DRM packaging (a licence per viewer)
+ *   referrers  allowed referrer domains (only the play gate can check them)
+ *   concurrent a concurrent streams limit (only the play gate can count)
+ *
+ * PURE. `settings` is a stamp or resolved settings; the rest is optional so a
+ * rule being saved (no title, no account limit known) is checked on its own.
+ */
+export interface TokenFreeBlocker { code: 'geo' | 'account' | 'rights' | 'paywall' | 'sign_in' | 'collection' | 'drm' | 'referrers' | 'concurrent'; words: string }
+export function tokenFreeBlockers(settings: any, o: {
+  rights?: { territoryMode?: string | null; appMode?: string | null } | null;
+  accountGeo?: { mode: string; countries: string[] } | null;
+  collectionAccess?: { g?: { levels: { rules?: { access: string }[] }[] }[] } | null;
+} = {}): TokenFreeBlocker[] {
+  const s = settings ?? {}, p = s.protection ?? {};
+  const out: TokenFreeBlocker[] = [];
+  const add = (code: TokenFreeBlocker['code'], words: string) => { if (!out.some((b) => b.code === code)) out.push({ code, words }); };
+  const rules: any[] = Array.isArray(s.accessRules) ? s.accessRules : [];
+  const worldIn = (r: any) => r?.if?.geo === 'in' && (r.if.countries ?? []).length > 0 && (r.if.countries ?? []).every((c: string) => String(c).toUpperCase() === 'WORLD');
+  if ((s.geo?.mode === 'allow' || s.geo?.mode === 'block') || rules.some((r) => !worldIn(r))) add('geo', 'it is limited to some countries');
+  if (o.accountGeo && (o.accountGeo.mode === 'allow' || o.accountGeo.mode === 'block')) add('account', 'the account is limited to some countries');
+  if (o.rights && ((o.rights.territoryMode && o.rights.territoryMode !== 'worldwide') || (o.rights.appMode && o.rights.appMode !== 'all'))) add('rights', 'its rights limit territories or apps');
+  if (s.access === 'paid' || s.access === 'entitled' || (s.paywall && typeof s.paywall === 'object') || rules.some((r) => r?.then?.access === 'premium')) add('paywall', 'it needs a payment or an entitlement');
+  if (rules.some((r) => r?.then?.access === 'members' || (r?.then?.userGroups ?? []).length)) add('sign_in', 'viewers must sign in');
+  const levels = (o.collectionAccess?.g ?? []).flatMap((ch) => ch.levels ?? []);
+  if (levels.some((l) => (l.rules ?? []).some((r) => r.access !== 'free'))) add('collection', 'a collection it is in asks for a sign-in or a package');
+  if (p.drm === true) add('drm', 'DRM is on');
+  if (Array.isArray(p.referrers) && p.referrers.length) add('referrers', 'it may only be embedded on some sites');
+  if (p.concurrentStreams != null && Number(p.concurrentStreams) > 0) add('concurrent', 'it has a concurrent streams limit');
+  return out;
+}
+
+/**
+ * Does this on-demand title play by its plain address right now? Only an
+ * Available title whose stamp asks for it and that no blocker applies to.
+ * `until`: when that stops on its own (the end of its window), so the edge
+ * can stop letting plain requests through on the exact second. Everything it
+ * reads is cached (the availability row, the rights profile, the account's
+ * geo), so the API's own plain-path check makes no database read when warm.
+ */
+export async function tokenFreeNow(assetId: string, o: { accountId?: string | null; now?: Date } = {}):
+  Promise<{ open: boolean; until: Date | null; blockers: TokenFreeBlocker[] }> {
+  const no = { open: false, until: null, blockers: [] as TokenFreeBlocker[] };
+  if (!/^[0-9a-f-]{36}$/i.test(assetId)) return no;
+  const row = await vodAvailabilityRow(assetId);
+  if (!row || row.availability?.protection?.tokenFree !== true) return no;
+  const now = o.now ?? new Date();
+  const { publicDecision } = await import('./publicStatus');
+  const ps = await publicDecision(assetId, now);
+  if (!ps || ps.status !== 'available') return no;
+  const { rightsForAsset } = await import('./rightsProfiles');
+  const { accountGeo } = await import('./geoAccess');
+  const acct = o.accountId ?? await accountOf(assetId);
+  const blockers = tokenFreeBlockers(row.availability, {
+    rights: await rightsForAsset(row), accountGeo: acct ? await accountGeo(acct) : null, collectionAccess: row.collection_access ?? null });
+  return { open: !blockers.length, until: ps.effectiveUntil ?? null, blockers };
+}
+
+/** The account an asset belongs to, cached (an asset never changes account). */
+async function accountOf(assetId: string): Promise<string | null> {
+  const { cached } = await import('../scale/cache');
+  const { one } = await import('../db');
+  return cached<string | null>(`vodacct:${assetId}`, { ttlSec: 3600, tags: [`asset:${assetId}`] },
+    async () => (await one<any>(`SELECT account_id FROM vod_assets WHERE id = $1`, [assetId]))?.account_id ?? null);
 }

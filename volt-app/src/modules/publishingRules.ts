@@ -104,6 +104,7 @@ export const settingsSchema = z.object({
     waf: z.enum(['off', 'standard', 'rights_managed']).optional(),
     referrers: z.array(z.string().min(1).max(253).regex(/^[a-z0-9.*-]+$/i, 'a domain such as example.com or *.example.com')).max(50).optional(),
     concurrentStreams: z.number().int().min(1).max(100).nullable().optional(),
+    tokenFree: z.boolean().optional(),
   }).strict().optional(),
   distribution: z.object({
     mp4Download: z.boolean().optional(),

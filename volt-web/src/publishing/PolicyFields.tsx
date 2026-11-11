@@ -26,7 +26,7 @@ export const SECTIONS: { key: 'lifecycle' | 'access' | 'protection' | 'distribut
   { key: 'access', label: 'Access', hint: 'Who can watch, where, and whether they pay.',
     fields: ['accessRules', 'geo', 'access', 'paywall'] },
   { key: 'protection', label: 'Protection', hint: 'How playback is protected. DRM changes the files, so turning it on or off for published titles asks first.',
-    fields: ['protection.drm', 'protection.tokenLifetimeSec', 'protection.waf', 'protection.referrers', 'protection.concurrentStreams'] },
+    fields: ['protection.drm', 'protection.tokenLifetimeSec', 'protection.waf', 'protection.referrers', 'protection.concurrentStreams', 'protection.tokenFree'] },
   { key: 'distribution', label: 'Distribution', hint: 'Where it is published and what else may be done with it.',
     fields: ['targets', 'distribution.mp4Download', 'distribution.shareLinks', 'distribution.fastEligible', 'distribution.sitemap', 'archive'] },
   { key: 'retention', label: 'Retention', hint: 'How long a title is kept. Stored now; the sweep that deletes comes later.',
@@ -35,7 +35,7 @@ export const SECTIONS: { key: 'lifecycle' | 'access' | 'protection' | 'distribut
 
 export const SECTION_FIELD_LABEL: Record<string, string> = {
   'protection.drm': 'DRM', 'protection.tokenLifetimeSec': 'Playback token lifetime', 'protection.waf': 'WAF profile',
-  'protection.referrers': 'Allowed referrer domains', 'protection.concurrentStreams': 'Concurrent streams',
+  'protection.referrers': 'Allowed referrer domains', 'protection.concurrentStreams': 'Concurrent streams', 'protection.tokenFree': 'Token-free playback',
   'distribution.mp4Download': 'MP4 download', 'distribution.shareLinks': 'Share links', 'distribution.fastEligible': 'FAST eligible',
   'distribution.sitemap': 'Sitemap and schema.org', 'retention.keep': 'Retention', 'retention.days': 'Retention days',
   'retention.anchor': 'Retention counts from', 'retention.legalHoldAllowed': 'Legal hold allowed', 'retention.archiveTier': 'Archive storage tier',
@@ -43,7 +43,7 @@ export const SECTION_FIELD_LABEL: Record<string, string> = {
 
 /** The platform's own values beneath the account default (services/publishingRules.ts BASELINE). */
 export const BASELINE_SECTIONS = {
-  protection: { drm: false, tokenLifetimeSec: null, waf: 'off', referrers: [], concurrentStreams: null },
+  protection: { drm: false, tokenLifetimeSec: null, waf: 'off', referrers: [], concurrentStreams: null, tokenFree: false },
   distribution: { mp4Download: true, shareLinks: true, fastEligible: true, sitemap: true },
   retention: { keep: 'forever', days: null, anchor: 'available_until', legalHoldAllowed: true, archiveTier: null },
 } as const
@@ -96,6 +96,7 @@ export function describeSection(id: string, v: any): string {
     case 'protection.waf': return (WAF_LABEL as any)[v] ?? v
     case 'protection.referrers': return v?.length ? v.join(', ') : 'any site'
     case 'protection.concurrentStreams': return v == null ? 'no limit' : `${v} at once`
+    case 'protection.tokenFree': return v ? 'plain addresses' : 'play tokens'
     case 'retention.keep': return v === 'days' ? 'for a number of days' : 'forever'
     case 'retention.days': return v == null ? 'not set' : `${v} day${v === 1 ? '' : 's'}`
     case 'retention.anchor': return (ANCHOR_LABEL as any)[v] ?? v
@@ -136,6 +137,13 @@ export function SectionFieldControl({ id, value, onChange }: { id: string; value
           <input {...inp} type="number" min={1} max={100} aria-label="Streams at once" placeholder="no limit" style={{ ...inp.style, width: 100 }}
             value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Math.min(100, Math.max(1, Math.round(Number(e.target.value)))))} />
           <span style={{ color: 'var(--muted)' }}>streams one viewer may play at once; empty for no limit</span>
+        </div>)
+    // Build queue P2-2c: refused by the server when a viewer condition applies (shown under Before you save).
+    case 'protection.tokenFree':
+      return (
+        <div style={{ display: 'grid', gap: 4 }}>
+          {check('Play by plain address, without a play token')}
+          <span style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>Only for content anyone may watch: not with geo, rights, DRM, a paywall, sign-in, referrer domains or a streams limit.</span>
         </div>)
     case 'distribution.mp4Download': return check('Allow MP4 download')
     case 'distribution.shareLinks': return check('Allow share links')

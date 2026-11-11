@@ -24,6 +24,7 @@ import {
 } from './publishingRules';
 import { effectiveRights, cachedProfile, type EffectiveRights } from './rightsProfiles';
 import { rungOf, loadRules, firstMatches, type MetadataRule } from './publishingMetadataRules';
+import { tokenFreeBlockers } from './deliveryPolicy';
 
 export type PresetKey = 'open' | 'members' | 'geo_locked' | 'premium' | 'rights_managed';
 export interface Preset { key: PresetKey; name: string; summary: string; settings: RuleSettings }
@@ -81,7 +82,7 @@ function retainUntil(s: Settings, t: { createdAt?: Date | null }, w: { from: Dat
  */
 export function policyConflicts(s: Settings, o: {
   presetKey?: string | null;
-  title?: { rights?: EffectiveRights | null; availableFrom?: Date | null; availableUntil?: Date | null; createdAt?: Date | null };
+  title?: { rights?: EffectiveRights | null; availableFrom?: Date | null; availableUntil?: Date | null; createdAt?: Date | null; collectionAccess?: any };
 } = {}): Conflict[] {
   const out: Conflict[] = [];
   const p = s.protection ?? BASELINE.protection, d = s.distribution ?? BASELINE.distribution;
@@ -99,6 +100,15 @@ export function policyConflicts(s: Settings, o: {
     out.push({ code: 'geo_empty', level: 'warn', fields: ['geo'], message: 'Only in these countries, with no country chosen: nobody can watch.' });
   if (s.availableFrom?.mode === 'at' && s.expire?.mode === 'at' && new Date(s.expire.at) <= new Date(s.availableFrom.at))
     out.push({ code: 'empty_window', level: 'block', fields: ['availableFrom', 'expire'], message: 'Expires before it becomes available: the window is empty.' });
+  // TOKEN-FREE PLAYBACK (build queue P2-2c): a plain address plays for anyone
+  // who has it, so it is refused wherever a condition depends on the viewer.
+  // With a title, its rights and collections count too.
+  if ((p as any).tokenFree === true) {
+    const why = tokenFreeBlockers(s, { rights: o.title?.rights ?? null, collectionAccess: o.title?.collectionAccess ?? null });
+    if (why.length)
+      out.push({ code: 'token_free_conditions', level: 'block', fields: ['protection.tokenFree', ...new Set(why.map((b) => TOKEN_FREE_FIELD[b.code]).filter(Boolean))],
+        message: `Token-free playback is on, but ${why.map((b) => b.words).join(', ')}: a plain address would let anyone play it. Turn token-free off, or remove ${why.length === 1 ? 'that condition' : 'those conditions'}.` });
+  }
   const rightsManaged = o.presetKey === 'rights_managed' || p.waf === 'rights_managed';
   const w = windowOf(s, o.title ?? {});
   if (o.title) {
@@ -127,6 +137,11 @@ export function policyConflicts(s: Settings, o: {
   return out;
 }
 
+/** The field behind each token-free blocker, for the editor to outline. */
+const TOKEN_FREE_FIELD: Record<string, string> = {
+  geo: 'geo', paywall: 'access', sign_in: 'accessRules', drm: 'protection.drm', referrers: 'protection.referrers', concurrent: 'protection.concurrentStreams', rights: '', account: '', collection: '',
+};
+
 /** PURE. A rung changing fields a rung above it has locked: one block per field. */
 export function lockConflicts(settings: RuleSettings, rung: Rung, locks: Record<string, Rung>): Conflict[] {
   const out: Conflict[] = [];
@@ -153,7 +168,7 @@ const FIELD_LABELS: Record<string, string> = {
   targets: 'Publish to', autoPublish: 'Auto-publish', availableFrom: 'Available from', expire: 'Expires', geo: 'Geo access', access: 'Access',
   paywall: 'Paywall', gate: 'Publish gate', accessRules: 'Access rules', archive: 'Archive copies',
   'protection.drm': 'DRM', 'protection.tokenLifetimeSec': 'Playback token lifetime', 'protection.waf': 'WAF profile', 'protection.referrers': 'Allowed referrer domains',
-  'protection.concurrentStreams': 'Concurrent streams', 'distribution.mp4Download': 'MP4 download', 'distribution.shareLinks': 'Share links',
+  'protection.concurrentStreams': 'Concurrent streams', 'protection.tokenFree': 'Token-free playback', 'distribution.mp4Download': 'MP4 download', 'distribution.shareLinks': 'Share links',
   'distribution.fastEligible': 'FAST eligible', 'distribution.sitemap': 'Sitemap and schema.org', 'retention.keep': 'Retention', 'retention.days': 'Retention days',
   'retention.anchor': 'Retention counts from', 'retention.legalHoldAllowed': 'Legal hold allowed', 'retention.archiveTier': 'Archive storage tier',
 };
@@ -249,7 +264,7 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
   const titles = await query<any>(
     `SELECT v.id, v.title, v.schema_id, v.channel_id, v.event_id, v.availability_override, v.availability_state, v.available_from, v.available_until,
             v.availability->>'publishedAt' AS published_at,
-            v.created_at, v.rights_profile_id, v.rights_narrow, v.first_aired_at
+            v.created_at, v.rights_profile_id, v.rights_narrow, v.first_aired_at, v.collection_access
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
@@ -298,8 +313,8 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
     // rule, not once per title, so only what the title's dates and rights add
     // is counted here.
     const own = new Set(policyConflicts(now.settings, { presetKey: preset }).map((c) => c.code));
-    const before = new Set(policyConflicts(was.settings, { presetKey: presetOf(was), title: { rights, availableFrom: t.available_from, availableUntil: t.available_until, createdAt: t.created_at } }).map((c) => c.code));
-    for (const c of policyConflicts(now.settings, { presetKey: preset, title: { rights, availableFrom: t.available_from, availableUntil: t.available_until, createdAt: t.created_at } })) {
+    const before = new Set(policyConflicts(was.settings, { presetKey: presetOf(was), title: { rights, availableFrom: t.available_from, availableUntil: t.available_until, createdAt: t.created_at, collectionAccess: t.collection_access } }).map((c) => c.code));
+    for (const c of policyConflicts(now.settings, { presetKey: preset, title: { rights, availableFrom: t.available_from, availableUntil: t.available_until, createdAt: t.created_at, collectionAccess: t.collection_access } })) {
       if (before.has(c.code) || own.has(c.code)) continue;
       tally(c.level === 'block' ? impact.blocks : impact.warnings, c, t);
     }

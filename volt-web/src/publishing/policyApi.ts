@@ -6,7 +6,7 @@ import { apiRequest as req, ApiError, type RuleSettings, type RuleScope, type Ru
 
 /** The three sections whose fields resolve one by one (services/publishingRules.ts SECTION_FIELDS). */
 export interface PolicySections {
-  protection?: { drm?: boolean; tokenLifetimeSec?: number | null; waf?: 'off' | 'standard' | 'rights_managed'; referrers?: string[]; concurrentStreams?: number | null }
+  protection?: { drm?: boolean; tokenLifetimeSec?: number | null; waf?: 'off' | 'standard' | 'rights_managed'; referrers?: string[]; concurrentStreams?: number | null; tokenFree?: boolean }
   distribution?: { mp4Download?: boolean; shareLinks?: boolean; fastEligible?: boolean; sitemap?: boolean }
   retention?: { keep?: 'forever' | 'days'; days?: number | null; anchor?: 'ingest' | 'available_from' | 'available_until'; legalHoldAllowed?: boolean; archiveTier?: 'infrequent' | 'glacier' | null }
 }

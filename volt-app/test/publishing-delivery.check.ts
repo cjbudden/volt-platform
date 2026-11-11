@@ -33,10 +33,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // ---------------------------------------------------------------- pure
   check('a stamp with no sections: the baseline (platform lifetime, any site, MP4 and sharing allowed)',
-    D.deliveryPolicyOf({ geo: { mode: 'worldwide' } }), { tokenLifetimeSec: null, referrers: [], mp4Download: true, shareLinks: true });
+    D.deliveryPolicyOf({ geo: { mode: 'worldwide' } }), { tokenLifetimeSec: null, referrers: [], mp4Download: true, shareLinks: true, tokenFree: false });
   check('a stamp with sections: read as written',
     D.deliveryPolicyOf({ protection: { tokenLifetimeSec: 600, referrers: ['Example.com '] }, distribution: { mp4Download: false, shareLinks: false } }),
-    { tokenLifetimeSec: 600, referrers: ['example.com'], mp4Download: false, shareLinks: false });
+    { tokenLifetimeSec: 600, referrers: ['example.com'], mp4Download: false, shareLinks: false, tokenFree: false });
   check('no stamp at all: the baseline', D.deliveryPolicyOf(null).mp4Download, true);
   check('domains: exact, wildcard covers the bare name and names under it, not look-alikes',
     [D.domainMatches('example.com', 'example.com'), D.domainMatches('example.com', 'www.example.com'), D.domainMatches('*.partner.tv', 'partner.tv'),

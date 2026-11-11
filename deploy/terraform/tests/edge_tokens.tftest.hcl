@@ -52,8 +52,13 @@ run "enforce_refuses_plain_paths" {
     condition     = length(aws_cloudfront_function.vod_plain_refuse) == 1 && length(aws_cloudfront_function.vod_token) == 1
     error_message = "enforce needs the token function and the refuse function"
   }
+  # Token-free titles (build queue P2-2c): the refuse function reads "f:<id>" from the store.
   assert {
-    condition = [for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern if contains(["/vod/*", "/clips/vod/*"], b.path_pattern)] == ["/vod/*", "/clips/vod/*"]
+    condition     = length(aws_cloudfront_function.vod_plain_refuse[0].key_value_store_associations) == 1
+    error_message = "the refuse function needs the store to let token-free titles through"
+  }
+  assert {
+    condition     = [for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern if contains(["/vod/*", "/clips/vod/*"], b.path_pattern)] == ["/vod/*", "/clips/vod/*"]
     error_message = "enforce should add the two plain behaviours"
   }
   assert {

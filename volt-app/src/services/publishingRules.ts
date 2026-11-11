@@ -81,6 +81,13 @@ export interface RuleSettings {
     referrers?: string[];
     /** Streams one viewer may play at once; null: no limit. */
     concurrentStreams?: number | null;
+    /** TOKEN-FREE PLAYBACK (build queue P2-2c): the play gate hands out the
+     *  title's plain addresses and the edge lets them through even when play
+     *  tokens are enforced. Only for content with no per-viewer condition: a
+     *  rule that turns it on where geo, rights, DRM, a paywall or sign-in
+     *  apply cannot be saved, and a title stamped with it that gains one of
+     *  them plays with tokens as before (services/deliveryPolicy.ts). */
+    tokenFree?: boolean;
   };
   /** DISTRIBUTION (P3): what else may be done with a published title. */
   distribution?: {
@@ -108,7 +115,7 @@ export const RULE_KEYS: RuleKey[] = ['targets', 'autoPublish', 'availableFrom', 
 export const SECTION_KEYS = ['protection', 'distribution', 'retention'] as const;
 export type SectionKey = typeof SECTION_KEYS[number];
 export const SECTION_FIELDS: Record<SectionKey, string[]> = {
-  protection: ['drm', 'tokenLifetimeSec', 'waf', 'referrers', 'concurrentStreams'],
+  protection: ['drm', 'tokenLifetimeSec', 'waf', 'referrers', 'concurrentStreams', 'tokenFree'],
   distribution: ['mp4Download', 'shareLinks', 'fastEligible', 'sitemap'],
   retention: ['keep', 'days', 'anchor', 'legalHoldAllowed', 'archiveTier'],
 };
@@ -139,7 +146,7 @@ export const BASELINE: Required<Omit<RuleSettings, 'paywall'>> & { paywall: Rule
   accessRules: [],
   archive: { copies: [], offPeak: null },
   // Today's behaviour, stated: nothing protected, everything allowed, kept forever.
-  protection: { drm: false, tokenLifetimeSec: null, waf: 'off', referrers: [], concurrentStreams: null },
+  protection: { drm: false, tokenLifetimeSec: null, waf: 'off', referrers: [], concurrentStreams: null, tokenFree: false },
   distribution: { mp4Download: true, shareLinks: true, fastEligible: true, sitemap: true },
   retention: { keep: 'forever', days: null, anchor: 'available_until', legalHoldAllowed: true, archiveTier: null },
 };

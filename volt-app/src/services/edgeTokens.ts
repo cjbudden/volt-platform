@@ -50,6 +50,15 @@
 //  queue P2-2b). The API checks /t/<token>/ paths itself too
 //  (tokenPathMiddleware), so a single Mac with no edge in front, and the ALB's
 //  /clips/* route on AWS, honour the same tokens.
+//
+//  TOKEN-FREE TITLES (build queue P2-2c): a title whose publishing rule asks
+//  for token-free playback, that no viewer condition applies to, plays by its
+//  plain address under enforce too. The control plane keeps "f:<asset id>" in
+//  the edge store for each such title while it is Available (the value: when
+//  that ends, epoch seconds, or 0 for no end), and the three plain-path checks
+//  (CloudFront's vod-plain-refuse.js, the staging njs, the API) let a plain
+//  /vod/<id>/ or /clips/vod/<id>/ request through when the key is there and
+//  not past. Everything else under enforce is refused as before.
 // ============================================================================
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { query } from '../db';
@@ -63,6 +72,26 @@ export interface EdgeClaims { a: string; p: string; c: string; k: PolicyClass; d
 /** Where the edge reads the key ("k:pt") and the revocations ("r:<asset id>"). */
 export const TOKEN_KEY = 'k:pt';
 export const revocationKey = (assetId: string) => `r:${assetId}`;
+/** A token-free title's key in the edge store (P2-2c): value "<until epoch s>" or "0". */
+export const openKey = (assetId: string) => `f:${assetId}`;
+
+/** The asset id of a plain on-demand path (/vod/<id>/... or /clips/vod/<id>/...), or null. */
+export function plainAssetId(uri: string): string | null {
+  const m = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//.exec(uri);
+  return m && uri.indexOf('/../') < 0 ? m[1].toLowerCase() : null;
+}
+
+/**
+ * THE PLAIN-PATH CHECK, in TypeScript: the reference the CloudFront function
+ * and the staging njs are tested against. "ok" lets the request through,
+ * "403" refuses it. `open`: the value of "f:<id>" for the path's asset.
+ */
+export function plainPathVerdict(uri: string, mode: string, open: string | null | undefined, nowSec: number): 'ok' | '403' {
+  if (String(mode ?? '').trim().toLowerCase() !== 'enforce' || !PLAIN_VOD_RE.test(uri)) return 'ok';
+  if (open == null || !plainAssetId(uri)) return '403';
+  const until = Number(open);
+  return Number.isFinite(until) && (until === 0 || nowSec < until) ? 'ok' : '403';
+}
 
 export function edgeTokensMode(): 'off' | 'issue' | 'enforce' {
   const v = String(process.env.VOLT_EDGE_TOKENS ?? '').trim().toLowerCase();
@@ -271,6 +300,49 @@ export async function syncEdgeTokens(store: EdgeStore, memo?: Map<string, string
 }
 
 /**
+ * THE TOKEN-FREE SET at the edge (P2-2c): "f:<id>" for every title that plays
+ * by its plain address now, removed when it stops (rule changed, a condition
+ * added, window ended, withdrawn). The keys written are kept in
+ * edge_open_assets, because the store cannot be listed: that is how a key
+ * that is no longer wanted is found and removed after a restart.
+ */
+export async function syncEdgeOpen(store: EdgeStore, memo?: Map<string, string | null>, now = new Date()): Promise<{ put: number; deleted: number }> {
+  const res = { put: 0, deleted: 0 };
+  const { tokenFreeNow } = await import('./deliveryPolicy');
+  // Candidates: stamped token-free and Available. tokenFreeNow decides.
+  const cand = await query<any>(
+    `SELECT v.id::text AS id, COALESCE(g.account_id, v.account_id)::text AS account_id
+       FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id
+       LEFT JOIN events   e ON e.id = v.event_id
+       LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE v.availability -> 'protection' ->> 'tokenFree' = 'true' AND v.availability_state = 'available' AND v.archived_at IS NULL`);
+  const want = new Map<string, string>();
+  for (const r of cand) {
+    const tf = await tokenFreeNow(r.id, { accountId: r.account_id, now }).catch(() => null);
+    if (tf?.open) want.set(r.id, tf.until ? String(Math.floor(tf.until.getTime() / 1000)) : '0');
+  }
+  const had = await query<any>(`SELECT asset_id::text AS id, value FROM edge_open_assets`);
+  for (const h of had) {
+    if (want.has(h.id)) continue;
+    await store.delete(openKey(h.id)); memo?.set(openKey(h.id), null); res.deleted++;
+    await query(`DELETE FROM edge_open_assets WHERE asset_id = $1::uuid`, [h.id]);
+  }
+  const hadV = new Map(had.map((h) => [h.id, h.value]));
+  for (const [id, v] of want) {
+    const k = openKey(id);
+    const was = memo?.has(k) ? memo.get(k)! : hadV.get(id) ?? null;
+    if (was !== v) {
+      await store.put(k, v); res.put++;
+      await query(`INSERT INTO edge_open_assets (asset_id, value, synced_at) VALUES ($1::uuid, $2, now())
+                   ON CONFLICT (asset_id) DO UPDATE SET value = EXCLUDED.value, synced_at = now()`, [id, v]);
+    }
+    memo?.set(k, v);
+  }
+  return res;
+}
+
+/**
  * The staging edge's store (the Mac): one JSON file of the same keys the
  * CloudFront KeyValueStore holds, on the volume the nginx edge mounts. Written
  * whole to a temporary file and renamed, so the edge never reads half a file.
@@ -319,7 +391,14 @@ export function tokenPathMiddleware() {
     if (!path.startsWith('/t/')) {
       // /clips/vod/ only: the API serves no /vod/ media (that is S3 behind
       // CloudFront), and /vod is the console's Media Library page.
-      if (edgeTokensMode() === 'enforce' && path.startsWith('/clips/vod/')) return refuseText(res, 403, EDGE_REFUSAL_TEXT.path);
+      if (edgeTokensMode() === 'enforce' && path.startsWith('/clips/vod/')) {
+        // A token-free title (P2-2c) plays by its plain address: the same
+        // answer the edges read from "f:<id>", here from the cached stamp.
+        const id = plainAssetId(path);
+        const { tokenFreeNow } = await import('./deliveryPolicy');
+        const tf = id ? await tokenFreeNow(id).catch(() => null) : null;
+        if (!tf?.open) return refuseText(res, 403, EDGE_REFUSAL_TEXT.path);
+      }
       return next();
     }
     const m = /^\/t\/([^/]+)(\/.*)$/.exec(req.path);

@@ -61,9 +61,13 @@ resource "aws_cloudfront_function" "vod_plain_refuse" {
   count   = local.edge_tokens_mode == "enforce" ? 1 : 0
   name    = "${local.name}-vod-plain-refuse"
   runtime = "cloudfront-js-2.0"
-  comment = "Volt on-demand play tokens enforced: refuse a plain path"
+  comment = "Volt on-demand play tokens enforced: refuse a plain path unless the title is token-free"
   publish = true
-  code    = file("${path.module}/../edge/vod-plain-refuse.js")
+  # Reads "f:<asset id>" (token-free titles, build queue P2-2c) from the same store.
+  code = templatefile("${path.module}/../edge/vod-plain-refuse.js", {
+    kvs_id = aws_cloudfront_key_value_store.rights[0].id
+  })
+  key_value_store_associations = [aws_cloudfront_key_value_store.rights[0].arn]
 }
 
 # The function compares the token's country with the viewer's, so the

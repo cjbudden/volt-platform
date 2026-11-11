@@ -451,7 +451,7 @@
       "waitFor": "[data-rule-editor=account] [data-policy-section=protection]",
       "clip": "[data-rule-editor=account] [data-policy-section=protection]",
       "settleMs": 800,
-      "alt": "The Protection section of the account default: DRM, playback token lifetime, WAF profile, allowed referrer domains and concurrent streams, with DRM's padlock closed"
+      "alt": "The Protection section of the account default: DRM, playback token lifetime, WAF profile, allowed referrer domains, concurrent streams and token-free playback, with DRM's padlock closed"
     },
     {
       "name": "publishing-policy-check",

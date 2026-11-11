@@ -35,7 +35,7 @@ import { rightsForAsset } from '../services/rightsProfiles';
 import { limit } from '../scale/ratelimit';
 import { blockSettings, addNotifyRequest, type NotifyReason } from '../services/blockMessage';
 import { vodAvailabilityRow } from '../services/viewerPath';
-import { deliveryPolicyOf, referrerRefusal } from '../services/deliveryPolicy';
+import { deliveryPolicyOf, referrerRefusal, tokenFreeNow } from '../services/deliveryPolicy';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -462,11 +462,22 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   // country, ending at the earlier of its lifetime and the asset's window.
   // An ad session's addresses are the stitcher's own (per viewer) and are left
   // as they are. Everything it reads is cached: no database read when warm.
+  //
+  // TOKEN-FREE (build queue P2-2c): a title whose rule asks for it, that no
+  // viewer condition applies to (services/deliveryPolicy.ts tokenFreeNow), and
+  // that this viewer was let in to openly (no sign-in, entitlement or package
+  // behind the answer) gets its plain addresses, which the edge lets through
+  // under enforce while the title is Available.
   if (kind === 'vod' && delivery && !ads && edgeTokensMode() !== 'off') {
     const prefix = tokenPrefix([delivery.hls, delivery.dash]);
-    if (prefix) {
-      const row = await vodAvailabilityRow(b.assetId);
-      const prof = row ? await rightsForAsset(row) : null;
+    const row = prefix ? await vodAvailabilityRow(b.assetId) : null;
+    const prof = row ? await rightsForAsset(row) : null;
+    const openPlay = policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }) === 'open';
+    const tf = prefix && openPlay && row?.availability?.protection?.tokenFree === true
+      ? await tokenFreeNow(b.assetId, { accountId: key.account_id }) : null;
+    if (tf?.open) {
+      if (edgeSec > 0 && tf.until) edgeSec = Math.max(0, Math.min(edgeSec, Math.floor((tf.until.getTime() - Date.now()) / 1000)));
+    } else if (prefix) {
       // The title's rule may set the token's lifetime (Protection, P3-4b); otherwise the policy class decides.
       const et = mintEdgeToken({ assetId: b.assetId, prefix, country: geo ?? null, sid: b.sid ?? null,
         policyClass: policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }),

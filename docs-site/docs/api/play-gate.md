@@ -148,6 +148,10 @@ Play the address exactly as it is. Every manifest and segment request goes throu
 
 Where the operator enforces tokens, a plain on-demand address with no token (`/vod/...` or `/clips/vod/...`, for example one saved from before tokens or taken from a page) is refused with `403` *Not available*: the gate's address is the only one that plays. Volt's own console previews and share pages carry tokens too.
 
+#### Token-free titles
+
+A title whose publishing rule turns on **Token-free playback** (`protection.tokenFree`, see [Publishing rules](../guides/publishing-rules.md#play-without-tokens-token-free-playback)) is answered with its plain addresses, with no `/t/` token, and they play at the CDN even where tokens are enforced, for as long as the title is available. Only titles nothing about the viewer decides qualify: no country limit, rights territories, paywall, sign-in, DRM, referrer domains or streams limit. A title that gains one of these goes back to tokenised addresses within about a minute, and its plain address is refused again, as it is once the title stops being available. Treat both kinds the same way: play the address the gate gave you.
+
 The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available* or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not. Ad sessions (step 6) keep their own addresses.
 
 ## Troubleshooting

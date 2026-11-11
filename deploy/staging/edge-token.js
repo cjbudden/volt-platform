@@ -13,7 +13,9 @@
 //  viewer's country is the X-Test-Country header, as everywhere on staging.
 //
 //  `plain`: "403" for a plain /clips/vod/ path when VOLT_EDGE_TOKENS is
-//  "enforce" (build queue P2-2b), "ok" otherwise.
+//  "enforce" (build queue P2-2b), "ok" otherwise, and "ok" under enforce for a
+//  token-free title: "f:<asset id>" in the store, not past its end (build
+//  queue P2-2c; plainPathVerdict in services/edgeTokens.ts).
 //
 //  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked),
 //  "503" (no key yet: the scheduler has not synced). `refusal` gives the
@@ -81,14 +83,25 @@ function verdict(r) {
   return check(r.uri, r.headersIn['X-Test-Country'] || '', readStore(), Math.floor(Date.now() / 1000));
 }
 
-// A plain on-demand path under enforce. mode: VOLT_EDGE_TOKENS.
-function plainVerdict(uri, mode) {
+// A plain on-demand path under enforce. mode: VOLT_EDGE_TOKENS; store and now
+// only matter for a token-free title ("f:<asset id>").
+var PLAIN_ID = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+function plainVerdict(uri, mode, store, now) {
   var m = String(mode || '').trim().toLowerCase();
-  return m === 'enforce' && /^\/(clips\/vod|vod)\//.test(uri) ? '403' : 'ok';
+  if (m !== 'enforce' || !/^\/(clips\/vod|vod)\//.test(uri)) return 'ok';
+  var id = PLAIN_ID.exec(uri);
+  if (!id || uri.indexOf('/../') >= 0 || !store) return '403';
+  var open = store['f:' + id[1].toLowerCase()];
+  if (open === undefined || open === null) return '403';
+  var until = Number(open);
+  return until === 0 || now < until ? 'ok' : '403';
 }
 
 function plain(r) {
-  return plainVerdict(r.uri, process.env && process.env.VOLT_EDGE_TOKENS);
+  var mode = process.env && process.env.VOLT_EDGE_TOKENS;
+  // The store is read only under enforce, and only for a plain on-demand path.
+  if (plainVerdict(r.uri, mode, null, 0) === 'ok') return 'ok';
+  return plainVerdict(r.uri, mode, readStore(), Math.floor(Date.now() / 1000));
 }
 
 // Read only on a refusal (nginx evaluates js_set variables when used).
