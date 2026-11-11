@@ -243,6 +243,7 @@
 .songf-q label > span { color: var(--faint); font-size: var(--fs-xs) }
 .songf-q label > span em { font-style: normal; color: var(--faint); opacity: .8 }
 .songf-q .wide { grid-column: 1 / -1 }
+.songf-link { margin-top: 8px }
 .songf-q .btn { justify-self: start }
 .songf-links { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 10px }
 .songf-links a { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap }

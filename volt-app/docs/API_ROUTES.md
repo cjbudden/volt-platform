@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**957 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 736 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**958 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 737 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1181,6 +1181,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PATCH | `/api/vod/:id/availability` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/delete-impact` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/details/find` | admin session (Bearer) or account secret key | vod: manage |  |
+| POST | `/api/vod/:id/details/page` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/details/use` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/encode` | admin session (Bearer) or account secret key | vod: view |  |
 | GET | `/api/vod/:id/epg-fill` | admin session (Bearer) or account secret key | vod: view |  |

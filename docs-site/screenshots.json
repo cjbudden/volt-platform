@@ -227,6 +227,31 @@
       "_comment": "Needs Wikidata reachable from the API, or WIKIDATA_API_BASE at a stand-in that answers wbsearchentities and wbgetentities (Wikimedia rate-limits busy shared addresses)."
     },
     {
+      "name": "media-library-find-details-link",
+      "guide": "guides/media-library.md",
+      "path": "/vod",
+      "fresh": true,
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1200,
+      "click": [
+        "tr:has-text(\"Nosferatu\") button:has-text(\"Open\")",
+        "button:text-is(\"Metadata\")",
+        "button:has-text(\"Find details\")",
+        ".songf-q button:has-text(\"Search\")",
+        { "fill": ".songf-link input", "value": "http://films.example/films/nosferatu" },
+        ".songf-link button:has-text(\"Read page\")",
+        ".songf-r:has-text(\"From the page on\")"
+      ],
+      "waitAfter": ".songf-review",
+      "clip": ".songf",
+      "hide": [
+        ".topbar"
+      ],
+      "alt": "Find details with a pasted link: the film's page on its site shown first, then the Wikidata result, and the fields to tick beside what the asset has",
+      "_comment": "Needs a page at http://films.example/films/nosferatu with schema.org Movie JSON-LD that the API can fetch (a hosts entry to a stand-in, with GRAPHICS_ALLOW_PRIVATE_FEEDS=1 on the API), and WIKIDATA_API_BASE as for media-library-find-details. Reset Nosferatu's metadata to its title and rating PG first."
+    },
+    {
       "name": "recordings",
       "guide": "guides/recordings.md",
       "path": "/recordings",

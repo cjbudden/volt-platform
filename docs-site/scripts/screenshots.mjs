@@ -15,6 +15,10 @@
 //   (volt-web)  npx vite --port 5173
 //   (docs-site) node scripts/screenshots.mjs [name ...]
 // A shot may also press `keys` after its clicks and wait for `waitAfter`.
+// A `click` entry may be `{ "fill": <selector>, "value": <text> }` to type into a
+// field between clicks (a link pasted into Find details, build queue F2).
+// `fresh: true` visits / first, so a shot on the same path as the one before
+// starts from a newly drawn page rather than what that shot left open.
 // A shot may also `hide` elements (kept in place, left blank) or `remove` them
 // (taken out of the layout).
 //
@@ -81,12 +85,17 @@ for (const s of shots) {
   // page is never reloaded, so they used to carry into every later shot.
   const injected = [];
   // The session lives in memory, so move inside the app instead of reloading.
+  if (s.fresh) { await page.evaluate(() => { history.pushState(null, '', '/'); dispatchEvent(new PopStateEvent('popstate')); }); await page.waitForTimeout(400); }
   await page.evaluate((u) => { history.pushState(null, '', u); dispatchEvent(new PopStateEvent('popstate')); }, s.path);
   try {
     if (s.waitFor) await page.waitForSelector(s.waitFor, { timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(s.settleMs ?? 1200);
-    for (const c of s.click || []) { await page.click(c); await page.waitForTimeout(600); }
+    for (const c of s.click || []) {
+      if (c && typeof c === 'object') await page.fill(c.fill, c.value);
+      else await page.click(c);
+      await page.waitForTimeout(600);
+    }
     // `keys` are pressed after the clicks (frame stepping, build queue 3.2-3),
     // then `waitAfter` is waited for: a key's result can arrive from the server.
     for (const k of s.keys || []) { await page.keyboard.press(k); await page.waitForTimeout(250); }

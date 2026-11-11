@@ -4,6 +4,9 @@
 // matched by their schema.org names (modules/vodDetails.ts). Empty fields are
 // ticked by default; a value already there changes only when ticked. Nothing
 // is saved until Apply.
+// Paste a link (build queue F2): one page a person names is read for its
+// schema.org data and Open Graph tags and shown first among the results, to
+// review and tick the same way.
 import { useMemo, useState } from 'react'
 import { apiRequest } from '../../api'
 
@@ -12,6 +15,7 @@ const show = (v: unknown) => Array.isArray(v) ? v.join(', ') : v == null || v ==
 const same = (a: unknown, b: unknown) => show(a).trim().toLowerCase() === show(b).trim().toLowerCase()
 const EDITABLE = new Set(['string', 'text', 'number', 'url', 'date', 'tags'])
 
+const LinkIcon = () => <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
 const ExtIcon = () => <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
 export const SearchIcon = () => <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
 
@@ -25,10 +29,12 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
   onApplied: (changed: string[]) => void
 }) {
   const [q, setQ] = useState(term)
-  const [busy, setBusy] = useState<'find' | 'use' | null>(null)
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState<'find' | 'page' | 'use' | null>(null)
   const [err, setErr] = useState('')
   const [res, setRes] = useState<any | null>(null)
-  const [pick, setPick] = useState<number | null>(null)
+  const [page, setPage] = useState<any | null>(null)
+  const [pick, setPick] = useState<string | null>(null)
   const [found, setFound] = useState<Record<string, any>>({})
   const [ticks, setTicks] = useState<Record<string, boolean>>({})
 
@@ -37,14 +43,29 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
     try { setRes(await apiRequest(`/vod/${id}/details/find`, { method: 'POST', ...J({ q: q.trim() || undefined }) })) }
     catch (e: any) { setErr(e.message) } finally { setBusy(null) }
   }
+  const read = async () => {
+    setBusy('page'); setErr(''); setPick(null); setFound({}); setTicks({})
+    try { setPage(await apiRequest(`/vod/${id}/details/page`, { method: 'POST', ...J({ url: url.trim() }) })) }
+    catch (e: any) { setErr(e.message); setPage(null) } finally { setBusy(null) }
+  }
 
-  const fields: Field[] = res?.current?.fields ?? []
-  const cur: Record<string, any> = res?.current?.metadata ?? {}
-  const prov: Record<string, any> = res?.current?.provenance ?? {}
+  // Whichever answered carries the asset's current values; both carry the same.
+  const ctx = page ?? res
+  const fields: Field[] = ctx?.current?.fields ?? []
+  const cur: Record<string, any> = ctx?.current?.metadata ?? {}
+  const prov: Record<string, any> = ctx?.current?.provenance ?? {}
+  // The pasted page first, then what the search found.
+  const items: any[] = [
+    ...(page?.result ? [{ ...page.result, key: `page:${page.result.link}`, source: 'page' }] : []),
+    ...(res?.results ?? []).map((r: any) => ({ ...r, key: `wd:${r.id}`, source: 'wikidata' })),
+  ]
+  const picked = items.find((x) => x.key === pick) ?? null
+  const unmapped: string[] = picked?.source === 'page' ? (page?.unmapped ?? []) : (res?.unmapped ?? [])
 
-  const choose = (i: number) => {
-    const r = res.results[i]
-    setPick(i)
+  const choose = (key: string) => {
+    const r = items.find((x) => x.key === key)
+    if (!r) return
+    setPick(key)
     setFound({ ...r.proposed })
     const t: Record<string, boolean> = {}
     // Empty fields ticked; a value already there needs a tick to change.
@@ -61,12 +82,12 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
   const rows = useMemo(() => fields.filter((f) => f.key in found).map((f) => ({
     f, now: cur[f.key], value: found[f.key], same: same(cur[f.key], found[f.key]),
     personal: !!show(cur[f.key]) && !(prov[f.key]?.source && prov[f.key].source !== 'manual'),
-  })), [found, res]) // eslint-disable-line react-hooks/exhaustive-deps
+  })), [found, res, page]) // eslint-disable-line react-hooks/exhaustive-deps
   const changes = rows.filter((r) => ticks[r.f.key] && !r.same)
 
   const apply = async () => {
-    if (pick == null) return
-    const item = res.results[pick]
+    if (!picked) return
+    const item = picked
     const values: Record<string, any> = {}
     for (const r of changes) {
       let v = r.value
@@ -76,7 +97,7 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
     }
     setBusy('use'); setErr('')
     try {
-      const out: any = await apiRequest(`/vod/${id}/details/use`, { method: 'POST', ...J({ source: 'wikidata', itemId: item.id, link: item.link, values }) })
+      const out: any = await apiRequest(`/vod/${id}/details/use`, { method: 'POST', ...J(item.source === 'page' ? { source: 'page', link: item.link, values } : { source: 'wikidata', itemId: item.id, link: item.link, values }) })
       onApplied(out.changed ?? Object.keys(values))
     } catch (e: any) { setErr(e.message) } finally { setBusy(null) }
   }
@@ -85,28 +106,35 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
     <div className="songf" role="region" aria-label="Find details">
       <div className="songf-h">
         <div className="songf-t">Find details</div>
-        <div className="lib-faint">Searches Wikidata (free, open data) and matches what it knows to the {typeName} fields. Nothing changes until you apply it.</div>
+        <div className="lib-faint">Searches Wikidata (free, open data), or reads a page you paste, and matches what it finds to the {typeName} fields. Nothing changes until you apply it.</div>
       </div>
       <form className="songf-q" onSubmit={(e) => { e.preventDefault(); find() }}>
         <label className="wide"><span>Search for</span>
           <input className="inp" value={q} placeholder="The title" onChange={(e) => setQ(e.target.value)} /></label>
         <button className="btn primary sm" disabled={!!busy || !q.trim()}><SearchIcon /> {busy === 'find' ? 'Searching…' : 'Search'}</button>
       </form>
+      <form className="songf-q songf-link" onSubmit={(e) => { e.preventDefault(); read() }}>
+        <label className="wide"><span>Or paste a link to a page about it <em>(its own page on a studio, broadcaster, news or podcast site)</em></span>
+          <input className="inp" type="url" inputMode="url" value={url} placeholder="https://" onChange={(e) => setUrl(e.target.value)} /></label>
+        <button className="btn sm" disabled={!!busy || !url.trim()}><LinkIcon /> {busy === 'page' ? 'Reading…' : 'Read page'}</button>
+      </form>
       {err && <div className="asset-img-err">{err}</div>}
       {res?.error && <div className="asset-img-err">{res.error}. Try again in a moment.</div>}
+      {page?.error && <div className="asset-img-err">{page.error}</div>}
       {res && !res.error && res.results.length === 0 && <div className="lib-faint" style={{ marginTop: 10 }}>Nothing found for “{res.term}”. Try fewer words, or the original title.</div>}
 
-      {res?.results?.length > 0 && (
+      {items.length > 0 && (
         <div className="songf-results">
-          {res.results.map((r: any, i: number) => {
+          {items.map((r: any) => {
             const n = Object.keys(r.proposed).length
             return (
-              <button key={r.id} type="button" className={`songf-r${pick === i ? ' sel' : ''}`} disabled={!!busy} onClick={() => choose(i)}>
+              <button key={r.key} type="button" className={`songf-r${pick === r.key ? ' sel' : ''}`} disabled={!!busy} onClick={() => choose(r.key)}>
                 {r.imageUrl ? <img src={r.imageUrl} alt="" loading="lazy" /> : <span className="songf-noimg" />}
                 <span className="songf-rb">
                   <span className="songf-main songf-src">{r.label}</span>
+                  {r.source === 'page' && <span className="lib-faint">From the page on {r.site}{r.kinds[0] ? ` (${r.kinds[0]})` : ''}</span>}
                   <span className="lib-faint">{r.description ?? r.kinds.join(', ') ?? ''}</span>
-                  <span className="lib-faint">{n ? `${n} field${n === 1 ? '' : 's'} to compare` : 'Nothing for these fields'}{r.likely ? ` · a ${(r.kinds[0] ?? 'match')}` : ''}</span>
+                  <span className="lib-faint">{n ? `${n} field${n === 1 ? '' : 's'} to compare` : 'Nothing for these fields'}{r.source !== 'page' && r.likely ? ` · a ${(r.kinds[0] ?? 'match')}` : ''}</span>
                 </span>
               </button>
             )
@@ -114,10 +142,10 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
         </div>
       )}
 
-      {pick != null && res && (
+      {picked && (
         <div className="songf-review">
-          <div className="songf-rh">Review: tick what to use · <a href={res.results[pick].link} target="_blank" rel="noreferrer">Wikidata item <ExtIcon /></a></div>
-          {rows.length === 0 ? <div className="lib-faint">This item has nothing for the {typeName} fields.</div> : (
+          <div className="songf-rh">Review: tick what to use · <a href={picked.link} target="_blank" rel="noreferrer">{picked.source === 'page' ? `The page on ${picked.site}` : 'Wikidata item'} <ExtIcon /></a></div>
+          {rows.length === 0 ? <div className="lib-faint">{picked.source === 'page' ? 'This page has' : 'This item has'} nothing for the {typeName} fields.</div> : (
             <table className="songf-t">
               <thead><tr><th /><th>Field</th><th>Now</th><th>Found</th></tr></thead>
               <tbody>
@@ -138,11 +166,11 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
               </tbody>
             </table>
           )}
-          {res.unmapped?.length > 0 && <div className="lib-faint" style={{ marginTop: 8 }}>Not filled from Wikidata: {res.unmapped.join(', ')}.</div>}
+          {unmapped.length > 0 && <div className="lib-faint" style={{ marginTop: 8 }}>{picked.source === 'page' ? 'No schema.org name, so never filled from a page' : 'Not filled from Wikidata'}: {unmapped.join(', ')}.</div>}
           <div className="songf-act">
             <button type="button" className="btn primary sm" disabled={!!busy || !changes.length} onClick={apply}>
               {busy === 'use' ? 'Applying…' : `Apply ${changes.length} change${changes.length === 1 ? '' : 's'}`}</button>
-            <span className="lib-faint">Each field you apply remembers that it came from Wikidata.</span>
+            <span className="lib-faint">Each field you apply remembers that it came from {picked.source === 'page' ? picked.site : 'Wikidata'}.</span>
           </div>
         </div>
       )}

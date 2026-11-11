@@ -962,6 +962,10 @@
   },
   "POST /api/vod/:id/details/use": {
     "summary": "Use found details",
-    "description": "Writes exactly the `values` given (field key to value, the ones a person ticked), checked as a metadata save checks them (`422` for a field the type does not have or a value that does not fit). An image found on the web is copied into the Image Library and the field holds the library reference. Each written field's `metadata_provenance` records `source` (`wikidata`), `item`, `link`, who chose it, when, and the value it replaced (`was`). Audited. Needs `vod: manage`."
+    "description": "Writes exactly the `values` given (field key to value, the ones a person ticked), checked as a metadata save checks them (`422` for a field the type does not have or a value that does not fit). `source` is `wikidata` (with `itemId`) or `page` (with `link`, the page read by `details/page`). An image found on the web is copied into the Image Library and the field holds the library reference. Each written field's `metadata_provenance` records `source`, `item` (Wikidata) or `site` (a page), `link`, who chose it, when, and the value it replaced (`was`). Audited. Needs `vod: manage`."
+  },
+  "POST /api/vod/:id/details/page": {
+    "summary": "Find details on a page",
+    "description": "Reads the one page at `url` (fetched once, like a link preview; private network addresses refused with `400`) for the schema.org JSON-LD and Open Graph details it publishes about its subject, and maps them onto the asset's content type fields through their schema.org names. `result` is shaped like a `details/find` result (`label`, `description`, `kinds`, `link`, `site`, `likely`, `proposed`, and `from`, where each proposed value came from: `json-ld`, `og` or `title`), with `current` and `unmapped` as there. A pasted image address proposes the image fields only. Saves nothing. Answers `200` with `error` set and `result: null` when the site refuses programs (`blocked: true`), the page cannot be read, or it publishes no details; `400` when the asset has no content type; `409` when the type uses the song finder. Needs `vod: manage`."
   }
 }
