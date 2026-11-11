@@ -32,8 +32,10 @@ for (const [k, spec] of Object.entries(TARGETS)) {
 }
 ok(STANDARD_TYPES.some((t) => t.key === 'movie' && t.schemaOrgType === 'Movie'), 'Movie is a standard type (schema.org Movie)');
 ok(type('episode').some((f) => f.key === 'rating'), 'Episode carries a content rating');
-ok(STANDARD_TYPES.filter((t) => t.appliesTo.includes('vod')).map((t) => t.schemaOrgType).join(',') === 'VideoObject,MusicRecording,Interview,Episode,Movie',
-  'on-demand types: VideoObject, MusicRecording, Interview, Episode, Movie');
+// Clip, Song, Interview, Episode, Movie, then Trailer / promo, Music video and
+// Bug / sponsor graphic (added with the content types work, 109000a5).
+ok(STANDARD_TYPES.filter((t) => t.appliesTo.includes('vod')).map((t) => t.schemaOrgType).join(',') === 'VideoObject,MusicRecording,Interview,Episode,Movie,VideoObject,MusicVideoObject,VideoObject',
+  'on-demand types: Clip, Song, Interview, Episode, Movie, Trailer, Music video, Bug');
 
 console.log('\n== completeness ==');
 const ep = type('episode');

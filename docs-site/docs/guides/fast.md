@@ -64,7 +64,7 @@ The buttons across the top are **QC** (a check of everything the channel needs),
 
 **Example.** "Movies Plus", Video channel, ladder "HD 1080", time zone Australia/Sydney: the library offers 1080p titles, and the 15 minute grid and the 06:00 restart are worked out on Sydney time.
 
-### Build the run order (Build > Run order)
+### Build the run order (Build > Run order) {#build-the-run-order}
 
 The run order is a list of **slots** that loops. One time through the list is a **pass**, and each pass starts where the last one ended.
 
@@ -126,7 +126,7 @@ Both show the run order as you have it now, saved or not, so you can try a chang
 
 ![The Week tab: seven days side by side, every programme of the coming week at its start time on the half-hour grid](/img/screens/fast-week.png)
 
-### Set up ads (Build > Ads)
+### Set up ads (Build > Ads) {#set-up-ads}
 
 **Ad breaks** decides the kind of ads:
 
