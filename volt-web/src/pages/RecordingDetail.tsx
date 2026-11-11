@@ -593,6 +593,12 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
               <span title="When the recording is deleted by the source's keep period. Cut what you need into VOD before then."
                 style={{ marginLeft: 10, color: r.warn ? '#fbbf24' : 'var(--faint)', fontWeight: r.warn ? 600 : 400 }}>· {r.text}</span>
             ) })()}
+            {/* KEPT FOR THE ARCHIVE (H3-5c): its delete waits until the archive file covering it is verified. */}
+            {rec.archive_wait && (
+              <span data-archive-wait={rec.archive_wait_code} style={{ display: 'block', marginTop: 4, color: 'var(--faint)' }}>
+                Kept until its archive copy is verified: {rec.archive_wait}
+              </span>
+            )}
           </p>
           {/* SAID UP FRONT. The holes are drawn on the timeline, but a day-long
               recording can hide them off screen; the count and total sit here

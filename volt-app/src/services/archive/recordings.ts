@@ -267,8 +267,11 @@ export async function recordingPass(opts: { now?: Date; accountId?: string; stre
     try {
       const rule = (await resolveForAsset(st.account_id, st.kind === 'channel' ? { channel_id: st.id } : { event_id: st.id })).settings.archive as ArchiveRule | undefined;
       const wanted = (rule?.copies ?? []).filter((c) => (c.on ?? []).includes('recording')).map((c) => c.targetId);
-      const cur = await one<any>(`SELECT done_until FROM archive_recording_cursors WHERE stream_id = $1`, [st.id]);
+      const cur = await one<any>(`SELECT done_until, archived_from FROM archive_recording_cursors WHERE stream_id = $1`, [st.id]);
       if (!wanted.length || !cur) { await setCursor(st.id, st.account_id, until); continue; }
+      // From here the rule hands recordings on: what ended before was never
+      // going to be archived, so its delete does not wait (recordingWait.ts).
+      if (!cur.archived_from) await query(`UPDATE archive_recording_cursors SET archived_from = done_until WHERE stream_id = $1 AND archived_from IS NULL`, [st.id]);
       out.streams++;
       const after = new Date(cur.done_until).getTime();
       const guide = await guideFor(st.id, st.kind, after, until.getTime());

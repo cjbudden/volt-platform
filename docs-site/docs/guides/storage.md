@@ -182,6 +182,8 @@ A rule on a channel or event decides for that stream's media before the account'
 
 You do not have to restore by hand before a re-encode. When an encode, or a FAST channel's **Prepare**, needs an original that is in the archive only, Volt starts the restore itself and runs that work once the original lands. The asset's page says **Coming back from the archive** under **Original**, with what waits for it, and the FAST channel shows the title as being prepared. If the restore cannot start (the copy is no longer verified, or the target or site is disabled), the encode or the channel says why.
 
+**Recordings wait for their archive file.** When a channel's, station's or event's copy rule archives **Recordings**, retention never deletes one of its recordings (by the ladder or on a date you set by hand) until every archive file covering it is **Verified** at your storage target. Until then the **Retention list** shows **Waiting for its archive copy** with the reason (the file is not made yet, is being made or copied, or its copy failed or went missing), and so does the recording's page. Recordings from before the rule began archiving, and those of streams no copy rule archives, are deleted as before.
+
 ## How it connects
 
 | Section | How it relates |
@@ -214,6 +216,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|---|
 | **No media is tracked yet. It is registered as recordings are written.** | Nothing has been recorded yet | Turn on recording for a channel, station or event and run it |
 | Only **Keep** and **Delete** in **Action** | Your service has one tier of storage, so there is nothing cheaper to move to | Use a keep-then-delete ladder; the first card says why |
+| **Waiting for its archive copy** on a recording in the **Retention list** | Its stream's copy rule archives recordings and the archive file covering it is not verified yet | Read the reason beside it: wait for the file to be made and copied, or copy a failed or missing file again under Mirror and Archive |
 | **Two stages both fire at** a number of **days** | Two rungs have the same age | Give each rung its own age |
 | **A ladder cannot go backwards** | A later rung undoes an earlier one, for example cheaper storage after archive | Order the actions keep, cheaper storage, archive, delete |
 | A message that an action is already the stage at an earlier age | The same action appears twice | Remove the repeated rung |

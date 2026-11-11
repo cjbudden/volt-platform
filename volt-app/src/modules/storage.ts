@@ -322,7 +322,7 @@ storageRouter.get('/expiring', asyncHandler(async (req, res) => {
   const within = req.query.within ? Math.max(1, Math.min(3650, Number(req.query.within) || 0)) : null;
   const rows = await query<any>(
     `SELECT r.id, r.title, r.kind, r.channel_id, r.event_id, r.start_epoch_ms, r.end_epoch_ms, r.expires_at, r.delete_after,
-            r.delete_after_by, r.delete_after_note, r.storage_state, COALESCE(c.name, e.name) AS owner,
+            r.delete_after_by, r.delete_after_note, r.storage_state, r.archive_wait_code, r.archive_wait, COALESCE(c.name, e.name) AS owner,
             (SELECT COALESCE(sum(m.bytes), 0)::bigint FROM media_objects m WHERE m.recording_id = r.id AND m.state <> 'deleted') AS bytes,
             (SELECT bool_or(m.hold AND m.hold_reason NOT LIKE 'kept %') FROM media_objects m WHERE m.recording_id = r.id AND m.state <> 'deleted') AS held,
             (SELECT max(m.hold_reason) FROM media_objects m WHERE m.recording_id = r.id AND m.state <> 'deleted' AND m.hold AND m.hold_reason LIKE 'kept %') AS kept_for_clips,
@@ -351,6 +351,8 @@ storageRouter.get('/expiring', asyncHandler(async (req, res) => {
       held: !!r.held, keptForClips: r.kept_for_clips ?? null, storageState: r.storage_state,
       expiresAt: expiry, expirySource: source, rule: rule ? { name: rule.name, deleteAfterDays: del?.afterDays ?? null } : null,
       manual: r.delete_after ? { at: r.delete_after, by: r.delete_after_by, note: r.delete_after_note } : null,
+      // Its delete waits for its archive file (H3-5c), and why.
+      archiveWait: r.archive_wait_code ? { code: r.archive_wait_code, message: r.archive_wait } : null,
     });
   }
   const now = Date.now();

@@ -2719,6 +2719,9 @@ export interface ProgrammeVod {
 }
 
 export interface RecordingRow {
+  /** Its delete waits for its archive file (Mirror and Archive, H3-5c), and why. */
+  archive_wait_code?: string | null
+  archive_wait?: string | null
   id: string; kind: 'event' | 'channel_day' | string
   channel_id: string | null; event_id: string | null; source_name: string | null
   title: string | null; status: 'recording' | 'complete' | 'error' | string

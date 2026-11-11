@@ -19,6 +19,8 @@ import { Notice } from '../notices'
 interface Expiring {
   id: string; title: string | null; owner: string | null; startMs: number; endMs: number | null; recording: boolean
   bytes: number; clips: number; held: boolean; keptForClips: string | null
+  /** Its delete waits for its archive file to be verified (Mirror and Archive). */
+  archiveWait?: { code: string; message: string } | null
   expiresAt: string | null; expirySource: 'manual' | 'rule' | 'legacy' | 'none' | 'kept_for_clips'
   rule: { name: string; deleteAfterDays: number | null } | null; manual: { at: string; by: string; note: string | null } | null
 }
@@ -100,6 +102,7 @@ export function RetentionList() {
                       <div style={{ fontSize: 'var(--fs-sm)', color: r.tone === 'over' ? 'var(--danger,#f87171)' : r.tone === 'soon' ? 'var(--warn,#fbbf24)' : 'var(--faint)' }}>{r.text}</div>
                     </> : <span style={{ color: 'var(--faint)' }}>{x.expirySource === 'kept_for_clips' ? 'Kept for clips' : 'Never'}</span>}
                     {x.held && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)' }}>On hold</div>}
+                    {x.archiveWait && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)' }} title={x.archiveWait.message} data-archive-wait={x.archiveWait.code}>Waiting for its archive copy</div>}
                   </td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{x.owner ?? 'Recording'}{x.title && x.title !== x.owner ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {x.title}</span> : null}</div>
@@ -116,6 +119,7 @@ export function RetentionList() {
                       : x.expirySource === 'legacy' ? 'Expiry set when it was recorded'
                       : x.expirySource === 'kept_for_clips' ? 'The rest was removed by retention'
                       : 'No rule deletes it'}
+                    {x.archiveWait && <div style={{ color: 'var(--faint)' }}>{x.archiveWait.message}</div>}
                   </td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {edit?.id === x.id ? (

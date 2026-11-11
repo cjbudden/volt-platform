@@ -1405,7 +1405,7 @@ export class Orchestrator {
         `[retention] ${result.considered} considered: ${result.cooled} cooled, ` +
         `${result.archived} archived, ${result.deleted} deleted, ` +
         `${result.orphaned} orphaned reclaimed, ` +
-        `${result.skippedOnHold} on hold, ${result.unavailable} unavailable, ${result.failed} failed`
+        `${result.skippedOnHold} on hold, ${result.waitingArchive} waiting for their archive file, ${result.unavailable} unavailable, ${result.failed} failed`
       );
     }
 

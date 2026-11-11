@@ -393,6 +393,10 @@ export interface SweepResult {
    *  that is persistently non-zero means storage is failing, not that recovery
    *  is working. */
   recovered: number;
+  /** Recording objects whose delete waits for their archive file (H3-5c):
+   *  the recording's channel or event archives recordings and a file
+   *  covering it is not verified yet. The reason is on the recording. */
+  waitingArchive: number;
 }
 
 /**
@@ -426,7 +430,18 @@ export async function sweep(opts: {
   const actor = opts.actor ?? 'retention';
   const res: SweepResult = {
     considered: 0, cooled: 0, archived: 0, deleted: 0,
-    skippedOnHold: 0, failed: 0, unavailable: 0, orphaned: 0, recovered: 0, sidecarBytes: 0 };
+    skippedOnHold: 0, failed: 0, unavailable: 0, orphaned: 0, recovered: 0, sidecarBytes: 0, waitingArchive: 0 };
+  // NEVER THE ONLY COPY (H3-5c): judged once per recording per pass, since a
+  // recording has many objects. A dry run judges without writing the reason.
+  const waits = new Map<string, Promise<boolean>>();
+  const waitsForArchive = (recordingId: string) => {
+    if (!waits.has(recordingId)) {
+      waits.set(recordingId, import('../archive/recordingWait')
+        .then((m) => m.recordingArchiveWait(recordingId, { write: !opts.dryRun }))
+        .then((w) => !!w));
+    }
+    return waits.get(recordingId)!;
+  };
   const caps = capabilities();
   const driver = storageDriver();
 
@@ -554,6 +569,7 @@ export async function sweep(opts: {
     // earlier or later, and applies to a recording no rule governs too.
     const manual = obj.recording_id && obj.delete_after ? new Date(obj.delete_after).getTime() : null;
     if (manual != null && manual <= Date.now() && obj.state !== 'deleting') {
+      if (await waitsForArchive(obj.recording_id)) { res.waitingArchive++; continue; }
       if (opts.dryRun) { res.deleted++; continue; }
       try {
         if (await removeRecordingMedia(obj, `expiry set by hand for ${new Date(manual).toISOString().slice(0, 10)}`, actor,
@@ -571,6 +587,7 @@ export async function sweep(opts: {
     const due = dueStage(obj, rule, locs.map((l) => l.tier), closedAtMsOf(obj));
     if (!due) continue;
     if (due.stage.action === 'delete' && manual != null && manual > Date.now()) continue;   // kept longer by hand
+    if (due.stage.action === 'delete' && obj.recording_id && await waitsForArchive(obj.recording_id)) { res.waitingArchive++; continue; }
     // FRAME STILLS take only the delete rung (services/frames/folders.ts): they
     // are made again from the media in a fraction of a second, so moving them
     // to cold or archive storage would cost more than it saves.

@@ -117,6 +117,7 @@ With **Recordings** ticked for a target, the recordings of the channels, station
 - **A metadata file beside it**, `<same name>.json`: the channel, the programme and its description, the start and end, the time zone, the file's size and SHA-256.
 - **When:** a few minutes after the programme or hour ends, inside the rule's off-peak window if it has one. Both files are copied and checked like any other copy, and Volt's own working file is removed once every target holds a verified copy.
 - **From when:** ticking **Recordings** starts with the next programme or hour that ends; recordings already kept are not copied.
+- **Never the only copy:** from then on, retention does not delete a recording of that stream (by the ladder or on a date set by hand) until every archive file covering it is verified at your target. The **Retention list** on Storage and the recording's page say why one is waiting ([Storage](../guides/storage.md#take-originals-out-of-the-cloud-once-they-are-archived)).
 
 ### 4. Watch the copies
 
@@ -167,6 +168,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | An original is **Kept, waiting** under **Originals out of the cloud** | Its retention rule is due but no verified copy of that file is held yet | Follow **What to do** on its row; it goes at the next sweep once the copy is verified |
 | **The last restore failed** with *no longer matches* or *no longer at the target* | The copy at the site changed or went since it was archived | Check the copy again; the original has to come from elsewhere if the copy is gone |
 | A FAST title says *the original is in the archive and cannot be brought back* | Its archive copy is no longer verified, or the target or site is disabled | Check the copy again, or enable the target or site, then choose **Prepare** |
+| A recording in the **Retention list** says **Waiting for its archive copy** | Its archive file is not verified yet: not made, being copied, or its copy failed or went missing | Wait for the copy, or copy the file again; the recording goes at the next sweep once it is verified |
 | A restore stays **Being restored** | No server of the site with agent 0.12.0 or later is online | Update the agent and start it on a server of the site |
 | A copy to an object store stays **Queued** with *No keys named ...* | The server running the agent has no keys under the target's key name | Add them to `archive-keys.json` on every server of the site, or set the environment variables the message names |
 | A copy to an object store stays **Queued** with *can be read by others* | The key file is readable by other users of the server | `chmod 600` the key file |
