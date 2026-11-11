@@ -205,6 +205,28 @@
       "alt": "The Media Library preview paused on exact frame 5, with its frame number and timecode over the picture"
     },
     {
+      "name": "media-library-find-details",
+      "guide": "guides/media-library.md",
+      "path": "/vod",
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1200,
+      "click": [
+        "tr:has-text(\"Nosferatu\") button:has-text(\"Open\")",
+        "button:text-is(\"Metadata\")",
+        "button:has-text(\"Find details\")",
+        ".songf-q button:has-text(\"Search\")",
+        ".songf-r >> nth=0"
+      ],
+      "waitAfter": ".songf-review",
+      "clip": ".songf",
+      "hide": [
+        ".topbar"
+      ],
+      "alt": "Find details on a film: the search, the items Wikidata found with the film first, and the fields to tick beside what the asset has",
+      "_comment": "Needs Wikidata reachable from the API, or WIKIDATA_API_BASE at a stand-in that answers wbsearchentities and wbgetentities (Wikimedia rate-limits busy shared addresses)."
+    },
+    {
       "name": "recordings",
       "guide": "guides/recordings.md",
       "path": "/recordings",

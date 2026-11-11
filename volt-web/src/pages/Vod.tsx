@@ -9,6 +9,8 @@ import { useAccess } from '../access'
 import { Notice, PageError, useNotify, usePageNotice } from '../notices'
 import MediaPreview, { type SeekRequest } from '../MediaPreview'
 import { AssetImage } from './vod/AssetImage'
+import { DetailsFinder, SearchIcon } from './vod/DetailsFinder'
+import { SongFinder } from './vod/SongFinder'
 import { confirmLeave, setUnsaved, stable } from './vod/unsaved'
 import { AssetFiles } from './vod/AssetFiles'
 import { useLibraryChanges, posterVersion } from './vod/useLibraryChanges'
@@ -503,10 +505,35 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
       notify({ id: 'asset-save', kind: 'error', title: 'The metadata was not saved.', message: e.message })
     } finally { setBusy(false) }
   }
+  // FIND DETAILS (build queue F1): the content type's finder, the song service
+  // for Songs and Music videos, Wikidata for every other type. It works on the
+  // SAVED type and values, so it waits for unsaved changes to be saved first.
+  const [finder, setFinder] = useState<{ finder: 'song' | 'general'; term: string; song: { artist: string; title: string } | null; contentType: { name: string } | null } | null>(null)
+  const openFinder = async () => {
+    setErr('')
+    try { setFinder(await apiRequest(`/vod/${d.id}/finder`)) } catch (e: any) { setErr(e.message) }
+  }
+  const found = (changed: string[]) => {
+    setFinder(null)
+    notify({ id: 'asset-found', kind: 'ok', message: changed.length ? `Applied ${changed.length} detail${changed.length === 1 ? '' : 's'} to ${what}.` : `Applied the details to ${what}.` })
+    onSaved()
+  }
   return (
     <div style={{ maxWidth: 820 }}>
       <TypePicker appliesTo="vod" value={typeId} onChange={(id) => setTypeId(id)}
         hint="Inherited from the channel, station or event it was cut from. Change it to describe this item differently." />
+      <div className="asset-find">
+        <button type="button" className="btn ghost sm" disabled={busy || dirty || !d.schema_id} onClick={openFinder}
+          title={!d.schema_id ? 'Choose a content type and save it first' : dirty ? 'Save or discard your changes first' : 'Look this title up and choose what to fill in'}>
+          <SearchIcon /> Find details…</button>
+        <span className="lib-faint">{!d.schema_id ? 'Choose a content type and save it to look the details up.' : dirty ? 'Save or discard your changes to look the details up.' : 'Look the title up and choose what to fill in. Empty fields only, unless you tick more.'}</span>
+      </div>
+      {finder && finder.finder === 'song' && (
+        <SongFinder id={d.id} who={finder.song} onClose={() => setFinder(null)} onApplied={() => found([])} />
+      )}
+      {finder && finder.finder === 'general' && (
+        <DetailsFinder id={d.id} term={finder.term} typeName={finder.contentType?.name ?? 'content type'} onClose={() => setFinder(null)} onApplied={found} />
+      )}
       <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact imageFolder={imgFolder ?? undefined} assetId={d.id} links={links} />
       <div role="status" aria-live="polite" style={{ position: 'sticky', bottom: 0, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
         padding: '10px 12px', margin: '8px -12px 0', background: dirty ? 'color-mix(in srgb, var(--warn, #d97706) 14%, var(--panel))' : 'var(--panel)',

@@ -450,6 +450,25 @@ async function seedAccountSections() {
      ON CONFLICT (account_id) WHERE schema_id IS NULL DO UPDATE SET mode='on', ad_server_id=EXCLUDED.ad_server_id, house_ads=EXCLUDED.house_ads`,
     [ACCOUNT, ADSRV, JSON.stringify([{ assetId: PROMO }])]);
 
+  // Find details (build queue F1): a film to look up on Wikidata, and a song
+  // and its music video for the song service, so the Media Library guide can
+  // show each finder. Titles only: the finders fill the rest.
+  {
+    const { standardTypeId } = await import('../src/services/contentTypes');
+    const FIND = [
+      { id: '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6b01', title: 'Nosferatu', type: 'movie', metadata: { title: 'Nosferatu' } },
+      { id: '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6b02', title: 'Neon Coast - Night Drive', type: 'song', metadata: { artist: 'Neon Coast', title: 'Night Drive' } },
+      { id: '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6b03', title: 'Night Drive (official video)', type: 'music-video', metadata: { artist: 'Neon Coast', title: 'Night Drive' } },
+    ];
+    for (const f of FIND) {
+      await query(
+        `INSERT INTO vod_assets(id, account_id, source_kind, kind, title, start_epoch_ms, end_epoch_ms, duration_ms, metadata, schema_id, created_at)
+         VALUES ($1,$2,'upload','clip',$3,0,240000,240000,$4::jsonb,$5, now() - interval '2 days')
+         ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, metadata=EXCLUDED.metadata, schema_id=EXCLUDED.schema_id`,
+        [f.id, ACCOUNT, f.title, JSON.stringify(f.metadata), await standardTypeId(ACCOUNT, f.type)]);
+    }
+  }
+
   // Payments: a month pass on Sport One, and a viewer who bought it elsewhere.
   const term = { kind: 'period', count: 1, unit: 'month', priceCents: 999, currency: 'AUD', productKey: 'sport-month', name: 'Sport One monthly pass' };
   await query(

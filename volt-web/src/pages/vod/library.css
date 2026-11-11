@@ -269,6 +269,10 @@
 .songf-note { font-size: var(--fs-xs); color: var(--warn) }
 .songf-act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px }
 @media (max-width: 720px) { .songf-q { grid-template-columns: 1fr } }
+/* Find details on the Metadata tab (DetailsFinder.tsx, or the song finder for Songs and Music videos). */
+.asset-find { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px }
+.asset-find .btn { display: inline-flex; align-items: center; gap: 6px }
+.songf-q .btn { display: inline-flex; align-items: center; gap: 6px }
 
 /* What the asset is, top right of the card (KindBadge): its colour from the colour key, as a small dot. */
 .lib-badge-kind { right: 8px; top: 8px; display: inline-flex; align-items: center; gap: 5px; font-weight: 600 }

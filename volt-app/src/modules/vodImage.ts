@@ -22,6 +22,8 @@
 //                                       song's fields, remembered for the song
 //    DELETE /api/vod/:id/song/details   forget the remembered details
 //
+//  Find details for every other content type (Wikidata) is modules/vodDetails.ts.
+//
 //  Feature `vod`: reading needs view, choosing and lookups need manage (auth/roles.ts).
 // ============================================================================
 import { Router } from 'express';
@@ -37,6 +39,7 @@ import { songIdentity } from '../services/media/musicLookup';
 import { parseIcyTitle } from '../services/radio/trackMeta';
 import { assetImagesRouter } from './assetImages';
 import { assetFilesRouter } from './assetFiles';
+import { vodDetailsRouter } from './vodDetails';
 
 export const vodImageRouter = Router();
 vodImageRouter.use(requireAuth);
@@ -44,6 +47,8 @@ vodImageRouter.use(requireAuth);
 vodImageRouter.use(assetImagesRouter);
 // Companion files: captions (subtitle tracks) and metadata sidecars (modules/assetFiles.ts, COMPANION_FILES.md).
 vodImageRouter.use(assetFilesRouter);
+// Find details: which finder a type uses, and the general one (modules/vodDetails.ts, build queue F1).
+vodImageRouter.use(vodDetailsRouter);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -79,7 +84,9 @@ async function view(id: string, acct: string) {
     pickedAt: a.poster_picked_at ?? null,
     audio: isAudioAsset(a),
     song: isSongAsset(a),
-    songIdentity: isAudioAsset(a) ? songIdentity({ title: a.title, metadata: a.metadata, ingest: a.ingest }) : null,
+    songIdentity: isAudioAsset(a) || a.schema_key === 'music-video' ? songIdentity({ title: a.title, metadata: a.metadata, ingest: a.ingest }) : null,
+    // Which Find details the content type uses (services/media/finders.ts).
+    finder: (await import('../services/media/finders')).finderFor(a.schema_key),
     upload: ['upload', 'watchfolder'].includes(a.source_kind),
     sprite: a.sprite ? { sheets: a.sprite.sheets?.length ?? 0, intervalMs: a.sprite.intervalMs, tiles: (a.sprite.sheets ?? []).reduce((n: number, s: any) => n + (s.tiles ?? 0), 0) } : null,
     candidates: (Array.isArray(a.poster_candidates) ? a.poster_candidates : []).slice(0, 24).map((c: any) => ({
@@ -274,7 +281,11 @@ vodImageRouter.post('/:id/song/find', asyncHandler(async (req, res) => {
   const { songType } = await import('../services/media/assetImage');
   const song = await songType(acct);
   const own = a.schema_id ? await one<any>(`SELECT id, name, standard_key, fields FROM metadata_schemas WHERE id = $1`, [a.schema_id]) : null;
-  const schemaFields = (own?.standard_key === 'song' ? own.fields : song?.fields) ?? own?.fields ?? [];
+  // A type whose finder is the song service (a Song, a Music video: services/media/finders.ts)
+  // is filled through its OWN fields and keeps its type; anything else is proposed as a Song.
+  const { finderFor } = await import('../services/media/finders');
+  const keepsType = !!own && finderFor(own.standard_key) === 'song';
+  const schemaFields = (keepsType ? own.fields : song?.fields) ?? own?.fields ?? [];
   const fdefs = schemaFields.map((f: any) => ({ key: f.key, type: f.type, options: f.options, multiple: f.multiple }));
   for (const r of results) if (r.state === 'hit') r.proposed = ml.fillsFor({ ...r, state: 'hit' }, {}, fdefs);
   const { getSongDetails } = await import('../services/media/songDetails');
@@ -282,7 +293,7 @@ vodImageRouter.post('/:id/song/find', asyncHandler(async (req, res) => {
     query: who, sentAs: asked,
     // What the asset has now, to show next to each find: a change needs the person's approval.
     // The content type: Song is proposed when it is not one already (ticked when it has none).
-    contentType: { now: own ? { id: own.id, name: own.name, song: own.standard_key === 'song' } : null, song: song ? { id: song.id } : null },
+    contentType: { now: own ? { id: own.id, name: own.name, song: own.standard_key === 'song', keep: keepsType } : null, song: song ? { id: song.id } : null },
     current: { metadata: a.metadata ?? {}, provenance: a.metadata_provenance ?? {}, imageUrl: sign(a.poster_key, '300x300,inside'), imageSource: a.poster_source ?? null,
       fields: schemaFields.map((f: any) => ({ key: f.key, label: f.label ?? f.key, type: f.type, options: f.options ?? null, multiple: !!f.multiple })) },
     chosen: who ? await getSongDetails(acct, who.artist, who.title) : null,
@@ -354,7 +365,8 @@ vodImageRouter.post('/:id/song/use', asyncHandler(async (req, res) => {
   // The content type, if approved: Song (the metadata already there is kept).
   const { songType } = await import('../services/media/assetImage');
   let schemaId: string | null = a.schema_id ?? null;
-  if (b.setSong) {
+  // A Music video stays one: its song details are filled in its own fields.
+  if (b.setSong && a.schema_key !== 'music-video') {
     const song = await songType(acct);
     if (song && song.id !== schemaId) {
       await query(`UPDATE vod_assets SET schema_id = $2, updated_at = now() WHERE id = $1`, [a.id, song.id]);

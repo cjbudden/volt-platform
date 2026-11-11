@@ -7335,6 +7335,24 @@
   "group": "/api/vod"
  },
  {
+  "method": "POST",
+  "path": "/api/vod/:id/details/find",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/details/use",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "GET",
   "path": "/api/vod/:id/encode",
   "api": "admin",
@@ -7418,6 +7436,15 @@
  {
   "method": "GET",
   "path": "/api/vod/:id/files/:fileId/proposal",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/:id/finder",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: view",

@@ -52,10 +52,13 @@ export function SongFinder({ id, who, onClose, onApplied }: {
     for (const [k, v] of Object.entries(d.proposed)) if (!same(cur[k], v)) t[k] = !show(cur[k])
     setTicks(t)
     const src = res?.current?.imageSource
-    setUseImage(!!r.coverUrl && !['cover_art', 'metadata', 'manual'].includes(src))
+    // A Music video keeps a frame of the video as its picture: the album cover is offered, not ticked.
+    const keep = !!res?.contentType?.now?.keep && !res?.contentType?.now?.song
+    setUseImage(!keep && !!r.coverUrl && !['cover_art', 'metadata', 'manual'].includes(src))
     // A song found: make it a Song. Ticked unless it already is one (a Clip cut from a
-    // station recording is the usual case); untick to keep the type it has.
-    setSetSong(!res?.contentType?.now?.song)
+    // station recording is the usual case); untick to keep the type it has. A Music
+    // video stays a Music video (its own fields hold the song's details).
+    setSetSong(!res?.contentType?.now?.song && !keep)
   }
   const typed = () => choose(-1, { provider: 'typed', state: 'hit', artist: q.artist, title: q.title, album: '', released: '', label: '', isrc: '', genres: [], coverUrl: q.url.trim() || null,
     proposed: { title: q.title, artist: q.artist, album: '', released: '', label: '', isrc: '' }, terms: 'Typed by a person.' })
@@ -79,7 +82,8 @@ export function SongFinder({ id, who, onClose, onApplied }: {
   const changes = Object.entries(ticks).filter(([, on]) => on).map(([k]) => k)
   const hasArtwork = fields.some((f) => f.key === 'artwork')
   const ctNow = res?.contentType?.now ?? null
-  const songAlready = !!ctNow?.song
+  // A Song, or a type that keeps itself and is filled through its own fields (a Music video).
+  const songAlready = !!ctNow?.song || !!ctNow?.keep
   // Fields are kept on a content type: with none and Song not ticked, only the image and the song's details are saved.
   const fieldsWontSave = !ctNow && !setSong
   const nChanges = (fieldsWontSave ? 0 : changes.length) + (useImage ? 1 : 0) + (setSong && !songAlready ? 1 : 0)
@@ -174,7 +178,7 @@ export function SongFinder({ id, who, onClose, onApplied }: {
                   <td>Image</td>
                   <td>{res?.current?.imageUrl ? <img className="songf-thumb" src={res.current.imageUrl} alt="Current" /> : <span className="lib-faint">none</span>}</td>
                   <td>{draft.coverUrl ? <img className="songf-thumb" src={draft.coverUrl} alt="Found" /> : <span className="lib-faint">no cover</span>}
-                    {useImage && draft.coverUrl && <div className="songf-note">Copied into the Image Library, then set as the Artwork</div>}</td>
+                    {useImage && draft.coverUrl && <div className="songf-note">Copied into the Image Library, then set as the {ctNow?.keep && !ctNow?.song ? 'image' : 'Artwork'}</div>}</td>
                 </tr>
               )}
               {rows.map((r) => (

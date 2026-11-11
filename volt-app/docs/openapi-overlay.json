@@ -951,5 +951,17 @@
     "tag": "Collections",
     "summary": "Let titles back in",
     "description": "`{ \"assetIds\" }`: removes them from the left-out list and lets the rules decide again at once."
+  },
+  "GET /api/vod/:id/finder": {
+    "summary": "Which Find details an asset uses",
+    "description": "The finder for the asset's content type: `song` (Songs and Music videos use the song service: `POST /api/vod/{id}/song/find`) or `general` (every other type: `POST /api/vod/{id}/details/find`), the default search `term` (the type's title field, else the asset title) and, for the song finder, `song` (artist and title). Needs `vod: view`."
+  },
+  "POST /api/vod/:id/details/find": {
+    "summary": "Find details for an asset",
+    "description": "Searches Wikidata for `q` (default: the title field's value) and maps each item onto the asset's content type fields through their schema.org names (`proposed`, field key to value, shaped to the field type), with the asset's `current` metadata, provenance and fields to compare, and `unmapped`, the fields this finder cannot fill. Saves nothing. Answers `200` with `error` set when Wikidata cannot be reached, `400` when the asset has no content type, `409` when the type uses the song finder. Needs `vod: manage`."
+  },
+  "POST /api/vod/:id/details/use": {
+    "summary": "Use found details",
+    "description": "Writes exactly the `values` given (field key to value, the ones a person ticked), checked as a metadata save checks them (`422` for a field the type does not have or a value that does not fit). An image found on the web is copied into the Image Library and the field holds the library reference. Each written field's `metadata_provenance` records `source` (`wikidata`), `item`, `link`, who chose it, when, and the value it replaced (`was`). Audited. Needs `vod: manage`."
   }
 }

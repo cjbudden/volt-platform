@@ -14,6 +14,8 @@ interface ImageView {
   candidates: Cand[]; music: any; pending?: boolean
   upload?: boolean; sprite?: { sheets: number; intervalMs: number; tiles: number } | null
   folder?: string | null; providersEnabled?: string[]
+  /** The content type's finder (song for Songs and Music videos). */
+  finder?: 'song' | 'general'
 }
 
 const SOURCE: Record<string, string> = {
@@ -67,7 +69,7 @@ export function AssetImage({ id, onChanged }: { id: string; onChanged?: () => vo
         </div>
         <div className="asset-img-why">
           <div>{v.pending ? 'Still working: looking the song up…' : v.reason ?? 'Not picked yet.'}</div>
-          {v.song && v.songIdentity && (
+          {(v.song || v.finder === 'song') && v.songIdentity && (
             <div className="lib-faint" style={{ marginTop: 6 }}>Song: {v.songIdentity.artist} – {v.songIdentity.title}, from {FROM[v.songIdentity.from] ?? v.songIdentity.from}.{' '}
               <button type="button" className="linklike" disabled={!!busy} onClick={() => setFinder(true)}>Find song details…</button></div>
           )}
