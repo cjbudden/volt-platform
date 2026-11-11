@@ -2,6 +2,14 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.86.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · API: GET /api/collections/{id}/access now gives each app a ruledOut count: how many of the collection's titles its rights keep out of that app, with a few of their titles.
+- added · Collections: Set who can watch a collection from its page: choose the apps and territories it applies to, then region by region whether viewers need nothing, to sign in, or a package, with the package's products and an app's own store prices. A sub-collection shows what it inherits, and apps the rights of every title keep out are greyed with the reason.
+- added · Collections: View as on a collection shows what a viewer gets for each title in an app and a country (not signed in, signed in or holding a package): plays, sign in, locked with the packages and prices that unlock it, or blocked by rights, and which collections decided; below it, a matrix of your apps by regions.
+
 ## 0.85.0 (2026-11-10)
 
 ### Product (in customer release notes)
