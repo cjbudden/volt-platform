@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.87.0 (2026-11-11)
+
+### Internal
+
+- added · Deploy: HTTPS, certificates and DNS from one input: set domain_name (and route53_zone_id when Route 53 hosts it) and Terraform makes api., cdn., img. and origin.<domain>, DNS-validated certificates for CloudFront and the ALB, an HTTPS listener with port 80 redirecting, HTTPS from CloudFront and the encoders to the ALB, and the DNS records (or lists them to create by hand). With no domain the stack is unchanged (deploy/terraform/dns_https.tf, APPLY.md step 3).
+
 ## 0.86.0 (2026-11-11)
 
 ### Product (in customer release notes)
