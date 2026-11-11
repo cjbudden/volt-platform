@@ -35,8 +35,13 @@ Every change (handling, tax rate, charge, price, mark paid) is in the audit log.
 ## Add-ons and packs (build queue B2)
 
 The catalogue is data (migration 0171, `src/services/invoicing/addons.ts`).
-Until the System Admin tab for it lands (B2-2), it is kept through the API
-with a platform session:
+On **System Admin > Billing**, the **Add-ons** section lists each add-on with
+its price, included quantity, packs (choose one to edit it, **+ Pack** to
+add) and how many accounts have it; **Add an add-on** and **Edit** set the
+name, description, price, included quantity, unit, the feature it opens and
+whether it is offered. An account's **Edit** drawer lists the add-ons it has
+on and how much of each is used. The same through the API, with a platform
+session:
 
 | Request | Does |
 |---|---|

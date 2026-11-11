@@ -12,12 +12,15 @@
 //  Prices are only ever added: a new price with a later effective date
 //  replaces the old one from that date, so an invoice already issued is never
 //  re-priced.
+//
+//  The add-on catalogue (build queue B2-2) is in BillingAddons.tsx.
 // ============================================================================
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { apiRequest as req } from '../api'
 import { StatusTag } from '../scaffold'
 import { FormStatus, Notice, useNotify, FieldError } from '../notices'
 import { usd, unitPrice, pct, monthLabel, dayLabel, InvoiceStatus, InvoiceDrawer, DownloadButtons, useEscape, type Invoice } from './Billing'
+import { AddonCatalogue, AccountAddonsList } from './BillingAddons'
 
 interface Acc { id: string; name: string; status: string; plan: string; handling: 'automated' | 'contract'; storedHandling: string; taxRate: number | null; ownFeeUsd: number | null; openInvoices: number; openUsd: number }
 interface Overview { mode: 'off' | 'contract' | 'automated'; taxRate: number; currency: string; openMonth: string; lastClosable: string; accounts: Acc[] }
@@ -150,6 +153,8 @@ export function BillingAdmin() {
         </div>
       )}
 
+      <AddonCatalogue />
+
       {editAcc && <AccountBillingDrawer acc={editAcc} defaultRate={ov.taxRate} contractDeployment={ov.mode === 'contract'} onClose={() => setEditAcc(null)} onDone={() => { setEditAcc(null); load() }} />}
       {charge && <ChargeDrawer accounts={ov.accounts} openMonth={ov.openMonth} onClose={() => setCharge(false)} onDone={() => { setCharge(false); load() }} />}
       {paying && <MarkPaidDrawer inv={paying} onClose={() => setPaying(null)} onDone={() => { setPaying(null); load() }} />}
@@ -161,8 +166,8 @@ export function BillingAdmin() {
 }
 
 /** The drawer frame every form here uses: title, body, status and two buttons. */
-function Drawer({ title, children, err, busy, okLabel, okDisabled, onOk, onClose }: {
-  title: string; children: ReactNode; err: string; busy: boolean; okLabel: string; okDisabled?: boolean; onOk: () => void; onClose: () => void
+export function Drawer({ title, children, err, busy, okLabel, okDisabled, onOk, onClose, danger }: {
+  title: string; children: ReactNode; err: string; busy: boolean; okLabel: string; okDisabled?: boolean; onOk: () => void; onClose: () => void; danger?: boolean
 }) {
   useEscape(onClose, !busy)
   return (
@@ -173,14 +178,14 @@ function Drawer({ title, children, err, busy, okLabel, okDisabled, onOk, onClose
         <div className="drawer-f">
           <FormStatus error={err} />
           <button className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn primary" onClick={onOk} disabled={busy || okDisabled}>{busy ? 'Saving…' : okLabel}</button>
+          <button className={`btn primary${danger ? ' danger' : ''}`} onClick={onOk} disabled={busy || okDisabled}>{busy ? 'Saving…' : okLabel}</button>
         </div>
       </div>
     </div>
   )
 }
 
-function useSubmit(onDone: () => void) {
+export function useSubmit(onDone: () => void) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const notify = useNotify()
@@ -216,6 +221,7 @@ function AccountBillingDrawer({ acc, defaultRate, contractDeployment, onClose, o
         <FieldError>{rateErr}</FieldError>
         <div className="hintxt">Leave empty to use the deployment's default. Applies to invoices issued from now on; issued invoices keep their rate.</div>
       </div>
+      <AccountAddonsList accountId={acc.id} />
     </Drawer>
   )
 }

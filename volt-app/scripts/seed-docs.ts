@@ -1015,6 +1015,22 @@ async function seedBilling() {
     if (!(await one(`SELECT 1 FROM billing_charges WHERE account_id = $1 AND period_month = $2 AND source = 'manual'`, [ACCOUNT, open]))) {
       await I.addManualCharge({ accountId: ACCOUNT, amountUsd: -25, description: 'Credit: outage on the 3rd', month: open, userId: null });
     }
+    // ADD-ONS (build queue B2-2): a catalogue with packs, and the docs account
+    // with one on and part of its allowance used, for the Billing guide.
+    if (!(await one(`SELECT 1 FROM billing_addons WHERE key = 'archive_storage'`))) {
+      await query(`INSERT INTO billing_addons(key, name, description, monthly_usd, included_quantity, unit, licence) VALUES
+        ('archive_storage', 'Archive storage', 'Verified copies of your originals and recordings in your own storage', 50, 100, 'GB', 'mirror_archive'),
+        ('extra_transcode', 'Extra transcode hours', 'Encoding hours beyond your plan for on-demand titles', 30, 20, 'hours', NULL)`);
+      await query(`INSERT INTO billing_addon_packs(addon_key, key, name, extra_quantity, monthly_usd) VALUES
+        ('archive_storage', 'small', 'Small pack', 100, 20), ('archive_storage', 'large', 'Large pack', 500, 60),
+        ('extra_transcode', 'plus', 'Plus pack', 40, 45)`);
+    }
+    const X = await import('../src/services/invoicing/addons');
+    if (!(await one(`SELECT 1 FROM account_addons WHERE account_id = $1 AND addon_key = 'archive_storage'`, [ACCOUNT]))) {
+      await X.setAddon(ACCOUNT, 'archive_storage', 'small', { userId: null, label: 'volt' });
+    }
+    await query(`INSERT INTO addon_usage(account_id, addon_key, period_month, used) VALUES ($1, 'archive_storage', $2, 128.5)
+                 ON CONFLICT (account_id, addon_key, period_month) DO NOTHING`, [ACCOUNT, open]);
   } finally {
     if (before === undefined) delete process.env.VOLT_BILLING; else process.env.VOLT_BILLING = before;
   }

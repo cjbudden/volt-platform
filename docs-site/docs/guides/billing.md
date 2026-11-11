@@ -51,7 +51,17 @@ Volt never sees or keeps your card number: it stays with the payment provider.
 
 ### Add-ons and packs
 
-Add-ons are extra services your Volt provider offers for a monthly price, such as storage for archive copies. Each includes a quantity of something (for example 100 GB) and may offer **packs** that add more for their own monthly price. For now you turn add-ons on, change their pack and turn them off through the API (see [Through the API](#through-the-api)).
+Add-ons are extra services your Volt provider offers for a monthly price, such as storage for archive copies. Each includes a quantity of something (for example 100 GB) and may offer **packs** that add more for their own monthly price. They are listed under **Add-ons** on the Billing page.
+
+![Add-ons on the Billing page: Archive storage on with the Small pack, its price and a meter of the GB used this month with what is left and when it starts again, and Extra transcode hours off with Turn on](/img/screens/billing-addons.png)
+
+1. To start one, choose **Turn on**, pick the add-on on its own or with a pack, and choose **Turn on**. The drawer says what is charged now before you confirm.
+2. To get more or less, choose **Change pack** on an add-on that is on, pick another pack (or **No pack**) and choose **Change pack**.
+3. To stop one, choose **Turn off** and confirm.
+
+![Changing the Archive storage pack: no pack, the Small pack (current) and the Large pack chosen, with what it costs now: the Large pack's full month charged and the bigger allowance at once](/img/screens/billing-addon-change.png)
+
+The meter under an add-on that is on shows how much of this month's quantity is used, what is left, and the day it starts again.
 
 How they are charged:
 
@@ -108,6 +118,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Card payments are not set up on this deployment yet.** | Your provider has not finished setting up card payments | Ask your Volt provider |
 | **No invoices yet** | No month has been invoiced since your account started | The first invoice is issued on the 1st, for the month before |
 | **The PDF could not be downloaded: ...** | The download was refused or the connection dropped | Try again; if it keeps failing, note the invoice number and ask your Volt provider |
+| **The ... allowance for this month is used up** | This month's quantity of an add-on is used up | Choose **Change pack** for a bigger pack, or wait for the 1st when it starts again |
+| **On this deployment add-ons are switched on by your Volt provider.** | Your provider does not bill through Volt, so add-ons are set up by them | Ask your Volt provider |
+| **Turning add-ons on or off needs Account settings: Manage.** | You can see add-ons but not change them | Ask an administrator of your account |
 | **Couldn't load billing.** | The page could not reach Volt | Choose **Retry** |
 
 ## Through the API

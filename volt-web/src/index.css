@@ -1682,4 +1682,15 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .bill-dl{display:inline-flex;gap:6px;margin-left:6px}
 .bill-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:10px}
 .bill-actions{display:flex;gap:8px;flex-wrap:wrap}
-@media (max-width:640px){.bill-pay{flex-wrap:wrap}.bill-pay>.btn{width:100%}.plan-head{flex-wrap:wrap}}
+.addon-list{display:grid;gap:12px;margin-bottom:22px}
+.addon-card{padding:16px 18px}
+.addon-head{display:flex;align-items:flex-start;gap:14px}
+.addon-t{flex:1;min-width:0}
+.addon-name{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:2px}
+.addon-actions .btn svg,.addon-packs .btn svg{margin-right:2px}
+.addon-use{margin-top:14px;display:grid;gap:6px}
+.addon-opt{cursor:pointer;margin-bottom:0}
+.addon-opt[data-sel]{border-color:rgba(63,123,255,.45)}
+.addon-effect{margin-top:14px;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border);font-size:var(--fs-body)}
+.addon-packs{display:flex;flex-wrap:wrap;gap:6px}
+@media (max-width:640px){.bill-pay{flex-wrap:wrap}.bill-pay>.btn{width:100%}.plan-head{flex-wrap:wrap}.addon-head{flex-wrap:wrap}.addon-actions{width:100%}.addon-actions .btn{flex:1;justify-content:center}}

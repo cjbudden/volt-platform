@@ -17,6 +17,7 @@ import { PageHead, StatusTag } from '../scaffold'
 import { navigate } from '../router'
 import { useAccess } from '../access'
 import { usePageNotice, useNotify, Notice } from '../notices'
+import { AddonsSection } from './BillingAddons'
 
 export interface BillLine { source: string; itemKey?: string; description: string; quantity: number; unit: string; unitUsd: number; amountUsd: number; reference?: string | null; sofar?: boolean }
 export interface Invoice {
@@ -199,6 +200,8 @@ export default function BillingPage() {
           </div>
         </>
       )}
+
+      <AddonsSection mode={b.mode} canManage={canManage} />
 
       <div className="sec-head"><h2>Invoices</h2></div>
       {b.invoices.length === 0 ? (

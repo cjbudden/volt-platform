@@ -553,6 +553,28 @@
       "alt": "An invoice opened: its period, issue date, how it is paid and its status, the payment reference, every line with subtotal, tax and total, and the PDF and CSV buttons"
     },
     {
+      "name": "billing-addons",
+      "guide": "guides/billing.md",
+      "path": "/billing",
+      "waitFor": ".addon-card",
+      "billingOn": true,
+      "fresh": true,
+      "clip": ".addon-list",
+      "alt": "Add-ons on the Billing page: Archive storage on with the Small pack, its price and a meter of the GB used this month with what is left and when it starts again, and Extra transcode hours off with Turn on"
+    },
+    {
+      "name": "billing-addon-change",
+      "guide": "guides/billing.md",
+      "path": "/billing",
+      "waitFor": ".addon-card",
+      "billingOn": true,
+      "fresh": true,
+      "click": [".addon-card:has(.tag.live) button:has-text(\"Change pack\")", ".addon-opt:has-text(\"Large pack\")"],
+      "waitAfter": ".drawer .addon-effect",
+      "clip": ".drawer",
+      "alt": "Changing the Archive storage pack: no pack, the Small pack (current) and the Large pack chosen, with what it costs now: the Large pack's full month charged and the bigger allowance at once"
+    },
+    {
       "name": "fleet-and-usage",
       "guide": "guides/fleet-and-usage.md",
       "path": "/fleet",
