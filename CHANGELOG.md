@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.89.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Media Library: Find details now reads a page you paste as well as searching Wikidata: paste the link to a title's own page (a studio's film page, a broadcaster's episode page, a news article, a podcast episode) and Volt reads the details it publishes, maps them to the content type's fields and shows them to tick, each applied field remembering the page it came from.
+
+### Internal
+
+- added · Docs: The screenshot script can type into a field between clicks and start a shot from a fresh page; new find-details-page suite and browser check.
+
 ## 0.88.0 (2026-11-11)
 
 ### Product (in customer release notes)
