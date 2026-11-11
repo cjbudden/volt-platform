@@ -175,6 +175,7 @@ async function main() {
   await seedRights();
   await seedRightsDemand();
   await seedRuleCollection();
+  await seedCollectionAccess();
   await seedMetadataRules();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
@@ -817,6 +818,42 @@ async function seedRightsDemand() {
        SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(account_id uuid, day date, asset_id text, country text, reason text, vh text)
        ON CONFLICT DO NOTHING`, [JSON.stringify(viewers.slice(i, i + 5000))]);
   }
+}
+
+/**
+ * ACCESS ON A COLLECTION (build queue C2-2): Premium picks asks for a package
+ * in Australia and New Zealand (its own price in the iOS app) and for signing
+ * in everywhere else; Food & Travel asks for signing in everywhere, which its
+ * sub-collection inherits. The Collections guide shows the access editor, the
+ * inherited access, View as and the matrix of apps by regions, with one title
+ * the rights keep out where the package is asked.
+ */
+async function seedCollectionAccess() {
+  const FOOD = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a01', WEEK = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a02';
+  const PICKS = '7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a05';
+  await query(
+    `INSERT INTO collections(id, account_id, name, description, color, created_by) VALUES ($1,$2,'Premium picks','Titles sold as a pass in Australia and New Zealand','#d4a64a',$3)
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description`, [PICKS, ACCOUNT, ADMIN]);
+  for (const [i, asset] of ['5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e41', '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01', '5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e35'].entries()) {
+    await query(
+      `INSERT INTO collection_items(collection_id, vod_asset_id, position, added_by)
+       SELECT $1, $2, $3, $4 WHERE EXISTS (SELECT 1 FROM vod_assets WHERE id=$2)
+       ON CONFLICT (collection_id, vod_asset_id) DO UPDATE SET position=EXCLUDED.position`, [PICKS, asset, i, ADMIN]);
+  }
+  const term = (productKey: string, name: string, priceCents: number) => ({ productKey, name, kind: 'period', count: 1, unit: 'month', priceCents, currency: 'AUD' });
+  const picks = { apps: 'all', territories: { mode: 'world', countries: [] }, rules: [
+    { id: 'r1', countries: ['AU', 'NZ'], access: 'premium', terms: [term('picks.monthly', 'Premium picks pass', 499)],
+      appTerms: { [IOSAPP]: [term('picks.ios.monthly', 'Premium picks pass (iOS)', 599)] } },
+    { id: 'r2', countries: ['WORLD'], access: 'members' },
+  ] };
+  const food = { apps: 'all', territories: { mode: 'world', countries: [] }, rules: [{ id: 'r1', countries: ['WORLD'], access: 'members' }] };
+  const CA = await import('../src/services/collectionAccess');
+  for (const [id, access] of [[PICKS, picks], [FOOD, food]] as const) {
+    await query(`UPDATE collections SET access = $2::jsonb WHERE id = $1`, [id, JSON.stringify(access)]);
+    await CA.syncPackageProducts(ACCOUNT, id, access as any);
+  }
+  await CA.enqueueCollections([PICKS, FOOD, WEEK]);
+  while (await CA.drainAccessRechecks());
 }
 
 /**

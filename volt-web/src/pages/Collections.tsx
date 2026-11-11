@@ -8,6 +8,9 @@
 //      Week 45        3       sub-collections
 //    GOLDFRAME        4       its assets, in order: move up / down, take out
 //
+//  Access by app and region, View as and the matrix of apps by regions:
+//  vod/CollectionAccess.tsx (build queue C2-2).
+//
 //  /collections/<id> opens one. Assets are added from the Media Library
 //  (select, then Add to collection); this page orders and prunes them.
 // ============================================================================
@@ -21,6 +24,7 @@ import {
 } from './vod/collections'
 import './vod/collections.css'
 import { CollectionRulesCard } from './vod/CollectionRules'
+import { CollectionAccessCard } from './vod/CollectionAccess'
 
 const SWATCHES = ['#ff4d6d', '#ffb703', '#2ec4b6', '#b8a1ff', '#3f7bff', '#d4a64a', '#8bd450', '#f78fb3']
 const durOf = (ms: number) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
@@ -173,6 +177,9 @@ function Detail({ node, all, maxDepth, onChanged, onChoose, onNewSub }: {
 
       {info && <CollectionRulesCard collectionId={node.id} rules={info.rules ?? null} orderBy={info.orderBy ?? 'manual'} checkedAt={info.rulesCheckedAt ?? null}
         counts={info.counts ?? { rule: 0, manual: 0, excluded: 0 }} onSaved={() => { loadInfo(); loadItems(); onChanged() }} />}
+
+      {/* ACCESS (build queue C2-2): by app and region, with View as and the matrix. */}
+      <CollectionAccessCard collectionId={node.id} collectionName={node.name} />
 
       <div className="card colp-items">
         <div className="card-h"><h3>Media</h3>

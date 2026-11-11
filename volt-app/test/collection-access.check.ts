@@ -11,7 +11,8 @@
 //  viewer session) unlocks it, a looser collection does not loosen it, a
 //  child inherits and a parent's change reaches the child's titles, a move
 //  and a removal compile the title again, the rights refuse a manual add
-//  and cap the gate, View as, another account kept out, and a warm gate
+//  and cap the gate, View as, the apps the rights rule out for the editor
+//  (C2-2), another account kept out, and a warm gate
 //  with a package rule still makes no database read.
 //    DATABASE_URL=... npx tsx test/collection-access.check.ts
 // ============================================================================
@@ -145,6 +146,16 @@ const check = (m: string, got: unknown, want: unknown) => {
 
     const g0 = await admin('GET', `/api/collections/${sportC}/access`);
     check('GET access: none yet (inherits), the default, the account\'s apps, the titles counted', [g0.s, g0.j.access, g0.j.inherits, g0.j.apps.length, g0.j.items], [200, null, true, 2, 4]);
+    // The editor greys an app the rights keep every title out of (build queue C2-2).
+    check('GET access: per app, how many titles the rights keep out (none yet)', g0.j.apps.map((a: any) => [a.name, a.ruledOut.count, a.ruledOut.of]), [['Web', 0, 4], ['Phone', 0, 4]]);
+    const webOnly = (await one<any>(`INSERT INTO rights_profiles(account_id, name, app_mode, app_types) VALUES ($1,'Web only','allow',$2) RETURNING id`, [me.a, ['web']]))!.id;
+    const webTitle = await asset('Web exclusive', webOnly);
+    const webC = await col('Web exclusives');
+    await admin('POST', `/api/collections/${webC}/items`, { assetIds: [webTitle] });
+    const gw = await admin('GET', `/api/collections/${webC}/access`);
+    check('...a web-only title: the phone app ruled out for 1 of 1, named; the web app not',
+      gw.j.apps.map((a: any) => [a.name, a.ruledOut.count, a.ruledOut.of, a.ruledOut.titles]), [['Web', 0, 1, []], ['Phone', 1, 1, ['Web exclusive']]]);
+    check('...another account cannot read it', (await admin('GET', `/api/collections/${webC}/access`, undefined, them)).s, 404);
     const sportAccess = { apps: 'all', territories: { mode: 'world', countries: [] }, rules: [
       { countries: ['GB', 'IE'], access: 'premium', terms: [term(`sport.web.${tag}`, 999)], appTerms: { [iosApp.id]: [term(`sport.ios.${tag}`, 1099)] } }] };
     const p1 = await admin('PUT', `/api/collections/${sportC}/access`, { access: sportAccess });

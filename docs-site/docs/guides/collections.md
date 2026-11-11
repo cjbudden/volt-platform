@@ -17,7 +17,7 @@ Collections are your own groupings of library media: a collection per channel or
 - **Collections that keep themselves current.** Rules pick titles by their fields: title, genre, tags, length, content type, rights profile, provider, dates and your content types' own fields. New and changed media joins or leaves on its own.
 - **Running order.** Each collection holds its titles in an order you set, or sorted by a field such as newest first.
 - **Finding media.** The **Collections** rail beside the [Media Library](media-library.md) narrows the library to one collection, with or without its sub-collections, and every other filter still works inside it.
-- **Packages and access by app and region.** A collection can ask more of viewers in chosen apps and countries: that they sign in, or that they buy it as a package, priced per app. Every title in it is then locked there, whatever other collection it is in (see [Access by app and region](#access-by-app-and-region)).
+- **Packages and access by app and region.** A collection can ask more of viewers in chosen apps and countries: that they sign in, or that they buy it as a package, priced per app. Every title in it is then locked there, whatever other collection it is in (see [Set who can watch](#set-who-can-watch-access-by-app-and-region) and, for the API, [Access by app and region](#access-by-app-and-region)).
 - **Programming a FAST channel.** In a [FAST](fast.md) channel's run order, pick a collection in the library and choose **Add the whole collection in its order**.
 
 Programmers and media librarians use it day to day.
@@ -67,6 +67,28 @@ From then on the collection keeps itself up to date: a title that is added or ch
 - **Added by hand** titles (marked **Added**) stay whatever the rules say.
 - **Taking a title out** of a rule collection leaves it out: the rules will not put it back. **Show left out** lists them, and **Let back in** returns one to the rules.
 - Untick **Add media by rules** and choose **Turn rules off** to stop: what the rules added comes out, what people added stays.
+
+### Set who can watch: access by app and region
+
+1. Open the collection. The **Access** card says what it asks now, and a sub-collection lists what it inherits from each parent.
+2. Tick **Set access here**.
+3. Under **Apps**, keep **All apps** or choose **Chosen apps** and tick them. An app the rights of every title here keep out is greyed, with the reason; when the rights keep only some titles out, the card names them.
+4. Under **Territories**, keep **Everywhere (Global)**, or choose **Only in these territories** or **Everywhere except these** and type the two-letter country codes (for example `AU, NZ`). Outside these apps and territories the collection asks nothing.
+5. Under **Region rules**, add a rule for each region: the countries (or **Everywhere else**) and what a viewer needs there: **Free**, **Members (signed in)** or **Premium (a package)**. The first rule naming the viewer's country decides.
+6. For **Premium**, fill in the package's products: a name, a product key, the period (or **for the published dates**), the price and the currency. To charge differently in one app (an app store price, for example), choose **Own prices in an app** and give that app its own products.
+7. Choose **Save access**. Every title here and in sub-collections follows it at once; the card shows how many.
+
+![The Access card of a collection: all apps, everywhere, a premium rule for Australia and New Zealand with its pass and the iOS app's own price, and members everywhere else](/img/screens/collections-access.png)
+
+A sub-collection can only ask more than its parents. If it would let viewers in where a parent locks them, **Save access** is refused and the card lists where. Untick **Set access here** and choose **Clear access** to go back to what the parents ask.
+
+### Check what a viewer gets: View as
+
+The **View as** card under **Access** answers the way the player does. Choose an app, type a country code and choose the viewer: **Not signed in**, **Signed in** or **Holding a package**. Each title shows **Plays**, **Sign in**, **Locked** (with the packages and prices that unlock it) or **Blocked by rights** (with the reason), and which collections decided.
+
+Below it, the matrix shows every app against each country the access names, plus one country no rule names, for a viewer who is not signed in.
+
+![View as on a collection: the web player in Australia for a viewer not signed in, two titles locked with the pass that unlocks them and one blocked by rights, then the matrix of apps by regions](/img/screens/collections-view-as.png)
 
 ### Put a collection in order
 
@@ -136,7 +158,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "It asks for less than the parent in ... A child collection can only tighten its parent's access." | A sub-collection's access would let viewers in where its parent locks them | Ask the same or more than the parent there, or clear the sub-collection's access so it inherits |
 | A title is not added, with "The rights do not allow ..." | The collection has access that the title's rights rule out: apps, territories or premium access its rights profile does not allow | Add it to a collection without that access, or change the title's [rights](rights.md) |
 | "Another collection or rule already sells ..." | A product key names one product, and another collection or access rule uses it | Give this package its own product keys |
-| A title is locked although its own rules make it free | Another collection it is in asks more in that app and country: the strictest collection wins | Use **View as** through the API to see which collection decides, then take the title out of it or change that collection's access |
+| A title is locked although its own rules make it free | Another collection it is in asks more in that app and country: the strictest collection wins | Open the collection and use **View as** to see which collection decides, then take the title out of it or change that collection's access |
 
 ## Through the API
 
@@ -183,7 +205,7 @@ A sub-collection inherits its parent's access and can only tighten it: it can ap
 
 | Request | Does |
 |---|---|
-| `GET /api/collections/{id}/access` | The collection's own access (`null` when it inherits), what its parents ask, the account's apps and how many titles it governs |
+| `GET /api/collections/{id}/access` | The collection's own access (`null` when it inherits), what its parents ask, the account's apps (each with `ruledOut`: how many of the titles here its rights keep out of that app, of how many, and a few of their titles) and how many titles it governs |
 | `PUT /api/collections/{id}/access` | Sets the access (`{"access": null}` clears it). `422` with `code: "looser_than_parent"` or `"invalid_access"` and the problems; `409` with `code: "product_key_taken"` |
 | `GET /api/collections/{id}/access/view-as?appId=…&country=GB&viewer=anonymous` | What a viewer gets for each title here: `plays`, `sign_in`, `locked` (with the packages and products), or `blocked_by_rights`, and which collections decided. `viewer` is `anonymous`, `member`, or `package` with `packageId` |
 

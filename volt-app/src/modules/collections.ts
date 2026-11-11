@@ -43,7 +43,7 @@ import {
   validateAccess, AccessError, looserThan, ancestorsOf, levelsOf, enqueueCollections, drainFor, syncPackageProducts, productKeyClashes,
   appsOf, rightsConflict, cellFor, compileFor, holdsPackage, kindsFor, ALL_ACCESS, type CollectionAccess,
 } from '../services/collectionAccess';
-import { rightsForAsset, evaluateRights, appTypeOf, accessAllowed } from '../services/rightsProfiles';
+import { rightsForAsset, evaluateRights, appTypeOf, accessAllowed, appAllowed } from '../services/rightsProfiles';
 import { actor, writeAudit } from '../services/audit';
 
 export const collectionsRouter = Router();
@@ -394,6 +394,30 @@ async function rightsRefusals(acct: string, collectionId: string, assetIds: stri
 const accessView = (a: CollectionAccess | null) => a ?? null;
 
 /**
+ * For the access editor (build queue C2-2): per app, how many of the titles
+ * here (and in sub-collections) the rights keep out of that app, with a few
+ * of their names. When the rights keep every title out, the editor greys the
+ * app with the reason; choosing it would only ever answer "blocked by
+ * rights". Read from the first 500 titles, as View as is.
+ */
+async function appsRuledOut(collectionId: string, apps: { id: string; name: string; type: string; surface: string | null }[]) {
+  const out = new Map<string, { count: number; of: number; titles: string[] }>();
+  const rows = await query<any>(
+    `SELECT DISTINCT ON (v.id) v.id, v.title, v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at
+       FROM collection_items i JOIN vod_assets v ON v.id = i.vod_asset_id
+      WHERE i.collection_id = ANY($1::uuid[]) ORDER BY v.id LIMIT 500`, [await subtreeIds(collectionId)]);
+  const rights = await Promise.all(rows.map((r) => rightsForAsset(r)));
+  for (const a of apps) {
+    const t = appTypeOf(a.type, a.surface);
+    const titles: string[] = [];
+    let count = 0;
+    rows.forEach((r, i) => { if (!appAllowed(rights[i], t, a.id)) { count++; if (titles.length < 3) titles.push(r.title || 'Untitled'); } });
+    out.set(a.id, { count, of: rows.length, titles });
+  }
+  return out;
+}
+
+/**
  * The collection's access: its own (null: it says nothing and inherits), what
  * its ancestors say (root first), and the account's apps to choose from.
  */
@@ -402,8 +426,9 @@ collectionsRouter.get('/:id/access', asyncHandler(async (req, res) => {
   const ancestors = await ancestorsOf(c.id, c.parent_id);
   const apps = await appsOf(accountId(req));
   const items = (await one<{ n: number }>(`SELECT count(DISTINCT vod_asset_id)::int AS n FROM collection_items WHERE collection_id = ANY($1::uuid[])`, [await subtreeIds(c.id)]))?.n ?? 0;
+  const ruledOut = await appsRuledOut(c.id, apps);
   res.json({ id: c.id, access: accessView(c.access), inherits: !c.access, ancestors, default: ALL_ACCESS,
-    apps: apps.map((a) => ({ id: a.id, name: a.name, type: a.type })), items });
+    apps: apps.map((a) => ({ id: a.id, name: a.name, type: a.type, ruledOut: ruledOut.get(a.id)! })), items });
 }));
 
 /**

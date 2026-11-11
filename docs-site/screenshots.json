@@ -533,6 +533,22 @@
       "alt": "A rule-based collection: the Rules card with two conditions and the live count, the order, and its media marked Rule or Added"
     },
     {
+      "name": "collections-access",
+      "guide": "guides/collections.md",
+      "path": "/collections/7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a05",
+      "waitFor": ".cax-rule",
+      "clip": ".card:has(.cax)",
+      "alt": "The Access card of a collection: all apps, everywhere, a premium rule for Australia and New Zealand with its pass and the iOS app's own price, and members everywhere else"
+    },
+    {
+      "name": "collections-view-as",
+      "guide": "guides/collections.md",
+      "path": "/collections/7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a05",
+      "waitFor": ".cax-mx tbody tr",
+      "clip": ".card:has(.cax-va)",
+      "alt": "View as on a collection: the web player in Australia for a viewer not signed in, two titles locked with the pass that unlocks them and one blocked by rights, then the matrix of apps by regions"
+    },
+    {
       "name": "encoding-queue",
       "guide": "guides/encoding-queue.md",
       "path": "/encode-jobs",
