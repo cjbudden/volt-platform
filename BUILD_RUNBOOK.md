@@ -2,7 +2,9 @@
 
 For the scheduled **Volt build queue** task (and anyone doing the same by hand).
 One run = one item from `BUILD_QUEUE.md`: build, validate, document, commit,
-release. Written 22 Oct 2026 from what worked in practice.
+release (a second item is allowed in a short run, see section 6).
+The task runs hourly at :22 UTC (Christian, 11 Nov 2026); the `doing` lock
+keeps runs from overlapping. Written 22 Oct 2026 from what worked in practice.
 
 ## 0. Where things are
 
@@ -165,6 +167,10 @@ secrets, or delete user data. Christian pushes and deploys.
 ## 6. Finish
 
 Put the version into the item's status and the run-log line, commit that with
-`--no-verify` (docs only). Then stop: one item per run. Tell Christian in one
+`--no-verify` (docs only). Then stop: one item per run, with one exception
+(Christian, 11 Nov 2026): if the first item is fully done, committed and
+released within about 40 minutes of the run starting, take ONE more `todo`
+item from section 1 step 2, with its own `doing` lock, validation, commit and
+release. Never more than two built items per run. Tell Christian in one
 short message what was done, the test numbers, the version, and anything that
 now needs his input.
