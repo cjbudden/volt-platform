@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.97.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- improved · Mirror and Archive: When an encode or a FAST channel needs an original that a retention rule has taken out of the cloud, Volt now brings it back from the archive by itself and runs that work once it lands. The asset's page shows the original coming back and what waits for it.
+
+### Internal
+
+- added · Tests: retention-originals-reencode: a FAST Prepare (with and without a ladder), an encode handler and queueEncodeFor on an archived original start one restore and run once it lands.
+
 ## 0.96.0 (2026-11-11)
 
 ### Product (in customer release notes)
