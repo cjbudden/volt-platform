@@ -34,6 +34,9 @@ import { usageStatusSql, USAGE_STATUSES } from '../services/assetReadiness';
 import { checkContentValues, syncAfterSave, readLinks, parseInclude } from '../services/contentLinks';
 import { resolveEffectiveFields } from './metadataSchemas';
 import { SITE_NAME_SQL, encodePlaceOf, withEncodePlace } from '../services/sites/encodePlace';
+import { PUBLIC_STATUSES, computePublicStatus, publiclyVisible, publiclyListed, archiveAsset, unarchiveAsset, setListing } from '../services/publicStatus';
+import { rightsForAsset, appTypeOf } from '../services/rightsProfiles';
+import { whoCanWatch, VIEWER_KINDS } from '../services/whoCanWatch';
 export const vodRouter = Router();
 vodRouter.use(requireAuth);
 
@@ -87,6 +90,11 @@ const RENDITION_COUNT_SQL = `COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(
   (SELECT jsonb_array_length(op.rungs) FROM output_profiles op WHERE op.id = g.output_profile_id AND jsonb_typeof(op.rungs) = 'array'))`;
 /** CAN IT BE USED (services/assetReadiness.ts). The list and facets join the encode job as `j`. */
 const USAGE_SQL = usageStatusSql('v', 'j.state::text');
+/** The editorial state in SQL, as services/publicStatus.ts editorialStateOf() reads it. */
+const EDITORIAL_SQL = `(CASE WHEN v.archived_at IS NOT NULL THEN 'archived'
+   WHEN v.availability_state IN ('scheduled', 'available', 'expired') THEN 'published'
+   WHEN COALESCE(v.availability_state, 'draft') = 'draft' AND v.published THEN 'published'
+   ELSE 'draft' END)`;
 const LIBRARY_JOINS = `
        LEFT JOIN metadata_schemas ms ON ms.id = v.schema_id
        LEFT JOIN metadata_schemas msp ON msp.id = ms.extends_id`;
@@ -119,6 +127,14 @@ const VOD_LIST = defineList({
     available_from: { sql: 'v.available_from', type: 'timestamp' },
     available_until: { sql: 'v.available_until', type: 'timestamp' },
     withdrawn_at: { sql: 'v.withdrawn_at', type: 'timestamp' },
+    // PUBLIC STATUS (build queue P1 and P1-2, services/publicStatus.ts): what a
+    // viewer gets now, stored at every change and by the minute sweep.
+    public_status: { sql: `COALESCE(v.public_status, 'draft')`, type: 'enum', values: [...PUBLIC_STATUSES], doc: 'What a viewer gets now: draft, in_review, changes_requested, rejected, processing, scheduled, available, restricted, expired or archived' },
+    editorial_state: { sql: EDITORIAL_SQL, type: 'enum', values: ['draft', 'published', 'archived'], doc: 'What people set: draft, published or archived' },
+    status_until: { sql: 'v.status_until', type: 'timestamp', doc: 'The next moment the public status can change on its own (for an Available title, when it stops being available)' },
+    listed_from: { sql: 'v.listed_from', type: 'timestamp', doc: 'When it shows in browse and search (a Scheduled title past this date is a teaser)' },
+    unlisted: { sql: 'v.unlisted', type: 'boolean', doc: 'Playable by link only, never in browse or search' },
+    archived_at: { sql: 'v.archived_at', type: 'timestamp' },
     thumb_status: { sql: 'v.thumb_status', type: 'enum', values: ['uploading', 'processing', 'ready', 'error'] },
     original_filename: { sql: 'v.original_filename', type: 'string' },
     mime: { sql: 'v.mime', type: 'string' },
@@ -158,8 +174,21 @@ const VOD_LIST = defineList({
   // any of them; collection_deep=true includes their sub-collections;
   // not_in_collection=<id> leaves out what is already in one (the picker's
   // "not yet added" view). Applied by collectionWhere below.
-  extraParams: ['collection', 'collection_deep', 'not_in_collection'],
+  extraParams: ['collection', 'collection_deep', 'not_in_collection', 'expires_within_days'],
 });
+
+/**
+ * EXPIRES SOON (the library's "Expires in 7 days"): Available now and its
+ * window, the publish window inside the rights, ends within the given days.
+ * Taken on the server so the page's query does not change with the clock.
+ */
+function expiresWhere(q: Record<string, any>, params: unknown[]): string {
+  if (q.expires_within_days == null || q.expires_within_days === '') return '';
+  const n = Number(q.expires_within_days);
+  if (!Number.isInteger(n) || n < 1 || n > 366) throw badRequest('expires_within_days must be a whole number of days from 1 to 366');
+  params.push(n);
+  return ` AND v.public_status = 'available' AND v.status_until > now() AND v.status_until <= now() + make_interval(days => $${params.length}::int)`;
+}
 
 /**
  * The collection filters as SQL on `v`, with their params pushed (tenant-safe:
@@ -193,7 +222,7 @@ vodRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const params: unknown[] = [accountId(req)];
-    const inCollection = await collectionWhere(req.query as any, params, accountId(req));
+    const inCollection = await collectionWhere(req.query as any, params, accountId(req)) + expiresWhere(req.query as any, params);
     const pl = parseList(VOD_LIST, req.query, params);
     const from = `${OWNED}${LIBRARY_JOINS}
        LEFT JOIN jobs j ON j.id = v.encode_job_id
@@ -236,7 +265,8 @@ vodRouter.get(
               (v.export_mp3_key IS NOT NULL) AS has_mp3,
               -- THE SITE that keeps an Encode at site original, for "At site" (H4-8).
               ${SITE_NAME_SQL()} AS site_name,
-              ${USAGE_SQL} AS usage_status
+              ${USAGE_SQL} AS usage_status,
+              ${EDITORIAL_SQL} AS editorial_state
        ${fromPage}
        ${pageSql(pl)}`,
       params
@@ -263,6 +293,7 @@ const FACET_PARAMS: Record<string, string[]> = {
   codecs: ['video_codec'],
   metadata: ['metadata_missing_required', 'metadata_completeness'],
   usage: ['usage_status', 'media_state'],
+  public_status: ['public_status'],
 };
 const FACET_SQL: Record<string, { select: string; group: string }> = {
   types: { select: `ms.id AS id, ms.name AS name, ms.standard_key AS key, ms.schema_org_type AS schema_org_type`, group: 'ms.id, ms.name, ms.standard_key, ms.schema_org_type' },
@@ -274,6 +305,7 @@ const FACET_SQL: Record<string, { select: string; group: string }> = {
   codecs: { select: `v.video_codec AS value`, group: 'v.video_codec' },
   metadata: { select: `(${MISSING_REQUIRED_SQL} > 0) AS value`, group: '1' },
   usage: { select: `${USAGE_SQL} AS value`, group: '1' },
+  public_status: { select: `COALESCE(v.public_status, 'draft') AS value`, group: '1' },
 };
 
 vodRouter.get(
@@ -287,7 +319,7 @@ vodRouter.get(
     const out: Record<string, any[]> = {};
     for (const [name, keys] of Object.entries(FACET_PARAMS)) {
       const params: unknown[] = [accountId(req)];
-      const inCollection = await collectionWhere(req.query as any, params, accountId(req));
+      const inCollection = await collectionWhere(req.query as any, params, accountId(req)) + expiresWhere(req.query as any, params);
       const pl = parseList(VOD_LIST, strip(keys) as any, params);
       const f = FACET_SQL[name];
       const groupBy = f.group === '1' ? '1' : f.group;
@@ -302,7 +334,7 @@ vodRouter.get(
           GROUP BY ${groupBy} ORDER BY n DESC`, countParams(pl, params));
     }
     const allParams: unknown[] = [accountId(req)];
-    const allIn = await collectionWhere(req.query as any, allParams, accountId(req));
+    const allIn = await collectionWhere(req.query as any, allParams, accountId(req)) + expiresWhere(req.query as any, allParams);
     const all = parseList(VOD_LIST, strip([]) as any, allParams);
     const total = await one<{ n: number }>(
       `SELECT count(*)::int AS n ${OWNED}${LIBRARY_JOINS} LEFT JOIN jobs j ON j.id = v.encode_job_id
@@ -449,6 +481,21 @@ async function fetchOwned(id: string, acct: string) {
     `SELECT v.*, ${usageStatusSql('v')} AS usage_status ${OWNED} WHERE v.id = $1 AND ${OWNER_ACCOUNT} = $2`, [id, acct]);
 }
 
+/**
+ * THE PUBLIC STATUS ON THE ASSET (build queue P1-2): computed now from the row
+ * and its rights, so the detail is exact even between sweeps. The stored
+ * columns (public_status, status_reason, status_until) are what lists filter on.
+ */
+async function statusFields(row: any) {
+  const now = new Date();
+  const s = computePublicStatus(row, await rightsForAsset(row), now);
+  return {
+    public_status: s.status, status_reason: s.reason, status_until: s.until, editorial_state: s.editorial,
+    effective_from: s.effectiveFrom, effective_until: s.effectiveUntil, listed_from_effective: s.listedFrom,
+    publicly_visible: publiclyVisible(s, now), publicly_listed: publiclyListed(s, now),
+  };
+}
+
 vodRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -493,7 +540,8 @@ vodRouter.get(
     const siteName = row.ingest?.siteSource?.siteId
       ? (await one<any>(`SELECT name FROM sites WHERE id::text = $1 AND account_id = $2`, [row.ingest.siteSource.siteId, accountId(req)]))?.name ?? null
       : null;
-    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), encode_place: encodePlaceOf(row.ingest, siteName), ...extra });
+    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), encode_place: encodePlaceOf(row.ingest, siteName),
+      ...(await statusFields(row)), ...extra });
   })
 );
 
@@ -1052,6 +1100,111 @@ vodRouter.get('/:id/availability', asyncHandler(async (req, res) => {
     override: asset.availability_override ?? {},
     plan, publications: pubs,
   });
+}));
+
+/**
+ * LISTED FROM AND UNLISTED (build queue P1-2): when the title shows in browse
+ * and search, and whether it ever does. Delivery-time fields: nothing is
+ * reprocessed, the status is stored again at once. Leave a field out to keep
+ * it; listedFrom: null goes back to the default (the window's start).
+ */
+vodRouter.put('/:id/availability', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const b = z.object({
+    listedFrom: z.string().datetime({ offset: true }).nullable().optional(),
+    unlisted: z.boolean().optional(),
+  }).strict().parse(req.body ?? {});
+  if (b.listedFrom === undefined && b.unlisted === undefined) throw badRequest('Send listedFrom, unlisted or both.');
+  const s = await setListing(asset.id, { listedFrom: b.listedFrom === undefined ? undefined : b.listedFrom === null ? null : new Date(b.listedFrom), unlisted: b.unlisted });
+  const who = actor(req);
+  const changes: Record<string, any> = {};
+  if (b.listedFrom !== undefined) changes.listed_from = { from: asset.listed_from ?? null, to: b.listedFrom };
+  if (b.unlisted !== undefined) changes.unlisted = { from: !!asset.unlisted, to: b.unlisted };
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'vod_asset', entityId: asset.id, changes }).catch(() => {});
+  const fresh = await fetchOwned(asset.id, accountId(req));
+  res.json({ listedFrom: fresh?.listed_from ?? null, unlisted: !!fresh?.unlisted, ...(await statusFields(fresh ?? asset)), reason: s?.reason ?? null });
+}));
+
+/**
+ * ARCHIVE AND RESTORE (build queue P1-2). Archive takes the title off the
+ * catalogue and stops it playing, media kept, its publications withdrawn.
+ * Restore brings it back as a draft (dates kept) or published again, through
+ * publish with every gate checked; if publishing refuses, it stays a draft and
+ * the answer says why. Both are audited. "Restore" from the restore bin (a
+ * deleted asset) is POST /:id/restore; this one is /:id/unarchive.
+ */
+vodRouter.post('/:id/archive', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  if (asset.archived_at) return res.status(409).json({ error: 'This title is already archived.', code: 'archived' });
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : undefined;
+  const who = actor(req);
+  const s = await archiveAsset(asset.id, await actorLabel(req));
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'vod_asset', entityId: asset.id,
+    changes: { editorial_state: { from: computeEditorial(asset), to: 'archived' }, public_status: { from: asset.public_status ?? null, to: s?.status ?? 'archived' } },
+    snapshot: { reason } }).catch(() => {});
+  const fresh = await fetchOwned(asset.id, accountId(req));
+  res.json({ archivedAt: fresh?.archived_at ?? null, archivedBy: fresh?.archived_by ?? null, ...(await statusFields(fresh ?? asset)) });
+}));
+
+vodRouter.post('/:id/unarchive', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const b = z.object({ to: z.enum(['draft', 'published']).default('draft') }).parse(req.body ?? {});
+  if (!asset.archived_at) return res.status(409).json({ error: 'This title is not archived.', code: 'not_archived' });
+  const who = actor(req);
+  let refused: string | null = null;
+  try { await unarchiveAsset(asset.id, await actorLabel(req), b.to); }
+  catch (e: any) {
+    if (!(e instanceof NotPublishable)) throw e;
+    // Out of the archive already (as a draft); publishing said no.
+    refused = e.message;
+    await (await import('../services/publicStatus')).refreshPublicStatus(asset.id);
+  }
+  const fresh = await fetchOwned(asset.id, accountId(req));
+  const after = await statusFields(fresh ?? asset);
+  await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
+    action: 'update', entityType: 'vod_asset', entityId: asset.id,
+    changes: { editorial_state: { from: 'archived', to: after.editorial_state }, public_status: { from: asset.public_status ?? 'archived', to: after.public_status } },
+    snapshot: { restoredTo: b.to, refused } }).catch(() => {});
+  if (refused) return res.status(409).json({ error: `Restored as a draft. It could not be published: ${refused}`, code: 'not_publishable', ...after });
+  res.json(after);
+}));
+
+/** The editorial state of a fetched row (before a change, for the audit). */
+function computeEditorial(row: any): string {
+  if (row.archived_at) return 'archived';
+  const st = row.availability_state ?? 'draft';
+  return st === 'scheduled' || st === 'available' || st === 'expired' || (st === 'draft' && row.published) ? 'published' : 'draft';
+}
+
+/**
+ * WHO CAN WATCH (build queue P1-2, services/whoCanWatch.ts): a country, a kind
+ * of viewer, a moment and optionally an app in; the play gate's own answer
+ * out. Reads only (Media library: view).
+ */
+vodRouter.post('/:id/evaluate', asyncHandler(async (req, res) => {
+  const asset = await fetchOwned(req.params.id, accountId(req));
+  if (!asset) throw notFound('VOD asset not found');
+  const b = z.object({
+    country: z.string().regex(/^[A-Za-z]{2}$/, 'country must be a two-letter code').nullable().optional(),
+    viewer: z.enum(VIEWER_KINDS).default('anonymous'),
+    at: z.string().datetime({ offset: true }).nullable().optional(),
+    appId: z.string().uuid().nullable().optional(),
+  }).parse(req.body ?? {});
+  let appType = null;
+  if (b.appId) {
+    const app = await one<any>(`SELECT type, surface FROM apps WHERE id = $1 AND account_id = $2`, [b.appId, accountId(req)]);
+    if (!app) throw badRequest('That app is not an app of this account.');
+    appType = appTypeOf(app.type, app.surface);
+  }
+  const out = await whoCanWatch({ accountId: accountId(req), assetId: asset.id, country: b.country ?? null, viewer: b.viewer,
+    at: b.at ? new Date(b.at) : null, appId: b.appId ?? null, appType });
+  if (!out) throw notFound('VOD asset not found');
+  res.json(out);
 }));
 
 vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {

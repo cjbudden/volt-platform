@@ -44,6 +44,13 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
   eq([api.get('duration_ms[gte]'), api.get('duration_ms[lte]')], ['300000', '3600000'], 'API: duration range in ms')
   eq([api.get('review_state'), api.get('has_stale_publication'), api.get('q')], ['in_review,changes_requested', 'true', 'harbour final'], 'API: review, stale, search')
   eq([api.get('sort'), api.get('limit'), api.get('count'), api.get('cursor')], ['metadata_completeness,-created_at', '48', 'true', 'abc'], 'API: sort, page size, total, cursor')
+  // PUBLIC STATUS (build queue P1-2): any of, and Expires in 7 days as days the server counts from now.
+  const pf: LibraryFilters = { ...EMPTY_FILTERS, pub: ['restricted', 'expired'], exp: true }
+  eq(filtersToSearch(pf), '?pub=restricted%2Cexpired&exp=7', 'URL: public status and expires in 7 days')
+  eq(parseFilters(filtersToSearch(pf)), pf, 'URL round trip: public status and expires in')
+  eq([parseFilters('?pub=hidden,available&exp=3').pub, parseFilters('?exp=3').exp], [['available'], false], 'unknown public statuses and other day counts are dropped')
+  const papi = new URLSearchParams(filtersToApi(pf))
+  eq([papi.get('public_status'), papi.get('expires_within_days')], ['restricted,expired', '7'], 'API: public_status (any of) and expires_within_days')
   const fq = new URLSearchParams(filtersToApi(f, { facets: true }))
   ok(!fq.has('sort') && !fq.has('limit') && !fq.has('cursor') && fq.get('schema_id') === `${ID1},${ID2}`, 'facet query: the filters without paging')
   eq(parseColumns(null), DEFAULT_COLUMNS, 'default optional columns')
@@ -88,6 +95,10 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
   ok(/Asset type/.test(plain) && />Video<span class="ct">6/.test(plain) && />Audio<span class="ct">0/.test(plain) && />Song<span class="ct">3/.test(plain), 'asset type chips: video, audio, song with counts')
   ok(/>Channel<span class="ct">5/.test(plain) && />Event<span class="ct">0/.test(plain) && />Radio</.test(plain) && />Upload<span class="ct">3/.test(plain) && />No source<span class="ct">1/.test(plain), 'source chips: channel, event, radio, upload and no source')
   ok(plain.includes('Created as'), 'how it was made is labelled Created as, not Source')
+  const pfx = { ...facets, facets: { ...facets.facets, public_status: [{ value: 'available', n: 5 }, { value: 'restricted', n: 2 }, { value: 'draft', n: 2 }] } }
+  const pubPanel = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, pub: ['restricted'] }} onChange={() => {}} facets={pfx} />)
+  ok(/Public status/.test(pubPanel) && /aria-pressed="true"[^>]*>Restricted<span class="ct">2/.test(pubPanel) && />Available<span class="ct">5/.test(pubPanel) && !/>Archived</.test(pubPanel) && /Expires in 7 days/.test(pubPanel),
+    'public status chips: the statuses in use with counts, the chosen one pressed, and Expires in 7 days')
   const panel2 = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, res: [1080] }} onChange={() => {}} facets={facets} />)
   ok(panel2.indexOf('1080p') < panel2.indexOf('720p') && panel2.includes('Top resolution') && panel2.includes('Clear filters'), 'a secondary filter in use opens the panel; resolutions highest first; Clear shown')
 

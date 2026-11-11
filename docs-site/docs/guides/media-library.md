@@ -14,7 +14,7 @@ The Media Library holds everything on demand in your account: clips cut from rec
 ## What it is for
 
 - **One library.** Clips from [Recordings](recordings.md), programmes converted from the [EPG](epg.md), and uploaded or watch-folder files all land here.
-- **Finding things.** Search, sort and filter by asset type, source, availability, how it was made, missing metadata, content type, resolution, codec, review state, date and length. The filters are part of the page address, so a filtered view can be bookmarked or sent to a colleague.
+- **Finding things.** Search, sort and filter by asset type, source, public status (and what expires within a week), availability, how it was made, missing metadata, content type, resolution, codec, review state, date and length. The filters are part of the page address, so a filtered view can be bookmarked or sent to a colleague.
 - **Describing it.** Each asset has a content type and metadata, which can be filled from the guide programme it came from.
 - **Checking it.** The encode, the renditions, the files you can download, QC results and the full history of what happened to it.
 - **Publishing it.** Publish through the asset's publishing rules, take it off again, or post it to your linked social accounts.
@@ -40,6 +40,7 @@ Media librarians, clip editors and digital producers use it every day.
    |---|---|
    | **Asset type** | **Video**, **Audio**, **Song** |
    | **Source** | **Channel**, **Event**, **Radio**, **Upload**, **No source** (its channel or event no longer exists) |
+   | **Public status** | What a viewer gets now: **Draft**, **In review**, **Changes requested**, **Rejected**, **Processing**, **Scheduled**, **Available**, **Restricted**, **Expired**, **Archived** (only the ones in use are shown), and **Expires in 7 days**: available now and stops being available within a week |
    | **Availability** | **Not published**, **Scheduled**, **Available**, **Expired**, **Access removed** (only the ones in use are shown) |
    | **Created as** | **Recording**, **Clip**, **Upload**, **Watch folder** (only the ones in use are shown) |
    | **Metadata** | **Missing required**: a required field of its content type is empty, or it has no content type |
@@ -138,9 +139,47 @@ Changes reach viewers the next time their player loads the playlist; nothing is 
 
 The **Formats** tab frames a 9:16, 1:1 and 4:5 version of the asset by following the people in the picture. Choose **Analyse the picture**, check and adjust the framing, then **Approve** and **Render** each format. See [Formats & reframing](formats-and-reframing.md#check-and-adjust-one-asset).
 
+### See what viewers get, and when (Availability)
+
+The top of the **Availability** tab says what a viewer gets right now and why.
+
+![The Availability tab: the public status and its reason, the lifecycle with today marked, the dates, Listing, Archive and Who can watch](/img/screens/media-library-availability.png)
+
+1. Open the **Availability** tab. The first line is the asset's **public status** with the reason, for example **Available** and "Available until 16 Dec 18:00 UTC", and when it changes on its own.
+
+   | Public status | What a viewer gets |
+   |---|---|
+   | **Draft**, **In review**, **Changes requested**, **Rejected** | Nothing: it is not published. Viewers' apps get the same answer as for a title that does not exist |
+   | **Processing** | Nothing yet: it is published but the media is still being made. It goes live on its own when ready |
+   | **Scheduled** | Nothing yet: its window has not opened. With a **Listed from** date that has passed, apps show it as a teaser (title, artwork and when) with no way to play |
+   | **Available** | It can be found and played, inside its rules (regions, sign-in, payment) |
+   | **Restricted** | Nothing: it is published, but its [rights](rights.md) do not allow it now |
+   | **Expired** | Nothing: its window has closed. Extending the window brings it back |
+   | **Archived** | Nothing: it is off the catalogue. The media is kept and it can be restored |
+
+2. The steps **Draft**, **Scheduled**, **Available**, **Expired** and **Archived** show where it is in its life, and the bar below shows those stretches in proportion with today marked. The window a viewer gets is the publish window inside the rights window, so the rights can shorten it.
+3. Below are **Available from**, **Available until**, **Listed from** and whether it is **In browse and search** now (**No, by link only** when it is unlisted).
+
+### Show it early, or keep it out of browse (Listing)
+
+1. Under **Listing**, set **Listed from** to a date before it becomes available to show it early as a teaser. Clear the date to list it when it becomes available.
+2. Tick **Unlisted** to keep it out of browse and search for good. It still plays for anyone with the link.
+3. Choose **Save listing**. It takes effect at once; nothing is encoded again.
+
+### Archive it, and restore it
+
+1. Choose **Archive…**, then **Archive**. The title leaves the catalogue and stops playing at once, including for viewers who already started it; its publishing points are withdrawn. The media is kept.
+2. To bring it back, open the archived asset's **Availability** tab and choose **Restore as draft** (its dates are kept, nothing is published) or **Restore and publish** (it is published again through its rules, with every check). If publishing is refused, it is restored as a draft and the message says why.
+
+### Check who can watch
+
+1. Under **Who can watch**, enter a **Country** (two letters, for example **GB**), choose a **Viewer** (**Not signed in**, **Signed in**, or **Signed in and has paid**) and, to ask about another moment, a date under **When**.
+2. Choose **Test**. The answer is the play gate's own decision: **Plays**, **Teaser, no play**, **Not found**, **Paywall**, **Sign in** or **Blocked**, the reason, the step that decided it and the status at that moment.
+3. It cannot know the page the player is on (a rule's **Allowed referrer domains**) or a real viewer's purchases, so it says so under the answer.
+
 ### Publish it, or take it off (Availability)
 
-1. Open the **Availability** tab. It shows where the asset stands and, if published, from and until when.
+1. Further down the **Availability** tab, **Publishing** shows the publishing state and, if published, from and until when.
 2. **What a publish does for this item** shows the publishing rule it follows: **Publish to**, **Auto-publish**, **Available from**, **Expires**, **Geo access**, **Access**, **Paywall**, **Publish gate** and **Access rules**. Grey values are inherited from the account, its content type and its channel, event or station ([Publishing Rules](publishing-rules.md)).
 3. To change a value for this asset only, tick the field, set it, and choose **Save publishing rule**.
 4. Choose **Publish**. Volt publishes it to every point the rule names and confirms **Published through its rules.** An asset that has expired or had its access removed offers **Publish again**.
@@ -200,8 +239,9 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | Task | Access needed |
 |---|---|
 | See the library, open assets and read every tab | Media library & publishing: View |
-| Publish, publish again, remove access, publish to social, retry a social post | Media library & publishing: Operate |
-| Save metadata, fill from the guide, change the image, set skip markers, send for review, re-run QC, change the asset's publishing rule, work its formats | Media library & publishing: Manage |
+| Test who can watch | Media library & publishing: View |
+| Publish, publish again, remove access, archive and restore, publish to social, retry a social post | Media library & publishing: Operate |
+| Set Listed from and Unlisted, save metadata, fill from the guide, change the image, set skip markers, send for review, re-run QC, change the asset's publishing rule, work its formats | Media library & publishing: Manage |
 | See which files can be downloaded | Downloads: View |
 | Download a file | Downloads: Operate |
 | Delete an asset | Media library & publishing: Manage |
@@ -233,16 +273,19 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A cloud drive button is greyed out when adding files | Your Volt service has not set that drive up | Upload from your device or a link, or ask your Volt provider |
 | A **Download** button is greyed out | Your role can see the files but not download them | Ask for Downloads: Operate |
 | **No social accounts are linked.** in **Publish to social** | No social account has been linked | Choose **Link one**, or ask an administrator |
-| **copy is old** in the Availability column | The asset changed after it was published | Publish it again so the published copy matches |
+| **copy is old** in the Public status column | The asset changed after it was published | Publish it again so the published copy matches |
+| **Restricted** although it is published | Its rights do not allow on-demand use now: the use, the territories or the rights window | Open the **Rights** tab; the reason on **Availability** names the profile |
+| **Restored as a draft. It could not be published: …** | **Restore and publish** brought it out of the archive, but its rules or rights refuse publishing | Fix what the message names, then choose **Publish** |
+| **Not found** in **Who can watch** for a title you can see | It is not public for that moment (draft, processing, scheduled without a teaser, restricted, expired or archived) | Read the status line under the answer |
 | **Couldn't load this asset.** | The asset could not be read | Choose **Retry** |
 
 ## Through the API
 
 | Request | Does |
 |---|---|
-| `GET /api/vod` | Lists assets, with the same filters as the page (for example `availability_state`, `review_state`, `media_type`, `q`, `sort`, `limit`) |
+| `GET /api/vod` | Lists assets, with the same filters as the page (for example `public_status`, `expires_within_days=7`, `availability_state`, `review_state`, `media_type`, `q`, `sort`, `limit`). Each row carries `public_status`, `status_reason`, `status_until` and `editorial_state` |
 | `GET /api/vod/facets` | The counts behind the filter chips |
-| `GET /api/vod/{id}`, `PUT /api/vod/{id}` | One asset; change its title, content type (`schemaId`) and `metadata` |
+| `GET /api/vod/{id}`, `PUT /api/vod/{id}` | One asset, with its public status computed at that moment (`public_status`, `status_reason`, `status_until`, `editorial_state`, `effective_from`, `effective_until`, `publicly_visible`, `publicly_listed`); change its title, content type (`schemaId`) and `metadata` |
 | `GET /api/vod/{id}/target-metadata`, `GET /api/vod/{id}/encode` | The **Metadata** and **Encode** tabs |
 | `GET /api/vod/{id}/epg-fill`, `POST /api/vod/{id}/epg-fill` | Preview and apply **Fill from EPG**; `POST /api/vod/epg-fill` does several at once |
 | `GET /api/vod/{id}/from-filename`, `POST /api/vod/{id}/from-filename` | Preview and apply **Read from file name**; `POST /api/vod/from-filename` applies only what is clear to several at once |
@@ -255,6 +298,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/vod/{id}/history`, `GET /api/vod/{id}/provenance` | Its history and where it came from |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | Its publishing rule for this item |
 | `POST /api/vod/{id}/publish`, `POST /api/vod/{id}/withdraw` | Publish, and remove access |
+| `PUT /api/vod/{id}/availability` | **Listed from** and **Unlisted**: `{"listedFrom": "2026-12-01T09:00:00Z", "unlisted": false}` (`null` for the default) |
+| `POST /api/vod/{id}/archive`, `POST /api/vod/{id}/unarchive` | Archive (optional `reason`), and restore with `{"to": "draft"}` or `{"to": "published"}` |
+| `POST /api/vod/{id}/evaluate` | **Who can watch**: `{"country": "GB", "viewer": "anonymous", "at": "2026-12-01T12:00:00Z"}` in, the play gate's answer (`outcome`, `http`, `message`, `decidedBy`, `status`) out |
 | `GET /api/vod/{id}/markers`, `PUT /api/vod/{id}/markers/{kind}` | Skip markers (`intro`, `recap`, `credits`) |
 | `GET /api/vod/{id}/frame-index`, `GET /api/vod/{id}/frame` | The asset's frame rate and frame count, and one exact frame as an image (by `n`, `tc` or `ms`) |
 | `GET /api/vod/{id}/image`, `PUT /api/vod/{id}/image`, `POST /api/vod/{id}/image/auto` | Its image |

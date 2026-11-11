@@ -124,9 +124,11 @@ export const CATALOGUE: FeatureDef[] = [
   { key: 'recordings', label: 'Recordings & clips', area: 'content', prefixes: ['/api/recordings', '/api/scheduled-clips'],
     operate: [new RegExp(`^/api/recordings/${ID}/publish$`)], operateMeans: 'Publish recordings' },
   { key: 'vod', label: 'Media library & publishing', area: 'content', prefixes: ['/api/vod', '/api/publications', '/api/social', '/api/collections'],
-    operate: [new RegExp(`^/api/vod/${ID}/(publish|withdraw)$`), new RegExp(`^/api/publications/vod/${ID}/publish$`),
+    operate: [new RegExp(`^/api/vod/${ID}/(publish|withdraw|archive|unarchive)$`), new RegExp(`^/api/publications/vod/${ID}/publish$`),
       new RegExp(`^/api/social/publish/${ID}$`), new RegExp(`^/api/social/publish-image/${ID}$`), new RegExp(`^/api/social/publications/${ID}/retry$`)],
-    operateMeans: 'Publish and withdraw' },
+    // The who-can-watch tester answers a question and changes nothing.
+    readWrites: [new RegExp(`^/api/vod/${ID}/evaluate$`)],
+    operateMeans: 'Publish, withdraw, archive and restore' },
   // DOWNLOADING IS ITS OWN PERMISSION (modules/downloads.ts): seeing, describing
   // and publishing an item is not the same as being allowed to take a copy.
   // view = see which files there are; operate = download them. A role that

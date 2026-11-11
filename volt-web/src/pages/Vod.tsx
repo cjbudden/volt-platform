@@ -34,6 +34,8 @@ import { LibraryGrid } from './vod/LibraryGrid'
 import { AvailabilityPill, Completeness, Keyscreen, KindLegend, TypeLabel } from './vod/LibraryCells'
 import { DownloadFiles, EncodePanel, TargetMetadataPanel } from './vod/AssetPanels'
 import FormatsPanel from './vod/FormatsPanel'
+import { Lifecycle } from './vod/Lifecycle'
+import { PublicStatusTag } from './vod/PublicStatus'
 import { libraryApi, type LibraryFacets, type LibraryRow, type LinkedContent } from './vod/libraryApi'
 import { VIEWS, codecLabel, filtersToApi, filtersToSearch, isFiltered, parseColumns, parseFilters, resLabel, type LibraryFilters, type LibraryView } from './vod/libraryQuery'
 import { LibIcon } from './vod/icons'
@@ -590,6 +592,9 @@ function AvailabilityPanel({ d, onChanged }: { d: any; onChanged: () => void }) 
   const live = a.state === 'available' || a.state === 'scheduled'
   return (
     <div>
+      {/* THE PUBLIC STATUS, the timeline, listing, archive and who can watch (build queue P1-2). */}
+      <Lifecycle key={`${d.id}:${d.updated_at}`} d={d} onChanged={() => { load(); onChanged() }} />
+      <div className="sec-label">Publishing</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', padding: '10px 12px', borderRadius: 8, border: `1px solid ${ui.color}55`, background: `${ui.color}10`, marginBottom: 12 }}>
         <b style={{ color: ui.color }}>{ui.label}</b>
         {a.availableFrom && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)' }}>from {new Date(a.availableFrom).toLocaleString()}</span>}
@@ -994,7 +999,7 @@ export default function VodPage() {
                 {show('codec') && <th scope="col">Codec</th>}
                 {show('renditions') && <th scope="col">Renditions</th>}
                 {show('blocks') && <th scope="col">Sources</th>}
-                <th scope="col">Review</th><th scope="col">QC</th><th scope="col">Availability</th><th scope="col">Cut</th><th />
+                <th scope="col">Review</th><th scope="col">QC</th><th scope="col">Public status</th><th scope="col">Cut</th><th />
               </tr>
             </thead>
             <tbody>
@@ -1035,7 +1040,7 @@ export default function VodPage() {
                       )}
                       <td style={{ color: REVIEW_TONE[x.review_state ?? 'draft'], fontSize: 'var(--fs-sm)' }}>{REVIEW_LABEL[x.review_state ?? 'draft']}</td>
                       <td style={{ color: QC_TONE[x.qc_state] ?? 'var(--faint)', fontSize: 'var(--fs-sm)' }}>{x.qc_state ?? 'not run'}</td>
-                      <td><AvailabilityPill row={a} />{x.has_stale_publication && <div className="lib-faint lib-small">copy is old</div>}</td>
+                      <td>{a.public_status ? <PublicStatusTag status={a.public_status} reason={a.status_reason} withdrawn={a.availability_state === 'withdrawn'} /> : <AvailabilityPill row={a} />}{x.has_stale_publication && <div className="lib-faint lib-small">copy is old</div>}</td>
                       <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleDateString()}</td>
                       <td style={{ textAlign: 'right' }}>
                         <button className="btn ghost" onClick={e => { e.stopPropagation(); guardOpen(open === a.id ? null : a.id) }} aria-expanded={open === a.id}>

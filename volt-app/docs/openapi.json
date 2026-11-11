@@ -23804,11 +23804,11 @@
   "/api/public/availability": {
    "get": {
     "operationId": "getPublicAvailability",
-    "summary": "Play gate (anonymous, edge cached)",
+    "summary": "Play gate for anonymous viewers (edge-cacheable)",
     "tags": [
      "Availability"
     ],
-    "description": "Allowed or not, why, and a short-lived playback token. The anonymous GET is cached at the edge per app, asset and country.\n\n**Credential:** publishable key; viewer session optional",
+    "description": "The same decision as POST for a viewer who is not signed in, with `appKey`, `assetId` and optionally `geo` in the query, so the edge can cache it. A Scheduled title past its Listed from date answers 403 `mode: scheduled` with `until`, and the edge keeps that answer no longer than until the title opens.\n\nAllowed or not, why, and a short-lived playback token. The anonymous GET is cached at the edge per app, asset and country.\n\n**Credential:** publishable key; viewer session optional",
     "security": [
      {
       "publishableKey": []
@@ -23892,11 +23892,11 @@
    },
    "post": {
     "operationId": "postPublicAvailability",
-    "summary": "Play gate (signed-in viewer)",
+    "summary": "Play gate: may this viewer play this asset",
     "tags": [
      "Availability"
     ],
-    "description": "The viewer token decides groups and entitlements. Body viewer/entitled are ignored unless the app has trustAssertedViewer. Never edge cached.\n\n**Credential:** publishable key; viewer session optional",
+    "description": "The answer for one viewer: 200 with a playback token and the addresses to play; 402 (`mode: paywall`) or 403 (`mode: sign_in` or `blocked`) with what would let them in; 451 (`mode: blocked`) where the region or the rights say no. An on-demand title that is not public (draft, in review, processing, restricted, expired or archived) is answered exactly as an unknown id: 404. A Scheduled title past its Listed from date is a teaser: 403 with `mode: scheduled`, `until` (when it becomes available; `availableFrom` is the same date for older players), `notify` and `meta` (title, description and artwork), never a token or an address.\n\nThe viewer token decides groups and entitlements. Body viewer/entitled are ignored unless the app has trustAssertedViewer. Never edge cached.\n\n**Credential:** publishable key; viewer session optional",
     "security": [
      {
       "publishableKey": []
@@ -36537,7 +36537,7 @@
     "tags": [
      "VOD"
     ],
-    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`.\n\nDerived assets. ?published=true|false.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `kind`, `source_kind`, `source_name`, `channel_id`, `event_id`, `recording_id`, `schema_id`, `schema_name`, `published`, `portal_visible`, `output_kind`, `review_state`, `qc_state`, `availability_state`, `available_from`, `available_until`, `withdrawn_at`, `thumb_status`, `original_filename`, `mime`, `start_epoch_ms`, `end_epoch_ms`, `duration_ms`, `source_bytes`, `source_coverage_pct`, `schema_key`, `schema_org_type`, `origin`, `source`, `media_type`, `metadata_completeness`, `metadata_missing_required`, `top_height`, `video_codec`, `rendition_count`, `has_stale_publication`, `publication_count`, `encode_state`, `usage_status`, `media_state`, `encode_pct`, `created_at`, `updated_at`, `built_at`, `reviewed_at`.",
+    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`. Each asset carries its public status (`public_status`: draft, in_review, changes_requested, rejected, processing, scheduled, available, restricted, expired or archived), `status_reason`, the next moment it can change (`status_until`) and the editorial state people set (`editorial_state`: draft, published or archived); filter on them like any field (`public_status=restricted`), and `expires_within_days=7` keeps titles that are Available now and stop being available within that many days.\n\nDerived assets. ?published=true|false.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `kind`, `source_kind`, `source_name`, `channel_id`, `event_id`, `recording_id`, `schema_id`, `schema_name`, `published`, `portal_visible`, `output_kind`, `review_state`, `qc_state`, `availability_state`, `available_from`, `available_until`, `withdrawn_at`, `public_status`, `editorial_state`, `status_until`, `listed_from`, `unlisted`, `archived_at`, `thumb_status`, `original_filename`, `mime`, `start_epoch_ms`, `end_epoch_ms`, `duration_ms`, `source_bytes`, `source_coverage_pct`, `schema_key`, `schema_org_type`, `origin`, `source`, `media_type`, `metadata_completeness`, `metadata_missing_required`, `top_height`, `video_codec`, `rendition_count`, `has_stale_publication`, `publication_count`, `encode_state`, `usage_status`, `media_state`, `encode_pct`, `created_at`, `updated_at`, `built_at`, `reviewed_at`.",
     "security": [
      {
       "adminBearer": []
@@ -37023,6 +37023,80 @@
       "description": "Filter: `withdrawn_at=value`, or `withdrawn_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
      },
      {
+      "name": "public_status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "draft",
+        "in_review",
+        "changes_requested",
+        "rejected",
+        "processing",
+        "scheduled",
+        "available",
+        "restricted",
+        "expired",
+        "archived"
+       ]
+      },
+      "description": "What a viewer gets now: draft, in_review, changes_requested, rejected, processing, scheduled, available, restricted, expired or archived. Filter: `public_status=value` (comma list = any of), or `public_status[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "editorial_state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "draft",
+        "published",
+        "archived"
+       ]
+      },
+      "description": "What people set: draft, published or archived. Filter: `editorial_state=value` (comma list = any of), or `editorial_state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "status_until",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "The next moment the public status can change on its own (for an Available title, when it stops being available). Filter: `status_until=value`, or `status_until[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "listed_from",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "When it shows in browse and search (a Scheduled title past this date is a teaser). Filter: `listed_from=value`, or `listed_from[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "unlisted",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Playable by link only, never in browse or search. Filter: `unlisted=value`, or `unlisted[op]=value` with op: `eq` (equals), `ne` (not equal), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "archived_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `archived_at=value`, or `archived_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
       "name": "thumb_status",
       "in": "query",
       "required": false,
@@ -37333,7 +37407,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, title, kind, source_kind, source_name, channel_id, event_id, recording_id, schema_id, schema_name, published, portal_visible, output_kind, review_state, qc_state, availability_state, available_from, available_until, withdrawn_at, thumb_status, original_filename, mime, start_epoch_ms, end_epoch_ms, duration_ms, source_bytes, source_coverage_pct, schema_key, schema_org_type, origin, source, media_type, metadata_completeness, metadata_missing_required, top_height, video_codec, has_stale_publication, publication_count, encode_state, usage_status, media_state, encode_pct, created_at, updated_at, built_at, reviewed_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, title, kind, source_kind, source_name, channel_id, event_id, recording_id, schema_id, schema_name, published, portal_visible, output_kind, review_state, qc_state, availability_state, available_from, available_until, withdrawn_at, public_status, editorial_state, status_until, listed_from, unlisted, archived_at, thumb_status, original_filename, mime, start_epoch_ms, end_epoch_ms, duration_ms, source_bytes, source_coverage_pct, schema_key, schema_org_type, origin, source, media_type, metadata_completeness, metadata_missing_required, top_height, video_codec, has_stale_publication, publication_count, encode_state, usage_status, media_state, encode_pct, created_at, updated_at, built_at, reviewed_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",
@@ -37406,11 +37480,11 @@
    },
    "get": {
     "operationId": "getVODByID",
-    "summary": "Get VOD (+ schema.org)",
+    "summary": "One VOD asset",
     "tags": [
      "VOD"
     ],
-    "description": "Asset + assigned schema + publications + schema.org JSON-LD.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "description": "The asset with its metadata, content type and publications. Its public status is computed at the moment you ask: `public_status`, `status_reason`, `status_until` (the next moment it can change on its own), `editorial_state` (draft, published or archived), `effective_from` and `effective_until` (the publish window inside the rights window), `listed_from` and `unlisted`, `archived_at`, and whether a public route shows it now (`publicly_visible`) and lists it in browse and search (`publicly_listed`). Needs `vod: view`.\n\nAsset + assigned schema + publications + schema.org JSON-LD.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -38020,6 +38094,42 @@
     }
    }
   },
+  "/api/vod/{id}/archive": {
+   "post": {
+    "operationId": "postVODByIDArchive",
+    "summary": "Archive an asset",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Takes the title off the catalogue and stops it playing; the media is kept and it can be restored at any time until retention removes it. Its publications are withdrawn and play tokens already handed out stop at the edge. Optional body `reason`. Audited. 409 when it is already archived. Needs `vod: operate`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: operate",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/{id}/availability": {
    "get": {
     "operationId": "getVODByIDAvailability",
@@ -38062,6 +38172,40 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putVODByIDAvailability",
+    "summary": "Set when an asset is listed",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Body: `listedFrom` (ISO date and time, or `null` for the default, the start of its window) and `unlisted` (true: playable by link only, never in browse or search). Leave a field out to keep it. A Scheduled title past its Listed from date is a teaser on public routes: what it is and when, never a playable address. Nothing is reprocessed; the status is stored again at once and the change is audited. Answers with the new status fields as on `GET /api/vod/:id`. Needs `vod: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []
@@ -38312,6 +38456,42 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/evaluate": {
+   "post": {
+    "operationId": "postVODByIDEvaluate",
+    "summary": "Who can watch: test an asset",
+    "tags": [
+     "VOD"
+    ],
+    "description": "The play gate's own decision for one viewer, without a player. Body: `country` (two letters), `viewer` (`anonymous`, `signed_in` or `entitled`, a viewer whose purchase covers the title), `at` (an ISO date and time; default now) and optionally `appId`. Answers `outcome` (play, teaser, not_found, paywall, sign_in or blocked), `http` (the status the gate would answer: 200, 403, 402, 404 or 451), `message`, `decidedBy` (status, account, rights, on_demand, rules or none), `reason`, `ruleId`, the public `status` at that moment and `notChecked` (the player's page address and a real viewer's purchases). Changes nothing. Needs `vod: view`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -40362,6 +40542,42 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/{id}/unarchive": {
+   "post": {
+    "operationId": "postVODByIDUnarchive",
+    "summary": "Restore an archived asset",
+    "tags": [
+     "VOD"
+    ],
+    "description": "Body `to`: `draft` (the default; its dates are kept) or `published` (publishes it again through its rules, with every gate and the rights checked). If publishing refuses, the title is out of the archive as a draft and the answer is 409 with the reason. Audited. 409 `not_archived` when it is not archived. Needs `vod: operate`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: operate",
     "security": [
      {
       "adminBearer": []

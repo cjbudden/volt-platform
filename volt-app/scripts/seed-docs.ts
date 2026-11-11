@@ -177,6 +177,7 @@ async function main() {
   await seedRuleCollection();
   await seedCollectionAccess();
   await seedMetadataRules();
+  await seedLifecycle();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -945,6 +946,22 @@ async function seedMetadataRules() {
                                       settings = EXCLUDED.settings, locked_fields = EXCLUDED.locked_fields`,
       [id, ACCOUNT, position, name, JSON.stringify(conditions), JSON.stringify(settings), locked, ADMIN]);
   }
+}
+
+// THE LIFECYCLE (build queue P1-2): one published title with a window, so the
+// Media Library's Public status column and the Availability tab's timeline
+// show Available with a start, an end and today between them. The house promo
+// already has its media; it is published to the catalogue, open to everyone,
+// from 12 days before the seed to 18 days after it.
+async function seedLifecycle() {
+  const PROMO = '6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01';
+  await query(
+    `UPDATE vod_assets SET availability_state = 'available', published = true, media_state = 'ready',
+            availability = '{"targets":[{"kind":"portal"}],"access":"free"}'::jsonb,
+            available_from = now() - interval '12 days', available_until = now() + interval '18 days', updated_at = now()
+      WHERE id = $1 AND account_id = $2`, [PROMO, ACCOUNT]);
+  const { refreshPublicStatus } = await import('../src/services/publicStatus');
+  await refreshPublicStatus(PROMO);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

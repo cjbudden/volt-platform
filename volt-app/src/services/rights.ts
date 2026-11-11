@@ -31,7 +31,7 @@ export interface AccessDecision {
 /** `programmes.channel_id` is a uuid column. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId?: string | null; appType?: RightsAppType | null; entitled?: boolean; accountId?: string | null; viewer?: ViewerInput | null; viewerCtx?: ViewerCtx | null } = {}): Promise<AccessDecision & { rule?: any; products?: any[] }> {
+export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId?: string | null; appType?: RightsAppType | null; entitled?: boolean; accountId?: string | null; viewer?: ViewerInput | null; viewerCtx?: ViewerCtx | null; at?: Date } = {}): Promise<AccessDecision & { rule?: any; products?: any[] }> {
   // The asset id arrives from an UNAUTHENTICATED caller on the public play
   // gate. Handing a non-uuid to a uuid column raised 22P02 and the gate
   // answered 500 — a bad answer, and a free oracle besides: a stranger could
@@ -51,7 +51,7 @@ export async function evaluateAccess(assetId: string, geo?: string, ctx: { appId
   // A verified viewer session (auth/viewerTokens.ts) arrives as a ready
   // context: no database work. Otherwise the asserted viewer is resolved.
   const vctx = ctx.viewerCtx ?? (ctx.accountId ? await viewerContext(ctx.accountId, geo, ctx.viewer ?? undefined) : null);
-  const od = await onDemandAccess(assetId, geo, ctx.appId ?? null, ctx.entitled === true, vctx, ctx.appType ?? null);
+  const od = await onDemandAccess(assetId, geo, ctx.appId ?? null, ctx.entitled === true, vctx, ctx.appType ?? null, ctx.at);
   if (od) return od.allowed ? { allowed: true, rule: od.rule, layer: 'on_demand' } : { allowed: false, reason: od.reason, replacementAssetId: null, rule: od.rule, products: od.paywall ?? undefined, layer: od.rights ? 'rights' : 'on_demand' };
 
   // A LIVE OWNER under the rules engine. Christian: "this" means the current

@@ -5469,6 +5469,101 @@
      "exists"
     ]
    },
+   "public_status": {
+    "type": "enum",
+    "values": [
+     "draft",
+     "in_review",
+     "changes_requested",
+     "rejected",
+     "processing",
+     "scheduled",
+     "available",
+     "restricted",
+     "expired",
+     "archived"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "What a viewer gets now: draft, in_review, changes_requested, rejected, processing, scheduled, available, restricted, expired or archived"
+   },
+   "editorial_state": {
+    "type": "enum",
+    "values": [
+     "draft",
+     "published",
+     "archived"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "What people set: draft, published or archived"
+   },
+   "status_until": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ],
+    "doc": "The next moment the public status can change on its own (for an Available title, when it stops being available)"
+   },
+   "listed_from": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ],
+    "doc": "When it shows in browse and search (a Scheduled title past this date is a teaser)"
+   },
+   "unlisted": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "Playable by link only, never in browse or search"
+   },
+   "archived_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
    "thumb_status": {
     "type": "enum",
     "values": [

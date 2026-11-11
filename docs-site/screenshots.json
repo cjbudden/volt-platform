@@ -177,6 +177,24 @@
       "alt": "The Media Library page: the upload band at the top, the search, sort and filter chips, then the list of assets with their review, QC and availability"
     },
     {
+      "name": "media-library-availability",
+      "guide": "guides/media-library.md",
+      "path": "/vod?asset=6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01",
+      "fresh": true,
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1500,
+      "click": [
+        "button:text-is(\"Availability\")",
+        { "fill": ".lc input[placeholder=\"GB\"]", "value": "GB" },
+        ".lc button:has-text(\"Test\")"
+      ],
+      "waitAfter": ".lc-answer",
+      "clip": ".lc",
+      "hide": [".topbar"],
+      "alt": "The Availability tab: the public status and its reason, the lifecycle with today marked, the dates, Listing, Archive and Who can watch"
+    },
+    {
       "name": "media-library-exact-frame",
       "guide": "guides/media-library.md",
       "path": "/vod",

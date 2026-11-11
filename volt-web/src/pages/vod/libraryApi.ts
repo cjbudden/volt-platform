@@ -7,6 +7,11 @@ import { apiRequest, apiRequestWithHeaders, type VodAssetRow } from '../../api'
 import type { EncodePlace } from './EncodePlace'
 
 export interface LibraryRow extends VodAssetRow {
+  /** What a viewer gets now, its reason and next moment (build queue P1-2, services/publicStatus.ts). */
+  public_status?: string | null
+  status_reason?: string | null
+  status_until?: string | null
+  editorial_state?: 'draft' | 'published' | 'archived' | null
   source_kind?: string | null
   channel_id?: string | null
   event_id?: string | null
@@ -49,7 +54,7 @@ export interface FacetType { id: string | null; name: string | null; key: string
 export interface FacetValue { value: any; n: number }
 export interface LibraryFacets {
   total: number
-  facets: { types: FacetType[]; availability: FacetValue[]; origins: FacetValue[]; sources?: FacetValue[]; media_types?: FacetValue[]; resolutions: FacetValue[]; codecs: FacetValue[]; metadata: FacetValue[]; usage?: FacetValue[] }
+  facets: { types: FacetType[]; availability: FacetValue[]; origins: FacetValue[]; sources?: FacetValue[]; media_types?: FacetValue[]; resolutions: FacetValue[]; codecs: FacetValue[]; metadata: FacetValue[]; usage?: FacetValue[]; public_status?: FacetValue[] }
 }
 
 export interface TargetMetadata {

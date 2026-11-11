@@ -478,7 +478,7 @@
   },
   "GET /api/vod": {
     "summary": "List VOD assets",
-    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`."
+    "description": "The account's on-demand library: recordings published as VOD, clips, uploads and watch-folder files. Search titles and file names with `q`, filter on any field below (for example `review_state=in_review` or `published=true`), and sort with `sort=-created_at`. Each asset carries its public status (`public_status`: draft, in_review, changes_requested, rejected, processing, scheduled, available, restricted, expired or archived), `status_reason`, the next moment it can change (`status_until`) and the editorial state people set (`editorial_state`: draft, published or archived); filter on them like any field (`public_status=restricted`), and `expires_within_days=7` keeps titles that are Available now and stop being available within that many days."
   },
   "GET /api/recordings": {
     "summary": "List recordings",
@@ -967,5 +967,33 @@
   "POST /api/vod/:id/details/page": {
     "summary": "Find details on a page",
     "description": "Reads the one page at `url` (fetched once, like a link preview; private network addresses refused with `400`) for the schema.org JSON-LD and Open Graph details it publishes about its subject, and maps them onto the asset's content type fields through their schema.org names. `result` is shaped like a `details/find` result (`label`, `description`, `kinds`, `link`, `site`, `likely`, `proposed`, and `from`, where each proposed value came from: `json-ld`, `og` or `title`), with `current` and `unmapped` as there. A pasted image address proposes the image fields only. Saves nothing. Answers `200` with `error` set and `result: null` when the site refuses programs (`blocked: true`), the page cannot be read, or it publishes no details; `400` when the asset has no content type; `409` when the type uses the song finder. Needs `vod: manage`."
+  },
+  "GET /api/vod/:id": {
+    "summary": "One VOD asset",
+    "description": "The asset with its metadata, content type and publications. Its public status is computed at the moment you ask: `public_status`, `status_reason`, `status_until` (the next moment it can change on its own), `editorial_state` (draft, published or archived), `effective_from` and `effective_until` (the publish window inside the rights window), `listed_from` and `unlisted`, `archived_at`, and whether a public route shows it now (`publicly_visible`) and lists it in browse and search (`publicly_listed`). Needs `vod: view`."
+  },
+  "PUT /api/vod/:id/availability": {
+    "summary": "Set when an asset is listed",
+    "description": "Body: `listedFrom` (ISO date and time, or `null` for the default, the start of its window) and `unlisted` (true: playable by link only, never in browse or search). Leave a field out to keep it. A Scheduled title past its Listed from date is a teaser on public routes: what it is and when, never a playable address. Nothing is reprocessed; the status is stored again at once and the change is audited. Answers with the new status fields as on `GET /api/vod/:id`. Needs `vod: manage`."
+  },
+  "POST /api/vod/:id/archive": {
+    "summary": "Archive an asset",
+    "description": "Takes the title off the catalogue and stops it playing; the media is kept and it can be restored at any time until retention removes it. Its publications are withdrawn and play tokens already handed out stop at the edge. Optional body `reason`. Audited. 409 when it is already archived. Needs `vod: operate`."
+  },
+  "POST /api/vod/:id/unarchive": {
+    "summary": "Restore an archived asset",
+    "description": "Body `to`: `draft` (the default; its dates are kept) or `published` (publishes it again through its rules, with every gate and the rights checked). If publishing refuses, the title is out of the archive as a draft and the answer is 409 with the reason. Audited. 409 `not_archived` when it is not archived. Needs `vod: operate`."
+  },
+  "POST /api/vod/:id/evaluate": {
+    "summary": "Who can watch: test an asset",
+    "description": "The play gate's own decision for one viewer, without a player. Body: `country` (two letters), `viewer` (`anonymous`, `signed_in` or `entitled`, a viewer whose purchase covers the title), `at` (an ISO date and time; default now) and optionally `appId`. Answers `outcome` (play, teaser, not_found, paywall, sign_in or blocked), `http` (the status the gate would answer: 200, 403, 402, 404 or 451), `message`, `decidedBy` (status, account, rights, on_demand, rules or none), `reason`, `ruleId`, the public `status` at that moment and `notChecked` (the player's page address and a real viewer's purchases). Changes nothing. Needs `vod: view`."
+  },
+  "POST /api/public/availability": {
+    "summary": "Play gate: may this viewer play this asset",
+    "description": "The answer for one viewer: 200 with a playback token and the addresses to play; 402 (`mode: paywall`) or 403 (`mode: sign_in` or `blocked`) with what would let them in; 451 (`mode: blocked`) where the region or the rights say no. An on-demand title that is not public (draft, in review, processing, restricted, expired or archived) is answered exactly as an unknown id: 404. A Scheduled title past its Listed from date is a teaser: 403 with `mode: scheduled`, `until` (when it becomes available; `availableFrom` is the same date for older players), `notify` and `meta` (title, description and artwork), never a token or an address."
+  },
+  "GET /api/public/availability": {
+    "summary": "Play gate for anonymous viewers (edge-cacheable)",
+    "description": "The same decision as POST for a viewer who is not signed in, with `appKey`, `assetId` and optionally `geo` in the query, so the edge can cache it. A Scheduled title past its Listed from date answers 403 `mode: scheduled` with `until`, and the edge keeps that answer no longer than until the title opens."
   }
 }

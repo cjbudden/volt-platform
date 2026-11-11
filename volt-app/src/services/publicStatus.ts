@@ -274,5 +274,9 @@ export async function setListing(assetId: string, listing: { listedFrom?: Date |
   if (listing.listedFrom !== undefined) { args.push(listing.listedFrom); sets.push(`listed_from = $${args.length}`); }
   if (listing.unlisted !== undefined) { args.push(listing.unlisted); sets.push(`unlisted = $${args.length}`); }
   if (sets.length) await query(`UPDATE vod_assets SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, args);
+  // The status may come out the same (a Scheduled title stays Scheduled when it
+  // gains a teaser date), so refreshPublicStatus would keep the cached row; the
+  // play gate reads Listed from and Unlisted from that row, so drop it here.
+  invalidateTag(`asset:${assetId}`);
   return refreshPublicStatus(assetId);
 }

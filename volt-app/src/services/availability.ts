@@ -234,20 +234,27 @@ export async function viewerContext(accountId: string, geo: string | undefined, 
   return { country: geo ?? null, viewerId: v.id, groups: v.groups ?? [], entitlements: await cachedEntitlements(v.id, () => viewerEntitlements(v.id)) };
 }
 
-export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false, viewer?: ViewerCtx | null, appType?: RightsAppType | null):
+export async function onDemandAccess(assetId: string, geo?: string, appId?: string | null, entitled = false, viewer?: ViewerCtx | null, appType?: RightsAppType | null, at?: Date):
   Promise<{ allowed: boolean; reason?: string; paywall?: any; rule?: AccessOutcome; rights?: boolean } | null> {
   const a = await vodAvailabilityRow(assetId);   // cached; edits and the availability clock invalidate it
   if (!a) return null;
   const st = a.availability_state ?? 'draft';
-  if (st === 'withdrawn') return { allowed: false, reason: 'this content is no longer available' };
-  if (st === 'expired') return { allowed: false, reason: 'this content is no longer available' };
-  if (st === 'scheduled') return { allowed: false, reason: `available from ${new Date(a.available_from).toISOString()}` };
-  if (st === 'draft' && !a.published) return { allowed: false, reason: 'not published' };
+  // `at`: the who-can-watch tester asking about another moment (build queue
+  // P1-2). Its caller has already found the title public at that moment from
+  // the public status (services/whoCanWatch.ts), which is what the stored
+  // state says only for now, so the state checks are skipped and the rights
+  // are read at that moment. The play gate never passes it.
+  if (!at) {
+    if (st === 'withdrawn') return { allowed: false, reason: 'this content is no longer available' };
+    if (st === 'expired') return { allowed: false, reason: 'this content is no longer available' };
+    if (st === 'scheduled') return { allowed: false, reason: `available from ${new Date(a.available_from).toISOString()}` };
+    if (st === 'draft' && !a.published) return { allowed: false, reason: 'not published' };
+  }
   // THE RIGHTS CAP (build queue R1), before collection access and the policy:
   // outside the rights nothing below can let the viewer in. The profile is
   // cached by id, so a warm gate still makes no database reads.
   const rights = await rightsForAsset(a);
-  const capped = evaluateRights(rights, { country: geo ?? null, appType: appType ?? null, appId: appId ?? null, use: 'on_demand' });
+  const capped = evaluateRights(rights, { country: geo ?? null, appType: appType ?? null, appId: appId ?? null, use: 'on_demand', at });
   if (!capped.allowed) return { allowed: false, reason: capped.reason, rights: true };
   // COLLECTION ACCESS (build queue C2, services/collectionAccess.ts): the
   // collections the title is in, compiled onto the cached row, most

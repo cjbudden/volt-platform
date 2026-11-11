@@ -21,8 +21,9 @@ import type { LibraryFacets } from './libraryApi'
 import {
   OPT_COLUMNS, SORTS, codecLabel, isFiltered, resLabel,
   type LibraryFilters, type LibraryView, type OptColumn, type SortKey,
-  PROBLEM_STATUSES,
+  PROBLEM_STATUSES, PUBLIC_VALUES,
 } from './libraryQuery'
+import { PUBLIC_STATUS_UI } from './PublicStatus'
 import { USAGE_LABEL, USAGE_TIP } from './AssetStatus'
 import type { UsageStatus } from '../../api'
 
@@ -158,6 +159,13 @@ export function LibraryFilterPanel({ filters, onChange, facets, mediaOnly }: {
         </Group>
       </div>
       <div className="lib-filter-row">
+        {/* PUBLIC STATUS (build queue P1-2): what a viewer gets now, and the titles about to stop being available. */}
+        <Group label="Public status">
+          {PUBLIC_VALUES.filter((k) => n(fx?.public_status, k) > 0 || filters.pub.includes(k)).map((k) => (
+            <Toggle key={k} on={filters.pub.includes(k)} label={PUBLIC_STATUS_UI[k]?.label ?? k} n={n(fx?.public_status, k)} title={PUBLIC_STATUS_UI[k]?.tip} onClick={() => set({ pub: flip(filters.pub, k) })} />
+          ))}
+          <Toggle on={filters.exp} label="Expires in 7 days" title="Available now, and stops being available within 7 days" onClick={() => set({ exp: !filters.exp })} />
+        </Group>
         <Group label="Availability">
           {Object.keys(AVAIL_LABEL).filter((k) => n(fx?.availability, k) > 0 || filters.avail.includes(k)).map((k) => (
             <Toggle key={k} on={filters.avail.includes(k)} label={AVAIL_LABEL[k]} n={n(fx?.availability, k)} onClick={() => set({ avail: flip(filters.avail, k) })} />
@@ -176,7 +184,7 @@ export function LibraryFilterPanel({ filters, onChange, facets, mediaOnly }: {
           {LibIcon.filter}{open ? 'Fewer filters' : 'More filters'}
         </button>
         {isFiltered(filters) && (
-          <button type="button" className="btn ghost sm" onClick={() => onChange({ ...filters, types: [], avail: [], origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [], from: '', to: '', durMin: null, durMax: null, q: '' })}>
+          <button type="button" className="btn ghost sm" onClick={() => onChange({ ...filters, types: [], avail: [], pub: [], exp: false, origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [], from: '', to: '', durMin: null, durMax: null, q: '' })}>
             Clear filters
           </button>
         )}

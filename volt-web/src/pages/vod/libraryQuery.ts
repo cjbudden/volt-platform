@@ -17,6 +17,10 @@ export interface LibraryFilters {
   types: string[]
   /** availability states, any of */
   avail: string[]
+  /** public statuses (build queue P1-2), any of */
+  pub: string[]
+  /** Available now and stops being available within 7 days */
+  exp: boolean
   /** how it was made: recording | clip | upload | watchfolder, any of */
   origin: string[]
   /** what it belongs to: channel | event | radio | upload | none, any of */
@@ -50,7 +54,7 @@ export interface LibraryFilters {
 }
 
 export const EMPTY_FILTERS: LibraryFilters = {
-  types: [], avail: [], origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [],
+  types: [], avail: [], pub: [], exp: false, origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [],
   from: '', to: '', durMin: null, durMax: null, q: '', sort: 'newest', col: '', colDeep: true,
 }
 
@@ -65,6 +69,9 @@ export const SORTS: { value: SortKey; label: string; api: string }[] = [
 ]
 
 const AVAIL = ['draft', 'scheduled', 'available', 'expired', 'withdrawn']
+export const PUBLIC_VALUES = ['draft', 'in_review', 'changes_requested', 'rejected', 'processing', 'scheduled', 'available', 'restricted', 'expired', 'archived']
+/** "Expires in 7 days" (the server takes the days, so the query does not change with the clock). */
+export const EXPIRES_DAYS = 7
 const ORIGIN = ['recording', 'clip', 'upload', 'watchfolder']
 export const SOURCE_VALUES = ['channel', 'event', 'radio', 'upload', 'none']
 export const MEDIA_VALUES = ['video', 'audio', 'song']
@@ -82,6 +89,8 @@ export function parseFilters(search: string | URLSearchParams): LibraryFilters {
   return {
     types: list(p.get('type')).filter((x) => /^[0-9a-f-]{36}$/i.test(x)),
     avail: list(p.get('avail')).filter((x) => AVAIL.includes(x)),
+    pub: list(p.get('pub')).filter((x) => PUBLIC_VALUES.includes(x)),
+    exp: p.get('exp') === String(EXPIRES_DAYS),
     origin: list(p.get('origin')).filter((x) => ORIGIN.includes(x)),
     source: list(p.get('src')).filter((x) => SOURCE_VALUES.includes(x)),
     media: list(p.get('media')).filter((x) => MEDIA_VALUES.includes(x)),
@@ -108,6 +117,8 @@ export function filtersToSearch(f: LibraryFilters): string {
   if (f.q.trim()) p.set('q', f.q.trim())
   if (f.types.length) p.set('type', f.types.join(','))
   if (f.avail.length) p.set('avail', f.avail.join(','))
+  if (f.pub.length) p.set('pub', f.pub.join(','))
+  if (f.exp) p.set('exp', String(EXPIRES_DAYS))
   if (f.origin.length) p.set('origin', f.origin.join(','))
   if (f.source.length) p.set('src', f.source.join(','))
   if (f.media.length) p.set('media', f.media.join(','))
@@ -135,6 +146,8 @@ export function filtersToApi(f: LibraryFilters, opts: { limit?: number; cursor?:
   if (f.q.trim()) p.set('q', f.q.trim())
   if (f.types.length) p.set('schema_id', f.types.join(','))
   if (f.avail.length) p.set('availability_state', f.avail.join(','))
+  if (f.pub.length) p.set('public_status', f.pub.join(','))
+  if (f.exp) p.set('expires_within_days', String(EXPIRES_DAYS))
   if (f.origin.length) p.set('origin', f.origin.join(','))
   if (f.source.length) p.set('source', f.source.join(','))
   if (f.media.length) p.set('media_type', f.media.join(','))
