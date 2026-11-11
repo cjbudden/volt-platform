@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.107.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Billing: A new Billing page under Admin shows what Volt charges your account: this month so far, every invoice with its PDF and CSV, and how invoices are paid. Where invoices are charged to a card, Change card opens the payment provider's page to update it.
+- added · API: POST /api/billing/portal answers a one-off link to change the card invoices are charged to, and GET /api/billing now says whether that is possible (paymentMethod).
+
+### Internal
+
+- added · Docs: Billing guide with screenshots, a staff guide for System Admin billing (volt-app/docs/BILLING.md), billing history in the docs seed, and billingOn shots in the screenshot script.
+- added · System Admin: System Admin has a Billing tab: how each account pays and its tax rate, open invoices with Mark paid, charges and credits, the price list for server time, and closing a month by hand.
+
 ## 0.106.0 (2026-11-11)
 
 ### Product (in customer release notes)
