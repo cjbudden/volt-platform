@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.95.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- fixed · Storage: Saving the retention ladder no longer changes an asset or both rule back into a recordings-only rule.
+- added · Storage: The account's retention rule can now cover uploads and watch folder files (Include uploads and watch folder files). New rules include them; rules you already have keep covering what they did until you tick the option.
+- added · Storage: With Mirror and Archive, a retention rule can now take each original out of the cloud a number of days after it lands, once a verified copy of that very file is held at one of your storage targets. The renditions stay, so the title keeps playing; until the copy is verified the original stays and Storage says why and what to do.
+
+### Internal
+
+- added: retention-originals suite (51 assertions): the copy-before-delete verdict, the rung's API, the pass, reach and the console routes.
+
 ## 0.94.0 (2026-11-11)
 
 ### Product (in customer release notes)
