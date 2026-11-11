@@ -2,6 +2,20 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.91.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · API: New on-demand routes: PUT /api/vod/{id}/availability (Listed from, Unlisted), POST /api/vod/{id}/archive and /unarchive, and POST /api/vod/{id}/evaluate (who can watch). GET /api/vod and GET /api/vod/{id} carry the public status, and the list filters on public_status and expires_within_days.
+- added · Media Library: The Availability tab now shows what viewers get: the public status and why, a timeline of the title's life with today marked, Listed from and Unlisted, Archive and Restore, and Who can watch, which tests a country, a kind of viewer and a date against the real play decision.
+- added · Media Library: The library has a Public status column and filter, including Expires in 7 days for titles about to stop being available.
+- fixed · Guides: The links from the FAST from the library workflow to the FAST guide's run order and ads sections open those sections again.
+
+### Internal
+
+- fixed · Tests: vod-library-pure expects the eight on-demand content types, including Trailer, Music video and Bug.
+- added: vod-lifecycle-api suite: the status in the admin API, listing, archive and restore, and the who-can-watch tester held to the play gate for every status.
+
 ## 0.90.0 (2026-11-11)
 
 ### Product (in customer release notes)
