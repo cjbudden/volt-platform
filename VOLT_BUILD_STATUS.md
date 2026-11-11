@@ -2291,7 +2291,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-11 - Publishing policies 2b-4: clip output folders under enforce (build queue P2-2d; __VER__)
+## 2026-11-11 - Publishing policies 2b-4: clip output folders under enforce (build queue P2-2d; v0.93.0)
 
 What: under `VOLT_EDGE_TOKENS=enforce` plain `/vod/` and `/clips/vod/` addresses were refused, but a clip cut from a recording keeps its files in a folder of its own, `/clips/<asset id>/` (`hls/`, `clip.mp4`, `clip.mp3`), and those still played by plain address. Now they are refused the same way at the API, the staging nginx and CloudFront, and play through a token.
 
@@ -2303,7 +2303,7 @@ What: under `VOLT_EDGE_TOKENS=enforce` plain `/vod/` and `/clips/vod/` addresses
 - **Found, not this item**: under enforce, FAST channel playlists and on-demand ad sessions name content segments by plain address (`fast_playout.py` `url_base`, `services/vodAds` `keyUrl`), so P2-2b's enforce already refuses them for encodes, and now for clips too. Stitched ad sessions are per viewer and can carry the viewer's token (P2-2e); FAST and guided ad playlists are shared by every viewer and cached, so they need a decision (P2-2f). schema.org `contentUrl` (`services/schemaOrg.ts`) also names plain addresses.
 - **Not done**: P2-2e, P2-2f.
 
-## 2026-11-11 - Publishing policies 2b-3: token-free playback (build queue P2-2c, (c); no release yet)
+## 2026-11-11 - Publishing policies 2b-3: token-free playback (build queue P2-2c, (c); v0.93.0)
 
 What: under `VOLT_EDGE_TOKENS=enforce` every on-demand title played only through a play token. For content anyone may watch a token adds nothing and stops plain addresses being shared, embedded or cached. A publishing rule can now ask for **token-free playback**: the gate hands out the plain addresses and the edges let them through, but only where nothing about the viewer decides.
 
