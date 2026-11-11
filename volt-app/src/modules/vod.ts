@@ -33,6 +33,7 @@ import { usageStatusSql, USAGE_STATUSES } from '../services/assetReadiness';
  */
 import { checkContentValues, syncAfterSave, readLinks, parseInclude } from '../services/contentLinks';
 import { resolveEffectiveFields } from './metadataSchemas';
+import { SITE_NAME_SQL, encodePlaceOf, withEncodePlace } from '../services/sites/encodePlace';
 export const vodRouter = Router();
 vodRouter.use(requireAuth);
 
@@ -233,13 +234,15 @@ vodRouter.get(
                      OR ((v.export_mp3_key IS NOT NULL OR v.export_m4a_key IS NOT NULL) AND v.top_height IS NULL AND v.progressive_key IS NULL) THEN 'audio'
                    ELSE 'video' END AS media_kind,
               (v.export_mp3_key IS NOT NULL) AS has_mp3,
+              -- THE SITE that keeps an Encode at site original, for "At site" (H4-8).
+              ${SITE_NAME_SQL()} AS site_name,
               ${USAGE_SQL} AS usage_status
        ${fromPage}
        ${pageSql(pl)}`,
       params
     );
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${fromCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
-    res.json(finishPage(req, res, pl, rows as any[], total));
+    res.json(finishPage(req, res, pl, (rows as any[]).map(withEncodePlace), total));
   })
 );
 
@@ -486,7 +489,11 @@ vodRouter.get(
       const eff = row.schema_id ? await resolveEffectiveFields(row.schema_id, accountId(req)) : null;
       extra.linkedContent = await readLinks(accountId(req), row.id, eff?.fields ?? []);
     }
-    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), ...extra });
+    // WHERE IT IS ENCODED (H4-8): at the customer's site, or in the cloud and why.
+    const siteName = row.ingest?.siteSource?.siteId
+      ? (await one<any>(`SELECT name FROM sites WHERE id::text = $1 AND account_id = $2`, [row.ingest.siteSource.siteId, accountId(req)]))?.name ?? null
+      : null;
+    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), encode_place: encodePlaceOf(row.ingest, siteName), ...extra });
   })
 );
 

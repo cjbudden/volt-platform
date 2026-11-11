@@ -98,8 +98,12 @@ With Hybrid Sites, a file can be encoded on a server of the site, so the origina
 To have a watchfolder's videos encoded at the site, open the on-prem watchfolder in [Watchfolders](watchfolders.md#create-an-on-prem-watchfolder) and set **Where it is encoded** to **Encode at site**. Then, for each video or audio file the folder accepts:
 
 1. The agent sends Volt the file's facts, not the file: its name, size and checksum, its first bytes and what the site's encoder read from it (length, picture size).
-2. Volt runs your [Ingest Rules](ingest-rules.md) on those facts (duplicates, holds, required metadata), makes the item in the Media Library and records where the original is: the site and its path there. The item reads **Processing** while the site encodes it.
+2. Volt runs your [Ingest Rules](ingest-rules.md) on those facts (duplicates, holds, required metadata), makes the item in the Media Library and records where the original is: the site and its path there. While the site encodes it, the item reads **Building** with **At site** beside it, in the Media Library and on its page. The row says **Queued at site** until a server takes it, then **Encoding at site** with a percentage, and the item's page names the site that is encoding it.
 3. A server of the site encodes it and sends only the finished streams. When Volt has checked them, the video is ready to play.
+
+![A title from an Encode at site watchfolder on its asset page: Building with At site beside it, the sentence saying a server of the site Main broadcast centre is encoding it, and the Encoded row in Facts](/img/screens/hybrid-sites-at-site.png)
+
+Once it is ready, the **Encoded** row in the item's **Facts** (and the top of its **Encode** tab) still says it was encoded at the site.
 
 The original stays in the watchfolder at the site; Volt keeps no copy of it. A held duplicate is not encoded until someone chooses to keep it; it is then encoded at the site too. Images, captions, slates and loops in the same folder are still uploaded, as with **Upload and encode in the cloud**.
 
@@ -112,8 +116,8 @@ When a FAST channel needs one of these videos encoded again (aligned for splicin
 By default an item in an **Encode at site** folder waits for the site, however long that takes: the original never leaves your storage. If you would rather have it encoded in the cloud when the site cannot do it in time, set **If the site does not encode it** on the watchfolder's page (it shows when **Where it is encoded** is **Encode at site**) to one of the times offered, from 15 minutes to 1 day. Then:
 
 1. Volt counts how long the item's encode has waited at the site with no server taking it. An encode a server is working on never falls back, however long it takes. A server that stopped reporting gives its job back, and the count starts again from then.
-2. When the time has passed, Volt takes the encode back from the site and asks the site's agent for the original. The item still reads **Processing**. The audit log says it fell back, after how long, and why.
-3. On its next pass the agent sends the original to Volt on the same resumable upload as an **Upload and encode in the cloud** folder (it carries on where it stopped if the connection drops). Volt checks it is the file that was registered, keeps it as the item's original and encodes it in the cloud like any upload. The original stays in the folder at the site as well, and the folder's queue says the item was encoded in the cloud.
+2. When the time has passed, Volt takes the encode back from the site and asks the site's agent for the original. The item still reads **Building**, now with **Sending to cloud** beside it, and its page says it is encoded in the cloud because no server of the site took the encode within the folder's fallback time. The audit log says it fell back, after how long, and why.
+3. On its next pass the agent sends the original to Volt on the same resumable upload as an **Upload and encode in the cloud** folder (it carries on where it stopped if the connection drops). Volt checks it is the file that was registered, keeps it as the item's original and encodes it in the cloud like any upload; the item shows **In the cloud** beside **Building** while it is encoded. Afterwards the **Encoded** row in its **Facts** keeps saying it was encoded in the cloud, and why. The original stays in the folder at the site as well, and the folder's queue says the item was encoded in the cloud.
 
 The agent can only send the file while a server of the site is running it. If the whole site is offline, the item waits until it is back, and the file goes then. If the file was replaced or deleted at the site in the meantime, the item shows **Failed** with the reason; a replaced file is taken in as a new item by the folder.
 
@@ -183,7 +187,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | An encode at the site is encoded again with *does not match its declared SHA-256* | A file changed between the encoder and Volt (a proxy or antivirus that rewrites files, or failing storage) | Exclude the agent's encode folder from such software and check the storage; after its attempts the item says why |
 | An item shows *the site could not send the original for the cloud encode* | The folder falls back to the cloud, but the file was no longer in the folder at the site (or had changed size) when the agent went to send it | Copy the file into the watchfolder again |
 | An item shows *the original sent from the site is not the file that was registered* | The file at the site was replaced with other content before it was sent | Nothing to do: the folder takes the new content in as a new item |
-| An item in an **Encode at site** folder stays **Processing** with a fallback time set | The time has not passed yet, or the site is wholly offline, so its agent cannot send the original | Start the agent on a server of the site; the file is sent on its next pass |
+| An item in an **Encode at site** folder stays **Building** with **Sending to cloud** beside it | The time has not passed yet, or the site is wholly offline, so its agent cannot send the original | Start the agent on a server of the site; the file is sent on its next pass |
 | An on-prem watchfolder's **Last pass** stays old | No approved server of the site is running the agent, or it cannot read the folder | Check the server here; the folder's page shows the agent's last error under **Last scan failed** |
 
 ## Through the API

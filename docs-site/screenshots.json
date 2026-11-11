@@ -385,6 +385,17 @@
       "alt": "The Sites page: a site with its health, its hosts with what each server has and when it last reported, one approved and one waiting for approval, and the Add a host section"
     },
     {
+      "name": "hybrid-sites-at-site",
+      "guide": "guides/hybrid-sites.md",
+      "path": "/vod?asset=8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c71",
+      "customerView": true,
+      "waitFor": ".asset-status",
+      "settleMs": 1200,
+      "clip": ".lib-drawer-asset",
+      "hide": [".topbar"],
+      "alt": "A title from an Encode at site watchfolder on its asset page: Building with At site beside it, the sentence saying a server of the site Main broadcast centre is encoding it, and the Encoded row in Facts"
+    },
+    {
       "name": "workflows",
       "guide": "guides/workflows.md",
       "path": "/workflows",

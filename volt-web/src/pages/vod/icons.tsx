@@ -16,6 +16,9 @@ export const LibIcon = {
   info: <svg {...s}><circle cx="12" cy="12" r="8" /><path d="M12 11v5M12 8h0" /></svg>,
   alert: <svg {...s}><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h0" /></svg>,
   empty: <svg {...s}><circle cx="12" cy="12" r="7" strokeDasharray="3 3" /></svg>,
+  // A server at the customer's site, and the cloud: where an asset is encoded (H4-8).
+  site: <svg {...s}><rect x="4" y="4" width="16" height="6" rx="1.5" /><rect x="4" y="14" width="16" height="6" rx="1.5" /><path d="M8 7h.01M8 17h.01" /></svg>,
+  cloud: <svg {...s}><path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.6 4.2 4.2 0 0 0 7 18z" /></svg>,
   clock: <svg {...s}><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>,
   close: <svg {...s}><path d="M6 6l12 12M18 6L6 18" /></svg>,
   prev: <svg {...s}><path d="M15 6l-6 6 6 6" /></svg>,

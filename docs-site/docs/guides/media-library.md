@@ -216,6 +216,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Nothing here yet** | No clips have been cut and no files uploaded | Cut a clip in [Recordings](recordings.md) or upload a file |
 | **No assets match these filters** | The filters leave nothing | Choose **Clear filters** |
 | **Queued to encode** or **Encoding** with a percentage | An uploaded file is still being encoded | Wait; the row updates when you choose **Refresh** |
+| **Queued at site** or **Encoding at site**, with **At site** beside **Building** | The file came from an **Encode at site** watchfolder and a server at your site is encoding it; the original stays there | Wait. If it stays queued, check the site's servers in [Hybrid Sites](hybrid-sites.md); the item's page says which site |
+| **Sending to cloud** or **In the cloud** beside **Building** | The site did not take the encode within the watchfolder's fallback time, so the original is being sent to Volt and encoded in the cloud | Nothing to do; the item's page says why. See [Hybrid Sites](hybrid-sites.md#when-the-site-does-not-encode-it-fall-back-to-the-cloud) |
 | **Encode failed** | The file could not be encoded; hover over it for the reason | Check the file plays, then upload it again |
 | **No rendered file for this asset.** or **Still being extracted…** on **Preview** | The asset is still being made | Wait and choose **Refresh** |
 | **This asset has no playlist yet, so there is nothing to mark.** on **Skip markers** | Markers need the built asset | Wait until it is built |

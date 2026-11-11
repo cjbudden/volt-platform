@@ -40,6 +40,7 @@ import { LibIcon } from './vod/icons'
 import { AssetStatusPanel, QcChecks, UsageBadge, USAGE_LABEL, hasNoMedia } from './vod/AssetStatus'
 import './vod/library.css'
 import { SourceFacts } from './vod/SourceFacts'
+import { EncodePlaceLine, EncodePlaceTag, encodePlaceText, encodeProgressWords } from './vod/EncodePlace'
 import { AddToCollectionDialog, CollectionTree, ColIcon, NewCollection, collectionsApi, flatten, pathName, useCollections } from './vod/collections'
 import { longTitle, seriesLabel } from './vod/libraryTitles'
 
@@ -100,8 +101,8 @@ function EncodeState({ a }: { a: any }) {
   if (st === 'queued' || st === 'running') {
     return (
       <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--brand,#3f7bff)', fontWeight: 600 }}
-        title={a.encode_note ?? 'Waiting for a worker'}>
-        {st === 'queued' ? 'Queued to encode' : `Encoding ${a.encode_pct ?? 0}%`}
+        title={a.encode_place ? encodePlaceText(a.encode_place, true) : a.encode_note ?? 'Waiting for a worker'}>
+        {encodeProgressWords(st, a.encode_pct, a.encode_place)}
       </span>
     )
   }
@@ -299,13 +300,15 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
             <div className="sec-label">Facts</div>
             <table>
               <tbody>
-                <tr><td style={{ color: 'var(--faint)' }}>Status</td><td>{d.usage_status ? <UsageBadge row={d} /> : '—'}</td></tr>
+                <tr><td style={{ color: 'var(--faint)' }}>Status</td><td>{d.usage_status ? <><UsageBadge row={d} /> <EncodePlaceTag asset={d} /></> : '—'}</td></tr>
                 <tr><td style={{ color: 'var(--faint)' }}>Kind</td><td>{mediaKind}{cut ? ` · ${cut}` : ''}</td></tr>
                 {(d.source_kind === 'upload' || d.source_kind === 'watchfolder') && <>
                   {/* THE SOURCE (mezzanine) FILE: kept as uploaded; every rendition is made from it. */}
                   <tr><td style={{ color: 'var(--faint)' }}>Source file</td>
                     <td style={{ wordBreak: 'break-all' }}>{d.original_filename ?? '—'}{d.source_bytes ? ` · ${(Number(d.source_bytes) / 1048576).toFixed(Number(d.source_bytes) > 1073741824 ? 0 : 1)} MB` : ''}
                       {d.ingest?.probe?.width ? ` · ${d.ingest.probe.width}×${d.ingest.probe.height}` : d.encode_result?.probe?.width ? ` · ${d.encode_result.probe.width}×${d.encode_result.probe.height}` : ''}</td></tr>
+                  {/* WHERE IT IS ENCODED: at the customer's site, or in the cloud and why (H4-8). */}
+                  {d.encode_place && <tr><td style={{ color: 'var(--faint)' }}>Encoded</td><td><EncodePlaceLine asset={d} /></td></tr>}
                   {d.sha256 && <tr><td style={{ color: 'var(--faint)' }}>SHA-256</td><td className="mono" title={d.sha256}>{String(d.sha256).slice(0, 16)}…</td></tr>}
                   <tr><td style={{ color: 'var(--faint)' }}>Ladder</td>
                     <td>{d.encode_result?.ladder?.name ?? '—'}{d.encode_result?.ladder?.origin?.kind === 'tracked' ? ` (tracks the live profile${d.encode_result.ladder.origin.profileName ? ` ${d.encode_result.ladder.origin.profileName}` : ''})` : ''}
@@ -431,7 +434,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
               <button className="btn ghost sm" onClick={() => navigate(`/encode-jobs/${d.encode_job_id}`)}>Encode job and log</button>
             </div>
           )}
-          <EncodePanel id={d.id} />
+          <EncodePanel id={d.id} place={d.encode_place ? <EncodePlaceLine asset={d} /> : null} />
         </>
       )}
 
@@ -1008,7 +1011,7 @@ export default function VodPage() {
                           <div className="min-w-0">
                             {seriesLabel(a) && <div className="lib-faint" style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{seriesLabel(a)}</div>}
                             <b>{a.title || 'Untitled'}</b>
-                            <div><EncodeState a={x} />{a.usage_status && a.usage_status !== 'ready' && <> <UsageBadge row={a} /></>}</div>
+                            <div><EncodeState a={x} />{a.usage_status && a.usage_status !== 'ready' && <> <UsageBadge row={a} /></>}<EncodePlaceTag asset={x} /></div>
                           </div>
                         </div>
                       </td>

@@ -652,6 +652,23 @@ async function seedG8Sections() {
       [id, SITE, ACCOUNT, hostname, status, cores, memGb * 2 ** 30, JSON.stringify(gpus), free, total, arch, ago]);
   }
 
+  // Encode at site (build queue H4-8): a title from an Encode at site
+  // watchfolder that a server of the site is encoding now, so the Hybrid
+  // Sites guide can show "At site" beside Building on the asset page. Its
+  // encode job is held running with a lease well past a docs run, so the
+  // API's reaper leaves it alone while the screenshots are taken.
+  const AT_SITE = '8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c71', AT_SITE_JOB = '8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c72';
+  await query(
+    `INSERT INTO jobs(id, type, state, progress_pct, pool, payload, claimed_by, claimed_at, started_at, lease_until, attempts)
+     VALUES ($1,'site.vod-encode','running',42,$2,'{}'::jsonb,'encoder-01',now(),now(),now() + interval '7 days',1)
+     ON CONFLICT (id) DO UPDATE SET state = 'running', lease_until = EXCLUDED.lease_until`, [AT_SITE_JOB, `site:${SITE}`]);
+  await query(
+    `INSERT INTO vod_assets(id, account_id, source_kind, kind, title, original_filename, start_epoch_ms, end_epoch_ms, duration_ms,
+                            media_state, encode_job_id, ingest)
+     VALUES ($1,$2,'watchfolder','clip','Harbour Lights','Harbour Lights.mp4',0,1500000,1500000,'processing',$3,$4::jsonb)
+     ON CONFLICT (id) DO NOTHING`,
+    [AT_SITE, ACCOUNT, AT_SITE_JOB, JSON.stringify({ status: 'ingested', siteSource: { siteId: SITE, folderId: '', itemId: 0, sitePath: '/mnt/nas/drop/Harbour Lights.mp4', objectKey: 'Harbour Lights.mp4' } })]);
+
   // Mirror and Archive (build queue H3-6): the add-on, a NAS folder and an
   // S3-compatible store at the site, copies of the library's originals in
   // the states the guide explains (verified, queued for missing keys, failed

@@ -17,6 +17,7 @@ import { api, ApiError, type QcFinding, type UsageStatus } from '../../api'
 import { useNotify } from '../../notices'
 import { navigate } from '../../router'
 import { LibIcon } from './icons'
+import { encodePlaceText } from './EncodePlace'
 import type { LibraryRow } from './libraryApi'
 
 export const USAGE_LABEL: Record<UsageStatus, string> = {
@@ -94,6 +95,7 @@ export function AssetStatusPanel({ asset, onChanged }: { asset: any; onChanged: 
     : s === 'no_media' ? (asset.media_error ?? 'Nothing was built for this asset.')
     : s === 'qc_failed' ? 'QC found an error in this media. It plays, but is held back from FAST, loops and blocking. Check each finding below in the player: once every error is accepted as fine, it is released.'
     : s === 'unchecked' ? 'QC has not checked this media yet, so it is not offered for scheduling.'
+    : asset.encode_place && asset.encode_place.state !== 'fallback_failed' ? encodePlaceText(asset.encode_place, true)
     : 'The media is being built.'
 
   return (

@@ -4,6 +4,7 @@
 //  rather than in api.ts (see apiRequest there).
 // ============================================================================
 import { apiRequest, apiRequestWithHeaders, type VodAssetRow } from '../../api'
+import type { EncodePlace } from './EncodePlace'
 
 export interface LibraryRow extends VodAssetRow {
   source_kind?: string | null
@@ -33,6 +34,8 @@ export interface LibraryRow extends VodAssetRow {
   encode_state?: string | null
   encode_pct?: number | null
   encode_result?: any
+  /** Encode at site items: at the site, or in the cloud and why (H4-8). Null for every other asset. */
+  encode_place?: EncodePlace | null
 }
 
 export interface LibraryPage {

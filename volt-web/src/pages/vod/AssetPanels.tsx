@@ -553,7 +553,8 @@ export function DownloadFiles({ id, compact = false, uploaded }: { id: string; c
 // enough, an upload made before file names were kept has none.
 const fromFile = (e: EncodeDetails) => /^(Uploaded|Watch folder) file$/.test(e.source.origin)
 
-export function EncodePanel({ id }: { id: string }) {
+/** `place`: where it is encoded, for an Encode at site item (H4-8); shown under the summary. */
+export function EncodePanel({ id, place }: { id: string; place?: React.ReactNode }) {
   const [e, setE] = useState<EncodeDetails | null>(null)
   const [err, setErr] = useState('')
   useEffect(() => {
@@ -595,6 +596,7 @@ export function EncodePanel({ id }: { id: string }) {
     return (
       <div className="lib-encode">
         <div className="lib-encode-sum">{LibIcon.audio}<b>{e.summary.label || 'Audio only'}</b></div>
+        {place && <div className="lib-encode-place">{place}</div>}
         <div className="lib-encode-grid">
           <div>
             <div className="sec-label">Audio encode <Mark s={ae?.source ?? 'unknown'} /></div>
@@ -637,6 +639,7 @@ export function EncodePanel({ id }: { id: string }) {
   return (
     <div className="lib-encode">
       <div className="lib-encode-sum">{LibIcon.encode}<b>{e.summary.label || 'Encode not known'}</b></div>
+        {place && <div className="lib-encode-place">{place}</div>}
       <div className="lib-encode-grid">
         <div>
           <div className="sec-label">Workflow</div>

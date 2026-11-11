@@ -5,6 +5,7 @@ import { thumbUrl } from '../../api'
 import { signImage } from '../../imageSigning'
 import { posterVersion } from './useLibraryChanges'
 import { LibIcon } from './icons'
+import { encodePlaceText, encodeProgressWords } from './EncodePlace'
 import { codecLabel, resLabel } from './libraryQuery'
 import type { LibraryRow } from './libraryApi'
 
@@ -115,7 +116,9 @@ export function EncodeSummary({ row }: { row: LibraryRow }) {
   }
   if (u === 'processing' && !row.encode_state) return <span className="lib-enc busy">{LibIcon.clock}Building</span>
   if (row.encode_state === 'queued' || row.encode_state === 'running') {
-    return <span className="lib-enc busy">{LibIcon.clock}{row.encode_state === 'queued' ? 'Queued to encode' : `Encoding ${row.encode_pct ?? 0}%`}</span>
+    // At a site it can wait for hours: the place says why (H4-8).
+    const p = row.encode_place
+    return <span className="lib-enc busy" title={p ? encodePlaceText(p, true) : undefined}>{LibIcon.clock}{encodeProgressWords(row.encode_state, row.encode_pct, p)}</span>
   }
   if (row.encode_state === 'failed') return <span className="lib-enc bad">{LibIcon.alert}Encode failed</span>
   // Audio has no picture to describe: say so (the Encode tab has the bitrate and the deliveries).

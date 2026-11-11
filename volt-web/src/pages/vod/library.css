@@ -68,6 +68,11 @@
 .lib-enc.busy { color: var(--sched) }
 .lib-enc.bad { color: var(--down) }
 .lib-enc.none { color: var(--faint) }
+/* Where an asset is encoded (H4-8): the tag beside Processing, and the line on the asset page. */
+.lib-place svg { width: 12px; height: 12px; flex: none }
+.lib-place-line { display: inline-flex; align-items: flex-start; gap: 6px; line-height: 1.45 }
+.lib-place-line svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--faint) }
+.lib-encode-place { margin: 2px 0 10px; color: var(--muted); font-size: var(--fs-sm) }
 
 /* ---- grid */
 .lib-grid-head { display: flex; align-items: center; margin: 0 0 10px }

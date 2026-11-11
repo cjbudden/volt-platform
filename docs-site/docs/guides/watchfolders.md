@@ -257,7 +257,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | "the site agent could not move it to the review folder" | Volt sent an on-prem file to review, but it was no longer in the watchfolder at the site | Find the file at the site, or **Dismiss** the entry |
 | "the site agent could not move it back" | After **Reprocess**, the file was no longer in the review folder at the site | Put the file back in the watchfolder at the site yourself, or **Dismiss** the entry |
 | "the encode at the site could not be queued" on an item in an **Encode at site** folder | The site was disabled, or this Volt keeps finished streams in a storage bucket, where encoding at the site is not available yet | Enable the site, or set the folder to **Upload and encode in the cloud** and copy the file in again |
-| An item in an **Encode at site** folder stays **Processing** | No approved, **Online** server of the site is taking the encode, or none has the encoder set up | Check the site's servers on [Sites](hybrid-sites.md) and start the agent with `VOLT_ENCODER_IMAGE`, or set **If the site does not encode it** to a time so it is encoded in the cloud instead |
+| An item in an **Encode at site** folder stays **Building** with **At site** beside it in the Media Library | No approved, **Online** server of the site is taking the encode, or none has the encoder set up | Check the site's servers on [Sites](hybrid-sites.md) and start the agent with `VOLT_ENCODER_IMAGE`, or set **If the site does not encode it** to a time so it is encoded in the cloud instead |
 
 ## Through the API
 
