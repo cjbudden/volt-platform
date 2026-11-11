@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.98.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- improved · Mirror and Archive: Recordings of a channel, station or event whose copy rule archives recordings are no longer deleted by retention until the archive file covering them is verified at your storage target. The Storage retention list and the recording's page say why one is waiting.
+
+### Internal
+
+- added · Tests: retention-recordings-archive: the delete rung and a manual expiry wait for the recording's archive file with the reason, and go once it is verified.
+
 ## 0.97.0 (2026-11-11)
 
 ### Product (in customer release notes)
