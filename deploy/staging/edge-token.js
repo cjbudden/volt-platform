@@ -17,8 +17,8 @@
 //  token-free title: "f:<asset id>" in the store, not past its end (build
 //  queue P2-2c; plainPathVerdict in services/edgeTokens.ts).
 //
-//  A shared token (build queue P2-2f, `k: "shared"`) opens the encode folders
-//  of the titles it names, for any viewer, each title's revocation applying.
+//  A shared token (build queue P2-2f, `k: "shared"`) opens the folders
+//  (/vod/, /clips/vod/, a clip's /clips/<id>/) of the titles it names, for any viewer, each title's revocation applying.
 //
 //  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked),
 //  "503" (no key yet: the scheduler has not synced). `refusal` gives the
@@ -29,7 +29,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 
 var TOK = /^\/t\/([A-Za-z0-9_-]{8,2048})\.([0-9a-f]{32})(\/.*)$/;
-var SHARED = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+var SHARED = /^\/(?:clips\/vod|vod|clips)\/([0-9a-fA-F-]{36})\//;
 
 function storePath() {
   return (process.env && process.env.EDGE_STORE_FILE) || '/data/edge/store.json';

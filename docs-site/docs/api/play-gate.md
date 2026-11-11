@@ -154,6 +154,10 @@ A title whose publishing rule turns on **Token-free playback** (`protection.toke
 
 The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available* or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not.
 
+#### FAST channels
+
+A FAST channel's playlists are the same for every viewer, so they cannot carry a viewer's token. Each channel's playlists name its titles' segments through a shared token instead (`/t/<token>/vod/<title>/...`), which opens only the titles that channel airs and carries no country: the channel's own country rules and its rights variants apply as before. It changes every few hours and the one before keeps working for an hour more, so nothing in a player's live window is refused across the change. A withdrawn title's segments answer `403` *No longer available* within about a minute. Play the channel's `master.m3u8` or `manifest.mpd` as before; your player needs no change.
+
 #### Ad sessions
 
 A stitched ad session (step 6) is this viewer's own, so its playlists carry this viewer's tokens: the title's segments, and each ad's and house spot's, have a token in front of their folder, bound to the viewer's country and lasting as long as the title's own token would. Nothing changes for your player: play `delivery.hls` or `delivery.dash` as they are. When the title stops being public, the session's playlists, its segment addresses and its timeline answer `403` *No longer available*, and so do the title's segments already in the player. Ask the gate again, as for any other `403`. With guided ads, each break's ads carry tokens the same way.

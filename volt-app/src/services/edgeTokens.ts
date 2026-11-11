@@ -82,7 +82,8 @@
 //    g  what it is for ("fast:<channel id>", "guided:<version>"): logs only
 //    A  the titles it opens, each as its 32 hex id (dashes dropped to keep
 //       the token short: it sits in front of every segment line). It opens
-//       /vod/<id>/ and /clips/vod/<id>/ of each, nothing else.
+//       /vod/<id>/, /clips/vod/<id>/ and /clips/<id>/ of each (the plain
+//       folders enforce refuses), nothing else.
 //    d  0 (clear)
 //    n  issued at, e expiry, as above
 //  No country: country rules stay where they are today (the channel playlist
@@ -247,8 +248,8 @@ export type EdgeVerdict = 'ok' | 'malformed' | 'signature' | 'early' | 'expired'
 // ---------------------------------------------------------------------------
 //  Shared tokens (P2-2f)
 // ---------------------------------------------------------------------------
-/** The title folders a shared token can open: an encode's, local or in the bucket. */
-export const SHARED_PATH_RE = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+/** The title folders a shared token can open: an encode's, local or in the bucket, and a clip's own (the same three enforce refuses plain). */
+export const SHARED_PATH_RE = /^\/(?:clips\/vod|vod|clips)\/([0-9a-fA-F-]{36})\//;
 /** The most titles one shared token names (the token must stay under 2048 characters). */
 export const SHARED_TOKEN_MAX_TITLES = 32;
 const hex32 = (id: string) => id.replace(/-/g, '').toLowerCase();
@@ -360,6 +361,43 @@ export function verifyEdgeToken(token: string, uri: string, o: {
 export function sharedAssetOf(uri: string): string | null {
   const m = SHARED_PATH_RE.exec(uri);
   return m && uri.indexOf('/../') < 0 ? m[1].toLowerCase() : null;
+}
+
+/**
+ * THE SHARED TOKENS A PLAYLIST WRITER PUTS IN FRONT OF ITS TITLES' SEGMENTS
+ * (P2-2f-2): given the master keys a FAST channel's timeline names (local
+ * "/clips/vod/<id>/..." or the bucket's "vod/<id>/..."), the token for each
+ * title folder, keyed by the folder's id in lower case. Null when tokens are
+ * off. The writer asks again well inside each period (the FAST playout reads
+ * its timeline every 20 s), so it moves to the next token at `nextAt` with the
+ * one before still valid for the overlap.
+ *
+ * WHO IS NAMED: a title is left out while it has a live revocation and is not
+ * public now (withdrawn, archived, its rights ended early): its segments stop
+ * at the edge within a minute and no later token opens them again. A title
+ * revoked and public again (republished) is named with its revocation time,
+ * so it plays at once. Titles never offered on demand (FAST-only) have no
+ * revocation and are named. Folders that are not a title's (ad creatives,
+ * prepared loops under the origin) need no token and are not named.
+ */
+export async function playlistEdgeTokens(scope: string, masterKeys: (string | null | undefined)[], nowSec = Math.floor(Date.now() / 1000)):
+  Promise<{ byAsset: Record<string, string>; nextAt: number; periodSec: number; overlapSec: number } | null> {
+  if (edgeTokensMode() === 'off') return null;
+  const ids = [...new Set(masterKeys.map((k) => k ? sharedAssetOf('/' + k.replace(/^\/+/, '')) : null).filter((x): x is string => !!x))];
+  const rot = sharedRotation();
+  const empty = { byAsset: {}, nextAt: (Math.floor(nowSec / rot.periodSec) + 1) * rot.periodSec, ...rot };
+  if (!ids.length) return empty;
+  const rows = await query<any>(
+    `SELECT r.asset_id::text AS id, extract(epoch FROM r.revoked_at)::bigint AS at, v.public_status = 'available' AS public
+       FROM edge_revocations r LEFT JOIN vod_assets v ON v.id = r.asset_id
+      WHERE r.asset_id::text = ANY($1::text[]) AND r.expires_at > now()`, [ids]);
+  const revokedAt: Record<string, number> = {};
+  const out = new Set<string>();
+  for (const r of rows) { if (r.public) revokedAt[r.id] = Number(r.at); else out.add(r.id); }
+  const named = ids.filter((id) => !out.has(id));
+  if (!named.length) return empty;
+  const t = sharedEdgeTokens({ scope, assetIds: named, nowSec, revokedAt });
+  return { byAsset: Object.fromEntries(t.byAsset), nextAt: t.nextAt, ...rot };
 }
 
 /**

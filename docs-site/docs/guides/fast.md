@@ -264,6 +264,10 @@ With **None** chosen, viewers outside a title's rights are refused for that prog
 - A rights or guide change reaches viewers within about 15 seconds.
 - On Loops & Fillers, the item shows the channel under **Used by** with the role **Geo replacement**.
 
+### Where play tokens are enforced
+
+On deployments that enforce play tokens at the CDN, a title's segments are refused by their plain address. A FAST channel's playlists are the same for every viewer, so Volt gives each channel a shared token that opens only the titles it airs, and the channel's playlists name every title segment through it. Nothing changes for viewers or for your player. The token changes every few hours; the one before keeps working for an hour more, so nothing in a viewer's live window is refused across the change, and a segment address copied out of the playlist stops working within a few hours. When a title is withdrawn or archived while it is in the guide, its segments stop within about a minute, even in the window a viewer already has; the rest of the channel keeps playing. The channel's own country rules apply as before.
+
 ### See who saw what (Build > Brand & filler > Rights delivery)
 
 **Rights delivery** lists every scheduled programme of the period you choose (**Today**, **Last 7 days**, **Last 31 days**) with three counts of viewers:
@@ -327,6 +331,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | Changes to break lengths or idents do not show | They are written into the guide | **Activate**, or **Rewrite guide** |
 | Viewers get nothing after activating | The channel is still **Private** | **Go live**, or turn on **Public** on Overview |
 | Some viewers get "not available where you are" for a programme | The title is not cleared where they are and there is no geo replacement | Choose one under **Brand & filler > Geo replacement** |
+| A programme stops with an error and the next one plays | The title was withdrawn, archived or its rights ended while it was in the guide, on a deployment that enforces play tokens | Take it out of the run order and **Rewrite guide**, or make it available again |
 | A whole country gets nothing | **Where it can be watched** leaves it out, or the account's geo does | Check Settings, and the account's geo |
 
 ## Through the API

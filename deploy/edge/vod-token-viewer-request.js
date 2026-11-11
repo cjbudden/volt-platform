@@ -19,7 +19,7 @@
 //            cache key is the plain path and viewers share every segment
 //
 //  SHARED TOKENS (build queue P2-2f): claims {k:"shared", A:[32 hex ids], n, e}
-//  open /vod/<id>/ and /clips/vod/<id>/ of each title named, for any viewer
+//  open /vod/<id>/, /clips/vod/<id>/ and /clips/<id>/ of each title named, for any viewer
 //  (no country); the revocation checked is the path's title's.
 //
 //  No key in the store (only before the control plane's first sync): 503 Try
@@ -32,7 +32,7 @@ import crypto from 'crypto';
 
 const kvs = cf.kvs('${kvs_id}');
 const TOK = /^\/t\/([A-Za-z0-9_-]{8,2048})\.([0-9a-f]{32})(\/.*)$/;
-const SHARED = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+const SHARED = /^\/(?:clips\/vod|vod|clips)\/([0-9a-fA-F-]{36})\//;
 
 function refuse(code, text) {
   return {

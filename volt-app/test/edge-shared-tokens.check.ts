@@ -15,6 +15,8 @@
 //  stops after its period plus the overlap, a revoked title stops while the
 //  others in the same token play, a republished one plays again, the token
 //  cannot be widened. Then the API as its own edge under enforce, over HTTP.
+//  P2-2f-2: the tokens a FAST channel's playlists carry (who is named, the
+//  rotation) and the playout's timeline handing them out.
 //    DATABASE_URL=... npx tsx test/edge-shared-tokens.check.ts
 // ============================================================================
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -102,7 +104,8 @@ const check = (m: string, got: unknown, want: unknown) => {
   check('...upper-case id in the path', (await three(`/t/${t}/vod/${B}/a.ts`, ''))[0], 'ok');
   check('no country in a shared token: any viewer, anywhere', await three(`/t/${t}/vod/${A}/a.ts`, 'NZ'), ['ok', `/vod/${A}/a.ts`, 'ok']);
   check('a title it does not name: 403', await three(`/t/${t}/vod/${C}/master.m3u8`, 'AU'), ['path', '403', '403']);
-  check('a named title\'s clip output folder (not an encode): 403', await three(`/t/${t}/clips/${A}/hls/index.m3u8`, 'AU'), ['path', '403', '403']);
+  check('a named title\'s own clip folder (/clips/<id>/, refused plain under enforce too): plays', await three(`/t/${t}/clips/${A}/hls/index.m3u8`, 'AU'), ['ok', `/clips/${A}/hls/index.m3u8`, 'ok']);
+  check('...another title\'s clip folder: 403', await three(`/t/${t}/clips/${C}/hls/index.m3u8`, 'AU'), ['path', '403', '403']);
   check('ad creatives and other folders: 403', await three(`/t/${t}/clips/ads/x/master.m3u8`, 'AU'), ['path', '403', '403']);
   check('climbing out of a named folder: 403', await three(`/t/${t}/vod/${A}/../${C}/master.m3u8`, 'AU'), ['path', '403', '403']);
   const [body, sg] = t.split('.');
@@ -144,7 +147,7 @@ const check = (m: string, got: unknown, want: unknown) => {
   // ---------------------------------------------------------------- the API as its own edge, enforce
   process.env.VOLT_EDGE_TOKENS = 'enforce';
   const { createServer } = await import('../src/server');
-  const { pool, one } = await import('../src/db');
+  const { pool, one, query } = await import('../src/db');
   const { invalidateTag } = await import('../src/scale/cache');
   const srv = createServer().listen(0);
   const base = `http://127.0.0.1:${(srv.address() as any).port}`;
@@ -171,6 +174,35 @@ const check = (m: string, got: unknown, want: unknown) => {
       ['403 No longer available', '200 SEGMENT']);
     const again = T.sharedEdgeToken({ scope: 'fast:test', assetIds: [x, y], nowSec: now + 1, revokedAt: { [x]: now } }).token;
     check('...republished: the next shared token plays it', await get(`/t/${again}/clips/vod/${x}/720p/seg_1.m4s`), '200 SEGMENT');
+
+    // ---- P2-2f-2: the tokens a FAST channel's playlists carry
+    await T.revokeAsset(z, 'test', now - 30);
+    await query(`UPDATE vod_assets SET public_status = 'available' WHERE id = $1`, [z]);
+    const pe = await T.playlistEdgeTokens(`fast:t`, [`/clips/vod/${x}/master.m3u8`, `vod/${y}/master.m3u8`, `/clips/vod/${z}/master.m3u8`, '/origin/c/filler/prebuilt/master.m3u8', null, `/clips/ads/a/master.m3u8`]);
+    check('playlist tokens: a title withdrawn and not public again is left out; others named, by the folder in either key form',
+      Object.keys(pe!.byAsset).sort(), [y, z].sort());
+    const zt = T.verifyEdgeToken(pe!.byAsset[z], `/clips/vod/${z}/720p/seg_1.m4s`, { nowSec: now + 1, revokedAt: now - 30 });
+    check('...a republished title is named with its revocation time, so it plays at once', [zt.verdict, (zt.shared?.n ?? 0) > now - 30], ['ok', true]);
+    check('...through the API under enforce', await get(`/t/${pe!.byAsset[y]}/clips/vod/${y}/720p/seg_1.m4s`), '200 SEGMENT');
+    check('...the rotation the writer moves on at', [pe!.periodSec, pe!.overlapSec, pe!.nextAt % pe!.periodSec, pe!.nextAt > now], [10800, 3600, 0, true]);
+    check('...no titles: nothing to name', (await T.playlistEdgeTokens('fast:t', ['/origin/c/x.m3u8']))!.byAsset, {});
+    process.env.VOLT_EDGE_TOKENS = 'off';
+    check('...tokens off: none at all', await T.playlistEdgeTokens('fast:t', [`/clips/vod/${y}/master.m3u8`]), null);
+    process.env.VOLT_EDGE_TOKENS = 'enforce';
+    // the playout's timeline carries them
+    const g = (await one<any>(`INSERT INTO groups(account_id, name, max_channels) VALUES ($1,'Main',50) RETURNING id`, [acct]))!.id;
+    const ch = (await one<any>(`INSERT INTO channels(group_id, name, origin) VALUES ($1,'Shared FAST','playlist') RETURNING id`, [g]))!.id;
+    await query(`INSERT INTO channel_ads (channel_id) VALUES ($1) ON CONFLICT DO NOTHING`, [ch]);
+    for (const [i, id] of [x, y].entries()) {
+      await query(`UPDATE vod_assets SET master_key = $2, duration_ms = 600000 WHERE id = $1`, [id, `/clips/vod/${id}/master.m3u8`]);
+      await query(`INSERT INTO programmes (channel_id, title, starts_at, ends_at, metadata) VALUES ($1, $2, now() + make_interval(mins => $3), now() + make_interval(mins => $3 + 10), $4::jsonb)`,
+        [ch, `P${i}`, i * 10 - 5, JSON.stringify({ vodAssetId: id })]);
+    }
+    const { config } = await import('../src/config');
+    const tl = await (await fetch(`${base}/api/fast-playout/${ch}/timeline`, { headers: { 'X-Volt-Ingest-Token': String((config as any).ingestToken) } })).json() as any;
+    check('the playout timeline: the guide\'s titles and a token for each it may play', [tl.items?.filter((i: any) => i.kind === 'content').length >= 2, Object.keys(tl.edgeTokens?.byAsset ?? {})], [true, [y]]);
+    check('...which opens that title\'s segments under enforce', await get(`/t/${tl.edgeTokens.byAsset[y]}/clips/vod/${y}/720p/seg_1.m4s`), '200 SEGMENT');
+    check('...and is the one for the channel', T.verifyEdgeToken(tl.edgeTokens.byAsset[y], `/clips/vod/${y}/a.ts`, { nowSec: now + 1 }).shared?.g, `fast:${ch}`);
   } catch (e: any) {
     console.log('FAIL threw: ' + (e?.stack ?? e)); fail++;
   } finally {

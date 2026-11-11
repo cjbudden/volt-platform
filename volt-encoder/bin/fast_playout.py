@@ -48,6 +48,16 @@ Rules
   exactly as they air. Finding a range costs one small ranged read of the
   segment's head, once per segment (cached, and loops repeat their segments).
   The master lists them once every rung has one.
+* EDGE TOKENS (build queue P2-2f-2): where the CDN enforces play tokens, a
+  title's segments are refused by their plain address. The timeline carries
+  `edgeTokens.byAsset` (the title folder's id -> a shared token, minted by the
+  control plane so the signing key never comes into this image), and every
+  segment and init address in a title's folder is written as
+  /t/<token>/vod/<id>/... The whole window takes the token current at the
+  last timeline read: the one before stays valid for the overlap, so nothing
+  in a player's window is refused across a rotation. The token is added only
+  when the playlists are written; state and the keyframe cache keep the plain
+  addresses.
 
 The core (Playout) is pure: no IO, an injected clock. main() does the IO.
 """
@@ -170,6 +180,19 @@ def parse_mpd_timelines(text):
             else:
                 out["video"][rep["height"]] = rep
     return out
+
+
+TITLE_PATH = re.compile(r"^(https?://[^/]+)?(/(?:clips/vod|vod|clips)/([0-9a-fA-F-]{36})/.*)$")
+
+
+def edge_uri(uri, tokens):
+    """`uri` with its title's shared token in front of the path (P2-2f-2), or as
+    it is when tokens are off, the folder is not a title's, or no token names it."""
+    if not tokens or not uri:
+        return uri
+    m = TITLE_PATH.match(uri)
+    tok = m and tokens.get(m.group(3).lower())
+    return f"{m.group(1) or ''}/t/{tok}{m.group(2)}" if tok else uri
 
 
 class Track:
@@ -311,6 +334,10 @@ class Playout:
         self.anchor = st.get("anchor")    # {"key", "start"}: wall-clock start of the part on air
         self.periods = {}                 # part key -> {start, dur, asset, vidx0, p}
         self.holes = []                   # [(guide time, seconds closed up)], for the heartbeat
+        self.edge = {}                    # title folder id -> shared edge token (P2-2f-2), from the timeline
+
+    def _u(self, uri):
+        return edge_uri(uri, self.edge)
 
     def state(self):
         return {"tracks": {n: {"msn": v["msn"], "d": v["d"], "last": v["last"]} for n, v in self.t.items()},
@@ -479,7 +506,7 @@ class Playout:
             # the init segment again after every discontinuity, even when it is the same file:
             # players that reset their demuxer at a discontinuity expect one
             if s["map"] != cur_map or (k > 0 and s["disc"]):
-                L.append(f'#EXT-X-MAP:URI="{s["map"]}"')
+                L.append(f'#EXT-X-MAP:URI="{self._u(s["map"])}"')
                 cur_map = s["map"]
             for tg in s["tags"]:
                 if k == 0 and tg.startswith("#EXT-X-CUE-IN"):
@@ -487,7 +514,7 @@ class Playout:
                 L.append(tg)
             L.append(f"#EXT-X-PROGRAM-DATE-TIME:{iso(s['pdt'])}")
             L.append(f"#EXTINF:{s['dur']:.3f},")
-            L.append(s["uri"])
+            L.append(self._u(s["uri"]))
         return "\n".join(L) + "\n"
 
     def iframes(self, name, kf):
@@ -514,13 +541,13 @@ class Playout:
             if k > 0 and sg["disc"]:
                 L.append("#EXT-X-DISCONTINUITY")
             if sg["map"] != cur_map or (k > 0 and sg["disc"]):
-                L.append(f'#EXT-X-MAP:URI="{sg["map"]}"')
+                L.append(f'#EXT-X-MAP:URI="{self._u(sg["map"])}"')
                 cur_map = sg["map"]
             off, ln = kf[sg["uri"]]
             L.append(f"#EXT-X-PROGRAM-DATE-TIME:{iso(sg['pdt'])}")
             L.append(f"#EXTINF:{sg['dur']:.3f},")
             L.append(f"#EXT-X-BYTERANGE:{ln}@{off}")
-            L.append(sg["uri"])
+            L.append(self._u(sg["uri"]))
         return "\n".join(L) + "\n"
 
     # ------------------------------------------------------------------ DASH out
@@ -628,8 +655,8 @@ class Playout:
                     out.append(f'      <Representation {" ".join(attrs)}>')
                     if rep.get("channels"):
                         out.append(f'        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="{rep["channels"]}"/>')
-                    init = a.url_base + rep["init"]
-                    media = a.url_base + rep["media"]
+                    init = self._u(a.url_base + rep["init"])
+                    media = self._u(a.url_base + rep["media"])
                     out.extend(_segment_template(ts, pto, init, media, nums[0], times, "        "))
                     out.append('      </Representation>')
                     emitted[n] = (rep, ts, pto, init, nums, times)
@@ -656,7 +683,7 @@ class Playout:
                         out.append('    <AdaptationSet id="2" contentType="video" segmentAlignment="true" startWithSAP="1">')
                         out.append('      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="0"/>')
                         out.append(f'      <Representation {" ".join(attrs)}>')
-                        out.extend(_segment_template(ts, pto, init, a.url_base + a.trick["media"], nums[0], times, "        "))
+                        out.extend(_segment_template(ts, pto, init, self._u(a.url_base + a.trick["media"]), nums[0], times, "        "))
                         out.append('      </Representation>')
                         out.append('    </AdaptationSet>')
             out.append('  </Period>')
@@ -1136,6 +1163,8 @@ def main():
                     # effect when the playout restarts
                     print("[fast] the channel's ladder changed; it takes effect when the playout restarts", file=sys.stderr)
                     play_ladder = (tl.get("ladder") or {}).get("groupId")
+                # shared edge tokens (P2-2f-2): none when the control plane has tokens off
+                play.edge = {str(k).lower(): v for k, v in ((tl.get("edgeTokens") or {}).get("byAsset") or {}).items()}
                 play.schedule(expand_parts(tl["items"], assets, play.seg), assets, now)
             if api_ok and now - trig_at > 5:
                 try:

@@ -853,7 +853,20 @@ fastPlayoutRouter.get('/:id/timeline', asyncHandler(async (req, res) => {
   const from = at(req.query.from, now - 3600_000), to = at(req.query.to, now + 3600_000);
   if (to.getTime() - from.getTime() > 12 * 3600_000 || to <= from) throw badRequest('window must be positive and at most twelve hours');
   res.setHeader('Cache-Control', 'no-store');
-  res.json(await timelineFor(id, from, to));
+  const tl: any = await timelineFor(id, from, to);
+  // SHARED EDGE TOKENS (build queue P2-2f-2): the playout writes these in
+  // front of its titles' segment addresses, so the channel plays where tokens
+  // are enforced. Minted here, not in the encoder, so the signing key never
+  // goes into the encoder image or its task definition: the playout already
+  // reads this timeline every 20 s with its ingest token, which is often
+  // enough to move to each new token well inside the overlap.
+  const { playlistEdgeTokens } = await import('../services/edgeTokens');
+  const masters: (string | null)[] = [];
+  for (const it of tl.items ?? []) { masters.push(it.master ?? null); for (const f of it.fill ?? []) masters.push(f.master ?? null); }
+  for (const k of ['loop', 'slate']) if (tl[k]?.master) masters.push(tl[k].master);
+  const edge = await playlistEdgeTokens(`fast:${id}`, masters);
+  if (edge) tl.edgeTokens = edge;
+  res.json(tl);
 }));
 
 // ------------------------------------------------------------------ the session stitcher (public)
