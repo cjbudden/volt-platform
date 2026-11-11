@@ -188,6 +188,22 @@ fastRouter.put('/channels/:id/geo', asyncHandler(async (req, res) => {
   res.json({ mode: b.mode, countries: b.mode === 'worldwide' ? [] : countries });
 }));
 
+/**
+ * RIGHTS DELIVERY (services/rightsDelivery.ts): per scheduled programme, how
+ * many viewers were given it, how many got the geo replacement and how many
+ * were refused, in total and per country. `from` and `to` are UTC dates
+ * (YYYY-MM-DD), at most 31 days apart; the last 7 days by default.
+ */
+fastRouter.get('/channels/:id/rights-report', asyncHandler(async (req, res) => {
+  const ch = await ownChannel(req, String(req.params.id));
+  const day = (v: unknown, d: Date) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : d.toISOString().slice(0, 10));
+  const to = day(req.query.to, new Date());
+  const from = day(req.query.from, new Date(Date.parse(to) - 6 * 86400_000));
+  if (from > to || Date.parse(to) - Date.parse(from) > 31 * 86400_000) throw badRequest('from must be on or before to, at most 31 days apart');
+  const { deliveryReport } = await import('../services/rightsDelivery');
+  res.json(await deliveryReport(String(ch.account_id), ch.id, from, to));
+}));
+
 /** Is every asset the channel uses ready to air (packaged, splice-aligned, loudness, 1 s slate)? */
 fastRouter.get('/channels/:id/readiness', asyncHandler(async (req, res) => {
   const ch = await ownChannel(req, String(req.params.id));

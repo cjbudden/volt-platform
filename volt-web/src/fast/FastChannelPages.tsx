@@ -13,7 +13,7 @@
 //  (apps.ts fastBrandMark -> sdk BrandMark) and the console preview draws the
 //  same mark here, at the same place and size the settings frame shows.
 // ============================================================================
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api, thumbUrl, fillerUsable, type FillerAsset } from '../api'
 import { useNotify, Notice } from '../notices'
 import { useAccess } from '../access'
@@ -24,7 +24,7 @@ import { WatermarkFields, wmDefaults, wmPatch, wmProblem, type WmForm } from '..
 import { GraphicsSettings, type GraphicsValue } from '../GraphicsSettings'
 import { gfx, type Assignment } from '../graphics/gfxApi'
 import { openLiveControl } from '../graphics/Graphics'
-import { fastApi, type FastChannelSettings, type RundownRow, type ChannelAds, type FastRights } from './fastApi'
+import { fastApi, type FastChannelSettings, type RundownRow, type ChannelAds, type FastRights, type RightsReport, type DeliveryCount } from './fastApi'
 import { signImage } from '../imageSigning'
 import { SourceFacts } from '../pages/vod/SourceFacts'
 import type { BrandMark } from '@volt/player'
@@ -306,6 +306,7 @@ export function FastGeoReplacementCard({ channelId, fillers }: { channelId: stri
   const when = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
   const value = r.geoReplacement?.fillerId ?? ''
   return (
+    <>
     <div className="card">
       <div className="card-h"><h3>Geo replacement</h3><span className="sub">what viewers outside a title's rights see</span></div>
       <div className="card-b">
@@ -334,6 +335,91 @@ export function FastGeoReplacementCard({ channelId, fillers }: { channelId: stri
               </div>
             </>
           )}
+      </div>
+    </div>
+    <FastRightsReportCard channelId={channelId} />
+    </>
+  )
+}
+
+// ============================================================================
+//  RIGHTS DELIVERY (services/rightsDelivery.ts): per scheduled programme, the
+//  viewers given it, given the geo replacement, or refused, and where they
+//  were. Counted as viewers play; written once a minute.
+// ============================================================================
+const RANGES = [{ id: 'today', label: 'Today', days: 0 }, { id: '7', label: 'Last 7 days', days: 6 }, { id: '31', label: 'Last 31 days', days: 30 }] as const
+const n0 = (n: number) => n.toLocaleString()
+
+function Count({ c, tone }: { c: DeliveryCount; tone?: string }) {
+  return <span className="mono" title={`${n0(c.requests)} playlist requests`} style={{ color: c.viewers ? tone : 'var(--faint)' }}>{n0(c.viewers)}</span>
+}
+
+export function FastRightsReportCard({ channelId }: { channelId: string }) {
+  const [range, setRange] = useState<typeof RANGES[number]['id']>('7')
+  const [rep, setRep] = useState<RightsReport | null>(null)
+  const [err, setErr] = useState('')
+  const [open, setOpen] = useState<string | null>(null)
+  useEffect(() => {
+    const days = RANGES.find((x) => x.id === range)!.days
+    const to = new Date().toISOString().slice(0, 10)
+    const from = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10)
+    setErr('')
+    fastApi.rightsReport(channelId, from, to).then(setRep).catch((e: any) => setErr(e.message))
+  }, [channelId, range])
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Outside the guide')
+  const t = rep?.totals
+  return (
+    <div className="card" style={{ gridColumn: '1 / -1' }}>
+      <div className="card-h"><h3>Rights delivery</h3><span className="sub">per scheduled programme: viewers who saw it, saw the geo replacement, or were refused</span><span className="spacer" />
+        <select className="inp sel-sm" style={{ width: 150 }} value={range} onChange={(e) => setRange(e.target.value as any)} aria-label="Period">
+          {RANGES.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+        </select></div>
+      <div className="card-b">
+        {err && <Notice kind="error" variant="compact" message={err} />}
+        {!rep && !err && <div className="loading">Loading…</div>}
+        {rep && t && (
+          <>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 12 }}>
+              {([['Viewers', t.viewers, undefined], ['Saw the programme', t.viewed.viewers, 'var(--ok, #4ade80)'], ['Saw the replacement', t.replaced.viewers, 'var(--warn, #fbbf24)'], ['Refused', t.blocked.viewers, 'var(--down, #f87171)']] as const).map(([l, v, c]) => (
+                <div key={l}><div className="sec-label" style={{ margin: 0 }}>{l}</div><div className="mono" style={{ fontSize: 22, fontWeight: 600, color: c }}>{n0(v)}</div></div>
+              ))}
+            </div>
+            {rep.programmes.length === 0
+              ? <div className="hintxt">Nothing counted in this period yet. Counts appear about a minute after viewers play the channel.</div>
+              : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table>
+                    <thead><tr><th>Scheduled</th><th>Programme</th><th style={{ textAlign: 'right' }}>Saw it</th><th style={{ textAlign: 'right' }}>Replacement</th><th style={{ textAlign: 'right' }}>Refused</th><th style={{ textAlign: 'right' }}>Countries</th></tr></thead>
+                    <tbody>
+                      {rep.programmes.map((p) => (
+                        <Fragment key={p.programmeId || 'none'}>
+                          <tr onClick={() => setOpen(open === p.programmeId ? null : p.programmeId)} style={{ cursor: 'pointer' }} aria-expanded={open === p.programmeId}>
+                            <td className="mono" style={{ whiteSpace: 'nowrap', color: 'var(--muted)' }}>{when(p.startsAt)}{p.endsAt ? ` to ${new Date(p.endsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</td>
+                            <td style={{ fontWeight: 600 }}>{p.title ?? 'Untitled'}</td>
+                            <td style={{ textAlign: 'right' }}><Count c={p.totals.viewed} /></td>
+                            <td style={{ textAlign: 'right' }}><Count c={p.totals.replaced} tone="var(--warn, #fbbf24)" /></td>
+                            <td style={{ textAlign: 'right' }}><Count c={p.totals.blocked} tone="var(--down, #f87171)" /></td>
+                            <td style={{ textAlign: 'right', color: 'var(--muted)' }}>{p.countries.length} {open === p.programmeId ? '▴' : '▾'}</td>
+                          </tr>
+                          {open === p.programmeId && p.countries.map((c) => (
+                            <tr key={`${p.programmeId}-${c.country}`} style={{ background: 'var(--panel-2)' }}>
+                              <td />
+                              <td style={{ color: 'var(--muted)', paddingLeft: 18 }}>{c.country || 'Unknown country'}</td>
+                              <td style={{ textAlign: 'right' }}><Count c={c.viewed} /></td>
+                              <td style={{ textAlign: 'right' }}><Count c={c.replaced} tone="var(--warn, #fbbf24)" /></td>
+                              <td style={{ textAlign: 'right' }}><Count c={c.blocked} tone="var(--down, #f87171)" /></td>
+                              <td />
+                            </tr>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            <div className="hintxt" style={{ marginTop: 8 }}>Viewers are distinct players (estimated to within about 3 %); hover a number for the playlist requests behind it. A viewer who stays through several programmes counts in each.</div>
+          </>
+        )}
       </div>
     </div>
   )

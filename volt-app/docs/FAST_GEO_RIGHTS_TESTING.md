@@ -24,8 +24,9 @@ Written 11 Nov 2026 against commit a01dfb7a (FAST geo rights) and later. For the
    - When the programme ends, the playlist is the channel's own again. The player never changes URL.
 6. **In production** the same decision runs in the CloudFront Function from the key-value store the control plane keeps in sync. A replaced viewer's `/channel/<id>/fast/<file>` request is rewritten to `/channel/<id>/v/<key>/fast/<file>`, which the variants origin answers with the same service.
 
+DASH viewers get the same replacement: the restricted programme's Periods are cut at the window and the replacement's passes are added as Periods of their own.
+
 Not covered yet:
-- **DASH** viewers in a window are refused rather than replaced.
 - **Stitched-ads** viewers get the channel's own playlists, without their personalised ads, while replaced.
 
 ## 2. Mac or full deployment?
@@ -61,11 +62,23 @@ Measured against the code as it is now:
 | Cloud: CDN real-time logs | Every playlist and segment request, with the viewer's country and the path. Variant paths keep `/v/<key>/`, and replacement segments carry the replacement asset's path |
 | Rights demand report (P2-3) | Play-gate and edge-token refusals per title and country. It does **not** count FAST programme replacements |
 
-**The gap.** Nothing yet counts **"replacement delivered"**: how many viewers, from which countries, saw the replacement instead of which programme, and for how long. The facts are there:
+**Rights delivery** (added 12 Nov, see section 3a) now counts this. Before it, nothing counted **"replacement delivered"**: how many viewers, from which countries, saw the replacement instead of which programme, and for how long. The facts are there:
 - on the Mac, every variant playlist served;
 - in the cloud, the CDN log lines with `/v/<key>/` or the replacement asset's segments.
 
 They are not added up into a report. See section 6.
+
+## 3a. The rights delivery report
+
+Build > Brand & filler > **Rights delivery**, or `GET /api/fast/channels/<id>/rights-report?from=&to=`: per scheduled programme and country, the viewers who **saw it**, saw the **replacement**, or were **refused**, with the playlist requests behind each.
+
+How it is counted, and why it does not load the database:
+- **Without a CDN (the Mac):** every viewer of a FAST channel with rights is kept on the variant service, so each playlist reload is counted where it is answered. Allowed viewers are sent to `/live/<id>/v/v00000000/…`: the same playlists with no window.
+- **Behind the CDN:** the CDN's real-time log lines are counted: the channel's own playlists as viewed, `/v/<key>/` paths as replaced, the edge's 451s as refused. The origin counts nothing, so no viewer is counted twice.
+- **On the request path:** an in-memory counter only, per channel, 15 second bucket, country and outcome. Viewers are kept as they are while few, then as a 4 KB HyperLogLog.
+- **Once a minute:** each task resolves its buckets to the guide's programmes (one indexed read per channel) and **inserts** minute rows into the analytics database. Inserts only, so tasks never wait on each other.
+- **Every 5 minutes:** one task (the others skip) folds the minute rows into one row per programme, country and outcome, merging the viewers in memory, in one short transaction.
+- **Measured** on a scratch Postgres 16, for 2000 rows: the minute insert takes about 45 ms and the roll-up about 60 ms. Merging the registers in SQL instead took about 10 s, so it is not done there.
 
 ## 4. Test setup on the Mac
 
@@ -180,9 +193,9 @@ Each case says the request, what should come back, and what is checked. Times ar
 - **Do:** with a GB player on T1's replacement, add GB to T1's profile territories.
 - **Expect:** within about 15 s plus a playlist reload, the GB player gets the film.
 
-**15. DASH (known gap)**
-- **Do:** `hdr "$B/live/$CH/manifest.mpd?as=GB&at=<T1_START+5 min>"` and follow it.
-- **Expect today:** the variant manifest is refused (503), never the programme. To be built: DASH Periods.
+**15. DASH**
+- **Do:** `hdr "$B/live/$CH/manifest.mpd?as=GB"` while T1 is on air, follow it, and play it in a DASH player (for example the dash.js reference player, pointed at `http://localhost:5173/live/$CH/manifest.mpd?as=GB`).
+- **Expect:** `X-Volt-Rights: replace:v…`. In the MPD, T1's Period is gone, and Periods whose ids start with the variant key play the replacement (`initialization` under the replacement's folder), one per pass. T3's Period follows unchanged. The player loops the replacement, then moves on to T3.
 
 **16. Stitched ads (known limit)**
 - **Do:** set Ads to stitched, then run case 3.
@@ -192,14 +205,28 @@ Each case says the request, what should come back, and what is checked. Times ar
 - **Do:** open the replacement item in Loops & Fillers.
 - **Expect:** Used by: Geo Test, FAST channel, "Geo replacement", Ready.
 
+**17a. Rights delivery**
+- **Do:**
+  1. Play `/live/$CH/master.m3u8?as=AU` in one browser and `?as=GB` in another (different browsers count as different viewers) through T1 and into T3.
+  2. Wait a minute.
+  3. Open Build > Brand & filler > Rights delivery, Today.
+- **Expect:**
+  - T1: Saw it 1 (AU), Replacement 1 (GB).
+  - T3: Saw it 2 (AU, GB).
+  - Totals: 2 viewers.
+  - Run case 10 (no replacement) with a GB player: Refused 1 for that programme.
+- **Check:** `curl -sI` with `x-viewer-country: GB` against a channel limited to AU, NZ (case 11) adds to Refused.
+
 **18. Automated checks**
 - **Do:**
   ```
   cd volt-app
   npx tsx test/fast-geo-rights.check.ts
+  npx tsx test/fast-geo-dash.check.ts
+  npx tsx test/rights-delivery.check.ts
   npx tsx test/edge-variant-manifests.check.ts
   ```
-- **Expect:** 19 passed, then 43 passed, 0 failed.
+- **Expect:** 19, 9, 24 and 43 passed, 0 failed.
 
 ## 6. In the cloud (after the Mac pass)
 
@@ -211,11 +238,11 @@ Each case says the request, what should come back, and what is checked. Times ar
 
 ## 7. Gaps found while writing this, and suggested next steps
 
-1. **A "replacement delivered" report.**
+1. **A "replacement delivered" report.** Built 12 Nov (section 3a).
    - Count each variant playlist served, by stream, programme, country and variant, in memory, flushed once a minute to a daily rollup. This is the same pattern as the rights demand report.
    - In the cloud, count the CDN log lines carrying `/v/<key>/`.
    - Show it on the FAST channel and in Analytics as viewers and minutes replaced per programme and country.
 2. **The rights preview on the FAST page.** The API works for FAST channels, but the preview panel is only on live channel and event pages.
 3. **Multiview's "Viewer location" for FAST.** It plays FAST channels as they are today.
 4. **The rights preview's "not ready" hint for FAST.** It points at the live fallback loop, not the geo replacement.
-5. **DASH replacement for FAST**: the programme's Periods swapped for the replacement's.
+5. **DASH replacement for FAST**: done. The existing DASH variant renderer handles the FAST MPD (checked by test/fast-geo-dash.check.ts).

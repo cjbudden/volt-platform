@@ -259,10 +259,29 @@ With **None** chosen, viewers outside a title's rights are refused for that prog
 
 **Good to know**
 
-- The replacement is shown in the channel's own playlists (HLS). DASH viewers outside a title's rights are refused for that programme.
+- The replacement works for HLS and DASH viewers alike. In DASH the restricted programme is replaced by Periods of the replacement, one per time it loops.
 - Viewers with stitched ads get the channel's playlists, without their own ads, while a programme is replaced for them.
 - A rights or guide change reaches viewers within about 15 seconds.
 - On Loops & Fillers, the item shows the channel under **Used by** with the role **Geo replacement**.
+
+### See who saw what (Build > Brand & filler > Rights delivery)
+
+**Rights delivery** lists every scheduled programme of the period you choose (**Today**, **Last 7 days**, **Last 31 days**) with three counts of viewers:
+
+| Column | Counts the viewers who |
+|---|---|
+| **Saw it** | were given the programme |
+| **Replacement** | were outside the title's rights and were given the geo replacement |
+| **Refused** | were refused: outside **Where it can be watched**, or outside a title's rights with no geo replacement chosen |
+
+Choose a programme to see the same counts per country. The totals above the table count each viewer once over the whole period. Hover a number to see the playlist requests behind it.
+
+**Example.** The film cleared for Australia and New Zealand, 20:00 to 21:40: Saw it 1,240 (AU 1,100, NZ 140), Replacement 310 (GB 210, US 100), Refused 0. The open programme after it: Saw it 1,520, including the GB and US viewers who stayed on.
+
+Good to know:
+- Viewers are counted while they play, by the player's session (or its address and app, never stored), and appear about a minute later. A viewer who stays for several programmes counts in each.
+- Large numbers are estimates, within about 2 %.
+- Behind the CDN the counts come from the CDN's logs, which may be sampled: requests are scaled back up, viewers are those in the sample.
 
 ## How it connects
 
@@ -326,6 +345,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PUT /api/fast/channels/{id}/filler` | Sets the slate, brand loop and geo replacement from Loops & Fillers (`slateFillerId`, `loopFillerId`, `geoFillerId`), and `breaksUseLoop` |
 | `GET /api/fast/channels/{id}/rights` | The geo replacement, where the channel can be watched, and the restricted programmes of the next two days |
 | `PUT /api/fast/channels/{id}/geo` | Where the channel can be watched: `{ "mode": "allow", "countries": ["AU", "NZ"] }` |
+| `GET /api/fast/channels/{id}/rights-report?from=YYYY-MM-DD&to=YYYY-MM-DD` | Rights delivery: per scheduled programme and country, the viewers who saw it, saw the geo replacement, or were refused (at most 31 days) |
 | `GET /api/fast/channels/{id}/readiness` | Whether each title, spot, ident, loop and slate is ready to air |
 | `POST /api/fast/channels/{id}/prepare` | Packages what is not ready |
 | `GET /api/fast/channels/{id}/rundown` | What goes to air next, as the playout plays it |

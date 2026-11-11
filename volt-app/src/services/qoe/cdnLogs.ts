@@ -50,6 +50,7 @@ import { deviceClass } from './ua';
 import * as sk from './sketch';
 import { edgeDemandOf, recordDemand } from '../availabilityDemand';
 import { verifyEdgeToken } from '../edgeTokens';
+import { recordEdgeLine } from '../rightsDelivery';
 
 /**
  * The fields asked of CloudFront, in the order AWS documents them for
@@ -391,6 +392,10 @@ export async function handleCdnLines(lines: string[], rate: number, deps: CdnDep
     for (const x of items) {
       const d = x.l.status === 403 ? edgeDemandOf(x.l, (t, uri, cc, nowSec) => verifyEdgeToken(t, uri, { country: cc, nowSec })) : null;
       if (d) recordDemand({ accountId: acct, assetId: d.assetId, assetKind: 'vod', country: x.l.country, reason: d.reason, source: 'edge', at: x.l.at, viewer: d.sid ? `sid:${d.sid}` : x.skey, weight: w });
+      // A FAST channel's playlists: viewed, replaced (a variant path) or refused
+      // (451), per programme and country (services/rightsDelivery.ts, which
+      // keeps only FAST channels when it writes).
+      if (x.l.path.startsWith('/channel/')) recordEdgeLine(x.l, x.sid ? `sid:${x.sid}` : x.skey, w);
     }
     kept += items.length;
   }

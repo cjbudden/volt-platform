@@ -117,6 +117,8 @@ export async function rightsViewer(req: any, id: string): Promise<{
 
 export async function publicRightsDecision(req: any, id: string): Promise<{
   restricted: boolean; decision: string; variant: string | null; cc: string; rc: string; perViewer: boolean; carry: string;
+  /** the time decided at (the development `&at=` stand-in, else now), ms */
+  atMs: number;
 }> {
   const er = await import('../services/edgeRights');
   const { cc, rc, nowSec, atSet, perViewer, carry } = await rightsViewer(req, id);
@@ -135,7 +137,7 @@ export async function publicRightsDecision(req: any, id: string): Promise<{
     decision: er.edgeDecision(rules, cc, rc, nowSec),
     // the variant the audience maps to, even before the variant service runs
     variant: d === 'replace' ? er.variantFor(rules?.vm, cc, rc) : null,
-    cc, rc, perViewer, carry,
+    cc, rc, perViewer, carry, atMs: nowSec * 1000,
   };
 }
 
@@ -309,7 +311,10 @@ publicLiveRouter.get(
     // everything else keeps its single shared edge entry.
     const gate = await publicGeoGate(id, viewerGeo(req));
     if (gate.varies) res.setHeader('Vary', 'CloudFront-Viewer-Country');
-    if (gate.blocked) { noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return; }
+    if (gate.blocked) {
+      await countDelivery(req, id, 'blocked', viewerGeo(req) ?? null);
+      noStore(res); res.status(451).json({ available: false, reason: 'geo', message: gate.blocked }); return;
+    }
     // THE PROGRAMME RIGHTS (blackout and replace windows from the guide), the
     // same decision the edge makes. A stream with rules varies by country; a
     // tester's pretend country or a signed class is one viewer's answer.
@@ -331,10 +336,21 @@ publicLiveRouter.get(
         }
         // Blocked, or replaced while no variant service runs yet: never
         // serve what the rights say this viewer may not see.
+        await countDelivery(req, id, 'blocked', rd.cc, rd.atMs);
         res.status(451).json({
           available: false, reason: 'rights', decision: rd.variant ? 'replace' : 'block', variant: rd.variant,
           message: rd.variant ? 'This programme is replaced where you are' : 'This programme is not available where you are',
         });
+        return;
+      }
+      // A FAST CHANNEL WITH RIGHTS, SERVED WITHOUT A CDN (the Mac): the allowed
+      // viewer goes through the variant service too, with no window of their
+      // own, so every reload is decided again (a title restricted where they
+      // are starts while they watch) and counted (services/rightsDelivery.ts).
+      // Behind the CDN the edge decides each request itself.
+      if (rd.restricted && await vmIsFast(id) && await (await import('../services/rightsDelivery')).originCounts()) {
+        noStore(res);
+        res.redirect(302, `/live/${id}/v/v00000000/${file}${rd.carry}`);
         return;
       }
     }
@@ -475,7 +491,10 @@ async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | 
   const st = await er.loadEdgeState(kind, id, v.nowSec);
   const decision = er.decideFor(st.rules, v.cc, v.rc, v.nowSec);
   res.setHeader('X-Volt-Rights', decision);
+  // counted only on the public route without a CDN (never the operator's preview)
+  const counting = !preview && kindHint === null && kind === 'channel' && !/^master\.m3u8$/.test(file) && await vm.isFastChannel(id);
   if (decision === 'block') {
+    if (counting) await countDelivery(req, id, 'blocked', v.cc || null, v.nowSec * 1000);
     noStore(res);
     res.status(451).json({ available: false, reason: 'rights', decision: 'block', message: 'This programme is not available where you are' });
     return;
@@ -496,6 +515,10 @@ async function serveVariant(req: any, res: any, kindHint: 'channel' | 'event' | 
       shiftSec: v.atSet ? v.nowSec - Math.floor(Date.now() / 1000) : 0, carry: v.carry,
     });
     if (!out) { noStore(res); res.status(404).json({ available: false, reason: 'not_found' }); return; }
+    if (counting) {
+      const replacing = (variant?.timeline ?? []).some(([f, t]) => v.nowSec >= f && v.nowSec < t);
+      await countDelivery(req, id, replacing ? 'replaced' : 'viewed', v.cc || null, v.nowSec * 1000);
+    }
     // one answer per variant: the edge may share it for about a segment;
     // a tester's stand-ins are one viewer's answer
     if (preview || (v.perViewer && config.env !== 'production')) noStore(res);
@@ -546,3 +569,20 @@ publicLiveRouter.get('/origin/:id/v/:key/:file', asyncHandler(async (req, res) =
   if (!claims) { noStore(res); res.setHeader('Access-Control-Allow-Origin', '*'); res.status(401).json({ available: false, reason: 'preview_token' }); return; }
   await serveVariant(req, res, null, id, key, file, { claims, token: pt! });
 }));
+
+
+// ---------------------------------------------------------------------------
+//  RIGHTS DELIVERY COUNTS (services/rightsDelivery.ts): FAST channels only,
+//  and only where this box is the one viewers reach (no CDN in front).
+// ---------------------------------------------------------------------------
+async function vmIsFast(id: string): Promise<boolean> {
+  return (await import('../services/variantManifest')).isFastChannel(id);
+}
+async function countDelivery(req: any, id: string, outcome: 'viewed' | 'replaced' | 'blocked', country: string | null, at?: number): Promise<void> {
+  try {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+    const rdl = await import('../services/rightsDelivery');
+    if (!(await rdl.originCounts()) || !(await vmIsFast(id))) return;
+    rdl.recordDelivery({ channelId: id, outcome, country, viewer: rdl.viewerOf(req), at });
+  } catch { /* counting never fails a viewer */ }
+}

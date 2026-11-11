@@ -154,6 +154,8 @@ async function shutdown(signal: string) {
   if (leadership) await leadership.stop();
   if (worker) await worker.stop();   // let in-flight jobs unwind; the reaper covers the rest
   await stopScale();
+  // the rights delivery counts held in memory (services/rightsDelivery.ts)
+  await (await import('./services/rightsDelivery')).flushDelivery().catch(() => {});
   stopAllRadio();   // detached ffmpeg trees would otherwise outlive the control plane
   // On-demand MP3 transcodes are our children too, and a listener holding an
   // open socket would keep the server from closing. Ending them lets the

@@ -120,6 +120,18 @@ export interface FastRights {
   channelGeo: { mode: 'worldwide' | 'allow' | 'block'; countries: string[] }
 }
 
+/** GET /fast/channels/:id/rights-report: per scheduled programme, viewers given it, given the geo replacement, or refused. */
+export interface DeliveryCount { viewers: number; requests: number }
+export interface RightsReport {
+  channelId: string; from: string; to: string
+  totals: { viewed: DeliveryCount; replaced: DeliveryCount; blocked: DeliveryCount; viewers: number }
+  programmes: {
+    programmeId: string; title: string | null; startsAt: string | null; endsAt: string | null
+    totals: { viewed: DeliveryCount; replaced: DeliveryCount; blocked: DeliveryCount; viewers: number }
+    countries: { country: string; viewed: DeliveryCount; replaced: DeliveryCount; blocked: DeliveryCount }[]
+  }[]
+}
+
 const J = (b: unknown) => ({ body: JSON.stringify(b) })
 
 export const fastApi = {
@@ -152,6 +164,7 @@ export const fastApi = {
   saveFiller: (channelId: string, b: { slateFillerId?: string | null; loopFillerId?: string | null; geoFillerId?: string | null; breaksUseLoop?: boolean }): Promise<ChannelAds & { prepared?: { queued: string[] } | null }> => apiReq(`/fast/channels/${channelId}/filler`, { method: 'PUT', ...J(b) }),
   /** Rights on air: the geo replacement and the restricted programmes of the next two days (services/fast/rights.ts). */
   rights: (channelId: string): Promise<FastRights> => apiReq(`/fast/channels/${channelId}/rights`),
+  rightsReport: (channelId: string, from?: string, to?: string): Promise<RightsReport> => apiReq(`/fast/channels/${channelId}/rights-report${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) })}` : ''}`),
   /** Where the channel can be watched at all: worldwide, only the listed countries, or not in them. */
   saveGeo: (channelId: string, b: { mode: 'worldwide' | 'allow' | 'block'; countries: string[] }): Promise<{ mode: string; countries: string[] }> => apiReq(`/fast/channels/${channelId}/geo`, { method: 'PUT', ...J(b) }),
   /** Start, restart or stop the channel's playout by hand. */
