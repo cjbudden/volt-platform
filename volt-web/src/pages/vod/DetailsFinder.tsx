@@ -7,8 +7,11 @@
 // Paste a link (build queue F2): one page a person names is read for its
 // schema.org data and Open Graph tags and shown first among the results, to
 // review and tick the same way.
-import { useMemo, useState } from 'react'
+// Search the web (build queue F3): opens a web search for the term in a new
+// tab; the person pastes a result's link into the field below (webSearch.ts).
+import { useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../api'
+import { webSearchUrl } from './webSearch'
 
 const J = (b: unknown): RequestInit => ({ body: JSON.stringify(b), headers: { 'content-type': 'application/json' } })
 const show = (v: unknown) => Array.isArray(v) ? v.join(', ') : v == null || v === '' ? '' : String(v)
@@ -37,6 +40,18 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
   const [pick, setPick] = useState<string | null>(null)
   const [found, setFound] = useState<Record<string, any>>({})
   const [ticks, setTicks] = useState<Record<string, boolean>>({})
+  // The term a web search was opened for, to say where to paste the result.
+  const [searched, setSearched] = useState<string | null>(null)
+  const linkRef = useRef<HTMLInputElement>(null)
+
+  // A plain new tab in the person's browser: Volt sends the term nowhere itself.
+  const searchWeb = () => {
+    const to = webSearchUrl(q)
+    if (!to) return
+    window.open(to, '_blank', 'noopener,noreferrer')
+    setSearched(q.trim())
+    linkRef.current?.focus()
+  }
 
   const find = async () => {
     setBusy('find'); setErr(''); setPick(null); setFound({}); setTicks({})
@@ -106,16 +121,20 @@ export function DetailsFinder({ id, term, typeName, onClose, onApplied }: {
     <div className="songf" role="region" aria-label="Find details">
       <div className="songf-h">
         <div className="songf-t">Find details</div>
-        <div className="lib-faint">Searches Wikidata (free, open data), or reads a page you paste, and matches what it finds to the {typeName} fields. Nothing changes until you apply it.</div>
+        <div className="lib-faint">Searches Wikidata (free, open data), or reads a page you paste (Search the web helps you find one), and matches what it finds to the {typeName} fields. Nothing changes until you apply it.</div>
       </div>
       <form className="songf-q" onSubmit={(e) => { e.preventDefault(); find() }}>
         <label className="wide"><span>Search for</span>
           <input className="inp" value={q} placeholder="The title" onChange={(e) => setQ(e.target.value)} /></label>
-        <button className="btn primary sm" disabled={!!busy || !q.trim()}><SearchIcon /> {busy === 'find' ? 'Searching…' : 'Search'}</button>
+        <div className="songf-btns">
+          <button className="btn primary sm" disabled={!!busy || !q.trim()}><SearchIcon /> {busy === 'find' ? 'Searching…' : 'Search'}</button>
+          <button type="button" className="btn sm" disabled={!webSearchUrl(q)} onClick={searchWeb} title="Opens a web search for this in a new tab"><ExtIcon /> Search the web</button>
+        </div>
       </form>
       <form className="songf-q songf-link" onSubmit={(e) => { e.preventDefault(); read() }}>
         <label className="wide"><span>Or paste a link to a page about it <em>(its own page on a studio, broadcaster, news or podcast site)</em></span>
-          <input className="inp" type="url" inputMode="url" value={url} placeholder="https://" onChange={(e) => setUrl(e.target.value)} /></label>
+          <input ref={linkRef} className="inp" type="url" inputMode="url" value={url} placeholder="https://" onChange={(e) => setUrl(e.target.value)} /></label>
+        {searched && <div className="lib-faint wide songf-websearch" role="status">A web search for “{searched}” opened in a new tab. Open the result that is this title’s own page, copy its address and paste it here.</div>}
         <button className="btn sm" disabled={!!busy || !url.trim()}><LinkIcon /> {busy === 'page' ? 'Reading…' : 'Read page'}</button>
       </form>
       {err && <div className="asset-img-err">{err}</div>}
