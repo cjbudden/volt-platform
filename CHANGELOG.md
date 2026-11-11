@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.99.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Mirror and Archive: Copy rules can now mirror a storage target: when an item is deleted from Volt and leaves the restore bin, its copies at that target are deleted too, after a waiting period you set per target (7 days by default, 0 to 90). Volt never deletes a file someone changed at your site, recordings are always kept, a restore cancels anything waiting, and every delete is in the audit trail.
+- added · Mirror and Archive: The Storage page shows each target's mirror waiting period and the deletes waiting there, and each copy says when it will be deleted or that it was removed. Publishing Rules has a Keep choice per target: Archive or Mirror.
+
+### Internal
+
+- added · Mirror and Archive: Site agent 0.13.0 runs archive.delete jobs (read back, then delete only what still matches). New suite mirror-archive-mirror; the Mirror and Archive console walk covers mirror mode.
+
 ## 0.98.0 (2026-11-11)
 
 ### Product (in customer release notes)
