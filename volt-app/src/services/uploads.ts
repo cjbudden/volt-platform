@@ -157,6 +157,18 @@ export async function openSession(req: OpenRequest): Promise<{ session: UploadSe
     );
   }
 
+  // A caption or a metadata sidecar is not a programme: it belongs to a video
+  // (services/ingest/companionMatch.ts). Taken as one it became a "video"
+  // queued to encode, so it is refused here for every path (panel, phone, API).
+  if ((req.purpose ?? 'filler') === 'vod') {
+    const { companionType } = await import('./ingest/companionMatch');
+    const ct = companionType(req.filename ?? '');
+    if (ct) {
+      throw Object.assign(new Error(`${req.filename} is a ${ct === 'caption' ? 'subtitle' : 'metadata'} file, not a video. ` +
+        `Attach it to its video (POST /api/vod/{id}/files), or drop it with the video in the Media Library and it is attached by name.`), { status: 400 });
+    }
+  }
+
   const chunkCount = Math.ceil(req.totalBytes / CHUNK_SIZE);
 
   // The asset row exists from the START of the upload, in 'uploading'. It is

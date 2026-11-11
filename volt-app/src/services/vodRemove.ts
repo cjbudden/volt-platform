@@ -12,22 +12,30 @@ import { existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { config } from '../config';
 import { one, query } from '../db';
-import { BinItem, snapshotDelete } from './media/trash';
+import { BinItem, snapshotDelete, LIBRARY_TRASH_DAYS } from './media/trash';
 
 const inside = (p: string, dir: string) => { const r = resolve(p); const d = resolve(dir); return r.startsWith(d + sep); };
 
-export async function removeVodAsset(assetId: string, opts: { keepPath?: string | null; reason?: string; by?: string | null } = {}): Promise<string | null> {
+export async function removeVodAsset(assetId: string, opts: { keepPath?: string | null; reason?: string; by?: string | null; days?: number } = {}): Promise<string | null> {
   const a = await one<any>(
     `SELECT v.id, v.title, v.source_key, v.encode_job_id, COALESCE(gc.account_id, ge.account_id, v.account_id) AS account_id
        FROM vod_assets v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN groups gc ON gc.id = c.group_id
        LEFT JOIN events e ON e.id = v.event_id LEFT JOIN groups ge ON ge.id = e.group_id WHERE v.id = $1`, [assetId]);
   if (!a) return null;
   const bin = await BinItem.open({ accountId: a.account_id, kind: 'vod_asset', subjectId: a.id, label: a.title ?? 'Untitled asset',
-    reason: opts.reason ?? 'deleted from the Media Library', createdBy: opts.by ?? null });
+    reason: opts.reason ?? 'deleted from the Media Library', createdBy: opts.by ?? null, days: opts.days ?? LIBRARY_TRASH_DAYS });
   await snapshotDelete(bin, 'vod_assets', [a.id]);
   if (a.encode_job_id) {
     await query(`UPDATE jobs SET state = 'cancelled', finished_at = now(), lease_until = NULL WHERE id = $1 AND state = 'queued'`, [a.encode_job_id]).catch(() => {});
   }
+  // THE PACKAGED MEDIA: HLS and DASH, every FAST ladder variant (ladders/...), reframes and
+  // trick play all live under clips/vod/<id>. In production (VOD_STORE=s3) the same tree is
+  // in the origin bucket under vod/<id>/ and is what the CDN serves: it goes into the bin too,
+  // or it stayed playable at its old address after the delete and was never cleaned up.
+  // The bucket first: if it cannot be reached the delete fails here, before anything on
+  // this disk has moved, and the asset is still whole.
+  const { vodStore } = await import('./fast/vodStore');
+  if (vodStore() === 's3') await bin.objects(`vod/${a.id}/`);
   bin.file(join(config.clips.dir, 'vod', a.id), 'output');
   const src = a.source_key as string | null;
   if (src && !/^[a-z0-9]+:\/\//i.test(src) && src !== opts.keepPath && inside(src, join(config.clips.dir, 'vod-src')) && existsSync(src)) {

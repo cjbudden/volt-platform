@@ -35,7 +35,7 @@ import { one, query } from '../../db';
 import { imageStore } from '../imageStore';
 import { upsertMediaRow } from '../mediaLibrary';
 import { feedIconsFor, pickGuideIcon } from '../guideIcon';
-import { frameStats, scoreFrame, pickFrame, clock, type Candidate } from './frameScore';
+import { frameStats, scoreFrame, pickFrame, preferFaces, keepBestSpread, clock, type Candidate } from './frameScore';
 import { songIdentity, songMatch, fetchCoverFor, fillsFor, type MusicMatch } from './musicLookup';
 import { getSongDetails, detailsToMatch } from './songDetails';
 import { saveToLibrary, importImageUrl, LIBRARY_REF } from './libraryImages';
@@ -194,18 +194,25 @@ export function stationFills(a: any): Record<string, any> {
 }
 
 /** Score candidate frames (reading each from the store) and return them ranked. */
-export async function scoreCandidates(cands: Candidate[], durationMs?: number | null): Promise<Candidate[]> {
+export async function scoreCandidates(cands: Candidate[], durationMs?: number | null, bufsIn?: (Buffer | null)[]): Promise<Candidate[]> {
+  const bufs: (Buffer | null)[] = [];
+  for (const [i, c] of cands.entries()) bufs.push(bufsIn?.[i] ?? await imageStore().get(c.key).catch(() => null));
+  // Faces for the whole batch in one run (frameFaces.ts); null when no detector here.
+  const present = bufs.map((b, i) => (b ? i : -1)).filter((i) => i >= 0);
+  const found = present.length ? await (await import('./frameFaces')).detectFaces(present.map((i) => bufs[i]!)) : null;
+  const facesAt = new Map<number, any>(); if (found) present.forEach((i, k) => facesAt.set(i, found[k]));
   const out: Candidate[] = [];
-  for (const c of cands) {
+  for (const [i, c] of cands.entries()) {
     try {
-      const buf = await imageStore().get(c.key);
+      const buf = bufs[i];
       if (!buf) { out.push({ ...c, score: 0, rejected: 'missing' }); continue; }
-      const st = await frameStats(buf);
+      const st = { ...(await frameStats(buf)), faces: found ? facesAt.get(i) ?? null : undefined };
       const sc = scoreFrame(st, c.atMs != null && durationMs ? c.atMs / durationMs : null);
-      out.push({ ...c, score: sc.score, notes: sc.notes, ...(sc.rejected ? { rejected: sc.rejected } : {}) });
+      const { rejected: _r, notes: _n, score: _s, ...rest } = c;
+      out.push({ ...rest, score: sc.score, notes: sc.notes, ...(found ? { faces: st.faces ?? null } : {}), ...(sc.rejected ? { rejected: sc.rejected } : {}) });
     } catch { out.push({ ...c, score: 0, rejected: 'unreadable' }); }
   }
-  return out.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return preferFaces(out).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
 /** The live stream's stills over the asset's span, at most 24, evenly spread. */
@@ -224,30 +231,44 @@ async function liveCandidates(a: any): Promise<Candidate[]> {
 }
 
 /**
- * Frames from a video file: `n` stills spread over it (5% to 95%), written to
- * derived/<account>/asset-frames/<asset>/ and recorded as the asset's
- * candidates. Called by the encode job while the source file is on disk.
+ * Frames from a video file. `sample` stills are read across it (3% to 97%) and
+ * scored, faces included (frameScore.ts); the best `n`, spread over the video so
+ * no two are the same shot, are written to derived/<account>/asset-frames/<asset>/
+ * and recorded as the asset's candidates. Twelve evenly spaced frames used to be
+ * all there was to choose from, so a clear face between two of them was never
+ * offered (8 Nov 2026). Called by the encode job while the source file is on disk.
  */
-export async function extractFrames(assetId: string, acct: string, input: string, durationMs: number | null, n = 12): Promise<Candidate[]> {
+export async function extractFrames(assetId: string, acct: string, input: string, durationMs: number | null, n = 12, sample = 36): Promise<Candidate[]> {
   const dur = durationMs && durationMs > 0 ? durationMs : null;
-  const at = dur ? Array.from({ length: n }, (_, i) => Math.round(dur * (0.05 + 0.9 * i / (n - 1)))) : [0, 1000, 3000, 10_000];
+  const count = dur ? Math.max(n, Math.min(sample, Math.floor(dur / 1500))) : 4;
+  const at = dur ? Array.from({ length: count }, (_, i) => Math.round(dur * (0.03 + 0.94 * i / Math.max(1, count - 1)))) : [0, 1000, 3000, 10_000];
   const dir = await mkdtemp(join(tmpdir(), 'volt-frames-'));
-  const out: Candidate[] = [];
+  const read: { ms: number; buf: Buffer }[] = [];
   try {
     for (const [i, ms] of at.entries()) {
       const file = join(dir, `f${i}.jpg`);
       try {
         await run('ffmpeg', ['-loglevel', 'error', '-y', '-ss', (ms / 1000).toFixed(3), '-i', input, '-frames:v', '1', '-vf', 'scale=1280:-2', '-q:v', '3', file], { timeout: 30_000 });
-        const buf = await readFile(file);
-        const key = `derived/${acct}/asset-frames/${assetId}/${String(i).padStart(2, '0')}.jpg`;
-        await imageStore().put(key, buf, 'image/jpeg');
-        out.push({ key, atMs: ms, origin: 'ingest' });
+        read.push({ ms, buf: await readFile(file) });
       } catch { /* past the end, or a bad seek: fewer candidates */ }
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
-  const scored = await scoreCandidates(out, dur);
-  await query(`UPDATE vod_assets SET poster_candidates = $2::jsonb WHERE id = $1`, [assetId, JSON.stringify(scored)]);
-  return scored;
+  const tmp: Candidate[] = read.map((r, i) => ({ key: `#${i}`, atMs: r.ms, origin: 'ingest' as const }));
+  const scored = await scoreCandidates(tmp, dur, read.map((r) => r.buf));
+  const kept = keepBestSpread(scored, n, dur ? dur / (n * 2.5) : 0);
+  // Stored in time order under stable names, best first in the record.
+  const old = await imageStore().list(`derived/${acct}/asset-frames/${assetId}/`).catch(() => [] as any[]);
+  for (const o of old) await imageStore().delete(o.key ?? `derived/${acct}/asset-frames/${assetId}/${o}`).catch(() => {});
+  const out: Candidate[] = [];
+  for (const [i, c] of [...kept].sort((a, b) => (a.atMs ?? 0) - (b.atMs ?? 0)).entries()) {
+    const buf = read[Number(c.key.slice(1))].buf;
+    const key = `derived/${acct}/asset-frames/${assetId}/${String(i).padStart(2, '0')}.jpg`;
+    await imageStore().put(key, buf, 'image/jpeg');
+    out.push({ ...c, key });
+  }
+  out.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  await query(`UPDATE vod_assets SET poster_candidates = $2::jsonb WHERE id = $1`, [assetId, JSON.stringify(out)]);
+  return out;
 }
 
 async function fromRef(acct: string, ref: string | null | undefined, folder: string, name?: string): Promise<string | null> {
@@ -501,4 +522,53 @@ export async function setAssetImage(assetId: string, acct: string, ref: string, 
     [assetId, key, shape, reason]);
   await syncImageField(assetId).catch((e) => console.warn(`[asset-image] ${assetId}: image field not filled:`, e?.message ?? e));
   return { source: 'manual', key, shape, reason };
+}
+
+/**
+ * THE FRAME AT THE PLAYHEAD AS THE ASSET'S IMAGE (the Preview tab's "Use this
+ * frame"). The exact frame from the packaged media through the frame index
+ * (services/frames/store.ts: the same still frame stepping shows), so what the
+ * person paused on is what they get; an asset without packaged media yet falls
+ * back to its original file, read with ffmpeg at that time. The still is saved
+ * to the Image Library in the asset's folder (the same bytes chosen twice are one
+ * image) and set as the image, locked so an automatic pick never replaces it.
+ */
+export async function setPosterFromFrame(assetId: string, acct: string, at: { frame?: number | null; ms?: number | null }, by: string): Promise<PickResult & { frame: number | null; atMs: number; timecode: string | null }> {
+  const a = await load(assetId);
+  if (!a || a.acct !== acct) throw Object.assign(new Error('no such asset'), { status: 404 });
+  if (isAudioAsset(a)) throw Object.assign(new Error('This asset has no picture: it is audio only.'), { status: 422 });
+  let buf: Buffer | null = null, frame: number | null = null, atMs = Math.max(0, Number(at.ms ?? 0)), tc: string | null = null;
+  const F = await import('../frames/store');
+  const R = await import('../frames/frameIndex');
+  let s = await F.loadAssetFrameIndex(a.id).catch(() => null);
+  if (!s && a.master_key) s = await F.buildAssetFrameIndex(a.id).catch(() => null);
+  if (s?.state === 'ready' && s.index) {
+    const rate = s.index.rate;
+    const n = Math.min(Math.max(0, at.frame != null ? Math.round(Number(at.frame)) : R.frameAtMs(rate, atMs)), Math.max(0, s.index.totalFrames - 1));
+    const still = await F.assetFrameStill(acct, a.id, s, n);
+    buf = await imageStore().get(still.key);
+    frame = n;
+    atMs = Math.round(R.msOfFrame(rate, n));
+    tc = R.timecode(rate, n);
+  }
+  if (!buf && a.source_key) {
+    const { fetchVodSource } = await import('./vodSource');
+    const src = await fetchVodSource(a.source_key);
+    if (src) {
+      const dir = await mkdtemp(join(tmpdir(), 'volt-poster-'));
+      try {
+        const file = join(dir, 'f.jpg');
+        await run('ffmpeg', ['-loglevel', 'error', '-y', '-ss', (atMs / 1000).toFixed(3), '-i', src.path, '-frames:v', '1', '-q:v', '2', file], { timeout: 30_000 });
+        buf = await readFile(file);
+      } catch { buf = null; } finally { await rm(dir, { recursive: true, force: true }); await src.release(); }
+    }
+  }
+  if (!buf || !buf.length) throw Object.assign(new Error('That frame could not be read from the media. Try another position, or wait until the asset has finished building.'), { status: 409 });
+  const key = await saveToLibrary(acct, assetFolder(placeOf(a)), framePosterName(buf, a.title), buf, 'image/jpeg', 'poster',
+    { assetId: a.id, frameAtMs: atMs, frame, chosenBy: by }, a.title ?? undefined);
+  const reason = `Frame at ${clock(atMs)}${tc ? ` (${tc})` : ''}, chosen in the preview by ${by}.`;
+  await query(`UPDATE vod_assets SET poster_key = $2, poster_source = 'manual', poster_shape = 'wide', poster_reason = $3, poster_locked = true, poster_picked_at = now(), updated_at = now() WHERE id = $1`,
+    [a.id, key, reason]);
+  await syncImageField(a.id).catch((e) => console.warn(`[asset-image] ${a.id}: image field not filled:`, e?.message ?? e));
+  return { source: 'manual', key, shape: 'wide', reason, frame, atMs, timecode: tc };
 }

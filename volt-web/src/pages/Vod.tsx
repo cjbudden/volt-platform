@@ -23,6 +23,9 @@ import type { AssetAvailability } from '../api'
 import AssetRightsPanel from '../rights/AssetRightsPanel'
 import { useRoute } from '../router'
 import { BulkBar, SelectAllHead, SelectCell, bulkSummary, runBulk, useSelection } from '../listActions'
+import BulkRemoveDialog from '../BulkRemoveDialog'
+import { BulkRequests } from '../BulkRequests'
+import type { BulkRemoveResult } from '../api'
 import { NoMatches, usePref } from '../listFilters'
 import { LibraryFilterPanel, LibraryToolbar } from './vod/LibraryFilters'
 import { LibraryGrid } from './vod/LibraryGrid'
@@ -262,6 +265,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
           <div>
             {playable ? (
               <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} assetId={d.id} seek={seek}
+                onPosterSet={() => { load(); onChanged() }}
                 poster={d.poster_key ? signImage(`1280x720,${d.poster_shape === 'square' ? 'contain,bg=000000' : 'cover'}${posterVersion(d.poster_picked_at) ? `,v=${posterVersion(d.poster_picked_at)}` : ''}`, String(d.poster_key)) ?? thumbUrl(`/${String(d.poster_key).replace(/^\/+/, '')}`, 1280, 720, 'cover') : null} />
             ) : (
               <div style={{
@@ -287,7 +291,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
               <SourceFacts probe={d.ingest.probe} bytes={d.source_bytes} filename={d.original_filename} mime={d.mime} />
             )}
             {/* reload THIS drawer too: a song applied from the finder changes the content type and metadata shown below */}
-            <AssetImage id={d.id} onChanged={() => { load(); onChanged() }} />
+            <AssetImage key={String(d.poster_picked_at ?? '')} id={d.id} onChanged={() => { load(); onChanged() }} />
           </div>
           <div>
             <div className="sec-label">Facts</div>
@@ -646,6 +650,7 @@ export default function VodPage() {
     navigate(`/vod${q.toString() ? `?${q}` : ''}`, { replace: true })
   }
   const [bulkBusy, setBulkBusy] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string[] | null>(null)
   const [tick, setTick] = useState(0)
   const notify = useNotify()
 
@@ -764,6 +769,36 @@ export default function VodPage() {
       sel.clear(); load(); cols.reload()
     } catch (e: any) { notify({ kind: 'error', message: e.message }) } finally { setBulkBusy(null) }
   }
+  // BULK REMOVE (BulkRemoveDialog): into the restore bin with Undo, or a request
+  // for a manager to confirm when the account asks for that.
+  function bulkRemoved(r: BulkRemoveResult) {
+    setRemoving(null)
+    if (r.requested) {
+      notify({ id: 'bulk-remove', kind: 'info', autoHideMs: 15000, title: `Sent for approval: ${r.request.count} ${r.request.count === 1 ? 'asset' : 'assets'}.`,
+        message: 'Nothing is removed until an administrator or owner approves it. The request is shown above the library until then.' })
+      sel.clear(); setReqTick((t) => t + 1); return
+    }
+    const removed = r.done
+    const until = removed[0]?.purgeAfter ? new Date(removed[0].purgeAfter).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null
+    if (removed.some((x) => x.id === open)) setOpen(null)
+    sel.clear(); load()
+    notify({
+      id: 'bulk-remove', kind: r.refused.length ? 'warn' : 'ok', autoHideMs: r.refused.length ? undefined : 30000,
+      title: `Removed ${removed.length} ${removed.length === 1 ? 'asset' : 'assets'}.`,
+      message: `${removed.length ? `They are in Storage > Recently removed for ${r.binDays} day${r.binDays === 1 ? '' : 's'}${until ? ` (until ${until})` : ''}, and can be restored from there until then.` : ''}`
+        + (r.refused.length ? ` Not removed: ${r.refused.map((x) => `${x.name} (${x.why})`).join('; ')}` : ''),
+      actions: removed.length ? [{
+        label: 'Undo',
+        onClick: async () => {
+          try {
+            const b = await api.vodBulkRestore(removed.map((x) => x.id)); load()
+            notify({ id: 'bulk-remove', kind: b.missed.length ? 'warn' : 'ok', message: `${b.restored.length} restored, with their metadata and media.${b.missed.length ? ` ${b.missed.length} could not be: ${b.missed.map((x) => x.why).join('; ')}` : ''}` })
+          } catch (e: any) { notify({ id: 'bulk-remove', kind: 'error', title: 'They could not be restored.', message: e.message }) }
+        },
+      }] : undefined,
+    })
+  }
+  const [reqTick, setReqTick] = useState(0)
   async function bulkPublish() {
     setBulkBusy(`Publishing ${unpublished.length}…`)
     const res = await runBulk(unpublished.map((r) => ({ id: r.id, name: r.title || 'Untitled' })), (r) => api.publishVod(r.id), (n) => setBulkBusy(`Publishing ${n} of ${unpublished.length}…`))
@@ -867,6 +902,7 @@ export default function VodPage() {
         columns={columns} onColumns={(c) => setColPref(c.join(','))} />
       <LibraryFilterPanel filters={filters} onChange={setFilters} facets={facets} />
 
+      <BulkRequests key={reqTick} onChanged={load} />
       <BulkBar count={sel.sel.size} noun={['asset', 'assets']} onClear={sel.clear} busy={bulkBusy}
         actions={[
           { key: 'epg', label: 'Fill from EPG', icon: LibIcon.epg, count: fromGuide.length, onRun: bulkEpg,
@@ -879,7 +915,11 @@ export default function VodPage() {
             hint: 'Add the selected assets to a collection, or make a new one' },
           ...(filters.col ? [{ key: 'uncollect', label: 'Remove from collection', icon: ColIcon.out, count: chosen.length, onRun: bulkRemoveFromCollection,
             hint: `Take the selected assets out of ${pathName(cols.rows ?? [], filters.col)}. They stay in the library.` }] : []),
+          { key: 'remove', label: 'Remove', danger: true, count: chosen.length, onRun: () => setRemoving(chosen.map((x) => x.id)),
+            icon: <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>,
+            hint: 'Remove the selected assets and their media. You confirm first, and they can be restored for a short time.' },
         ]} />
+      {removing && <BulkRemoveDialog ids={removing} onClose={() => setRemoving(null)} onDone={bulkRemoved} />}
 
       {!page ? <div className="loading">Loading the library…</div> : rows.length === 0 ? (
         filters.col && !isFiltered({ ...filters, col: '' }) ? <div className="empty"><h3>This collection is empty</h3><p>Go to <b>All media</b>, select assets in the list or grid, and use <b>Add to collection</b>.</p></div>

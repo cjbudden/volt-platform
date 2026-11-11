@@ -355,7 +355,7 @@ export function injectBaseStyles(): void {
 }
 
 const CSS = `
-.vp{position:relative;font-family:var(--vp-font);color:var(--vp-text);-webkit-font-smoothing:antialiased;outline:none;line-height:1.35;font-size:14px;box-sizing:border-box}
+.vp{position:relative;font-family:var(--vp-font);font-variant-numeric:tabular-nums;color:var(--vp-text);-webkit-font-smoothing:antialiased;outline:none;line-height:1.35;font-size:14px;box-sizing:border-box}
 .vp *,.vp *::before,.vp *::after{box-sizing:border-box}
 .vp [hidden]{display:none!important}
 :where(.vp) button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;margin:0}

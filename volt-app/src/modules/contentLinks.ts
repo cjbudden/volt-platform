@@ -143,6 +143,8 @@ contentLinksRouter.post('/:id/from-filename', asyncHandler(async (req, res) => {
     type: z.boolean().default(false), title: z.boolean().default(false),
     fields: z.array(z.string().max(80)).max(100).optional(), overwrite: z.array(z.string().max(80)).max(100).default([]),
     link: z.union([z.string().uuid(), z.literal('auto'), z.null()]).default(null),
+    // Parts of the file name a person mapped to fields (preview `parts` and `targets`).
+    parts: z.array(z.object({ index: z.number().int().min(0).max(200), field: z.string().min(1).max(80) }).strict()).max(50).optional(),
   }).parse(req.body ?? {});
   const acct = accountId(req);
   const a = await ownedAsset(req.params.id, acct);

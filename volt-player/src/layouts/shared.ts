@@ -126,6 +126,7 @@ export function baseRules(): string {
 &, & * { box-sizing: border-box; }
 & {
   font-family: var(--vp-font);
+  font-variant-numeric: tabular-nums; /* digits one width: live numbers never shift the text */
   font-size: 14px; line-height: 1.4;
   color: var(--vp-ink);
 }

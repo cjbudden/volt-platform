@@ -14,7 +14,7 @@
 //  providers never move bytes through this device at all.
 // ============================================================================
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { api, getToken, type IngestPreviewRow, type IngestHeld, type IngestTransfer } from './api'
+import { api, apiRequest, getToken, type IngestPreviewRow, type IngestHeld, type IngestTransfer } from './api'
 import { startUpload, subscribe, type UploadItem } from './uploadManager'
 import { rightsApi } from './rights/rightsApi'
 import { tusUpload } from './tusClient'
@@ -45,7 +45,16 @@ type Source = 'device' | 'folder' | 'link' | 'dropbox' | 'onedrive' | 'gdrive' |
 interface Picked { id: string; file: File; preview?: IngestPreviewRow; skip?: boolean; meta?: Record<string, any>; typeId?: string | null
   cloud?: { provider: string; ref: string; providerAccountId: string; label: string; strength: string } | null; thumb?: string | null
   /** The answer to "this matches a record whose encode failed" (FailedRetryDialog). */
-  retry?: { assetId: string; action: RetryAction } | null }
+  retry?: { assetId: string; action: RetryAction } | null
+  /** A caption or sidecar: the picked video in this drop it goes with (its local id). */
+  companionOf?: string | null
+  /** Where a companion went, or why it could not go. */
+  attached?: { state: 'sending' | 'done' | 'failed'; note: string } | null }
+
+/** A caption or metadata file: attached to its video, never ingested as a programme. */
+const isCompanion = (p: Picked) => !!p.preview?.companion
+/** A companion that can be attached once its video exists (no match or too big: it cannot). */
+const companionUsable = (p: Picked) => !!p.preview?.companion?.match && !p.preview.companion.tooBig
 
 /** Line icons for our own doors; the cloud drives use their brand marks
  *  (served from Simple Icons, alt text and a letter fallback), because a
@@ -102,6 +111,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   const [tusProg, setTusProg] = useState<Record<string, number>>({})
   const [asks, setAsks] = useState<RetryAsk[]>([])
   const seenDone = useRef<Set<string>>(new Set())
+  const pickedRef = useRef<Picked[]>([]); pickedRef.current = picked
   const fileRef = useRef<HTMLInputElement | null>(null); const folderRef = useRef<HTMLInputElement | null>(null); const camRef = useRef<HTMLInputElement | null>(null)
   const depth = useRef(0)
   const phone = isPhone()
@@ -148,8 +158,13 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
     next.forEach(async n => { const t = await thumb(n.file); if (t) setPicked(p => p.map(x => x.id === n.id ? { ...x, thumb: t } : x)) })
     try {
       const rows = await api.ingestPreview({ files: files.map(f => ({ name: f.name, bytes: f.size, relativePath: (f as any).webkitRelativePath || null, mime: f.type || null })), source, contentTypeId: typeId })
-      next.forEach((n, i) => { n.preview = rows[i]; n.skip = rows[i]?.reject != null || rows[i]?.duplicate === 'skip' })
-      const wantCloud = next.filter(w => w.preview && w.preview.settings.transfer !== 'local' && !w.skip)
+      next.forEach((n, i) => {
+        n.preview = rows[i]
+        const c = rows[i]?.companion
+        if (c) { n.skip = !companionUsable(n); n.companionOf = c.match?.in === 'batch' ? next[c.match.index]?.id ?? null : null; return }
+        n.skip = rows[i]?.reject != null || rows[i]?.duplicate === 'skip'
+      })
+      const wantCloud = next.filter(w => w.preview && !isCompanion(w) && w.preview.settings.transfer !== 'local' && !w.skip)
       if (wantCloud.length) {
         try {
           const hits = await api.ingestLocate(wantCloud.map(w => ({ name: w.file.name, bytes: w.file.size, relativePath: (w.file as any).webkitRelativePath || null })))
@@ -158,8 +173,12 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
       }
       setPicked(p => p.map(x => next.find(n => n.id === x.id) ?? x))
       // A file that matches a record whose encode failed waits for an answer (FailedRetryDialog).
-      const ask = next.filter(n => !n.skip && n.preview?.failedMatch)
+      const ask = next.filter(n => !n.skip && !isCompanion(n) && n.preview?.failedMatch)
       if (ask.length) setAsks(a => [...a, ...ask.map(n => ({ id: n.id, fileName: n.file.name, bytes: n.file.size, match: n.preview!.failedMatch! }))])
+      // Companions for a video already in the library need no type: attach them now.
+      // The rest (and companions of a video in this drop) go with the upload.
+      const ready = next.filter(n => isCompanion(n) && !n.skip && n.preview?.companion?.match?.in === 'library')
+      if (autoUpload && typeChoice === 'unset' && ready.length) void start(ready)
       if (autoUpload && typeChoice !== 'unset') void start(next.filter(n => !ask.includes(n)))
     } catch (e: any) { setErr(String(e?.message ?? e)) }
   }
@@ -174,24 +193,58 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   async function start(list: Picked[], typeOverride?: string | null) {
     setBusy(true)
     const done: string[] = []
+    /** The asset each picked video became, for its companions. */
+    const assetOf: Record<string, string | null> = {}
+    // A companion is never uploaded as a programme. Those whose video is held
+    // (a failed-encode question) stay picked and go when it goes.
+    const companions = [...list, ...pickedRef.current.filter(x => x.companionOf && list.some(l => l.id === x.companionOf) && !list.includes(x))]
+      .filter(isCompanion)
+      // not one already attached or on its way (a second Start, or the type chosen after it went)
+      .filter(c => { const now = pickedRef.current.find(x => x.id === c.id); return !now?.attached || now.attached.state === 'failed' })
     for (const p of list) {
-      if (p.skip || p.preview?.reject) continue
+      if (isCompanion(p)) continue
+      // A skipped duplicate: its subtitles go to the record it duplicates.
+      if (p.skip) { assetOf[p.id] = p.preview?.duplicateOf?.assetId ?? null; continue }
+      if (p.preview?.reject) { assetOf[p.id] = null; continue }
       const m = { ...meta, ...(p.meta ?? {}) }; const t = p.typeId ?? (typeOverride !== undefined ? typeOverride : typeId)
       try {
         if (p.cloud && p.preview?.settings.transfer !== 'local') {
-          await api.ingestRemote({ ref: { provider: p.cloud.provider as any, ref: p.cloud.ref }, name: p.file.name, bytes: p.file.size, relativePath: (p.file as any).webkitRelativePath || null, schemaId: t, metadata: Object.keys(m).length ? m : undefined, providerAccountId: p.cloud.providerAccountId })
-          onDone(); done.push(p.id); continue
+          const r = await api.ingestRemote({ ref: { provider: p.cloud.provider as any, ref: p.cloud.ref }, name: p.file.name, bytes: p.file.size, relativePath: (p.file as any).webkitRelativePath || null, schemaId: t, metadata: Object.keys(m).length ? m : undefined, providerAccountId: p.cloud.providerAccountId })
+          assetOf[p.id] = r.assetId; onDone(); done.push(p.id); continue
         }
         if (phone) {
           await tusUpload(p.file, { endpoint: '/api/tus', token: getToken() ?? '', metadata: { source, ...(t ? { schemaId: t } : {}), ...(rightsId ? { rightsProfileId: rightsId } : {}), ...(Object.keys(m).length ? { metadata: JSON.stringify(m) } : {}), ...(p.retry ? { retryOf: JSON.stringify(p.retry) } : {}) }, onProgress: (s, tot) => setTusProg(x => ({ ...x, [p.id]: s / tot })) })
           setTusProg(x => { const c = { ...x }; delete c[p.id]; return c }); onDone(); loadHeld()
+          assetOf[p.id] = null                          // tus does not say which record it made
         } else {
-          await startUpload(p.file, { kind: 'loop', purpose: 'vod', source, schemaId: t, metadata: Object.keys(m).length ? m : null, retryOf: p.retry ?? null, rightsProfileId: rightsId || null })
+          const it = await startUpload(p.file, { kind: 'loop', purpose: 'vod', source, schemaId: t, metadata: Object.keys(m).length ? m : null, retryOf: p.retry ?? null, rightsProfileId: rightsId || null })
+          assetOf[p.id] = it.assetId
         }
         done.push(p.id)
-      } catch (e: any) { setErr(String(e?.message ?? e)) }
+      } catch (e: any) { assetOf[p.id] = null; setErr(String(e?.message ?? e)) }
     }
     setPicked(cur => cur.filter(x => !done.includes(x.id)))
+
+    // THE COMPANIONS, now their videos have an asset (the asset row exists from
+    // the first byte, so subtitles attach while the video is still uploading).
+    const mark = (id: string, attached: Picked['attached']) => setPicked(cur => cur.map(x => x.id === id ? { ...x, attached } : x))
+    for (const p of companions) {
+      if (p.skip || !companionUsable(p)) continue
+      const c = p.preview!.companion!
+      const target = c.match!.in === 'library' ? c.match!.assetId : (p.companionOf ? assetOf[p.companionOf] : null)
+      const videoName = c.match!.in === 'library' ? (c.match!.title ?? c.match!.originalName) : c.match!.name
+      if (target === undefined) continue               // its video has not started yet: it stays picked
+      if (!target) { mark(p.id, { state: 'failed', note: `${videoName} has no record here to attach it to (refused, failed to start, or sent from a phone). Attach it on the asset's Files tab once the video is in.` }); continue }
+      mark(p.id, { state: 'sending', note: `attaching to ${videoName}` })
+      try {
+        const r: any = await apiRequest(`/vod/${target}/files?name=${encodeURIComponent(p.file.name)}`, { method: 'POST', body: p.file, headers: { 'content-type': 'application/octet-stream' } })
+        const what = r.duplicate ? 'already attached'
+          : r.kind === 'captions' ? (r.report?.ok ? `${r.label} subtitles, ${r.report.cues} cues` : 'attached, but switched off: its check found problems (see the asset\'s Files tab)')
+          : r.kind === 'metadata' ? 'metadata sidecar, apply its fields on the asset\'s Files tab' : 'kept with the asset'
+        mark(p.id, { state: 'done', note: `${what} on ${videoName}` })
+        setTimeout(() => setPicked(cur => cur.filter(x => x.id !== p.id)), 6000)
+      } catch (e: any) { mark(p.id, { state: 'failed', note: String(e?.message ?? e) }) }
+    }
     setBusy(false)
   }
 
@@ -213,7 +266,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
   }
 
   async function sendWith(pa: { id: string; provider: string; label: string }) {
-    const list = picked.filter(p => !p.skip && !p.preview?.reject); if (!list.length) return
+    const list = picked.filter(p => !p.skip && !p.preview?.reject && !isCompanion(p)); if (!list.length) return
     setErr('')
     try {
       const t = await api.createIngestTransfer({ provider: pa.provider as any, files: list.map(p => ({ name: p.file.name, bytes: p.file.size, relativePath: (p.file as any).webkitRelativePath || null })), providerAccountId: pa.id })
@@ -240,10 +293,11 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
     <button type="button" className="ig-add" onClick={onClick} disabled={disabled} title={title} data-on={src === k || undefined}>{icon}<span>{text}</span></button>
   )
   const routeOf = (p: Picked): { key: 'local' | 'cloud' | 'none'; text: string } =>
-    p.preview?.reject ? { key: 'none', text: 'not ingested' }
+    p.preview?.companion ? (companionUsable(p) ? { key: 'local', text: 'attached to its video' } : { key: 'none', text: 'not attached' })
+    : p.preview?.reject ? { key: 'none', text: 'not ingested' }
     : p.cloud && p.preview?.settings.transfer !== 'local' ? { key: 'cloud', text: `cloud to cloud from ${p.cloud.label}` }
     : { key: 'local', text: phone ? 'from this phone, resumable' : 'from this device, resumable' }
-  const routeCounts = { local: pending.filter(p => routeOf(p).key === 'local').length, cloud: pending.filter(p => routeOf(p).key === 'cloud').length, refused: picked.filter(p => p.preview?.reject).length }
+  const routeCounts = { local: pending.filter(p => routeOf(p).key === 'local').length, cloud: pending.filter(p => routeOf(p).key === 'cloud').length, refused: picked.filter(p => p.preview?.reject || (isCompanion(p) && !companionUsable(p))).length }
 
   function answerRetry(answers: Record<string, RetryAction>) {
     const done = asks.filter(a => answers[a.id])
@@ -282,7 +336,7 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             {srcBtn('onedrive', 'OneDrive', <Brand k="onedrive" />, () => { setSrc('onedrive'); fromPicker('onedrive') }, !pickers.onedrive, pickers.onedrive ? '' : notSetUp('VITE_MS_CLIENT_ID'))}
             {srcBtn('gdrive', 'Google Drive', <Brand k="gdrive" />, () => { setSrc('gdrive'); fromPicker('gdrive') }, !pickers.gdrive, pickers.gdrive ? '' : notSetUp('VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY'))}
           </div>
-          <input ref={fileRef} type="file" accept="video/*,audio/*,image/*" multiple hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
+          <input ref={fileRef} type="file" accept="video/*,audio/*,image/*,.srt,.vtt,.ttml,.dfxp,.json,.xml,.nfo,.csv" multiple hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
           <input ref={folderRef} type="file" multiple hidden {...({ webkitdirectory: '' } as any)} onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
           <input ref={camRef} type="file" accept="video/*" capture="environment" hidden onChange={e => { add([...(e.target.files ?? [])]); e.target.value = '' }} />
         </div>
@@ -352,7 +406,13 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             <div className="ig-rows">
               {picked.map(p => {
                 const pv = p.preview; const r = routeOf(p); const prog = tusProg[p.id]
+                const cp = pv?.companion
+                const cWhat = cp?.type === 'caption' ? 'subtitles' : 'metadata'
                 const decision = !pv ? <span className="ig-dec">checking the rules</span>
+                  : cp ? (p.attached ? <span className={`ig-dec ${p.attached.state === 'failed' ? 'bad' : p.attached.state === 'done' ? 'ok' : ''}`}>{p.attached.state === 'done' ? '✓ ' : ''}{p.attached.note}</span>
+                    : cp.match ? <span className="ig-dec ok">{cWhat} for {cp.match.in === 'batch' ? <b>{cp.match.name}</b> : <>
+                        <b>{cp.match.title ?? cp.match.originalName}</b> in the library</>}, attached to it (not a video of its own)</span>
+                    : <span className="ig-dec bad">{cWhat}, not attached: {cp.why}</span>)
                   : pv.reject ? <span className="ig-dec bad">refused: {pv.reject}</span>
                   : p.retry ? <span className="ig-dec warn">{p.retry.action === 'reattach' ? 'becomes the source of the failed record, encoded again' : p.retry.action === 'replace' ? 'replaces the failed record' : 'a new record; the failed one stays'}</span>
                   : pv.failedMatch ? <span className="ig-dec warn">matches a record whose encode failed: choose what to do</span>
@@ -366,11 +426,11 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
                       <div className="l2">{decision}</div>
                       {prog != null && <div className="ig-pb"><i style={{ width: `${Math.round(prog * 100)}%` }} /></div>}
                     </div>
-                    <div className={`route ${r.key}`} title={r.text}><i /><span>{r.key === 'cloud' ? 'cloud to cloud' : r.key === 'local' ? (phone ? 'this phone' : 'this device') : 'not ingested'}</span>
+                    <div className={`route ${r.key}`} title={r.text}><i /><span>{cp ? (r.key === 'none' ? 'not attached' : 'to its video') : r.key === 'cloud' ? 'cloud to cloud' : r.key === 'local' ? (phone ? 'this phone' : 'this device') : 'not ingested'}</span>
                       {p.cloud && r.key === 'cloud' && <button type="button" className="ig-lnk" onClick={() => setPicked(c => c.map(x => x.id === p.id ? { ...x, cloud: null } : x))}>use this device</button>}
                     </div>
                     <div className="acts">
-                      <button type="button" className="ig-lnk" onClick={() => setSheet(sheet === p.id ? null : p.id)}>{sheet === p.id ? 'Close' : 'Details'}</button>
+                      {!cp && <button type="button" className="ig-lnk" onClick={() => setSheet(sheet === p.id ? null : p.id)}>{sheet === p.id ? 'Close' : 'Details'}</button>}
                       <button type="button" className="ig-x" aria-label="Remove" onClick={() => setPicked(c => c.filter(x => x.id !== p.id))}>×</button>
                     </div>
                     {sheet === p.id && (

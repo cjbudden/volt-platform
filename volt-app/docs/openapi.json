@@ -149,6 +149,11 @@
    "description": "Graphics delivery serves the files of a published graphics template version to the player and overlay that show it.\n\n**Use it to:**\n- Load a template version's files with `GET /gfx/:versionId/*`\n\n**Credential:** none, share token or playback token. These are public delivery files.\n\n**Good to know:** files are served sandboxed and can only connect to the template's own package. Versions never change, so they cache well."
   },
   {
+   "name": "Global Lists",
+   "x-displayName": "Global lists",
+   "description": "Reference lists that are the same for every account, such as countries and timezones, each item a stable code with structured fields.\n\n**Use it to:**\n- Fill country, timezone and similar pickers with `GET /api/global-lists/{key}`\n- Look up one item by its code with `GET /api/global-lists/{key}/items/{code}`\n- List what is available with `GET /api/global-lists`\n\n**Credential:** none for public lists; a session or account key for account-level lists.\n\n**Good to know:** use the item `code` in your data, not the label. Codes stay the same when a label is reworded."
+  },
+  {
    "name": "Graphics",
    "x-displayName": "Graphics",
    "description": "Graphics manages HTML overlay templates (scorebugs, lower thirds, sponsor bugs, tickers) and runs them live on your channels and events.\n\n**Use it to:**\n- Import, edit and publish templates with `POST /api/graphics/templates/import`, `PUT /api/graphics/templates/:id/draft` and `POST /api/graphics/templates/:id/draft/publish`\n- Connect the data that fills them with `POST /api/graphics/sources` and push values with `POST /api/graphics/sources/:id/push`\n- Group templates into setups and assign them to streams with `POST /api/graphics/setups` and `POST /api/graphics/assignments`\n- Take graphics on and off air with `POST /api/graphics/assignments/:id/air`, or run an event's rundown with `POST /api/graphics/rundowns/:eventId/take`\n- See what is live and what changed with `GET /api/graphics/live` and `GET /api/graphics/log`\n\n**Credential:** admin session (Bearer) or account secret key, with `graphics: view` to read, `graphics: operate` to run graphics live and `graphics: manage` to change templates and setups.\n\n**Good to know:** a published template version never changes. Edit the draft and publish again to make a new version."
@@ -422,6 +427,7 @@
     "Availability",
     "Cmcd",
     "EPG",
+    "Global Lists",
     "Guide",
     "Journey",
     "Me",
@@ -8867,6 +8873,112 @@
     }
    }
   },
+  "/api/collections/{id}/access": {
+   "get": {
+    "operationId": "getCollectionsByIDAccess",
+    "summary": "Get a collection's access",
+    "tags": [
+     "Collections"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putCollectionsByIDAccess",
+    "summary": "Set a collection's access",
+    "tags": [
+     "Collections"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/collections/{id}/access/view-as": {
+   "get": {
+    "operationId": "getCollectionsByIDAccessViewAs",
+    "summary": "Get access view as",
+    "tags": [
+     "Collections"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/collections/{id}/exclusions": {
    "get": {
     "operationId": "getCollectionsByIDExclusions",
@@ -13233,6 +13345,42 @@
     }
    }
   },
+  "/api/fast/channels/{id}/geo": {
+   "put": {
+    "operationId": "putFastChannelsByIDGeo",
+    "summary": "Set a channel's geo",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** fast: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/fast/channels/{id}/ladder": {
    "put": {
     "operationId": "putFastChannelsByIDLadder",
@@ -13417,6 +13565,42 @@
    "get": {
     "operationId": "getFastChannelsByIDReadiness",
     "summary": "Get a channel's readiness",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** fast: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/fast/channels/{id}/rights": {
+   "get": {
+    "operationId": "getFastChannelsByIDRights",
+    "summary": "Get a channel's rights",
     "tags": [
      "Fast"
     ],
@@ -15988,6 +16172,195 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/global-lists": {
+   "get": {
+    "operationId": "getGlobalLists",
+    "summary": "List global lists",
+    "tags": [
+     "Global Lists"
+    ],
+    "description": "**Credential:** none or per-route",
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    }
+   }
+  },
+  "/api/global-lists/{key}": {
+   "get": {
+    "operationId": "getGlobalListsByKey",
+    "summary": "Get a global list",
+    "tags": [
+     "Global Lists"
+    ],
+    "description": "**Credential:** none or per-route\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `code`, `position`, `isDefault`, `active`, `updatedAt`.",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "q",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Search code. Every word must match, case-insensitive."
+     },
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "code",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The item's stable code. Every field the list declares filters and sorts as value.<key> (and as <key> where that name is free). Filter: `code=value` (comma list = any of), or `code[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "position",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number"
+      },
+      "description": "Filter: `position=value` (comma list = any of), or `position[op]=value` with op: `eq` (equals), `ne` (not equal), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "isDefault",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Filter: `isDefault=value`, or `isDefault[op]=value` with op: `eq` (equals), `ne` (not equal), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "active",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Retired items (false) are left out unless you filter on active. Filter: `active=value`, or `active[op]=value` with op: `eq` (equals), `ne` (not equal), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "updatedAt",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `updatedAt=value`, or `updatedAt[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "position"
+      },
+      "description": "Comma list of: code, position, isDefault, active, updatedAt. Prefix `-` for descending. Default `position`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 1000,
+       "default": 500
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 100000
+      },
+      "description": "Skip this many rows (page jumps). Prefer cursor."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     }
+    },
+    "x-volt-list": true
+   }
+  },
+  "/api/global-lists/{key}/items/{code}": {
+   "get": {
+    "operationId": "getGlobalListsByKeyItemsByCode",
+    "summary": "Get an item",
+    "tags": [
+     "Global Lists"
+    ],
+    "description": "**Credential:** none or per-route",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "code",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
      }
     }
    }
@@ -26315,6 +26688,238 @@
      "Publishing Rules"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/publishing-rules/metadata-rules": {
+   "get": {
+    "operationId": "getPublishingRulesMetadataRules",
+    "summary": "Get publishing rules metadata rules",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postPublishingRulesMetadataRules",
+    "summary": "Publishing rules: metadata rules",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/publishing-rules/metadata-rules/{id}": {
+   "delete": {
+    "operationId": "deletePublishingRulesMetadataRulesByID",
+    "summary": "Delete a metadata rule",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "get": {
+    "operationId": "getPublishingRulesMetadataRulesByID",
+    "summary": "Get a metadata rule",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putPublishingRulesMetadataRulesByID",
+    "summary": "Replace a metadata rule",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/publishing-rules/metadata-rules/fields": {
+   "get": {
+    "operationId": "getPublishingRulesMetadataRulesFields",
+    "summary": "Get metadata rules fields",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/publishing-rules/metadata-rules/order": {
+   "put": {
+    "operationId": "putPublishingRulesMetadataRulesOrder",
+    "summary": "Set metadata rules order",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/publishing-rules/metadata-rules/test": {
+   "post": {
+    "operationId": "postPublishingRulesMetadataRulesTest",
+    "summary": "Metadata rules: test",
+    "tags": [
+     "Publishing Rules"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
     "security": [
      {
       "adminBearer": []
@@ -38199,6 +38804,42 @@
     }
    }
   },
+  "/api/vod/{id}/image/from-frame": {
+   "post": {
+    "operationId": "postVODByIDImageFromFrame",
+    "summary": "Image: from frame",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/{id}/images": {
    "get": {
     "operationId": "getVODByIDImages",
@@ -39883,6 +40524,218 @@
      "VOD"
     ],
     "description": "Body `{\"mode\": \"on\", \"policy\": {...}, \"adServerId\": \"...\", \"houseAds\": [{\"assetId\": \"...\"}]}`. `policy` takes `preroll`, `midroll`, `postroll`, `podMaxAds`, `maxAdSec`, `adFreeFor` (`entitlement`, `members`), `snapback`, `prerollOnResume` and `delivery` (`auto`, `stitched`, `guided`); values out of range are brought into range. New plays follow it at once. Recorded in the audit log.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/remove": {
+   "post": {
+    "operationId": "postVODBulkRemove",
+    "summary": "Bulk: remove",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/remove/impact": {
+   "post": {
+    "operationId": "postVODBulkRemoveImpact",
+    "summary": "Remove: impact",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/requests": {
+   "get": {
+    "operationId": "getVODBulkRequests",
+    "summary": "Get bulk requests",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/requests/{id}/approve": {
+   "post": {
+    "operationId": "postVODBulkRequestsByIDApprove",
+    "summary": "Approve (request)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/requests/{id}/cancel": {
+   "post": {
+    "operationId": "postVODBulkRequestsByIDCancel",
+    "summary": "Cancel (request)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/requests/{id}/reject": {
+   "post": {
+    "operationId": "postVODBulkRequestsByIDReject",
+    "summary": "Reject (request)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/bulk/restore": {
+   "post": {
+    "operationId": "postVODBulkRestore",
+    "summary": "Bulk: restore",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []

@@ -119,7 +119,7 @@ export const libraryApi = {
   },
   // ---- read from file name (services/ingest/filenameApply.ts) ----
   filenamePreview: (id: string): Promise<FilenamePreview> => apiRequest(`/vod/${id}/from-filename`),
-  filenameApply: (id: string, b: { type?: boolean; title?: boolean; fields?: string[]; overwrite?: string[]; link?: string | 'auto' | null }): Promise<FilenameApplyResult> =>
+  filenameApply: (id: string, b: { type?: boolean; title?: boolean; fields?: string[]; overwrite?: string[]; link?: string | 'auto' | null; parts?: { index: number; field: string }[] }): Promise<FilenameApplyResult> =>
     apiRequest(`/vod/${id}/from-filename`, { method: 'POST', body: JSON.stringify(b) }),
   filenameBulk: (ids: string[]): Promise<{ results: (FilenameApplyResult & { error?: string })[]; changed: number; unchanged: number }> =>
     apiRequest('/vod/from-filename', { method: 'POST', body: JSON.stringify({ ids }) }),
@@ -164,6 +164,12 @@ export interface FilenamePreview {
   link: null | { field: string; label: string; current: any; byPerson: boolean; query: { title: string; year?: number | null }
     decision?: { action: 'link' | 'suggest' | 'none'; reason: string; candidates: LinkCandidate[] } }
   mismatches: string[]
+  /** The name in parts, to map onto fields by hand (services/ingest/filenameParse.ts splitParts). */
+  parts?: { index: number; text: string; value: string; signal: { kind: string; reason: string } | null; number: boolean }[]
+  /** What a part can go into: `@title` (the asset title) and the type's fields. */
+  targets?: { field: string; label: string; type: string }[]
+  /** A first guess (part index to field), for music types only. */
+  guess?: Record<string, string>
 }
 export interface FilenameApplyResult { assetId: string; typeChanged: boolean; titleChanged: boolean; applied: string[]; skipped: { field: string; reason: string }[]; link: { action: string; reason: string } | null }
 

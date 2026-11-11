@@ -53,6 +53,11 @@ async function boot(): Promise<void> {
     await (await import('./services/graphics/defaults')).ensureDefaultTemplates()
       .then((g) => { if (g) console.log(`[graphics] default templates added or updated: ${g}`); })
       .catch((e) => console.error('[graphics] default templates not loaded', e));
+    // Built-in global lists (countries, timezones) and their shipped items. Adds
+    // missing items only; never overwrites a System Admin's edits.
+    await (await import('./services/globalLists')).ensureGlobalListSeeds()
+      .then((n) => { if (n) console.log(`[global-lists] shipped items added: ${n}`); })
+      .catch((e) => console.error('[global-lists] seeds not loaded', e));
   });
   // Give existing recordings their broadcast-day container. Additive and
   // idempotent: it only fills container_id where it is NULL, and no row's

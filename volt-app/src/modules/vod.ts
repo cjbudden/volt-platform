@@ -1166,7 +1166,7 @@ vodRouter.post('/:id/withdraw', asyncHandler(async (req, res) => {
 // WHAT A DELETE WOULD TAKE, shown by the console's delete dialog before anything goes (the
 // same workflow as removing a channel or station: DeleteChannelDialog). `blocker` says why
 // it would be refused now; the delete checks it again.
-async function assetDeleteImpact(id: string, acc: string) {
+export async function assetDeleteImpact(id: string, acc: string) {
   const a = await fetchOwned(id, acc);
   if (!a) throw notFound('VOD asset not found');
   const n = await one<any>(
@@ -1183,10 +1183,10 @@ async function assetDeleteImpact(id: string, acc: string) {
   const blocker = names.length
     ? `It is in the active lineup of FAST ${names.length === 1 ? 'channel' : 'channels'} ${names.join(', ')}. Take it out of the lineup first.`
     : null;
-  const { TRASH_DAYS } = await import('../services/media/trash');
+  const { LIBRARY_TRASH_DAYS } = await import('../services/media/trash');
   return {
     id: a.id, name: (a.title as string | null)?.trim() || 'Untitled', availability: a.availability_state ?? null,
-    binDays: TRASH_DAYS, blocker, fastChannels: names, counts: n,
+    binDays: LIBRARY_TRASH_DAYS, blocker, fastChannels: names, counts: n,
   };
 }
 
@@ -1212,7 +1212,7 @@ vodRouter.delete(
       snapshot: { title: own.title, source: own.source_kind, bin: binId } }).catch(() => {});
     // Say where it went, so the console can offer Undo (POST /api/vod/:id/restore) and
     // name how long it can wait.
-    const { TRASH_DAYS } = await import('../services/media/trash');
+    const { LIBRARY_TRASH_DAYS: TRASH_DAYS } = await import('../services/media/trash');
     const held = binId ? await one<{ purge_after: string }>(`SELECT purge_after FROM trash_items WHERE id = $1`, [binId]) : null;
     res.json({ id: own.id, bin: binId, binDays: TRASH_DAYS, purgeAfter: held?.purge_after ?? null });
   })

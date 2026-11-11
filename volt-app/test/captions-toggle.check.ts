@@ -5,6 +5,12 @@
  * licensed. Pure — no DB, no network.  Run: npx tsx test/captions-toggle.check.ts
  */
 import { buildEncoderJobConfig } from '../src/services/jobConfig';
+import { config } from '../src/config';
+
+// What the account allows is the question here, not what this machine can
+// host: plan as on AWS (the mock launcher stands in for ECS), whatever
+// ORCH_LAUNCHER a developer's .env sets. captions-plan covers the Mac's plan.
+(config.orchestrator as any).launcher = 'mock';
 
 const base = {
   kind: 'channel' as const,

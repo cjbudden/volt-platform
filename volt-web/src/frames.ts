@@ -88,6 +88,11 @@ export function getVodFrame(assetId: string, n: number, w = 960): Promise<ExactF
   return apiRequest(`/vod/${encodeURIComponent(assetId)}/frame?n=${Math.max(0, Math.round(n))}&w=${w}`)
 }
 
+/** The frame at the playhead as the asset's image (POST /vod/{id}/image/from-frame). */
+export function setPosterFromFrame(assetId: string, at: { frame?: number; ms?: number }): Promise<{ frame: number | null; atMs: number; timecode: string | null; reason?: string }> {
+  return apiRequest(`/vod/${encodeURIComponent(assetId)}/image/from-frame`, { method: 'POST', body: JSON.stringify(at) })
+}
+
 /** A recording's frame at a wall-clock moment (epoch ms). */
 export function getRecordingFrame(recordingId: string, atMs: number, w = 960): Promise<ExactFrame> {
   return apiRequest(`/recordings/${encodeURIComponent(recordingId)}/frame?at=${Math.round(atMs * 1000) / 1000}&w=${w}`)

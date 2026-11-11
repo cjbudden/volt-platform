@@ -492,6 +492,8 @@ export interface AccountSettings {
   geoAccess: { mode: 'block' | 'allow'; countries: string[] } | null
   /** What a new output profile starts with for trick-play (build queue 3.2b). */
   trickPlayDefault?: boolean
+  /** Bulk actions by people below administrator wait for an administrator or owner to confirm them. */
+  bulkNeedsApproval?: boolean
   /** The account has MP3 for radio listeners (set by the system admin, build queue 2.1c-2). */
   mp3FeedEnabled?: boolean
   canEdit: boolean; editReason: string | null
@@ -510,6 +512,8 @@ export interface CaptionsSettings {
   canEditProvider: boolean; providerReason: string | null
   canEditProfiles: boolean; profilesReason: string | null
   cpuInEncoder: boolean; cpuSizes: string[]; modelSizes: string[]
+  /** This deployment can run the GPU captions task (AWS). Without it a bigger size runs as base on CPU. */
+  gpuTask?: boolean
   languages: { code: string; label: string }[]
   profiles: CaptionsProfile[]
 }
@@ -1082,6 +1086,22 @@ export interface IngestPreviewRow {
   duplicate: 'proceed' | 'skip' | 'replace' | 'version' | 'rename' | 'ask'; duplicateOf: { assetId: string; strength: string } | null; reject: string | null
   /** A library record whose encode failed that this file looks like (the panel asks what to do). */
   failedMatch?: IngestFailedMatch | null
+  /** Set for a caption or metadata sidecar: it is attached to its video, never uploaded as one
+   *  (services/ingest/companionMatch.ts). `settings` is null on these rows. */
+  companion?: IngestCompanionPlan | null
+}
+export interface IngestCompanionPlan {
+  type: 'caption' | 'sidecar'; tooBig: boolean; why: string | null
+  match: { in: 'batch'; index: number; name: string } | { in: 'library'; assetId: string; title: string | null; originalName: string } | null
+}
+export interface BulkImpact { action: string; label: string; items: { id: string; name: string; blocker: string | null }[]; ready: number; needsApproval: boolean }
+export interface BulkOutcome { done: { id: string; name: string; bin?: string | null; purgeAfter?: string | null }[]; refused: { id: string; name: string; why: string }[] }
+export type BulkRemoveResult = ({ requested: false; binDays: number } & BulkOutcome) | { requested: true; request: BulkRequest }
+export interface BulkRequest {
+  id: string; action: string; label: string; count: number; items: { id: string; name: string }[]; note: string | null
+  state: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'expired' | 'failed'
+  requestedBy: string | null; requestedById: string | null; decidedBy: string | null; decidedAt: string | null; decisionNote: string | null
+  result: BulkOutcome | null; createdAt: string; expiresAt: string
 }
 export interface IngestFailedMatch {
   assetId: string; title: string; originalName: string | null; bytes: number | null; createdAt: string
@@ -1225,7 +1245,7 @@ export const api = {
   plan: (): Promise<PlanView> => req('/plan'),
   /** The account's logo and colours (Admin > Account settings; used by the share page). */
   accountSettings: (): Promise<AccountSettings> => req('/account-settings'),
-  patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null; trickPlayDefault?: boolean }): Promise<AccountSettings> =>
+  patchAccountSettings: (b: { logo?: string | null; primary?: string | null; secondary?: string | null; geoAccess?: { mode: 'block' | 'allow'; countries: string[] } | null; trickPlayDefault?: boolean; bulkNeedsApproval?: boolean }): Promise<AccountSettings> =>
     req('/account-settings', { method: 'PATCH', body: JSON.stringify(b) }),
   /** Admin > Sites, the Hybrid Sites add-on (volt-app modules/sites.ts, HYBRID_SITES.md). */
   sites: (): Promise<{ items: SiteRow[] }> => req('/sites?limit=500'),
@@ -1911,6 +1931,16 @@ export const api = {
   vodAsset: (id: string): Promise<any> => req(`/vod/${id}`),
   /** What deleting an asset would take with it, and why it would be refused now (DeleteAssetDialog). */
   vodDeleteImpact: (id: string): Promise<AssetDeleteImpact> => req(`/vod/${id}/delete-impact`),
+  // BULK REMOVE and management confirmation (volt-app modules/vodBulk.ts)
+  vodBulkRemoveImpact: (ids: string[]): Promise<BulkImpact> => req('/vod/bulk/remove/impact', { method: 'POST', body: JSON.stringify({ ids }) }),
+  vodBulkRemove: (ids: string[], confirm: number, note?: string): Promise<BulkRemoveResult> =>
+    req('/vod/bulk/remove', { method: 'POST', body: JSON.stringify({ ids, confirm, note: note || undefined }) }),
+  vodBulkRestore: (ids: string[]): Promise<{ restored: { id: string; name: string }[]; missed: { id: string; why: string }[] }> =>
+    req('/vod/bulk/restore', { method: 'POST', body: JSON.stringify({ ids }) }),
+  bulkRequests: (pending = true): Promise<{ requests: BulkRequest[]; canDecide: boolean; me: string | null }> => req(`/vod/bulk/requests${pending ? '?pending=1' : ''}`),
+  decideBulkRequest: (id: string, approve: boolean, note?: string): Promise<{ request: BulkRequest; outcome: BulkOutcome | null }> =>
+    req(`/vod/bulk/requests/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ note: note || undefined }) }),
+  cancelBulkRequest: (id: string): Promise<BulkRequest> => req(`/vod/bulk/requests/${id}/cancel`, { method: 'POST', body: '{}' }),
   /** Delete into the restore bin: the record, its metadata and its media files. Undo with restoreVod for `binDays`. */
   deleteVod: (id: string): Promise<{ id: string; bin: string | null; binDays: number; purgeAfter: string | null }> =>
     req(`/vod/${id}`, { method: 'DELETE' }),
@@ -2560,7 +2590,8 @@ export interface EpgOwnerRow {
    *  than emitting a literal, which is what used to bury every station in the
    *  Channels filter. */
   kind: 'channel' | 'radio' | 'event'; id: string; name: string; status: string
-  /** The image the guide shows for it; null for events and for channels with none. */
+  /** The image the guide shows for it: a channel's or station's guide icon or image, an
+   *  event's image from its metadata; null when there is none. */
   icon_ref: string | null
   programme_count: number; first_at: string | null; last_at: string | null
   auto_clip_count: number; next_title: string | null; next_at: string | null

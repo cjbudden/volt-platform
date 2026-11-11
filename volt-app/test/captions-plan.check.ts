@@ -58,6 +58,8 @@ const jbase: any = {
   profile: { rungs: [{ height: 720, bitrate_kbps: 2500 }], packaging: 'both', workflow_type: 'transcode', codec_backend: 'x264', segment_dur: 4, dvr_window_sec: 60,
     captions_enabled: true, caption_source_lang: 'en', caption_targets: ['en', 'ms'], caption_offset_sec: 0, caption_model_size: 'base' },
 };
+// AWS: the launcher runs the GPU task (the Mac's do not; see the end of this file).
+(config.orchestrator as any).launcher = 'ecs';
 (config.orchestrator as any).captionsCpuInEncoder = false;
 const jGpu = buildEncoderJobConfig(jbase);
 ok(jGpu.captions?.in_encoder === false && jGpu.captions?.model_size === 'base', 'GPU add-on plan: job says in_encoder false (the encoder only advertises tracks)');
@@ -70,6 +72,30 @@ const wl = est.lines.find((l: any) => /Whisper base on CPU \+ translation/.test(
 ok(!!wl, '...and the encoder estimate reserves Whisper base + NLLB on CPU');
 const jg = buildEncoderJobConfig({ ...jbase, account: { captions_provider: 'gladia' } });
 ok(jg.captions?.in_encoder === true && jg.captions?.model_size === undefined, 'gladia job: in the encoder, no model size');
+
+// ---- THE MAC: no GPU captions task (local and docker launchers) ----------------
+const { captionsHost } = require('../src/services/captionsPlan');
+ok(captionsHost({ captionsCpuInEncoder: true, launcher: 'docker' }).separateTaskRuns === false
+  && captionsHost({ captionsCpuInEncoder: true, launcher: 'local' }).separateTaskRuns === false
+  && captionsHost({ captionsCpuInEncoder: false, launcher: 'ecs' }).separateTaskRuns === true, 'only the Mac launchers cannot run the GPU task');
+const mac = (o: any) => resolveCaptionsPlan({ accountProvider: 'whisper', captionsEnabled: true, sourceLang: 'en', targets: ['en'], separateTaskRuns: false, ...o });
+let mp = mac({ cpuInEncoder: true, modelSize: 'small' });
+ok(mp.enabled && mp.inEncoder && !mp.runsSeparateTask && mp.modelSize === 'base' && mp.requestedModelSize === 'small' && /needs the GPU captions task/.test(mp.note ?? ''),
+  'Mac, CPU engine, the default small: runs base in the encoder and says why');
+mp = mac({ cpuInEncoder: true, modelSize: 'tiny' });
+ok(mp.inEncoder && mp.modelSize === 'tiny' && !mp.note, 'Mac, tiny: as asked, no note');
+mp = mac({ cpuInEncoder: true });
+ok(mp.inEncoder && mp.modelSize === 'base', 'Mac, no size set (small by default): base');
+mp = mac({ cpuInEncoder: false, modelSize: 'small' });
+ok(!mp.enabled && !mp.runsSeparateTask && /cannot run here/.test(mp.note ?? ''), 'Mac without a caption engine: off, and says how to fix it');
+const aws = resolveCaptionsPlan({ accountProvider: 'whisper', captionsEnabled: true, sourceLang: 'en', targets: ['en'], modelSize: 'small', cpuInEncoder: true, separateTaskRuns: true });
+ok(aws.runsSeparateTask && aws.modelSize === 'small' && !aws.note, 'AWS: small still goes to the GPU task, unchanged');
+(config.orchestrator as any).launcher = 'docker'; (config.orchestrator as any).captionsCpuInEncoder = true;
+const jMac = buildEncoderJobConfig({ ...jbase, profile: { ...jbase.profile, caption_model_size: 'small' } });
+ok(jMac.captions?.enabled === true && jMac.captions?.in_encoder === true && jMac.captions?.model_size === 'base', 'Mac job: a small profile reaches the encoder as base, in the encoder, enabled');
+(config.orchestrator as any).captionsCpuInEncoder = false;
+const jOff = buildEncoderJobConfig({ ...jbase, profile: { ...jbase.profile, caption_model_size: 'small' } });
+ok(jOff.captions?.enabled === false, 'Mac job without an engine: the encoder starts no caption worker');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

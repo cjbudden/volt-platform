@@ -40,6 +40,24 @@ export interface CaptionsPlanInput {
   modelSize?: string;           // whisper size: tiny|base|small|medium|large-v3
   /** The encoder image carries the CPU caption stack (CAPTIONS_CPU_IN_ENCODER). */
   cpuInEncoder?: boolean;
+  /**
+   * The launcher can run the separate GPU captions task (ECS; the mock launcher
+   * stands in for it). Unset means it can, as before. On the Mac (local and docker launchers)
+   * it cannot: launchCaptions there only logs.
+   */
+  separateTaskRuns?: boolean;
+}
+
+/**
+ * What this deployment can host: CPU whisper in the encoder (an image built
+ * with the stack, announced by CAPTIONS_CPU_IN_ENCODER) and the separate GPU
+ * task (the ECS launcher only). Every caller of resolveCaptionsPlan passes this,
+ * so the job, the launch and the settings screen agree.
+ */
+export function captionsHost(o: { captionsCpuInEncoder: boolean; launcher: string }): Pick<CaptionsPlanInput, 'cpuInEncoder' | 'separateTaskRuns'> {
+  // The Mac's launchers (local, docker) only log a captions launch. ECS runs it;
+  // mock records it like ECS would, so tests and dry runs see the AWS plan.
+  return { cpuInEncoder: o.captionsCpuInEncoder, separateTaskRuns: o.launcher !== 'local' && o.launcher !== 'docker' };
 }
 
 /** Whisper sizes that keep up with live on CPU beside the packager. */
@@ -64,6 +82,10 @@ export interface CaptionsPlan {
   estVramGb: number;
   /** a sensible default AWS GPU instance family for this footprint (whisper only). */
   instanceType: string | null;
+  /** The size the profile asked for, when this deployment runs a smaller one instead. */
+  requestedModelSize?: string;
+  /** Why captions are not what the profile asked for here, in words for the log and the console. */
+  note?: string;
 }
 
 /**
@@ -110,12 +132,30 @@ export function resolveCaptionsPlan(inp: CaptionsPlanInput): CaptionsPlan {
   }
 
   const modelSize = inp.modelSize ?? 'small';
+  const cpuSize = (CPU_WHISPER_SIZES as readonly string[]).includes(modelSize);
   // whisper tiny/base on CPU inside the encoder, when its image has the stack
-  if (inp.cpuInEncoder && (CPU_WHISPER_SIZES as readonly string[]).includes(modelSize)) {
+  if (inp.cpuInEncoder && cpuSize) {
     return {
       mode: 'whisper', enabled: true, runsSeparateTask: false, inEncoder: true, needsGpu: false,
       needsMt, sourceLang, targets, modelSize, image: null, estVramGb: 0, instanceType: null,
     };
+  }
+  // NO GPU TASK HERE (the Mac: local and docker launchers). A bigger size asked
+  // for, the default 'small' included, used to plan the GPU task, whose launch
+  // on the Mac only logs: every captioned channel streamed with no subtitles and
+  // nothing said why. Run the largest CPU size in the encoder instead, and say so.
+  if (inp.separateTaskRuns === false) {
+    if (inp.cpuInEncoder) {
+      const run = cpuSize ? modelSize : CPU_WHISPER_SIZES[CPU_WHISPER_SIZES.length - 1];
+      return {
+        mode: 'whisper', enabled: true, runsSeparateTask: false, inEncoder: true, needsGpu: false,
+        needsMt, sourceLang, targets, modelSize: run, image: null, estVramGb: 0, instanceType: null,
+        requestedModelSize: modelSize,
+        note: `Whisper ${modelSize} needs the GPU captions task, which this deployment cannot run; captions use whisper ${run} on CPU in the encoder instead.`,
+      };
+    }
+    return { ...off, sourceLang, targets,
+      note: 'Whisper captions cannot run here: the encoder has no caption engine (CAPTIONS_CPU_IN_ENCODER is off) and this deployment cannot run the GPU captions task. On the Mac, start with ENCODER_MODE=docker (CAPTIONS=1 is the default), or install faster-whisper for the native encoder.' };
   }
 
   // whisper: dedicated add-on task, own image + GPU sizing

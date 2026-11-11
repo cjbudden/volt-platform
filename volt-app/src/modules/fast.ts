@@ -569,6 +569,8 @@ const adsBody = z.object({
     mode: z.enum(['off', 'pad', 'between']),
     identIds: z.array(uuid).max(20).default([]),
     loopAssetId: uuid.nullable().optional(),
+    /** 'between' only: an ident after every Nth programme, grouping short titles (default 1). */
+    every: z.number().int().min(1).max(50).optional(),
   }).optional(),
 });
 fastRouter.get('/channels/:id/ads', asyncHandler(async (req, res) => {
@@ -618,7 +620,8 @@ fastRouter.put('/channels/:id/ads', asyncHandler(async (req, res) => {
     [ch.id, b.mode ?? null, policy ? JSON.stringify(policy) : null, b.adServerId ?? null, b.houseAds ? JSON.stringify(b.houseAds) : null, b.scope ?? null, b.adServerId !== undefined]);
   if (b.brand) {
     await query(`UPDATE channel_ads SET policy = jsonb_set(COALESCE(policy, '{}'::jsonb), '{brand}', $2::jsonb), updated_at = now() WHERE channel_id = $1`,
-      [ch.id, JSON.stringify({ mode: b.brand.mode, identIds: b.brand.identIds, loopAssetId: b.brand.loopAssetId ?? null })]);
+      [ch.id, JSON.stringify({ mode: b.brand.mode, identIds: b.brand.identIds, loopAssetId: b.brand.loopAssetId ?? null,
+        every: b.brand.every ?? (await adsFor(ch.id)).brand.every })]);
   }
   // a house spot, slate, ident or loop just added is packaged for the channel
   if (b.houseAds || b.brand || b.policy?.slateAssetId !== undefined) prepareSoon(ch.id);

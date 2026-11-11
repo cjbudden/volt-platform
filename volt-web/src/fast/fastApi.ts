@@ -74,6 +74,8 @@ export type BrandMode = 'off' | 'pad' | 'between'
 export interface ChannelBrand {
   mode: BrandMode; identIds: string[]; idents: { assetId: string; title: string; durationSec: number }[]
   loopAssetId: string | null; identBetweenSec: number
+  /** 'between' mode: an ident after every Nth programme, so short titles run as a group (1 = every programme). */
+  every: number
 }
 /** One line of the going-to-air rundown (GET /fast/channels/:id/rundown). */
 export interface RundownRow {
@@ -135,7 +137,7 @@ export const fastApi = {
   activate: (id: string): Promise<{ epoch: string; applied: { inserted: number; replaced: number; breaks: number; conflicts: any[]; notices: any[] } }> => apiReq(`/fast/lineups/${id}/activate`, { method: 'POST', body: '{}' }),
   apply: (id: string, b: { days?: number; dryRun?: boolean } = {}): Promise<{ inserted: number; replaced: number; breaks: number; conflicts: any[]; until: string }> => apiReq(`/fast/lineups/${id}/apply`, { method: 'POST', ...J(b) }),
   ads: (channelId: string): Promise<ChannelAds> => apiReq(`/fast/channels/${channelId}/ads`),
-  saveAds: (channelId: string, b: { mode?: string; policy?: Partial<AdPolicy>; adServerId?: string | null; houseAds?: { assetId: string; weight?: number }[]; scope?: string; brand?: { mode: BrandMode; identIds: string[]; loopAssetId?: string | null } }): Promise<ChannelAds> => apiReq(`/fast/channels/${channelId}/ads`, { method: 'PUT', ...J(b) }),
+  saveAds: (channelId: string, b: { mode?: string; policy?: Partial<AdPolicy>; adServerId?: string | null; houseAds?: { assetId: string; weight?: number }[]; scope?: string; brand?: { mode: BrandMode; identIds: string[]; loopAssetId?: string | null; every?: number } }): Promise<ChannelAds> => apiReq(`/fast/channels/${channelId}/ads`, { method: 'PUT', ...J(b) }),
   adServers: (): Promise<{ items: AdServer[] }> => apiReq('/fast/ad-servers'),
   addAdServer: (b: { name: string; vendor: string; tagTemplate: string; timeoutMs: number }): Promise<AdServer> => apiReq('/fast/ad-servers', { method: 'POST', ...J(b) }),
   testAdServer: (id: string, durationSec: number): Promise<AdTest> => apiReq(`/fast/ad-servers/${id}/test`, { method: 'POST', ...J({ durationSec }) }),

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, ApiError, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type ProgrammeConflict, type ProgrammeBody, type ProgrammeVod, type VodState, type EpgScope, type EpgSeriesInfo, type RepeatPolicy } from '../api'
+import { api, ApiError, thumbUrl, type EpgOwner, type EpgOwnerRow, type ProgrammeRow, type ProgrammeConflict, type ProgrammeBody, type ProgrammeVod, type VodState, type EpgScope, type EpgSeriesInfo, type RepeatPolicy } from '../api'
 import { FillerField } from '../FillerField'
 import { pressable } from '../a11y'
 import { navigate } from '../router'
 import { FormStatus, useNotify, usePageNotice, useSaveResult } from '../notices'
 import { Segmented } from '../listFilters'
-import { EpgTimeline } from './EpgTimeline'
+import { EpgTimeline, ProgrammeImage } from './EpgTimeline'
 import { CopyDayModal, RepeatEditor, PolicyPicker, PlacePreview, usePreview, defaultRepeat, toRule, browserTz, toDateInput as ymd, type RepeatValue } from './EpgRepeat'
 import { assetHref, recordingHref, ProgrammeFlagMark } from '../programmeMedia'
 
@@ -223,7 +223,11 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
       </div>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
-          <h1>{ownerRow?.name ?? 'Guide'} <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{owner.kind === 'channel' ? 'channel guide' : 'event schedule'}</span></h1>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {ownerRow?.icon_ref && <img src={thumbUrl(ownerRow.icon_ref, 96, 96, 'inside')} alt="" data-guide-image
+              style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: 8, background: 'var(--panel-2)', border: '1px solid var(--border)', flexShrink: 0 }} />}
+            <span>{ownerRow?.name ?? 'Guide'} <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{owner.kind === 'channel' ? 'channel guide' : owner.kind === 'radio' ? 'station guide' : 'event schedule'}</span></span>
+          </h1>
           <p>Add programmes, copy days, and control each slot: geo access, replacement, and post-airing clip automation.</p>
         </div>
         <div className="spacer" />
@@ -258,7 +262,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
       ) : view === 'timeline' ? (
         <>
         <VodSummary vod={vod} />
-        <EpgTimeline day={day} progs={progs} vod={vod} overlapsById={overlapsById} ownerWord={what}
+        <EpgTimeline day={day} progs={progs} vod={vod} overlapsById={overlapsById} ownerWord={what} guideImage={ownerRow?.icon_ref ?? null}
           onEdit={p => setEditing(p)} onAdd={hhmm => addAt(hhmm)} />
         </>
       ) : progs.length === 0 ? (
@@ -289,7 +293,9 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
                     <td style={{ fontFamily: 'ui-monospace,monospace', color: overlaps ? 'var(--warn,#e2b64f)' : undefined }}>{fmtT(p.starts_at)}</td>
                     <td style={{ fontFamily: 'ui-monospace,monospace', color: overlaps ? 'var(--warn,#e2b64f)' : 'var(--muted)' }}>{fmtT(p.ends_at)}</td>
                     <td style={{ color: 'var(--muted)' }}>{fmtDur(Date.parse(p.ends_at) - Date.parse(p.starts_at))}</td>
-                    <td><b>{p.title}</b>{live && <span className="badge live" style={{ marginLeft: 8 }}>ON NOW</span>}
+                    <td><div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                      <ProgrammeImage p={p} guideImage={ownerRow?.icon_ref ?? null} ownerWord={what} size={36} />
+                      <div style={{ minWidth: 0 }}><b>{p.title}</b>{live && <span className="badge live" style={{ marginLeft: 8 }}>ON NOW</span>}
                       {p.series_id && <span className="badge" style={{ marginLeft: 8 }} title={p.series_detached ? 'Part of a repeat, changed on its own' : 'Part of a repeat'}>{p.series_detached ? 'Repeat, edited' : 'Repeats'}</span>}
                       {overlaps && (
                         <span className="badge" style={{ marginLeft: 8, color: 'var(--warn,#e2b64f)', borderColor: 'rgba(220,170,60,.5)', background: 'rgba(220,170,60,.12)' }}>
@@ -297,7 +303,7 @@ export default function EpgDetail({ owner, onBack }: { owner: EpgOwner; onBack: 
                         </span>
                       )}
                       {p.metadata?.description && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.metadata.description}</div>}
-                    </td>
+                    </div></div></td>
                     <td style={{ color: p.geo_mode === 'worldwide' ? 'var(--faint)' : 'var(--warn,#e2b64f)', fontSize: 'var(--fs-sm)' }}>
                       {GEO_LABEL[p.geo_mode]}{p.geo_mode !== 'worldwide' && p.geo_countries.length ? ` (${p.geo_countries.slice(0, 3).join(',')}${p.geo_countries.length > 3 ? '…' : ''})` : ''}
                     </td>

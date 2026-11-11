@@ -51,6 +51,7 @@ Account administrators choose the engine; whoever looks after output settings se
 5. Under **Caption languages**, add each language to publish. At least one is needed.
 6. Set **Hold captions back by (seconds)**: the delay that keeps words in step with the picture, in whole seconds from 0 to 60. 3 to 6 seconds suits most streams.
 7. With the Whisper engine, choose the **Whisper model**: larger models are more accurate and need more of the server.
+   **tiny** and **base** run inside the encoder, with no extra server. **small** and larger need a GPU server of their own; on a Volt server that cannot add one (such as a single on-site server), a larger model runs as **base** instead and the list says so, so captions still appear.
 8. Choose **Save profile**, then start the streams. With captions on, a stream's first output takes 10 to 20 seconds longer to appear.
 
 ### Change captions from a channel

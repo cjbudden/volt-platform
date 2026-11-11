@@ -12,6 +12,7 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { actor, writeAudit } from '../services/audit';
 import { BASELINE, INGEST_KEYS } from '../services/ingest/rules';
 import { preview, completeMetadata, resolveDuplicate, failedMatches } from '../services/ingest/pipeline';
+import { planCompanions } from '../services/ingest/companionMatch';
 import { sanitise, applyNaming } from '../services/ingest/naming';
 import { INGEST_EVENTS } from '../services/ingest/events';
 import { openSession } from '../services/uploads';
@@ -143,7 +144,20 @@ const previewBody = z.object({
 ingestRouter.post('/preview', asyncHandler(async (req, res) => {
   const b = previewBody.parse(req.body);
   const out = [];
-  for (const f of b.files) {
+  // Captions and sidecars belong to a video (companionMatch.ts): they are not
+  // run through the programme rules, they are matched to their video by name.
+  const plans = await planCompanions(accountId(req), b.files);
+  for (const [i, f] of b.files.entries()) {
+    const plan = plans[i];
+    if (plan) {
+      out.push({
+        name: f.name, key: f.name, sanitised: f.name, changed: false,
+        settings: null, sources: {}, matched: [], deferred: false,
+        duplicate: 'proceed', duplicateOf: null, reject: null, failedMatch: null,
+        companion: plan,
+      });
+      continue;
+    }
     const p = await preview(accountId(req), { name: f.name, bytes: f.bytes ?? null, relativePath: f.relativePath ?? null, mime: f.mime ?? null }, b.source, b.contentTypeId ?? null, b.item ?? null);
     out.push({
       name: f.name, key: p.naming.key, sanitised: p.naming.sanitised.name, changed: p.naming.sanitised.changed,

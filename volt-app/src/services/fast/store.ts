@@ -168,6 +168,7 @@ export function lineupFromRow(row: any, ads: AdPolicy): Lineup {
     backfill: s.backfill ?? [],
     seed: s.seed ?? String(row.channel_id),
     identSec: Number((ads as any)?.identBetweenSec ?? 0) || 0,
+    identEvery: Number((ads as any)?.identEvery ?? 1) || 1,
   };
 }
 
@@ -179,9 +180,10 @@ export function lineupFromRow(row: any, ads: AdPolicy): Lineup {
  *   pad      an ident opens any gap long enough for it (grid pad, the anchor
  *            restart), then house spots / slate / the brand loop fill the rest.
  *            The guide's times do not change.
- *   between  an ident between EVERY pair of programmes: the planner reserves
- *            the longest ident's time after each programme (lineup.ts identSec),
- *            so the run order moves later by that much per programme.
+ *   between  an ident between programmes: the planner reserves the longest
+ *            ident's time after each programme (lineup.ts identSec), or after
+ *            every `every`th one so short titles run as a group (identEvery),
+ *            and the run order moves later by that much each time.
  *
  * `loopAssetId` is a seamless brand loop that fills what is left of a gap
  * instead of the slate (the slate stays the fallback for breaks nobody sold).
@@ -195,6 +197,8 @@ export interface ChannelBrand {
   loopAssetId: string | null;
   /** Seconds the planner reserves per programme in 'between' mode: the longest ident, whole segments. */
   identBetweenSec: number;
+  /** 'between' mode: an ident after every Nth programme (1 = every programme, up to 50). */
+  every: number;
 }
 
 export interface ChannelAds {
@@ -223,7 +227,7 @@ export async function adsFor(channelId: string): Promise<ChannelAds> {
     }
   }
   const brand = await brandOf(r?.policy?.brand);
-  const withBrand = brand.identBetweenSec ? { ...policy, identBetweenSec: brand.identBetweenSec } : policy;
+  const withBrand = brand.identBetweenSec ? { ...policy, identBetweenSec: brand.identBetweenSec, identEvery: brand.every } : policy;
   // Which slate and loop came from Loops & Fillers (asset id -> filler asset id), and whether breaks play the loop.
   const filler = { sources: (r?.policy?.fillerSources && typeof r.policy.fillerSources === 'object') ? r.policy.fillerSources as Record<string, string> : {}, breaksUseLoop: r?.policy?.breaksUseLoop === true };
   return { mode, policy: withBrand, brand, adServerId: r?.ad_server_id ?? null, house, houseRefs: refs, scope: r?.decision_scope ?? 'session', filler };
@@ -246,7 +250,8 @@ export async function brandOf(raw: any): Promise<ChannelBrand> {
   }
   const longest = idents.reduce((m, i) => Math.max(m, i.durationSec), 0);
   const identBetweenSec = mode === 'between' && longest > 0 ? Math.ceil(longest / SEGMENT_SEC - 1e-6) * SEGMENT_SEC : 0;
-  return { mode: idents.length ? mode : 'off', identIds, idents, loopAssetId, identBetweenSec };
+  const every = Math.min(50, Math.max(1, Math.round(Number(raw?.every) || 1)));
+  return { mode: idents.length ? mode : 'off', identIds, idents, loopAssetId, identBetweenSec, every };
 }
 
 /**
@@ -378,6 +383,7 @@ export async function applyLineup(lineupId: string, opts: { from?: Date; days?: 
       const md = {
         kind: 'content', source: 'fast', lineupId: row.id, slotId: p.slotId, cycle: p.cycle, vodAssetId: p.assetId,
         contentSec: p.contentSec, padSec: p.padSec, note: p.note ?? null,
+        ...(p.identAfter !== undefined ? { identAfter: p.identAfter } : {}),
         ...(p.series ? { series: p.series.name, season: p.series.season, episodeNumber: p.series.episode } : {}),
       };
       const ins = await c.query(
@@ -533,6 +539,8 @@ export async function timelineFor(channelId: string, from: Date, to: Date) {
   const gapFill = (sec: number, i: number, identIndex: number): TimelineFill[] =>
     brandedFill(sec, identIndex, brand, (left) => fillOf(houseFill(left, SEGMENT_SEC, ads.house, i)), loop)
       .map((f) => (f.kind === 'ident' ? { ...f, master: brandMasters.get(String(f.assetId)) ?? null } : f));
+  const gapFillNoIdent = (sec: number, i: number): TimelineFill[] =>
+    brandedFill(sec, 0, { ...brand, mode: 'off' }, (left) => fillOf(houseFill(left, SEGMENT_SEC, ads.house, i)), loop);
 
   const items: TimelineItem[] = [];
   let breakIndex = 0;
@@ -576,7 +584,13 @@ export async function timelineFor(channelId: string, from: Date, to: Date) {
     }
     const end = new Date(p.ends_at).getTime();
     if (end - t > 500) {
-      push({ kind: 'filler', id: `${p.id}:pad`, start: new Date(t).toISOString(), durationSec: (end - t) / 1000, fill: gapFill((end - t) / 1000, breakIndex++, identIndex) });
+      // EVERY N PROGRAMMES: a programme the planner kept no ident time after
+      // (identAfter false) is inside a group, so its gap (grid pad) has no
+      // ident either; the loop, house spots or slate fill it. Programmes
+      // written before identEvery existed carry no flag and keep the old rule.
+      const noIdent = brand.mode === 'between' && md.identAfter === false;
+      push({ kind: 'filler', id: `${p.id}:pad`, start: new Date(t).toISOString(), durationSec: (end - t) / 1000,
+        fill: noIdent ? gapFillNoIdent((end - t) / 1000, breakIndex++) : gapFill((end - t) / 1000, breakIndex++, identIndex) });
     }
   }
   // THE CHANNEL'S LADDER (ladder.ts): every asset plays its packaging for the

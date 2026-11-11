@@ -118,6 +118,15 @@ export interface Lineup {
    * the channel's ident. 0 = none. The playout fills it (store.ts timelineFor).
    */
   identSec?: number;
+  /**
+   * EVERY N PROGRAMMES (Christian 8 Nov): the ident time is kept after every
+   * Nth programme only, so a few short titles run back to back as a group and
+   * the sting closes the group. 1 (the default) is after every programme.
+   * Counted from the epoch like everything else here, so a re-plan puts the
+   * sting in the same place, and started again at the daily restart so the
+   * groups follow the run order.
+   */
+  identEvery?: number;
 }
 
 export interface PlannedProgramme {
@@ -128,6 +137,8 @@ export interface PlannedProgramme {
   slotIndex: number;
   /** Position in this pass's run order (after the cycle shift). */
   ordinal: number;
+  /** Brand mode 'between': whether the ident's time is kept after this programme (identEvery). */
+  identAfter?: boolean;
   assetId: string;
   title: string;
   start: Date;
@@ -279,6 +290,9 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
   // between breaks that accumulate over short titles, and ad seconds charged
   // to each local clock hour, for the hourly cap.
   let sinceBreak = 0;
+  // Programmes since the last ident (identEvery), carried like sinceBreak.
+  let sinceIdent = 0;
+  const identEvery = Math.max(1, Math.round(lineup.identEvery ?? 1));
   const hourUse = new Map<string, number>();
   const hourKey = (d: Date) => `${localDateOf(d, zone)}T${localTimeOf(d, zone).slice(0, 2)}`;
   const toMs = to.getTime();
@@ -306,7 +320,9 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
           if (c.trimmedSec > 0) notice(new Date(t), `The hourly cap of ${pol.maxPerHourMin} ad minutes shortened or dropped some breaks.`);
         }
         const breakSec = breaks.reduce((s, b) => s + b.durationSec, 0);
-        const identSec = Math.max(0, lineup.identSec ?? 0);
+        // the ident's time after this programme only when it closes a group of identEvery
+        const identAfter = (lineup.identSec ?? 0) > 0 && sinceIdent + 1 >= identEvery;
+        const identSec = identAfter ? Math.max(0, lineup.identSec ?? 0) : 0;
         // ANCHOR: an item that would run past the daily restart is not started.
         // The programme before it is padded up to the anchor and the run order
         // starts again from the top.
@@ -320,6 +336,7 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
           t = nextAnchor;
           nextAnchor = anchorAt(t);
           restarted = true;
+          sinceIdent = 0;
           break;
         }
         const midSec = breaks.filter((b) => b.position === 'mid').reduce((x, b) => x + b.durationSec, 0);
@@ -352,6 +369,7 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
         const prog: PlannedProgramme = {
           key: `c${cycle}:${slot.id}${p.series ? `:e${p.series.pass}.${p.series.index}` : ''}`,
           cycle, slotId: slot.id, slotIndex, ordinal: k, assetId: p.asset.id, title: p.asset.title,
+          ...((lineup.identSec ?? 0) > 0 ? { identAfter } : {}),
           start: new Date(t),
           contentEnd: new Date(t + Math.round((contentSec + midSec) * 1000)),
           end: new Date(slotEndMs),
@@ -369,8 +387,9 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
         }
         t = prog.end.getTime();
         placed++;
+        sinceIdent = identAfter ? 0 : sinceIdent + 1;
         // landed on (or past) the restart: the next pass starts the run order again
-        if (nextAnchor != null && t >= nextAnchor) { nextAnchor = anchorAt(t); restarted = true; break; }
+        if (nextAnchor != null && t >= nextAnchor) { nextAnchor = anchorAt(t); restarted = true; sinceIdent = 0; break; }
         if (t >= toMs) break;
       }
     }

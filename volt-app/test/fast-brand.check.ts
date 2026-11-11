@@ -31,6 +31,20 @@ const check = (m: string, got: unknown, want: unknown) => {
   const grid = planLineup({ epoch, zone: Z, slots, identSec: 6, gridMin: 5 }, assets, epoch, to).programmes;
   check('with a 5 min grid: ident first, grid pad after it, slot still on the grid', [grid[0].end.toISOString(), grid[0].padSec], ['2030-01-01T00:05:00.000Z', 100]);
 
+  // ---- every N programmes: short titles grouped, the ident closes the group --
+  const every3 = planLineup({ epoch, zone: Z, slots, identSec: 6, identEvery: 3 }, assets, epoch, to).programmes;
+  check('every 3: ident time after the 3rd, 6th... only', every3.slice(0, 7).map((p) => p.identAfter), [false, false, true, false, false, true, false]);
+  check('...the group plays back to back', [every3[0].end.toISOString(), every3[1].start.toISOString(), every3[1].padSec], ['2030-01-01T00:03:20.000Z', '2030-01-01T00:03:20.000Z', 0]);
+  check('...the 3rd ends 6 s after its content', [every3[2].padSec, (every3[2].end.getTime() - every3[2].contentEnd.getTime()) / 1000], [6, 6]);
+  const later = planLineup({ epoch, zone: Z, slots, identSec: 6, identEvery: 3 }, assets, new Date(epoch.getTime() + 1800_000), to).programmes;
+  const same = every3.find((p) => p.start.getTime() === later[0].start.getTime());
+  check('a later window puts the ident in the same place', [later[0].identAfter, later[1].identAfter], [same?.identAfter, every3[every3.indexOf(same!) + 1]?.identAfter]);
+  const anch = planLineup({ epoch, zone: Z, slots, identSec: 6, identEvery: 4, anchor: '01:00' }, assets, epoch, new Date(epoch.getTime() + 2 * 3600_000)).programmes;
+  const firstAfter = anch.findIndex((p) => p.start.getTime() >= Date.parse('2030-01-01T01:00:00Z'));
+  check('the count starts again at the daily restart', anch.slice(firstAfter, firstAfter + 4).map((p) => p.identAfter), [false, false, false, true]);
+  check('every 1 is every programme (as before)', planLineup({ epoch, zone: Z, slots, identSec: 6, identEvery: 1 }, assets, epoch, to).programmes.slice(0, 3).map((p) => p.identAfter), [true, true, true]);
+  check('no ident set: no flag', plain[0].identAfter, undefined);
+
   // ---- fill rules ----------------------------------------------------------
   const brand = { mode: 'pad' as const, idents: [{ assetId: 'i1', title: 'Sting', durationSec: 6 }, { assetId: 'i2', title: 'Swap', durationSec: 6 }], loopAssetId: 'L' };
   const rest = (sec: number) => [{ kind: 'slate' as const, assetId: 'S', master: 's', durationSec: sec }];

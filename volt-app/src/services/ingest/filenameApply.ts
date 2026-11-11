@@ -21,8 +21,9 @@
 //  by hand). For the content type the entry is "@type".
 // ============================================================================
 import { query, one } from '../../db';
+import { badRequest } from '../../util/http';
 import { dateAllowsYear, type SchemaField } from '../metadataValidator';
-import { parseFilename, episodeTitleFrom, type FilenameParse } from './filenameParse';
+import { parseFilename, episodeTitleFrom, splitParts, guessMapping, type FilenameParse, type NamePart } from './filenameParse';
 import { classify, BUILTIN_RULES, KIND_FIELD, STANDARD_LABEL, type ClassRule, type Classification } from './classify';
 import { contentFields, relationOf, autoLink, linkValue, type Candidate } from '../contentLinks';
 import type { MatchQuery } from '../relatedMatch';
@@ -185,6 +186,19 @@ export interface FilenamePreview {
   link: { field: string; label: string; query: MatchQuery; current: any; byPerson: boolean } | null;
   /** The probe disagreeing with the name (1080p in the name, 720 lines measured). */
   mismatches: string[];
+  /** The name in parts, for a person to map onto fields (splitParts). */
+  parts: NamePart[];
+  /** What a part can be mapped to: the asset title (`@title`) and the type's text, number, date and list fields. */
+  targets: { field: string; label: string; type: string }[];
+  /** A first guess at the mapping (part index to field), for music types only; empty otherwise. */
+  guess: Record<number, string>;
+}
+
+/** Field types a part of a name can go into as text. Images, links, flags and groups cannot. */
+const MAPPABLE = new Set(['string', 'text', 'tags', 'number', 'integer', 'date', 'datetime', 'enum', 'url']);
+export function mapTargets(fields: SchemaField[]): FilenamePreview['targets'] {
+  return [{ field: '@title', label: 'Asset title', type: 'string' },
+    ...fields.filter((f: any) => MAPPABLE.has(String(f.type)) && !relationOf(f as any).autoMatch).map((f: any) => ({ field: f.key, label: f.label ?? f.key, type: String(f.type) }))];
 }
 
 function isEmpty(v: any) { return v == null || v === '' || (Array.isArray(v) && !v.length); }
@@ -236,6 +250,9 @@ export async function preview(account: string, a: any): Promise<FilenamePreview>
     type: { current: cur ? { id: cur.id, name: cur.name } : null, suggested: r.suggestedType, action: typeAction, byPerson: typeByPerson,
       reasons: [...(r.classification.best?.reasons ?? []), r.classification.conflict?.reason ?? '', typeByPerson && typeAction === 'conflict' ? 'The current type was chosen by a person, so it is only changed if you tick it.' : ''].filter(Boolean), dropsFields },
     title, fields: plans, link, mismatches,
+    parts: splitParts(file),
+    targets: mapTargets(fields),
+    guess: guessMapping(splitParts(file), targetKey, fields.map((f) => f.key)),
   };
 }
 
@@ -252,6 +269,13 @@ export interface ApplyChoice {
   overwrite?: string[];
   /** The link: an asset id a person chose, null to leave it, 'auto' to let the matcher decide. */
   link?: string | 'auto' | null;
+  /**
+   * Parts of the name a person mapped to fields (`@title` for the asset title).
+   * The value is the part as the server splits it, never text from the browser.
+   * A person's mapping is their choice, so it fills or replaces, and it wins over
+   * the reading for the same field.
+   */
+  parts?: { index: number; field: string }[];
 }
 
 export interface ApplyResult {
@@ -306,6 +330,29 @@ export async function applyReading(account: string, assetId: string, choice: App
     if (!allowed) { if (f.action === 'conflict') res.skipped.push({ field: f.field, reason: `${f.label} holds a value a person entered.` }); continue; }
     fill[f.field] = f.value;
   }
+  // Parts a person mapped (only when they chose: never at ingest).
+  const mapped: Record<string, { value: any; token: string; index: number }> = {};
+  let mappedTitle: string | null = null;
+  if (mode === 'chosen' && choice.parts?.length) {
+    const targets = new Set(plan.targets.map((t) => t.field));
+    const byField = new Map<string, NamePart[]>();
+    for (const m of choice.parts) {
+      const part = plan.parts.find((x) => x.index === m.index);
+      if (!part) throw badRequest(`The file name has no part ${m.index + 1}`);
+      if (!targets.has(m.field)) throw badRequest(`${m.field} is not a field this asset's type can take from the file name`);
+      byField.set(m.field, [...(byField.get(m.field) ?? []), part]);
+    }
+    for (const [field, ps] of byField) {
+      ps.sort((a, b) => a.index - b.index);
+      const t = plan.targets.find((x) => x.field === field)!;
+      // Two parts mapped to one field: joined with a space, or kept as two tags.
+      const joined = ps.map((p) => p.value).join(' ');
+      const value = t.type === 'tags' ? ps.map((p) => p.value)
+        : (t.type === 'number' || t.type === 'integer') && /^\d+(\.\d+)?$/.test(joined) ? Number(joined) : joined;
+      if (field === '@title') mappedTitle = value as string;
+      else { mapped[field] = { value, token: ps.map((p) => p.text).join(' '), index: ps[0].index }; fill[field] = value; }
+    }
+  }
   if (Object.keys(fill).length) {
     const { resolveEffectiveFields } = await import('../../modules/metadataSchemas');
     const { validateMetadata } = await import('../metadataValidator');
@@ -315,13 +362,21 @@ export async function applyReading(account: string, assetId: string, choice: App
     for (const [k, v] of Object.entries(ok)) {
       meta[k] = v;
       const fv = plan.fields.find((x) => x.field === k);
-      prov[k] = { source: 'filename', file: plan.file, token: fv?.token ?? null, reason: fv?.reason ?? null, by: by?.label ?? null, at, was: a.metadata?.[k] ?? null };
+      const mp = mapped[k];
+      prov[k] = mp
+        ? { source: 'filename', file: plan.file, token: mp.token, reason: `Part ${mp.index + 1} of the file name, mapped by ${by?.label ?? 'a person'}.`, mapped: true, by: by?.label ?? null, at, was: a.metadata?.[k] ?? null }
+        : { source: 'filename', file: plan.file, token: fv?.token ?? null, reason: fv?.reason ?? null, by: by?.label ?? null, at, was: a.metadata?.[k] ?? null };
       res.applied.push(k);
     }
+    for (const k of Object.keys(mapped)) if (!(k in ok)) res.skipped.push({ field: k, reason: `"${mapped[k].value}" is not a valid value for this field.` });
   }
   // Title
   let title = a.title;
-  if (plan.title && plan.title.action !== 'same') {
+  // A Title field mapped by hand also names an asset still called by its file name.
+  if (!mappedTitle && mapped.title && typeof mapped.title.value === 'string' && (!a.title || a.title === a.original_filename)) mappedTitle = mapped.title.value;
+  if (mappedTitle) {
+    if (mappedTitle !== a.title) { title = mappedTitle; prov.title = { source: 'filename', file: plan.file, mapped: true, by: by?.label ?? null, at, was: a.title ?? null }; res.titleChanged = true; }
+  } else if (plan.title && plan.title.action !== 'same') {
     const ok = mode === 'safe' ? plan.title.action === 'fill' || (plan.title.action === 'replace' && prov.title?.source === 'filename') : !!choice.title;
     if (ok && plan.title.value) { title = plan.title.value; prov.title = { source: 'filename', file: plan.file, by: by?.label ?? null, at, was: a.title ?? null }; res.titleChanged = true; }
   }

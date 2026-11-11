@@ -137,9 +137,11 @@ function ProfileCard({ p, s, onSaved }: { p: CaptionsProfile; s: CaptionsSetting
             </div>
             <div className="field"><label>Whisper model</label>
               <select className="inp" value={f.modelSize} style={{ maxWidth: 320 }} onChange={e => setF(x => ({ ...x, modelSize: e.target.value }))}>
-                {s.modelSizes.map(m => <option key={m} value={m}>{m}{s.cpuInEncoder && s.cpuSizes.includes(m) ? ' (runs in the encoder, no GPU)' : ' (GPU add-on)'}</option>)}
+                {s.modelSizes.map(m => <option key={m} value={m}>{m}{s.cpuInEncoder && s.cpuSizes.includes(m) ? ' (runs in the encoder, no GPU)'
+                  : s.gpuTask === false ? (s.cpuInEncoder ? ' (needs the GPU add-on; runs as base here)' : ' (needs the GPU add-on, not available here)') : ' (GPU add-on)'}</option>)}
               </select>
               <div className="hintxt">{whisper ? 'Larger models are more accurate and need more of the server.' : 'Used only when the account engine is Whisper.'}</div>
+              {whisper && s.gpuTask === false && !s.cpuInEncoder && <div className="hintxt" style={{ color: 'var(--warn)' }} data-captions-unavailable>This server cannot transcribe: its encoder has no caption engine and it cannot run the GPU add-on. Channels stream without captions until the encoder image includes the caption engine.</div>}
             </div>
           </>
         )}

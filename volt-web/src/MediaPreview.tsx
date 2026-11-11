@@ -28,7 +28,7 @@ import { parseThumbVtt, ThumbScrubStrip } from './storyboard'
 import { Notice } from './notices'
 import VoltPlayerView from './VoltPlayerView'
 import { FrameStill } from './FrameStill'
-import { frameAtMs, frameMs, getVodFrame, getVodFrameIndex, msOfFrame, timecode, type ExactFrame, type Rate } from './frames'
+import { frameAtMs, frameMs, getVodFrame, getVodFrameIndex, msOfFrame, setPosterFromFrame, timecode, type ExactFrame, type Rate } from './frames'
 
 export interface PreviewSources {
   /** HLS master/index manifest path. */
@@ -125,7 +125,7 @@ function useSeekRequest(ref: { current: HTMLMediaElement | null }, seek: SeekReq
   }, [seek?.key])
 }
 
-export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster, assetId, seek }: {
+export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt, poster, assetId, onPosterSet, seek }: {
   sources: PreviewSources
   /** Go to a time from outside (QC review). */
   seek?: SeekRequest | null
@@ -135,6 +135,8 @@ export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt,
   assetId?: string | null
   /** The asset's image, shown in the player until it plays (a signed image-service URL). */
   poster?: string | null
+  /** With an asset: offers "Use this frame as the image", then calls this once it is set. */
+  onPosterSet?: () => void
   audioOnly: boolean
   title?: string | null
   /** WebVTT thumbnails for this media (a clip's or a recording's): a scrub
@@ -146,14 +148,31 @@ export default function MediaPreview({ sources, audioOnly, title, thumbnailsVtt,
   if (!hasAny) return null
   return audioOnly
     ? <AudioPreview sources={sources} title={title} err={err} setErr={setErr} seek={seek} />
-    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} assetId={assetId} seek={seek} />
+    : <VideoPreview sources={sources} err={err} setErr={setErr} thumbnailsVtt={thumbnailsVtt} poster={poster} assetId={assetId} onPosterSet={onPosterSet} seek={seek} />
 }
 
 /** Video: the Volt player SDK with the admin skin (the same player customers embed). */
-function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId, seek }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null; assetId?: string | null; seek?: SeekRequest | null }) {
+function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId, onPosterSet, seek }: { sources: PreviewSources; err: string; setErr: (m: string) => void; thumbnailsVtt?: string | null; poster?: string | null; assetId?: string | null; onPosterSet?: () => void; seek?: SeekRequest | null }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   useSeekRequest(ref, seek)
   const frames = useFrameStepping(ref, assetId ?? null)
+  // USE THIS FRAME AS THE IMAGE: the exact frame when frame stepping shows one,
+  // else the player's time (the server finds the frame at it). Pauses first, so
+  // the picture under the button is the one taken.
+  const [posterBusy, setPosterBusy] = useState(false)
+  const [posterMsg, setPosterMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  async function takeFrame() {
+    const v = ref.current
+    if (!v || !assetId) return
+    v.pause()
+    setPosterBusy(true); setPosterMsg(null)
+    try {
+      const r = await setPosterFromFrame(assetId, frames.still ? { frame: frames.still.frame } : { ms: Math.round(v.currentTime * 1000) })
+      setPosterMsg({ kind: 'ok', text: `Image set to the frame at ${r.timecode ?? fmt(r.atMs / 1000)}. It is saved in the Image Library.` })
+      onPosterSet?.()
+    } catch (e: any) { setPosterMsg({ kind: 'error', text: "Couldn't use this frame: " + (e?.message || e) }) }
+    finally { setPosterBusy(false) }
+  }
   // THE ASSET'S IMAGE AS THE POSTER, on the video element itself: shown until it plays, and
   // put back if loading a new source clears it. A newly chosen image is a new URL (versioned).
   useEffect(() => {
@@ -194,6 +213,16 @@ function VideoPreview({ sources, err, setErr, thumbnailsVtt, poster, assetId, se
           <span>frame {frames.still ? frames.still.frame : frameAtMs(frames.rate, t * 1000)}{frames.total ? ` of ${frames.total}` : ''}</span>
           <span style={{ flex: 1 }} />
           <span style={{ fontSize: 'var(--fs-label)', color: 'var(--faint)' }}>Paused: ← → step one frame</span>
+        </div>
+      )}
+      {assetId && onPosterSet && !noPicture && (
+        <div className="frame-readout" data-poster-from-frame>
+          <button type="button" className="btn ghost sm" disabled={posterBusy || !src} onClick={takeFrame}
+            title="Pauses the video and makes the frame on screen this asset's image (saved in the Image Library)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14 }} aria-hidden><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-8 8" /></svg>
+            {posterBusy ? 'Setting the image…' : 'Use this frame as the image'}
+          </button>
+          {posterMsg && <span role="status" style={{ color: posterMsg.kind === 'ok' ? 'var(--live)' : 'var(--down)' }}>{posterMsg.text}</span>}
         </div>
       )}
       {frames.err && <div style={{ marginTop: 6 }}><Notice kind="error" variant="compact" message={frames.err} /></div>}

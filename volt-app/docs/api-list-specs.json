@@ -1769,6 +1769,98 @@
  },
  {
   "method": "GET",
+  "path": "/api/global-lists/:key",
+  "search": [
+   "code"
+  ],
+  "defaultSort": "position",
+  "defaultLimit": 500,
+  "maxLimit": 1000,
+  "allowOffset": true,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": false,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "code": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "The item's stable code. Every field the list declares filters and sorts as value.<key> (and as <key> where that name is free)"
+   },
+   "position": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "isDefault": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ]
+   },
+   "active": {
+    "type": "boolean",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "exists"
+    ],
+    "doc": "Retired items (false) are left out unless you filter on active"
+   },
+   "updatedAt": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
   "path": "/api/ingest/held",
   "search": [
    "title",

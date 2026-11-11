@@ -171,6 +171,8 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
   const [pick, setPick] = useState<Set<string>>(new Set())
   const [replace, setReplace] = useState<Set<string>>(new Set())
   const [link, setLink] = useState<string | 'auto' | null>(null)
+  // Parts of the name mapped by hand: part index -> field ('' or missing: not used).
+  const [map, setMap] = useState<Record<number, string>>({})
   const notify = useNotify()
   useEffect(() => {
     let gone = false
@@ -181,6 +183,7 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
       setTitle(x.title?.action === 'fill')
       setPick(new Set(x.fields.filter((f) => f.action === 'fill').map((f) => f.field)))
       setReplace(new Set(x.fields.filter((f) => f.action === 'replace').map((f) => f.field)))
+      setMap(Object.fromEntries(Object.entries(x.guess ?? {}).map(([k, v]) => [Number(k), v])))
       // A single clear match is offered ticked; a person's existing link is left alone.
       const d = x.link?.decision
       setLink(x.link?.byPerson ? null : d?.action === 'link' && d.candidates[0] ? d.candidates[0].id : null)
@@ -192,7 +195,11 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
     if (!p) return
     setBusy(true)
     try {
-      const r = await libraryApi.filenameApply(asset.id, { type, title, fields: [...pick], overwrite: [...replace, ...(title && p.title?.action !== 'fill' ? ['title'] : [])], link })
+      const parts = Object.entries(map).filter(([, f]) => f).map(([i, field]) => ({ index: Number(i), field }))
+      // A field mapped by hand wins over the reading's value for it.
+      const handMapped = new Set(parts.map((x) => x.field))
+      const r = await libraryApi.filenameApply(asset.id, { type, title: title && !handMapped.has('@title'), fields: [...pick].filter((f) => !handMapped.has(f)),
+        overwrite: [...replace, ...(title && p.title?.action !== 'fill' ? ['title'] : [])].filter((f) => !handMapped.has(f)), link, parts })
       const n = r.applied.length + (r.titleChanged ? 1 : 0)
       notify({ kind: n || r.typeChanged || r.link?.action === 'linked' ? 'ok' : 'info', message: [
         r.typeChanged ? `Content type set to ${p.type.suggested?.name}.` : '',
@@ -202,7 +209,12 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
       onApplied()
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
-  const nothing = p && !p.fields.length && !p.title && p.type.action === 'none' && !p.link
+  const mapped = Object.values(map).filter(Boolean).length
+  // Fields set from the parts below: the reading's value for them is not used.
+  const fromParts = new Set(Object.values(map).filter(Boolean))
+  const titleFromParts = fromParts.has('@title') || (fromParts.has('title') && p?.title?.action === 'fill')
+  const showParts = !!p && (p.parts?.length ?? 0) > 1 && (p.targets?.length ?? 0) > 0
+  const nothing = p && !p.fields.length && !p.title && p.type.action === 'none' && !p.link && !showParts
   const cands = p?.link?.decision?.candidates ?? []
   return (
     <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -246,15 +258,23 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
                   <tbody>
                     {p.title && p.title.action !== 'same' && (
                       <tr>
-                        <td><input type="checkbox" checked={title} onChange={() => setTitle(!title)} aria-label="Use as the asset title" /></td>
+                        <td><input type="checkbox" checked={title && !titleFromParts} disabled={titleFromParts} onChange={() => setTitle(!title)} aria-label="Use as the asset title" /></td>
                         <td>Asset title</td>
-                        <td>{p.title.value}</td>
+                        <td>{titleFromParts ? <span className="lib-faint" data-from-parts>Set from the parts below</span> : p.title.value}</td>
                         <td className="lib-faint">{p.title.current || 'Empty'}{p.title.byPerson && <span className="lib-replace">Typed by a person</span>}{title && p.title.action !== 'fill' && <span className="lib-replace">Replaces it</span>}</td>
                       </tr>
                     )}
                     {p.fields.map((f) => {
                       const filledAlready = f.action === 'conflict' || f.action === 'replace'
                       const on = filledAlready ? replace.has(f.field) : pick.has(f.field)
+                      if (fromParts.has(f.field)) return (
+                        <tr key={f.field} className="same" data-from-parts>
+                          <td><input type="checkbox" checked={false} disabled aria-label={`${f.label} is set from the parts below`} /></td>
+                          <td>{f.label}</td>
+                          <td className="lib-faint">Set from the parts below</td>
+                          <td className="lib-faint">{f.action === 'fill' ? 'Empty' : show(f.current)}</td>
+                        </tr>
+                      )
                       return (
                         <tr key={f.field} className={f.action === 'same' ? 'same' : ''}>
                           <td>{f.action === 'same' ? <span className="lib-faint" title="Already this value">{LibIcon.check}</span>
@@ -267,6 +287,28 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
                     })}
                   </tbody>
                 </table>
+              )}
+              {showParts && (
+                <div className="field" style={{ marginTop: 14 }} data-name-parts>
+                  <label>Parts of the name</label>
+                  <div className="fn-why" style={{ marginBottom: 6 }}>Choose a field for any part the reading above missed. A field set here is used instead of the reading's value for it{p.guess && Object.keys(p.guess).length ? '; the guess for a music file is the artist then the title, check it' : ''}.</div>
+                  <table className="lib-sugg">
+                    <thead><tr><th scope="col">Part</th><th scope="col">Reads as</th><th scope="col">Use as</th></tr></thead>
+                    <tbody>
+                      {p.parts!.map((pt) => (
+                        <tr key={pt.index} data-part={pt.index}>
+                          <td><code>{pt.text}</code></td>
+                          <td className="lib-faint">{pt.signal ? <span title={pt.signal.reason}>{KIND_LABEL[pt.signal.kind] ?? pt.signal.kind}</span> : pt.number ? 'A number (a track number or a count?)' : pt.value}</td>
+                          <td><select className="inp" aria-label={`Use part ${pt.index + 1} (${pt.text}) as`} value={map[pt.index] ?? ''}
+                            onChange={(e) => setMap({ ...map, [pt.index]: e.target.value })} style={{ minWidth: 180 }}>
+                            <option value="">Not used</option>
+                            {p.targets!.map((t) => <option key={t.field} value={t.field}>{t.label}</option>)}
+                          </select></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
               {p.link && (
                 <div className="field" style={{ marginTop: 14 }}>
@@ -297,7 +339,7 @@ function FilenameDialog({ asset, onClose, onApplied }: { asset: any; onClose: ()
         </div>
         <div className="drawer-f">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn primary" disabled={busy || !p || (!type && !title && !pick.size && !replace.size && link === null)} onClick={apply}>{busy ? 'Applying…' : 'Apply'}</button>
+          <button type="button" className="btn primary" disabled={busy || !p || (!type && !title && !pick.size && !replace.size && link === null && !mapped)} onClick={apply}>{busy ? 'Applying…' : 'Apply'}</button>
         </div>
       </div>
     </div>

@@ -3,7 +3,7 @@ import { config } from '../../config';
 import { buildEncoderJobConfig, buildThumbnailerJobConfig, JobConfigCtx } from '../jobConfig';
 import { buildRadioJobConfig } from '../radio/jobConfig';
 import { burnPlan } from '../graphics/burnFeed';
-import { resolveCaptionsPlan, buildCaptionsJobConfig } from '../captionsPlan';
+import { resolveCaptionsPlan, buildCaptionsJobConfig, captionsHost } from '../captionsPlan';
 import { estimateEncoderLoad, estimateRadioLoad, estimateWhisperLoad } from '../fleet/streamLoad';
 import { assignStream, recordAssignment, type Assignment } from '../fleet/assign';
 import { createClipVod, deriveEventVod, enqueueClipBuild } from '../clips';
@@ -322,7 +322,7 @@ export class Orchestrator {
       sourceLang: ctx.profile.caption_source_lang,
       targets: ctx.profile.caption_targets,
       modelSize: (ctx.profile as any).caption_model_size,
-      cpuInEncoder: config.orchestrator.captionsCpuInEncoder,
+      ...captionsHost(config.orchestrator),
     });
     let capRes: { taskArn: string; lifecycle: 'spot' | 'on_demand' } | null = null;
     let capAssignment: Assignment | null = null;

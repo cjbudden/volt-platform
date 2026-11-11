@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ProgrammeRow, ProgrammeVod, VodState } from '../api'
+import { thumbUrl, type ProgrammeRow, type ProgrammeVod, type VodState } from '../api'
 import { ProgrammeFlagMark } from '../programmeMedia'
 
 /* ============================================================================
@@ -96,11 +96,34 @@ function gapsOf(placed: Placed[], dayStart: number, dayEnd: number) {
   return gaps
 }
 
-export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, onAdd }: {
+/** A programme's own image (metadata image, icon or thumbnail), the same fields the public guide reads. */
+export const programmeImageRef = (p: ProgrammeRow): string | null => {
+  const m = p.metadata ?? {}
+  for (const k of ['image', 'icon', 'thumbnail']) if (typeof m[k] === 'string' && m[k].trim()) return m[k].trim()
+  return null
+}
+
+/**
+ * The picture beside a programme in the guide: its own image, else the image of the
+ * channel, station or event the guide belongs to, so a guide never shows a blank slot
+ * where the stream has a picture. Nothing at all when neither has one.
+ */
+export function ProgrammeImage({ p, guideImage, ownerWord, size }: { p: ProgrammeRow; guideImage: string | null; ownerWord: string; size: number }) {
+  const own = programmeImageRef(p)
+  const ref = own ?? guideImage
+  if (!ref) return null
+  return <img src={thumbUrl(ref, size * 2, size * 2, own ? 'cover' : 'inside')} alt="" loading="lazy"
+    data-programme-image={own ? 'own' : 'guide'} title={own ? undefined : `The ${ownerWord}'s image (this programme has none of its own)`}
+    style={{ width: size, height: size, flexShrink: 0, objectFit: own ? 'cover' : 'contain', borderRadius: 6, background: 'var(--panel-2)', border: '1px solid var(--border)' }} />
+}
+
+export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, guideImage = null, onEdit, onAdd }: {
   day: Date
   progs: ProgrammeRow[]
   vod: Record<string, ProgrammeVod>
   overlapsById: Map<string, string[]>
+  /** The channel's, station's or event's image, for programmes without their own. */
+  guideImage?: string | null
   ownerWord: string
   onEdit: (p: ProgrammeRow) => void
   onAdd: (hhmm: string) => void
@@ -245,6 +268,7 @@ export function EpgTimeline({ day, progs, vod, overlapsById, ownerWord, onEdit, 
                   onClick={() => onEdit(p)} onMouseEnter={() => setHover(null)}
                   title={`${p.title}\n${time} · ${fmtDur(x.rawE - x.rawS)}${p.metadata?.description ? `\n${p.metadata.description}` : ''}`}>
                   <div className="row1">
+                    {!tight && <ProgrammeImage p={p} guideImage={guideImage} ownerWord={ownerWord} size={h >= 70 ? 36 : 22} />}
                     <b>{p.title}</b>
                     {tight && <span className="t">{fmtT(x.rawS)}</span>}
                     {tight && live && <span className="dot" aria-label="On now" />}

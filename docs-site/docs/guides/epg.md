@@ -40,6 +40,8 @@ A channel or event page shows the guide from two hours back to eight hours ahead
 
 A guide exists as soon as it has a programme; there is nothing to create first. The list shows each guide's programmes, **Coverage** (how far ahead it is filled) and **Next up**.
 
+A guide shows the image of the stream it belongs to, in the list, at the top of the guide, and beside each programme in **List** and **Timeline**: a channel's or station's guide icon (else its image), or an event's image from its details. A programme with an image of its own shows that instead. A stream with no image shows none.
+
 ### Add a programme
 
 1. In the guide, move to the day with **← Prev**, **Next →**, **Today** or the date box. **List** and **Timeline** switch between a table and the day on a time line; in the timeline, click empty time to add a programme there.

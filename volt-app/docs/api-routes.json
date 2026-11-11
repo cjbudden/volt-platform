@@ -1225,6 +1225,33 @@
  },
  {
   "method": "GET",
+  "path": "/api/collections/:id/access",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/collections/:id/access",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "GET",
+  "path": "/api/collections/:id/access/view-as",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "GET",
   "path": "/api/collections/:id/exclusions",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -2206,6 +2233,15 @@
  },
  {
   "method": "PUT",
+  "path": "/api/fast/channels/:id/geo",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fast: manage",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "PUT",
   "path": "/api/fast/channels/:id/ladder",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -2252,6 +2288,15 @@
  {
   "method": "GET",
   "path": "/api/fast/channels/:id/readiness",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fast: view",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels/:id/rights",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "fast: view",
@@ -2680,6 +2725,33 @@
   "access": "fleet: view",
   "viewerTier": false,
   "group": "/api/fleet"
+ },
+ {
+  "method": "GET",
+  "path": "/api/global-lists",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/global-lists"
+ },
+ {
+  "method": "GET",
+  "path": "/api/global-lists/:key",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/global-lists"
+ },
+ {
+  "method": "GET",
+  "path": "/api/global-lists/:key/items/:code",
+  "api": "public",
+  "credential": "none or per-route",
+  "access": "open",
+  "viewerTier": false,
+  "group": "/api/global-lists"
  },
  {
   "method": "GET",
@@ -4213,6 +4285,114 @@
  },
  {
   "method": "GET",
+  "path": "/api/platform/global-lists",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/global-lists",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/global-lists/:key",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/global-lists/:key",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/global-lists/:key/export",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/global-lists/:key/import",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/global-lists/:key/items",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/global-lists/:key/items",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/platform/global-lists/:key/items/:ref",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/global-lists/:key/items/:ref",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/platform/global-lists/:key/order",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/global-lists/:key/restore",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/global-lists"
+ },
+ {
+  "method": "GET",
   "path": "/api/platform/graphics/accounts/:id/sets",
   "api": "platform",
   "credential": "platform session (aud volt:platform, after TOTP)",
@@ -5081,6 +5261,78 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/metadata-rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "POST",
+  "path": "/api/publishing-rules/metadata-rules",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/publishing-rules/metadata-rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/metadata-rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/publishing-rules/metadata-rules/:id",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "GET",
+  "path": "/api/publishing-rules/metadata-rules/fields",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/publishing-rules/metadata-rules/order",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/publishing-rules"
+ },
+ {
+  "method": "POST",
+  "path": "/api/publishing-rules/metadata-rules/test",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
   "viewerTier": false,
   "group": "/api/publishing-rules"
  },
@@ -7245,6 +7497,15 @@
   "group": "/api/vod"
  },
  {
+  "method": "POST",
+  "path": "/api/vod/:id/image/from-frame",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "GET",
   "path": "/api/vod/:id/images",
   "api": "admin",
@@ -7641,6 +7902,69 @@
   "group": "/api/vod"
  },
  {
+  "method": "POST",
+  "path": "/api/vod/bulk/remove",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/bulk/remove/impact",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/bulk/requests",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/bulk/requests/:id/approve",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/bulk/requests/:id/cancel",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/bulk/requests/:id/reject",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/bulk/restore",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
   "method": "GET",
   "path": "/api/vod/changes",
   "api": "admin",
@@ -7967,6 +8291,15 @@
  {
   "method": "GET",
   "path": "/channel/:id/v/:key/:file",
+  "api": "delivery",
+  "credential": "none, share token or playback token",
+  "access": "public delivery",
+  "viewerTier": true,
+  "group": "/channel"
+ },
+ {
+  "method": "GET",
+  "path": "/channel/:id/v/:key/fast/:file",
   "api": "delivery",
   "credential": "none, share token or playback token",
   "access": "public delivery",

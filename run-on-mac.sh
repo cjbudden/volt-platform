@@ -212,9 +212,35 @@ have python3     || MISSING="$MISSING python3"
 #  engine is missing instead of finding out on air.
 # ---------------------------------------------------------------------------
 PYTHON_BIN="python3"
-if [ -x "$ROOT/volt-encoder/.venv/bin/python3" ]; then PYTHON_BIN="$ROOT/volt-encoder/.venv/bin/python3"; fi
+# A VENV THAT LOST ITS bin/ (an old bundle sync copied lib/ and include/ only):
+# its packages (faster-whisper, torch...) are all still in lib/pythonX.Y, so
+# give it back an interpreter of the same version in place instead of asking
+# for a fresh multi-gigabyte install. `python3.X -m venv` on the folder adds
+# bin/ and pyvenv.cfg and leaves lib/ alone.
+VENV="$ROOT/volt-encoder/.venv"
+if [ -d "$VENV/lib" ] && [ ! -x "$VENV/bin/python3" ]; then
+  PYVER=$(ls "$VENV/lib" 2>/dev/null | grep -E '^python3\.[0-9]+$' | head -1)
+  PYEXE=""
+  for c in "$PYVER" "/opt/homebrew/bin/$PYVER" "/usr/local/bin/$PYVER" "$HOME/.pyenv/shims/$PYVER"; do
+    if [ -n "$PYVER" ] && command -v "$c" >/dev/null 2>&1; then PYEXE="$c"; break; fi
+  done
+  if [ -n "$PYEXE" ]; then
+    echo "    captions venv: volt-encoder/.venv has its packages but no bin/; restoring it with $PYEXE..."
+    "$PYEXE" -m venv --without-pip "$VENV" >/dev/null 2>&1 \
+      && "$VENV/bin/python3" -c "import faster_whisper" >/dev/null 2>&1 \
+      && echo "    captions venv: restored." \
+      || echo "    captions venv: could not be restored in place (see below)."
+  elif [ -n "$PYVER" ]; then
+    echo "    captions venv: volt-encoder/.venv was built with $PYVER, which is not installed (brew install python@${PYVER#python})."
+  fi
+fi
+if [ -x "$VENV/bin/python3" ]; then PYTHON_BIN="$VENV/bin/python3"; fi
 if "$PYTHON_BIN" -c "import faster_whisper" >/dev/null 2>&1; then
   echo "    live captions engine: READY (faster-whisper via $PYTHON_BIN)"
+  # The native encoder runs whisper tiny/base on CPU itself: tell the control
+  # plane, or every captioned profile is planned onto the GPU task the Mac
+  # cannot run. Docker mode below sets this from the encoder image instead.
+  export CAPTIONS_CPU_IN_ENCODER=true
 else
   echo "    live captions engine (native encoder only): NOT AVAILABLE, ${PYTHON_BIN} cannot import faster_whisper."
   if [ -d "$ROOT/volt-encoder/.venv" ] && [ ! -x "$ROOT/volt-encoder/.venv/bin/python3" ]; then
@@ -235,13 +261,24 @@ if "$PYTHON_BIN" -c "import numpy, cv2; cv2.FaceDetectorYN" >/dev/null 2>&1; the
   echo "    social formats face tracking: READY (OpenCV via $PYTHON_BIN)"
 else
   echo "    social formats face tracking: installing numpy and OpenCV for ${PYTHON_BIN}..."
-  if "$PYTHON_BIN" -m pip install --quiet numpy opencv-python-headless >/dev/null 2>&1 \
-     || "$PYTHON_BIN" -m pip install --quiet --user --break-system-packages numpy opencv-python-headless >/dev/null 2>&1; then
+  # A venv restored above (or copied by an old bundle sync) has no working pip:
+  # `-m venv --without-pip` adds none, and a copied pip lost its __main__.py.
+  # Give it one first, or every install below fails with "No module named pip".
+  if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
+    "$PYTHON_BIN" -m ensurepip --upgrade >/dev/null 2>&1 \
+      && echo "      pip was missing from ${PYTHON_BIN}; added it."
+  fi
+  PIPLOG=$(mktemp -t volt-pip.XXXXXX)
+  if "$PYTHON_BIN" -m pip install --quiet numpy opencv-python-headless >"$PIPLOG" 2>&1 \
+     || { [ "$PYTHON_BIN" = "python3" ] && "$PYTHON_BIN" -m pip install --quiet --user --break-system-packages numpy opencv-python-headless >>"$PIPLOG" 2>&1; }; then
     echo "      installed."
   else
-    echo "      NOT AVAILABLE: shots are still found, faces are not. Fix with:"
-    echo "        $PYTHON_BIN -m pip install numpy opencv-python-headless"
+    echo "      NOT AVAILABLE: shots are still found, faces are not. pip said:"
+    grep -E 'ERROR|No module|error:' "$PIPLOG" | tail -3 | sed 's/^/        /'
+    echo "      Fix with:"
+    echo "        $PYTHON_BIN -m ensurepip --upgrade && $PYTHON_BIN -m pip install numpy opencv-python-headless"
   fi
+  rm -f "$PIPLOG"
 fi
 export PYTHON_BIN
 [ -n "$PACKAGER_BIN" ] || MISSING="$MISSING shaka-packager"
@@ -521,7 +558,9 @@ docs_checks() {
   docs_regen "API reference" "node scripts/openapi.mjs --check" "node scripts/openapi.mjs" "volt-app/docs/openapi.json"
   if out=$(cd "$ROOT/docs-site" && node scripts/check-scrub.mjs docs release-notes 2>&1); then docs_say "guides: no internal terms"
   else docs_say "guides: banned terms found:"; echo "$out" | sed 's/^/      /' | head -12; DOCS_FAIL=1; fi
-  if out=$(node "$ROOT/scripts/release/check.mjs" 2>&1); then docs_say "change notes: $(echo "$out" | sed 's/^change notes: //')"
+  # One [docs] line per check: the release check prints the migration safety
+  # line and the change notes line separately.
+  if out=$(node "$ROOT/scripts/release/check.mjs" 2>&1); then echo "$out" | while IFS= read -r l; do [ -n "$l" ] && docs_say "$l"; done
   else docs_say "change notes: core changes without a note (fine while working; needed before a release):"; echo "$out" | sed -n '2,6p' | sed 's/^/      /'; fi
   if out=$(cd "$ROOT/volt-app" && DOCS_TEST_EMAIL="${DOCS_TEST_EMAIL:-admin@rtm.example}" DOCS_TEST_PASSWORD="${DOCS_TEST_PASSWORD:-volt1234}" npx tsx test/docs-session.check.ts 2>&1); then
     docs_say "sign-in endpoint: $(echo "$out" | grep -c '^PASS') checks passed"

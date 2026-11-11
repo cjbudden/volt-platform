@@ -493,3 +493,64 @@ export function episodeTitleFrom(p: Pick<FilenameParse, 'season' | 'episode'>, t
   if (p.season == null) out = out.replace(/\s*\(S\)\s*/g, '').replace(/\s*\(\s*\)\s*/g, '').trim();
   return out;
 }
+
+// ---- the name in parts (manual mapping) -------------------------------------------
+
+export interface NamePart {
+  index: number;
+  /** As written in the file name. */
+  text: string;
+  /** Readable: separators inside the part become spaces, a lower-case part is title cased. */
+  value: string;
+  /** A part the reader recognises on its own (1080p, 2025, h264): its kind and why. */
+  signal: { kind: SignalKind; reason: string } | null;
+  /** Digits only, such as a track number or a count at the front. */
+  number: boolean;
+}
+
+/**
+ * The name split into its parts, for a person to map onto fields when the
+ * reading above is not enough: `21_josh-woodward_saboteurs_1080p.mp4` is
+ * 21 | Josh Woodward | Saboteurs | 1080p. The STRONGEST separator present
+ * splits it (` - `, then `_`, then ` | `, then `.` between words, then `-`,
+ * then spaces); weaker ones stay inside a part as spaces, so `josh-woodward`
+ * stays one part. Pure.
+ */
+export function splitParts(original: string): NamePart[] {
+  const { base } = splitName(original);
+  const tries: RegExp[] = [/\s+[-–—]\s+/, /_+/, /\s*\|\s*/, /(?<!\d)\.(?!\d)|(?<=\d)\.(?!\d)|(?<!\d)\.(?=\d)/, /-+/, /\s+/];
+  let raw: string[] = [base];
+  for (const re of tries) {
+    const p = base.split(re).map((s) => s.trim()).filter(Boolean);
+    if (p.length >= 2) { raw = p; break; }
+  }
+  return raw.map((text, index) => {
+    const words = text.split(/[\s_.\-]+/).filter(Boolean).map((w) => ({ text: w }));
+    const whole = wholeCase(words.map((w) => ({ text: w.text } as any)));
+    const value = whole === 'mixed' ? words.map((w) => w.text).join(' ') : titleCase(words, whole);
+    // Read with a stand-in title in front, since the reader never peels the last
+    // word of a name: a part that is wholly a tag (1080p, 2025, h264) then shows
+    // as a signal whose token is the whole part.
+    const p = parseFilename(`Zzqx ${text}.mp4`);
+    const sig = p.title === 'Zzqx' ? p.signals.find((x) => normaliseWords(x.token) === normaliseWords(text)) ?? p.signals[0] ?? null : null;
+    return { index, text, value, signal: sig ? { kind: sig.kind, reason: sig.reason } : null, number: /^\d+$/.test(text) };
+  });
+}
+
+/**
+ * A first guess at what each part is, for a person to check: for a music type
+ * (song, music video), with two or more plain text parts left once numbers and
+ * recognised tags are set aside, the last is the title and the one before it the
+ * artist (`artist_title`, the usual way music files are named). Anything else
+ * gets no guess: the person maps it. Never applied without the person.
+ */
+export function guessMapping(parts: NamePart[], typeKey: string | null, fieldKeys: string[]): Record<number, string> {
+  const out: Record<number, string> = {};
+  const plain = parts.filter((p) => !p.signal && !p.number);
+  if ((typeKey === 'song' || typeKey === 'music-video') && plain.length >= 2) {
+    const title = plain[plain.length - 1], artist = plain[plain.length - 2];
+    if (fieldKeys.includes('title')) out[title.index] = 'title'; else out[title.index] = '@title';
+    if (fieldKeys.includes('artist')) out[artist.index] = 'artist';
+  }
+  return out;
+}

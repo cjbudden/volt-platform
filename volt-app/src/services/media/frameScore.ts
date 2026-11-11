@@ -1,11 +1,19 @@
 // ============================================================================
 //  WHICH FRAME REPRESENTS A VIDEO BEST.
 //
-//  No model, no faces: plain image measures that separate "a good still" from
-//  the frames people complain about, and that run in milliseconds per frame
-//  on a 160×90 sample:
+//  Plain image measures that separate "a good still" from the frames people
+//  complain about, run in milliseconds per frame on a 160×90 sample, and, when
+//  the server has OpenCV, FACES (8 Nov 2026, Christian: too many hands and dark
+//  frames were chosen while clear faces and scenes were never offered):
 //
-//    exposure       black, white and fade frames are rejected outright
+//    faces          a clear, lit, good-sized face beats any face-less frame
+//                   (YuNet via volt-encoder/bin/frame_faces.py); a face in
+//                   deep shadow counts for less; when a video has faces, its
+//                   frames without one are marked down
+//    exposure       black, white and fade frames are rejected outright, but a
+//                   LOW-KEY frame (dark overall, with lit highlights such as a
+//                   face in a pool of light) is only marked down, not called black;
+//                   a well-exposed frame scores higher than a dim one
 //    contrast       a flat slate or a single-colour card is rejected
 //    sharpness      variance of the Laplacian: motion blur and soft focus lose
 //    colourfulness  Hasler and Süsstrunk's measure: a grey studio wall loses
@@ -29,7 +37,13 @@ export interface FrameStats {
   colourfulness: number; // Hasler-Süsstrunk on 0..1 RGB
   entropy: number;       // bits, 64-bin luma histogram (max 6)
   columnUniformity: number; // 0..1, 1 = every column is one colour top to bottom
+  /** Luma at the 98th percentile, 0..1: the frame's highlights. Low-key frames have them; black frames do not. */
+  p98?: number;
+  /** Faces found in the frame (frameFaces), when a detector ran. */
+  faces?: FrameFaces | null;
 }
+/** What the face detector saw in one frame. Areas are fractions of the frame. */
+export interface FrameFaces { count: number; largest: number; score: number; luma: number }
 export interface FrameScore { score: number; notes: string[]; rejected?: string }
 
 const W = 160, H = 90;
@@ -64,6 +78,7 @@ export async function frameStats(img: Buffer): Promise<FrameStats> {
   }
   const lm = lapSum / laps.length; for (const l of laps) lap += (l - lm) ** 2;
   let ent = 0; for (const c of hist) if (c) { const p = c / n; ent -= p * Math.log2(p); }
+  let acc = 0, p98 = 0; for (let b = 0; b < 64; b++) { acc += hist[b]; if (acc >= 0.98 * n) { p98 = (b * 4 + 2) / 255; break; } }
   // Colour bars and plain cards: how much of the picture's variation is
   // within columns rather than across them. Measured on the top two thirds,
   // where SMPTE bars are columns (the bottom third is the castellations).
@@ -78,6 +93,7 @@ export async function frameStats(img: Buffer): Promise<FrameStats> {
   return {
     mean: mean / 255, stdev: stdev / 255, sharpness: lap / laps.length, colourfulness, entropy: ent,
     columnUniformity: stdev > 1 ? Math.max(0, 1 - withinSd / stdev) : 1,
+    p98,
   };
 }
 
@@ -86,28 +102,75 @@ const clamp = (x: number) => Math.max(0, Math.min(1, x));
 /** Score one frame. `at` is its position in the asset, 0..1, when known. */
 export function scoreFrame(s: FrameStats, at?: number | null): FrameScore {
   const notes: string[] = [];
-  if (s.mean < 0.06) return { score: 0, notes: ['black'], rejected: 'black' };
+  // BLACK means no picture, not a dark one: a low-key frame keeps its highlights.
+  const highlights = s.p98 ?? s.mean;
+  if (s.mean < 0.06 && highlights < 0.3 && !(s.faces?.count)) return { score: 0, notes: ['black'], rejected: 'black' };
   if (s.mean > 0.96) return { score: 0, notes: ['white'], rejected: 'white' };
-  if (s.stdev < 0.035) return { score: 0, notes: ['a flat card'], rejected: 'flat' };
+  if (s.stdev < 0.035 && !(s.faces?.count)) return { score: 0, notes: ['a flat card'], rejected: 'flat' };
   if (s.columnUniformity > 0.93 && s.colourfulness > 0.25) return { score: 0, notes: ['colour bars'], rejected: 'bars' };
   // Log scale between a soft frame (~20) and a crisp one (~1500) on the 160×90 sample.
   const sharp = clamp((Math.log(Math.max(1, s.sharpness)) - Math.log(20)) / (Math.log(1500) - Math.log(20)));
   const contrast = clamp(s.stdev / 0.25);
   const colour = clamp(s.colourfulness / 0.45);
   const detail = clamp(s.entropy / 5.6);
-  let score = 100 * (0.45 * sharp + 0.2 * contrast + 0.15 * colour + 0.2 * detail);
-  if (s.mean < 0.18) { score *= 0.7; notes.push('dark'); }
+  // How well exposed: best around a mid-grey average, falling off towards dark and bright.
+  const exposure = clamp(1 - Math.abs(s.mean - 0.42) / 0.36);
+  // Sharpness no longer dominates: a crisp close-up of hands used to beat a clear face.
+  let score = 100 * (0.3 * sharp + 0.15 * contrast + 0.15 * colour + 0.15 * detail + 0.25 * exposure);
+  if (s.mean < 0.06) { score *= 0.55; notes.push('low light'); }
+  else if (s.mean < 0.18) { score *= 0.75; notes.push('dark'); }
   else if (s.mean > 0.85) { score *= 0.75; notes.push('very bright'); }
   if (sharp < 0.35) notes.push('soft'); else if (sharp > 0.8) notes.push('sharp');
   if (colour > 0.7) notes.push('colourful');
+  const f = s.faces;
+  if (f && f.count > 0) {
+    // A face from about 0.4% of the frame (a wide shot) to 6% (a close-up), surely detected.
+    const size = clamp((Math.log(Math.max(1e-4, f.largest)) - Math.log(0.004)) / (Math.log(0.06) - Math.log(0.004)));
+    const lit = clamp((f.luma - 0.08) / 0.27);
+    const bonus = 45 * (0.35 + 0.65 * size) * clamp(f.score) * (0.3 + 0.7 * lit);
+    score += bonus;
+    notes.push(f.count > 1 ? `${f.count} faces` : 'a face');
+    if (lit < 0.4) notes.push('face in shadow');
+  }
   if (at != null) {
     if (at < 0.03 || at > 0.97) { score *= 0.6; notes.push(at < 0.5 ? 'at the very start' : 'at the very end'); }
     else if (at < 0.08 || at > 0.92) score *= 0.85;
   }
-  return { score: Math.round(score), notes };
+  return { score: Math.round(Math.min(100, score)), notes };
 }
 
-export interface Candidate { key: string; atMs?: number | null; origin: 'ingest' | 'live'; score?: number; notes?: string[]; rejected?: string }
+/**
+ * When the video has faces, a frame without one is a weaker picture of it (a
+ * hand, a guitar neck, an empty room). Applied across a set of scored
+ * candidates once the detector has run on all of them.
+ */
+export function preferFaces<T extends { score?: number; notes?: string[]; rejected?: string; faces?: FrameFaces | null }>(cands: T[]): T[] {
+  const withFaces = cands.filter((c) => !c.rejected && (c.faces?.count ?? 0) > 0).length;
+  if (withFaces < 1) return cands;
+  return cands.map((c) => (c.rejected || (c.faces?.count ?? 0) > 0 || c.faces === undefined) ? c
+    : { ...c, score: Math.round((c.score ?? 0) * 0.75), notes: [...(c.notes ?? []), 'no face'] });
+}
+
+/**
+ * Keep `n` of the best, spread over the video: a frame within `gapMs` of a
+ * better one already kept is a near-copy of it (the same shot) and is passed
+ * over while others are left. Only when too few frames are usable do rejected
+ * ones fill the set, at the end, so the console can say why they were skipped.
+ */
+export function keepBestSpread<T extends { atMs?: number | null; score?: number; rejected?: string }>(cands: T[], n: number, gapMs: number): T[] {
+  const ranked = [...cands].filter((c) => !c.rejected).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const kept: T[] = [];
+  for (const c of ranked) {
+    if (kept.length >= n) break;
+    if (c.atMs != null && kept.some((k) => k.atMs != null && Math.abs((k.atMs as number) - (c.atMs as number)) < gapMs)) continue;
+    kept.push(c);
+  }
+  for (const c of ranked) { if (kept.length >= n) break; if (!kept.includes(c)) kept.push(c); }
+  const rejected = cands.filter((c) => c.rejected).slice(0, Math.max(0, n - kept.length));
+  return [...kept, ...rejected];
+}
+
+export interface Candidate { key: string; atMs?: number | null; origin: 'ingest' | 'live'; score?: number; notes?: string[]; rejected?: string; faces?: FrameFaces | null }
 
 /** The winner and a sentence about it. Candidates come back scored, best first. */
 export function pickFrame(cands: Candidate[]): { best: Candidate | null; reason: string; ranked: Candidate[] } {

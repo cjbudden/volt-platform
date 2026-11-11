@@ -169,6 +169,7 @@ function css(cls: string): string {
   padding: 14px; border-radius: 14px;
   background: var(--vp-secondary); color: var(--vp-ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-variant-numeric: tabular-nums; /* digits one width: live numbers never shift the text */
   font-size: 14px; line-height: 1.4;
   max-width: 480px;
 }

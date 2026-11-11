@@ -226,8 +226,12 @@ export function videoSkin(): Skin {
     const sub = st.live && st.programme ? (st.programme.subtitle ?? item?.title ?? '') : item?.subtitle ?? '';
     text(parts.title as HTMLElement, ctl.title ? title : '');
     text(parts.sub as HTMLElement, ctl.title && sub !== title ? sub : '');
-    // While an on-demand ad plays, its overlay (top left) names it instead.
-    show(parts.top.querySelector('.vpv-title') as HTMLElement, ctl.title && !!title && !st.ad);
+    // The title names the PROGRAMME, so it is hidden whenever something else is
+    // on screen (Christian, 6 Nov): an on-demand ad (its own overlay names it),
+    // a live ad break, and the channel's loop, slate or brand between
+    // programmes. A title that does not match the picture reads as a fault.
+    // Playing the loop video itself is not "between": it keeps its own title.
+    show(parts.top.querySelector('.vpv-title') as HTMLElement, ctl.title && !!title && !st.ad && !st.adBreak && !st.between);
 
     // Cast / AirPlay
     show(parts.cast, ctl.cast && (st.cast.available || st.cast.state !== 'none'));

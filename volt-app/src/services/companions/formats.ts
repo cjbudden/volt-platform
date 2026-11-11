@@ -80,10 +80,27 @@ export function nameHints(name: string): { language: string | null; forced: bool
     const lang = toLang(p);
     if (!lang) continue;
     if (i === 0 && parts.length > 1) continue;             // the title itself ("de" in "de-bruges")
-    const region = nxt && /^([A-Z]{2}|[A-Z][a-z]{3}|\d{3})$/.test(nxt) ? nxt : null;
-    language = region ? `${lang}-${region}` : lang;
+    language = region(nxt) ? `${lang}-${region(nxt)}` : lang;
   }
   return { language, forced, sdh };
+}
+/**
+ * A region or script after a language, in its standard case. Names are often
+ * lower case (`zh_tw`, `zh-hant`, `pt_br`), and reading only `TW` or `Hant`
+ * collapsed five Chinese tracks into one "Chinese". Lower case is taken too,
+ * but never a flag (`cc`, `hi`) or another language code, and a script only
+ * from the known list, so `en_full` stays `en`.
+ */
+const SCRIPTS = new Set(['hans', 'hant', 'latn', 'cyrl', 'arab', 'deva', 'beng', 'taml', 'thai', 'jpan', 'kore', 'hebr', 'grek']);
+const FLAGS = new Set(['cc', 'hi', 'hoh', 'sdh', 'forced']);
+function region(p: string | undefined): string | null {
+  if (!p) return null;
+  if (/^\d{3}$/.test(p)) return p;
+  if (/^[A-Z]{2}$/.test(p) || /^[A-Z][a-z]{3}$/.test(p)) return p;
+  const l = p.toLowerCase();
+  if (l.length === 2 && /^[a-z]{2}$/.test(l) && !FLAGS.has(l) && !toLang(l)) return l.toUpperCase();
+  if (l.length === 4 && SCRIPTS.has(l)) return l[0].toUpperCase() + l.slice(1);
+  return null;
 }
 const ISO3: Record<string, string> = {
   eng: 'en', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', spa: 'es', ita: 'it', por: 'pt', dut: 'nl', nld: 'nl', jpn: 'ja', kor: 'ko',

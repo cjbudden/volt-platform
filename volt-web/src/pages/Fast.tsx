@@ -1336,10 +1336,21 @@ function AirTab({ channelId, hasActive, onAirChange, onAirExt, brandMark, top, l
 
 // ------------------------------------------------------------------ brand
 
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`
+
+/** A whole number from 1 to 50, saved when it is left or Enter is pressed (not on every key). */
+function EveryInput({ id, value, onSave }: { id: string; value: number; onSave: (n: number) => void }) {
+  const [v, setV] = useState(String(value))
+  useEffect(() => setV(String(value)), [value])
+  const commit = () => { const n = Math.min(50, Math.max(1, Math.round(Number(v) || 1))); setV(String(n)); if (n !== value) onSave(n) }
+  return <input id={id} className="inp" type="number" min={1} max={50} step={1} value={v} style={{ width: 80 }}
+    onChange={e => setV(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit() }} />
+}
+
 const BRAND_MODES: [BrandMode, string, string][] = [
   ['off', 'No idents', 'Gaps between programmes are house spots and the slate, as before.'],
   ['pad', 'Idents fill the gaps', 'An ident opens any gap long enough for it (grid pad, the daily restart). The guide keeps its times.'],
-  ['between', 'An ident between every programme', 'Time for the longest ident is kept after every programme, the way a broadcaster runs its channel idents. The run order moves later by that much per programme.'],
+  ['between', 'Idents between programmes', 'Time for the longest ident is kept after every programme, or after every few to run short titles together as a group, the way a broadcaster runs its channel idents. The run order moves later by that much each time.'],
 ]
 
 /**
@@ -1377,9 +1388,10 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
     return save({ loopAssetId: v ? v.slice(2) : null })
   }
   const fillerName = (assetId: string | null | undefined) => { const fid = assetId ? sources[assetId] : null; return fid ? fillers.find(f => f.id === fid)?.name ?? null : null }
-  const brand = ads.brand ?? { mode: 'off' as BrandMode, identIds: [], idents: [], loopAssetId: null, identBetweenSec: 0 }
-  const save = async (b: { mode?: BrandMode; identIds?: string[]; loopAssetId?: string | null }) => {
-    const next = { mode: b.mode ?? brand.mode, identIds: b.identIds ?? brand.identIds, loopAssetId: b.loopAssetId !== undefined ? b.loopAssetId : brand.loopAssetId }
+  const brand = ads.brand ?? { mode: 'off' as BrandMode, identIds: [], idents: [], loopAssetId: null, identBetweenSec: 0, every: 1 }
+  const every = brand.every ?? 1
+  const save = async (b: { mode?: BrandMode; identIds?: string[]; loopAssetId?: string | null; every?: number }) => {
+    const next = { mode: b.mode ?? brand.mode, identIds: b.identIds ?? brand.identIds, loopAssetId: b.loopAssetId !== undefined ? b.loopAssetId : brand.loopAssetId, every: b.every ?? every }
     try {
       setAds(await fastApi.saveAds(channelId, { brand: next }))
       notify({ kind: 'ok', title: 'Saved.', message: next.mode === 'between' || brand.mode === 'between' ? 'Activate, or Rewrite guide, for the guide to make room for the idents.' : 'The playout picks it up within a minute.' })
@@ -1404,7 +1416,18 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
             </label>
           ))}
           {!brand.idents.length && <div className="hintxt">Add an ident first.</div>}
-          {brand.mode === 'between' && <div className="hintxt">{fmtDur(brand.identBetweenSec)} is kept after each programme (the longest ident, rounded up to whole segments).</div>}
+          {brand.mode === 'between' && <>
+            <div className="field" style={{ marginTop: 8 }}>
+              <label htmlFor="brand-every">Play an ident after every</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <EveryInput id="brand-every" value={every} onSave={n => save({ every: n })} />
+                <span>{every === 1 ? 'programme' : 'programmes'}</span>
+              </div>
+            </div>
+            <div className="hintxt">{every === 1
+              ? `${fmtDur(brand.identBetweenSec)} is kept after each programme (the longest ident, rounded up to whole segments).`
+              : `${every} programmes play back to back as a group, then an ident: ${fmtDur(brand.identBetweenSec)} is kept after every ${ordinal(every)} programme (the longest ident, rounded up to whole segments). The count starts again at the daily restart.`}</div>
+          </>}
         </div>
       </div>
       <div className="card">

@@ -112,7 +112,10 @@ epgRouter.get(
              FROM channels c
              JOIN groups g ON g.id=c.group_id WHERE g.account_id=$1
            UNION ALL
-           SELECT 'event', e.id, e.name, e.status::text, NULL::text FROM events e
+           -- An event has no image setting of its own: its content type's image
+           -- field (metadata image, poster, logo or thumbnail) is its picture.
+           SELECT 'event', e.id, e.name, e.status::text,
+                  NULLIF(COALESCE(e.metadata->>'image', e.metadata->>'poster', e.metadata->>'logo', e.metadata->>'thumbnail'), '') FROM events e
              JOIN groups g ON g.id=e.group_id WHERE g.account_id=$1
          ) o
          LEFT JOIN programmes p ON (p.channel_id = o.id OR p.event_id = o.id)

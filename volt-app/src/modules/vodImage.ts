@@ -32,7 +32,7 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { actorLabel } from '../util/actor';
 import { writeAudit, actor } from '../services/audit';
 import { signedImageUrl } from './images';
-import { pickAssetImage, setAssetImage, isAudioAsset, isSongAsset, prepareFileFrames } from '../services/media/assetImage';
+import { pickAssetImage, setAssetImage, setPosterFromFrame, isAudioAsset, isSongAsset, prepareFileFrames } from '../services/media/assetImage';
 import { songIdentity } from '../services/media/musicLookup';
 import { parseIcyTitle } from '../services/radio/trackMeta';
 import { assetImagesRouter } from './assetImages';
@@ -139,6 +139,31 @@ vodImageRouter.put('/:id/image', asyncHandler(async (req, res) => {
   const { userId, label } = actor(req);
   await writeAudit(null, { accountId: acct, userId, label, action: 'update', entityType: 'vod_asset', entityId: a.id, changes: { poster: { from: a.poster_key, to: b.ref } } });
   res.json(await view(a.id, acct));
+}));
+
+/**
+ * The frame at the preview's playhead as the asset's image: `frame` (the exact
+ * frame number, when frame stepping knows it) or `ms` (the player's time). The
+ * still is saved to the Image Library and set, locked against automatic picks.
+ */
+vodImageRouter.post('/:id/image/from-frame', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const b = z.object({ frame: z.number().int().min(0).optional(), ms: z.number().min(0).optional() }).strict()
+    .refine((x) => x.frame != null || x.ms != null, 'say which frame: frame (number) or ms (time)').parse(req.body ?? {});
+  const a = await owned(String(req.params.id), acct);
+  if (!a) throw notFound('VOD asset not found');
+  const by = (await actorLabel(req)) ?? 'someone';
+  let r;
+  try { r = await setPosterFromFrame(a.id, acct, b, by); }
+  catch (e: any) {
+    if (e?.status === 404) throw notFound('VOD asset not found');
+    if (e?.status) { res.status(e.status).json({ error: String(e.message) }); return; }
+    throw e;
+  }
+  const { userId, label } = actor(req);
+  await writeAudit(null, { accountId: acct, userId, label, action: 'update', entityType: 'vod_asset', entityId: a.id,
+    changes: { poster: { from: a.poster_key, to: r.key } }, snapshot: { via: 'preview frame', frame: r.frame, atMs: r.atMs, timecode: r.timecode } });
+  res.json({ ...(await view(a.id, acct)), frame: r.frame, atMs: r.atMs, timecode: r.timecode });
 }));
 
 /**

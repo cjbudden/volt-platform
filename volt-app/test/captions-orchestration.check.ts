@@ -5,6 +5,13 @@
 import { Orchestrator } from '../src/services/orchestrator/service';
 import { MockTaskLauncher } from '../src/services/orchestrator/launcher';
 import { query, pool } from '../src/db';
+import { config } from '../src/config';
+
+// The plan depends on what the launcher can run (captionsPlan.ts captionsHost):
+// on the Mac's local and docker launchers there is no GPU captions task. This
+// suite drives the mock launcher, which stands in for ECS, so say so rather
+// than inherit ORCH_LAUNCHER from a developer's .env.
+(config.orchestrator as any).launcher = 'mock';
 
 let fails = 0;
 const ok = (n: string, c: boolean) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) fails++; };

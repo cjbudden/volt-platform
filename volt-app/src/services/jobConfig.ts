@@ -1,5 +1,5 @@
 import { config } from '../config';
-import { resolveCaptionsPlan } from './captionsPlan';
+import { resolveCaptionsPlan, captionsHost } from './captionsPlan';
 
 /**
  * Build the JSON job config the Volt encoder container reads (matches
@@ -296,14 +296,17 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
       accountProvider: acctProvider, captionsEnabled: true,
       sourceLang: profile.caption_source_lang ?? 'auto', targets: profile.caption_targets ?? [],
       modelSize: (profile as any).caption_model_size ?? undefined,
-      cpuInEncoder: config.orchestrator.captionsCpuInEncoder,
+      ...captionsHost(config.orchestrator),
     });
+    if (plan.note) console.warn(`[captions] ${plan.note}`);
     cfg.captions = {
-      enabled: true,
       engine: acctProvider, // account decides the engine; profile can't exceed it
       source_lang: profile.caption_source_lang ?? 'auto',
       targets: profile.caption_targets ?? [],
       offset_sec: profile.caption_offset_sec ?? 0,
+      // Off here when nothing can transcribe (plan.note says why): the encoder
+      // then starts no worker rather than one that fails every window.
+      enabled: plan.enabled,
       in_encoder: plan.inEncoder,
       ...(plan.mode === 'whisper' && plan.modelSize ? { model_size: plan.modelSize } : {}),
     };

@@ -116,10 +116,16 @@ body{
      scrolled. The glows now sit at the top once and the rest is --bg. */
   background-repeat:no-repeat;
   font-size:var(--fs-base);line-height:1.45;-webkit-font-smoothing:antialiased;
+  /* EVERY DIGIT THE SAME WIDTH, everywhere (Christian, 8 Nov). Inter's
+     proportional figures make a 1 narrower than an 8, so live numbers (clocks,
+     counters, bitrates, viewer counts, durations) shifted the text around
+     them each time they changed, and columns of figures did not line up.
+     Tabular figures keep Inter's look; only the digit widths are fixed. */
+  font-variant-numeric:tabular-nums;
 }
 /* form controls inherit the platform type scale instead of the browser's
    13.333px default, so an input never disagrees with the text beside it */
-input,select,textarea,button{font-family:inherit;font-size:var(--fs-body)}
+input,select,textarea,button{font-family:inherit;font-size:var(--fs-body);font-variant-numeric:inherit}
 /* TEXT ENTRY IS STYLED BY DEFAULT, not by remembering to add a class.
    Before this, a bare <input> or <textarea> fell back to the browser's white
    box with black text: a light control on a dark panel, which is exactly the

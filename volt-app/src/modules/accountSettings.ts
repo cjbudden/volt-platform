@@ -42,9 +42,10 @@ accountSettingsRouter.use(requireAuth);
 
 async function view(acc: string) {
   const b = await accountBrand(acc);
-  const g = await one<any>(`SELECT geo_access, trick_play_default, mp3_feed_enabled FROM accounts WHERE id = $1`, [acc]);
+  const g = await one<any>(`SELECT geo_access, trick_play_default, mp3_feed_enabled, bulk_needs_approval FROM accounts WHERE id = $1`, [acc]);
   // mp3FeedEnabled is read-only here: the system admin sets it (build queue 2.1c-2).
-  return { ...b, geoAccess: normGeo(g?.geo_access), trickPlayDefault: !!g?.trick_play_default, mp3FeedEnabled: !!g?.mp3_feed_enabled, defaults: BRAND_DEFAULTS };
+  return { ...b, geoAccess: normGeo(g?.geo_access), trickPlayDefault: !!g?.trick_play_default, mp3FeedEnabled: !!g?.mp3_feed_enabled,
+    bulkNeedsApproval: !!g?.bulk_needs_approval, defaults: BRAND_DEFAULTS };
 }
 
 accountSettingsRouter.get('/', asyncHandler(async (req, res) => {
@@ -64,6 +65,8 @@ const patchSchema = z.object({
   }).nullable().optional(),
   /** What a new output profile starts with for trick-play (build queue 3.2b). */
   trickPlayDefault: z.boolean().optional(),
+  /** Bulk actions by people below administrator wait for an administrator or owner to confirm them (services/bulkActions.ts). */
+  bulkNeedsApproval: z.boolean().optional(),
 });
 
 accountSettingsRouter.patch('/', requireMinRole('admin'), asyncHandler(async (req, res) => {
@@ -97,6 +100,15 @@ accountSettingsRouter.patch('/', requireMinRole('admin'), asyncHandler(async (re
       const who = actor(req);
       await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'account_geo_access', entityId: acc,
         changes: { geo_access: { from: normGeo(prev?.geo_access), to: next } } });
+    }
+  }
+  if (body.bulkNeedsApproval !== undefined) {
+    const prev = await one<any>(`SELECT bulk_needs_approval FROM accounts WHERE id = $1`, [acc]);
+    if (!!prev?.bulk_needs_approval !== body.bulkNeedsApproval) {
+      await one(`UPDATE accounts SET bulk_needs_approval = $2 WHERE id = $1 RETURNING id`, [acc, body.bulkNeedsApproval]);
+      const who = actor(req);
+      await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'account_bulk_approval', entityId: acc,
+        changes: { bulk_needs_approval: { from: !!prev?.bulk_needs_approval, to: body.bulkNeedsApproval } } });
     }
   }
   if (body.trickPlayDefault !== undefined) {

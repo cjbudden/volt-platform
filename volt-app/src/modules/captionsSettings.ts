@@ -90,6 +90,9 @@ async function view(req: any) {
     // Whether whisper tiny and base run inside the encoder on CPU here, or
     // every whisper size needs the GPU add-on task (captionsPlan.ts).
     cpuInEncoder: config.orchestrator.captionsCpuInEncoder,
+    // Whether this deployment can run the GPU captions task at all (the ECS
+    // launcher; not the Mac's local or docker launchers). Without it a bigger size runs as base on CPU, or not at all.
+    gpuTask: config.orchestrator.launcher !== 'local' && config.orchestrator.launcher !== 'docker',
     cpuSizes: [...CPU_WHISPER_SIZES],
     modelSizes: [...MODEL_SIZES],
     languages: CAPTION_LANGUAGES,

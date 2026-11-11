@@ -78,3 +78,55 @@ export async function uploadVodDir(dir: string, assetId: string, opts: { concurr
   for (const f of lists) await put(f);
   return { master: `${base}/master.m3u8`, mpd: `${base}/manifest.mpd`, files: files.length, bytes };
 }
+
+// ---------------------------------------------------------------------------
+//  THE RESTORE BIN IN THE ORIGIN BUCKET (services/media/trash.ts objects).
+//  A deleted asset's packaged media (HLS and DASH, ladder variants) is moved
+//  from vod/<id>/ to trash/<bin item>/vod/<id>/ in the same bucket: off the
+//  CDN's path at once, restorable by moving it back, deleted by the purge.
+//  S3 has no rename, so a move is copy then delete, object by object.
+// ---------------------------------------------------------------------------
+
+/** Every key under a prefix. */
+export async function listPrefix(prefix: string): Promise<{ key: string; size: number }[]> {
+  const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+  const c = await client();
+  const out: { key: string; size: number }[] = [];
+  let token: string | undefined;
+  do {
+    const r: any = await c.send(new ListObjectsV2Command({ Bucket: config.aws.s3Bucket, Prefix: prefix, ContinuationToken: token }));
+    for (const o of r.Contents ?? []) out.push({ key: o.Key, size: Number(o.Size ?? 0) });
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
+/** Move everything under `from` to `to` (both prefixes ending in '/'). Returns what moved. */
+export async function movePrefix(from: string, to: string): Promise<{ files: number; bytes: number }> {
+  const { CopyObjectCommand, DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
+  const c = await client();
+  const keys = await listPrefix(from);
+  let bytes = 0;
+  for (let i = 0; i < keys.length; i += 8) {
+    await Promise.all(keys.slice(i, i + 8).map((k) => c.send(new CopyObjectCommand({
+      Bucket: config.aws.s3Bucket, Key: to + k.key.slice(from.length),
+      CopySource: `${config.aws.s3Bucket}/${k.key.split('/').map(encodeURIComponent).join('/')}`,
+    }))));
+  }
+  for (let i = 0; i < keys.length; i += 1000) {
+    await c.send(new DeleteObjectsCommand({ Bucket: config.aws.s3Bucket, Delete: { Objects: keys.slice(i, i + 1000).map((k) => ({ Key: k.key })), Quiet: true } }));
+  }
+  for (const k of keys) bytes += k.size;
+  return { files: keys.length, bytes };
+}
+
+/** Delete everything under a prefix (the bin's purge). */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const { DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
+  const c = await client();
+  const keys = await listPrefix(prefix);
+  for (let i = 0; i < keys.length; i += 1000) {
+    await c.send(new DeleteObjectsCommand({ Bucket: config.aws.s3Bucket, Delete: { Objects: keys.slice(i, i + 1000).map((k) => ({ Key: k.key })), Quiet: true } }));
+  }
+  return keys.length;
+}

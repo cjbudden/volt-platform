@@ -13,7 +13,15 @@
 //    rows     the database rows the removal deleted, parents before children, and the
 //             links it set to NULL, so a restore puts them back as they were.
 //
+//    objects  packaged media in the S3 origin bucket (vod/<id>/: HLS, DASH, ladder
+//             variants), moved inside the bucket to trash/<item>/... (vodStore.ts movePrefix),
+//             so it is off the CDN's path at once and a restore moves it back.
+//
 //  An item is purged after VOLT_TRASH_DAYS (7 by default): that is the real deletion.
+//  A Media Library delete (single or bulk) is held for VOLT_LIBRARY_TRASH_DAYS (2 by
+//  default, Christian 9 Nov): long enough to undo a mistake, short enough not to keep
+//  a library's worth of masters on disk. The hourly retention sweep does the purge
+//  (orchestrator sweepRetention, RETENTION_SWEEP_SECONDS).
 //  Restored media is put on hold, so the next retention sweep does not remove it again;
 //  setting an expiry on it lets retention take it later.
 // ============================================================================
@@ -24,12 +32,16 @@ import { one, query, tx } from '../../db';
 import { imageStore } from '../imageStore';
 
 export const TRASH_DAYS = Math.max(1, Number(process.env.VOLT_TRASH_DAYS ?? 7) || 7);
+/** How long a Media Library delete stays restorable. */
+export const LIBRARY_TRASH_DAYS = Math.max(1, Number(process.env.VOLT_LIBRARY_TRASH_DAYS ?? 2) || 2);
 export function trashRoot(): string { return resolve(process.env.VOLT_TRASH_DIR ?? join(process.cwd(), 'trash')); }
 
 export interface TrashFile { from: string; to: string }
 export interface TrashImage { from: string; to: string }
 export interface TrashRow { table: string; row: Record<string, any> }
 export interface TrashRelink { table: string; column: string; ids: string[]; value: string }
+/** A prefix of the S3 origin bucket moved into the bin. */
+export interface TrashObjects { from: string; to: string; files: number }
 
 /** Move a file or directory, across volumes if it must. */
 function move(from: string, to: string): void {
@@ -62,9 +74,11 @@ export class BinItem {
   private images: TrashImage[] = [];
   private rowsOut: TrashRow[] = [];
   private relinks: TrashRelink[] = [];
+  private objectsOut: TrashObjects[] = [];
   private bytes = 0;
   private count = 0;
-  constructor(id: string, readonly o: { accountId: string | null; kind: 'recording_media' | 'vod_asset' | 'media_file'; subjectId: string | null; label: string; reason: string; createdBy?: string | null }) {
+  constructor(id: string, readonly o: { accountId: string | null; kind: 'recording_media' | 'vod_asset' | 'media_file'; subjectId: string | null; label: string; reason: string; createdBy?: string | null;
+    /** Days before the purge; omitted: VOLT_TRASH_DAYS. */ days?: number }) {
     this.id = id;
   }
   static async open(o: BinItem['o']): Promise<BinItem> {
@@ -72,7 +86,7 @@ export class BinItem {
     return new BinItem(r!.id, o);
   }
   get dir(): string { return join(trashRoot(), this.id); }
-  get isEmpty(): boolean { return !this.files.length && !this.images.length && !this.rowsOut.length; }
+  get isEmpty(): boolean { return !this.files.length && !this.images.length && !this.rowsOut.length && !this.objectsOut.length; }
 
   /** Move a file or a whole directory into the bin. `group` names the subfolder it goes in. */
   file(path: string, group = 'files'): void {
@@ -100,15 +114,23 @@ export class BinItem {
     try { await imageStore().move(key, to); } catch { return; }
     this.images.push({ from: key, to }); this.bytes += size; this.count++;
   }
+  /** Move a prefix of the S3 origin bucket into the bin (vod/<id>/ for a library asset). */
+  async objects(prefix: string): Promise<void> {
+    const { movePrefix } = await import('../fast/vodStore');
+    const to = `trash/${this.id}/${prefix}`;
+    const m = await movePrefix(prefix, to);
+    if (!m.files) return;
+    this.objectsOut.push({ from: prefix, to, files: m.files }); this.bytes += m.bytes; this.count += m.files;
+  }
   rows(table: string, rows: Record<string, any>[]): void { for (const row of rows) this.rowsOut.push({ table, row }); }
   relink(table: string, column: string, ids: string[], value: string): void { if (ids.length) this.relinks.push({ table, column, ids, value }); }
 
   async save(hint: Record<string, any> = {}, c?: PoolClient): Promise<string> {
-    const sql = `INSERT INTO trash_items(id, account_id, kind, subject_id, label, reason, bytes, file_count, files, images, rows, relinks, restore_hint, purge_after, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb, now() + make_interval(days => $14), $15)`;
+    const sql = `INSERT INTO trash_items(id, account_id, kind, subject_id, label, reason, bytes, file_count, files, images, rows, relinks, restore_hint, purge_after, created_by, objects)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb, now() + make_interval(days => $14), $15, $16::jsonb)`;
     const params: any[] = [this.id, this.o.accountId, this.o.kind, this.o.subjectId, this.o.label.slice(0, 300), this.o.reason.slice(0, 500), this.bytes, this.count,
        JSON.stringify(this.files), JSON.stringify(this.images), JSON.stringify(this.rowsOut), JSON.stringify(this.relinks), JSON.stringify(hint),
-       TRASH_DAYS, this.o.createdBy ?? null];
+       this.o.days ?? TRASH_DAYS, this.o.createdBy ?? null, JSON.stringify(this.objectsOut)];
     if (c) await c.query(sql, params); else await query(sql, params);
     return this.id;
   }
@@ -210,6 +232,10 @@ export async function restoreItem(id: string, opts: { accountId?: string | null;
   for (const im of it.images as TrashImage[]) {
     try { await imageStore().move(im.to, im.from); res.images++; } catch { /* gone or already back */ }
   }
+  for (const ob of (it.objects ?? []) as TrashObjects[]) {
+    const { movePrefix } = await import('../fast/vodStore');
+    try { res.files += (await movePrefix(ob.to, ob.from)).files; } catch (e) { console.error('[bin] origin objects not restored', ob.from, e); res.skipped += ob.files; }
+  }
   await tx(async (c) => {
     for (const r of it.rows as TrashRow[]) { await insertRow(c, r.table, r.row); res.rows++; }
     for (const l of it.relinks as TrashRelink[]) {
@@ -254,6 +280,10 @@ export async function purgeItem(id: string): Promise<void> {
   if (!it) return;
   try { rmSync(join(trashRoot(), id), { recursive: true, force: true }); } catch { /* */ }
   for (const im of it.images as TrashImage[]) await imageStore().delete(im.to).catch(() => {});
+  for (const ob of (it.objects ?? []) as TrashObjects[]) {
+    // Left in the bin (and the item held) if the bucket cannot be reached: the next sweep tries again.
+    await (await import('../fast/vodStore')).deletePrefix(ob.to);
+  }
   // The rows were already deleted; once purged there is nothing to restore them to.
   await query(`UPDATE trash_items SET state = 'purged', purged_at = now(), rows = '[]'::jsonb, relinks = '[]'::jsonb WHERE id = $1`, [id]);
 }

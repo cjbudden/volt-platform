@@ -78,6 +78,44 @@ function SharePreview({ name, logo, primary, secondary }: { name: string; logo: 
    ========================================================================== */
 type Geo = { mode: 'block' | 'allow'; countries: string[] } | null
 /**
+ * BULK ACTIONS NEED A MANAGER (services/bulkActions.ts). Off by default. On,
+ * a bulk action by someone below administrator (removing assets in bulk, for
+ * now) is sent to administrators and owners to approve instead of running.
+ */
+function BulkApprovalCard({ on, canEdit, onSaved }: { on: boolean; canEdit: boolean; onSaved: (a: AS) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const notify = useNotify()
+  async function set(v: boolean) {
+    setBusy(true); setErr('')
+    try {
+      onSaved(await api.patchAccountSettings({ bulkNeedsApproval: v }))
+      notify({ kind: 'ok', message: v ? 'Bulk actions by editors and operators now wait for an administrator or owner to approve them.' : 'Bulk actions run as soon as the person confirms them.' })
+    } catch (e: any) { setErr(e?.message || 'Could not save') } finally { setBusy(false) }
+  }
+  return (
+    <div className="card" style={{ padding: 18, marginTop: 20 }}>
+      <div className="sec-label" style={{ marginTop: 0 }}>Bulk actions</div>
+      <div className="toggle-row">
+        <div>
+          <div className="tt">A manager confirms bulk actions</div>
+          <div className="td">Removing assets in bulk from the Media Library by someone below administrator is sent to the account's administrators and owners
+            to approve, and nothing happens until one does. Nobody approves their own request, and a request nobody decides expires after 7 days.
+            Administrators and owners run their own bulk actions after the usual confirmation. Off by default.</div>
+        </div>
+        <div className={`sw ${on ? '' : 'off'}`} role="switch" aria-checked={on} aria-label="A manager confirms bulk actions"
+          aria-disabled={!canEdit || busy || undefined} tabIndex={canEdit ? 0 : -1}
+          onClick={() => { if (canEdit && !busy) set(!on) }}
+          onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && canEdit && !busy) { e.preventDefault(); set(!on) } }}
+          style={!canEdit ? { cursor: 'default', opacity: .6 } : undefined}><i /></div>
+      </div>
+      {!canEdit && <div className="hintxt">Account administrators and owners change these settings.</div>}
+      <FormStatus error={err} />
+    </div>
+  )
+}
+
+/**
  * TRICK-PLAY (build queue 3.2b): I-frame playlists for the players that scrub
  * and fast-forward with them (AVPlayer on Apple devices and Safari, many
  * smart TVs). Off by default, per output profile; the account default is what
@@ -282,6 +320,7 @@ export default function AccountSettings() {
       </div>
       <GeoAccessCard value={a.geoAccess} canEdit={a.canEdit} onSaved={seed} />
       <TrickPlayCard accountDefault={!!a.trickPlayDefault} canEdit={a.canEdit} onSaved={seed} />
+      <BulkApprovalCard on={!!a.bulkNeedsApproval} canEdit={a.canEdit} onSaved={seed} />
     </>
   )
 }
