@@ -45,9 +45,11 @@ locals {
   ]
 }
 
+# On the HTTPS listener once there is one (dns_https.tf); port 80 then only
+# redirects.
 resource "aws_lb_listener_rule" "public" {
   count        = var.enable_role_split ? length(local.public_path_groups) : 0
-  listener_arn = aws_lb_listener.http.arn
+  listener_arn = local.https ? aws_lb_listener.https[0].arn : aws_lb_listener.http.arn
   priority     = 10 + count.index
 
   action {

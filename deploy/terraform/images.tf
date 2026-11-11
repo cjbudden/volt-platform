@@ -27,7 +27,7 @@ variable "enable_image_edge" {
 variable "image_edge_aliases" {
   type        = list(string)
   default     = []
-  description = "Custom domain(s) for the image CDN, e.g. [\"img.example.com\"]. Needs image_edge_certificate_arn."
+  description = "Custom domain(s) for the image CDN, e.g. [\"img.example.com\"]. Needs image_edge_certificate_arn. Empty with domain_name set: img.<domain> is made for you (dns_https.tf)."
 }
 
 variable "image_edge_certificate_arn" {
@@ -44,8 +44,12 @@ variable "image_edge_price_class" {
 
 variable "image_edge_origin_protocol" {
   type        = string
-  default     = "http-only"
-  description = "CloudFront to ALB for renders. Use https-only once the ALB has an HTTPS listener."
+  default     = ""
+  description = "CloudFront to ALB for renders: http-only, https-only or match-viewer. Empty: https-only with domain_name set, else http-only."
+  validation {
+    condition     = contains(["", "http-only", "https-only", "match-viewer"], var.image_edge_origin_protocol)
+    error_message = "image_edge_origin_protocol must be empty, http-only, https-only or match-viewer."
+  }
 }
 
 variable "image_cache_expire_days" {
@@ -76,8 +80,8 @@ locals {
   image_edge   = var.enable_image_edge ? 1 : 0
   image_prefix = "img-cache"
   image_public_base = var.enable_image_edge ? (
-    length(var.image_edge_aliases) > 0 ? "https://${var.image_edge_aliases[0]}" : "https://${aws_cloudfront_distribution.images[0].domain_name}"
-  ) : "http://${aws_lb.cp.dns_name}"
+    length(local.image_edge_aliases) > 0 ? "https://${local.image_edge_aliases[0]}" : "https://${aws_cloudfront_distribution.images[0].domain_name}"
+  ) : local.alb_base_url
 }
 
 # ---- bucket: originals + derivative cache -------------------------------------
@@ -211,7 +215,7 @@ resource "aws_cloudfront_distribution" "images" {
   is_ipv6_enabled = true
   http_version    = "http2and3"
   price_class     = var.image_edge_price_class
-  aliases         = var.image_edge_aliases
+  aliases         = local.image_edge_aliases
 
   # PRIMARY: rendered derivatives. CloudFront asks for <origin_path>/img/...,
   # which is exactly where the API writes them (IMAGE_CACHE_S3_PREFIX).
@@ -227,11 +231,11 @@ resource "aws_cloudfront_distribution" "images" {
   # FAILOVER: the API renders, caches to S3, answers.
   origin {
     origin_id   = "renderer"
-    domain_name = aws_lb.cp.dns_name
+    domain_name = local.alb_origin_host
     custom_origin_config {
       http_port                = 80
       https_port               = 443
-      origin_protocol_policy   = var.image_edge_origin_protocol
+      origin_protocol_policy   = local.image_origin_protocol
       origin_ssl_protocols     = ["TLSv1.2"]
       origin_read_timeout      = 30
       origin_keepalive_timeout = 60
@@ -282,10 +286,12 @@ resource "aws_cloudfront_distribution" "images" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = var.image_edge_certificate_arn == ""
-    acm_certificate_arn            = var.image_edge_certificate_arn == "" ? null : var.image_edge_certificate_arn
-    ssl_support_method             = var.image_edge_certificate_arn == "" ? null : "sni-only"
-    minimum_protocol_version       = var.image_edge_certificate_arn == "" ? "TLSv1" : "TLSv1.2_2021"
+    # Decided by the aliases (known at plan), as on the API edge: a derived
+    # certificate's ARN is only known once it is issued.
+    cloudfront_default_certificate = length(local.image_edge_aliases) == 0
+    acm_certificate_arn            = length(local.image_edge_aliases) == 0 ? null : local.image_edge_certificate_arn
+    ssl_support_method             = length(local.image_edge_aliases) == 0 ? null : "sni-only"
+    minimum_protocol_version       = length(local.image_edge_aliases) == 0 ? "TLSv1" : "TLSv1.2_2021"
   }
 
   tags = { Name = "${local.name}-images" }

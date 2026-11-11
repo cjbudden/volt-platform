@@ -1,11 +1,11 @@
 output "control_plane_url" {
-  value       = "http://${aws_lb.cp.dns_name}"
-  description = "Public control-plane API endpoint (add HTTPS + a domain for prod)."
+  value       = local.https ? "https://${local.host.api}" : "http://${aws_lb.cp.dns_name}"
+  description = "Public control-plane API endpoint: https://api.<domain> with domain_name set, else the ALB over HTTP."
 }
 
 output "cdn_domain" {
-  value       = aws_cloudfront_distribution.cdn.domain_name
-  description = "CloudFront delivery domain — set as CDN_BASE_URL."
+  value       = local.https ? local.host.cdn : aws_cloudfront_distribution.cdn.domain_name
+  description = "Delivery domain (CDN_BASE_URL without the scheme): cdn.<domain> with domain_name set, else the cloudfront.net name."
 }
 
 output "origin_bucket" {

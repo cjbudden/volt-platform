@@ -98,7 +98,7 @@ resource "aws_ecs_service" "control_plane" {
     ignore_changes = [desired_count, task_definition]
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.http, aws_lb_listener.https]
 }
 
 # Per-stream images run the release the deploy script last moved them to; see
@@ -339,7 +339,7 @@ locals {
     # edge_tokens.tf: on-demand play URLs carry a token the CDN checks
     { name = "VOLT_EDGE_TOKENS", value = local.edge_tokens_on ? "issue" : "off" },
     { name = "S3_BUCKET", value = aws_s3_bucket.origin.id },
-    { name = "CDN_BASE_URL", value = "https://${aws_cloudfront_distribution.cdn.domain_name}" },
+    { name = "CDN_BASE_URL", value = local.cdn_base_url },
     { name = "AWS_REGION", value = var.region },
     { name = "ECS_CLUSTER", value = aws_ecs_cluster.main.name },
     { name = "ORCH_LAUNCHER", value = "ecs" },
@@ -388,7 +388,8 @@ locals {
     { name = "ENCODER_LOCAL_KEEP_SECONDS", value = tostring(var.encoder_local_keep_seconds) },
     { name = "ECS_SUBNETS", value = join(",", aws_subnet.private[*].id) },
     { name = "ECS_SECURITY_GROUPS", value = aws_security_group.encoder.id },
-    { name = "INTERNAL_API_BASE_URL", value = "http://${aws_lb.cp.dns_name}" },
+    # origin.<domain> over HTTPS with domain_name set: port 80 then only redirects.
+    { name = "INTERNAL_API_BASE_URL", value = local.alb_base_url },
   ]
 
   control_plane_secrets = [

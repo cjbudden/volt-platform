@@ -35,15 +35,34 @@ resource "aws_lb_target_group" "cp" {
   deregistration_delay = 30
 }
 
-# HTTP listener. Add an HTTPS (443) listener + ACM cert for prod, and redirect
-# 80→443; left HTTP-only here so a throwaway env stands up without a domain.
+# HTTP listener. With domain_name set (dns_https.tf) it only redirects to the
+# HTTPS listener; without one it serves, so a throwaway env stands up with no
+# domain at all.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.cp.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.cp.arn
+    type             = local.https ? "redirect" : "forward"
+    target_group_arn = local.https ? null : aws_lb_target_group.cp.arn
+
+    dynamic "redirect" {
+      for_each = local.https ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+  }
+
+  # CloudFront does not follow redirects: an edge talking HTTP to a
+  # redirecting ALB would hand every viewer a 301 to itself.
+  lifecycle {
+    precondition {
+      condition     = !local.https || (local.alb_origin_protocol != "http-only" && local.image_origin_protocol != "http-only")
+      error_message = "With domain_name set the ALB redirects HTTP to HTTPS, so alb_origin_protocol and image_edge_origin_protocol cannot be http-only. Leave them empty to follow the domain."
+    }
   }
 }

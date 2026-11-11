@@ -36,9 +36,10 @@ locals {
   # Where viewers reach the API (PUBLIC_BASE_URL: share links, the FAST stitcher's
   # session URLs). The alias when one is set, else the edge, else the ALB.
   public_base_url = var.public_base_url != "" ? var.public_base_url : (
-    length(var.api_edge_aliases) > 0 ? "https://${var.api_edge_aliases[0]}" : (
-      var.enable_api_edge ? "https://${aws_cloudfront_distribution.api[0].domain_name}" : "http://${aws_lb.cp.dns_name}"
-  ))
+    length(local.api_edge_aliases) > 0 ? "https://${local.api_edge_aliases[0]}" : (
+      var.enable_api_edge ? "https://${aws_cloudfront_distribution.api[0].domain_name}" : (
+        local.https ? "https://${local.host.api}" : "http://${aws_lb.cp.dns_name}"
+  )))
 }
 
 data "aws_cloudfront_cache_policy" "disabled" {
@@ -122,16 +123,16 @@ resource "aws_cloudfront_distribution" "api" {
   comment         = "${local.name} API edge (play gate cache, WAF)"
   is_ipv6_enabled = true
   price_class     = var.api_edge_price_class
-  aliases         = var.api_edge_aliases
+  aliases         = local.api_edge_aliases
   web_acl_id      = aws_wafv2_web_acl.api[0].arn
 
   origin {
-    domain_name = aws_lb.cp.dns_name
+    domain_name = local.alb_origin_host
     origin_id   = "alb"
     custom_origin_config {
       http_port                = 80
       https_port               = 443
-      origin_protocol_policy   = var.alb_origin_protocol
+      origin_protocol_policy   = local.alb_origin_protocol
       origin_ssl_protocols     = ["TLSv1.2"]
       origin_read_timeout      = 60
       origin_keepalive_timeout = 60
@@ -221,10 +222,10 @@ resource "aws_cloudfront_distribution" "api" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = length(var.api_edge_aliases) == 0
-    acm_certificate_arn            = length(var.api_edge_aliases) == 0 ? null : var.api_edge_certificate_arn
-    ssl_support_method             = length(var.api_edge_aliases) == 0 ? null : "sni-only"
-    minimum_protocol_version       = length(var.api_edge_aliases) == 0 ? "TLSv1" : "TLSv1.2_2021"
+    cloudfront_default_certificate = length(local.api_edge_aliases) == 0
+    acm_certificate_arn            = length(local.api_edge_aliases) == 0 ? null : local.api_edge_certificate_arn
+    ssl_support_method             = length(local.api_edge_aliases) == 0 ? null : "sni-only"
+    minimum_protocol_version       = length(local.api_edge_aliases) == 0 ? "TLSv1" : "TLSv1.2_2021"
   }
 
   tags = { Name = "${local.name}-api-edge" }

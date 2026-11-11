@@ -272,8 +272,9 @@ leader) the pre-warm plan.
 - **The ALB health check is now `/health/ready`.** A task without a database
   leaves the load balancer instead of answering 500s; the container health
   check is `/health/live`, so a database outage does not restart every task.
-- **Not done here:** HTTPS between CloudFront and the ALB (set
-  `alb_origin_protocol = "https-only"` once the ALB has a certificate), Aurora
+- **Not done here:** Aurora
   (RDS Postgres + RDS Proxy + Multi-AZ is the supported path for now), and a
   chaos run on AWS (AWS FIS: kill tasks, fail over RDS and Valkey, interrupt
-  Spot) which is the next step after the first AWS load test.
+  Spot) which is the next step after the first AWS load test. HTTPS between
+  CloudFront and the ALB came with the domain (build queue D3, `dns_https.tf`):
+  set `domain_name` and `alb_origin_protocol` follows it.

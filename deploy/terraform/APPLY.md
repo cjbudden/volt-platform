@@ -36,7 +36,7 @@ have it, `tflint --init && tflint` in this folder is worth a look.
 | Environment name (`staging`, `prod`) | `env`; `prod` turns on deletion protection and a final database snapshot |
 | One customer or many | `deployment = "single"` (default) or `"saas"` |
 | Email provider for invites, password resets, sign-in codes and alerts | `SMTP_URL` in the integrations secret and `app_secret_keys`, `NOTIFY_FROM` in `app_env` (step 7). Without them production cannot send email |
-| A domain and an ACM certificate for the API and the console | `api_edge_aliases`, `api_edge_certificate_arn`, or `public_base_url` |
+| The domain Volt is served under, and its Route 53 hosted zone if it has one | `domain_name`, `route53_zone_id` (step 3). Terraform makes the certificates, the HTTPS listener and the records from these two |
 | Remote state | step 2 |
 
 ## 2. Remote state
@@ -56,6 +56,38 @@ cp terraform.tfvars.example terraform.tfvars
 Set `project`, `env`, `region` and the sizes at the top. Every other variable
 is listed further down the file, commented out, with its default and what it
 does; uncomment only what you change.
+
+**The domain** (`dns_https.tf`, build queue D3). Set `domain_name`, for example
+`volt.example.com`. Volt then answers on four names under it:
+
+| Name | What it is |
+|---|---|
+| `api.<domain>` | the console and the API (the API edge, or the ALB when `enable_api_edge = false`) |
+| `cdn.<domain>` | live and on-demand delivery |
+| `img.<domain>` | the image CDN |
+| `origin.<domain>` | the ALB, for CloudFront and the encoders only |
+
+`hostnames` changes the first label of any of them. Terraform requests two
+certificates validated through DNS (one in us-east-1 for CloudFront, one in
+the stack's region for the ALB), adds an HTTPS listener on the ALB with port
+80 redirecting to it, and has CloudFront and the encoders reach the ALB as
+`origin.<domain>` over HTTPS. `env = "prod"` with no domain plans with a
+warning. Names set by hand earlier (`api_edge_aliases`,
+`image_edge_aliases` with their certificates) still win.
+
+- **Route 53 hosts the domain:** also set `route53_zone_id`. The validation
+  records and the A/AAAA records are made in that zone and step 4 needs
+  nothing else.
+- **The domain is elsewhere:** leave `route53_zone_id` empty. Create the
+  certificates first, add their validation records at your DNS provider,
+  then apply the rest (apply waits up to two hours for the certificates):
+
+  ```bash
+  terraform apply -target=aws_acm_certificate.edge -target=aws_acm_certificate.alb
+  terraform output -json dns_records_to_create   # add every "validation" record
+  terraform plan -out tfplan && terraform apply tfplan
+  terraform output -json dns_records_to_create   # now add every "hosts" record (CNAME)
+  ```
 
 ## 4. Plan, then apply
 

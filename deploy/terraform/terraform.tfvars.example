@@ -5,6 +5,13 @@ project = "volt"
 env     = "staging"
 region  = "us-east-1"
 
+# HTTPS and DNS (dns_https.tf, D3). The domain is the one input; with its
+# Route 53 zone the certificates and records are made by Terraform too.
+# Empty: cloudfront.net names and an HTTP-only ALB (throwaway environments).
+# domain_name     = "volt.example.com"   # api., cdn., img. and origin.<domain>
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"   # empty: records listed in the dns_records_to_create output
+# hostnames       = { api = "api", cdn = "cdn", images = "img", origin = "origin" }
+
 # Encoder nodes. For GPU transcode density, use a g-family type AND switch the
 # ECS AMI in ecs_cluster.tf to the GPU-recommended parameter.
 # encoder_instance_types = ["g4dn.xlarge"]
@@ -41,7 +48,7 @@ enable_rds_proxy = false          # large event: true
 # db_multi_az       = true              # prod
 
 enable_api_edge = true            # CloudFront + WAF in front of the ALB
-# api_edge_aliases         = ["api.example.com"]
+# api_edge_aliases         = ["api.example.com"]   # only to override domain_name's api.<domain>
 # api_edge_certificate_arn = "arn:aws:acm:us-east-1:…"   # must be us-east-1
 # alb_lcu_reservation      = 200  # set the day before a big event, unset after (billed while set)
 
@@ -130,9 +137,9 @@ prewarm_origin_fraction = 0.1
 #   cloudfront.net domain.
 # image_edge_price_class = "PriceClass_All"
 #   CloudFront price class for the image CDN (PriceClass_100 / _200 / _All).
-# image_edge_origin_protocol = "http-only"
-#   CloudFront to ALB for renders. Use https-only once the ALB has an HTTPS
-#   listener.
+# image_edge_origin_protocol = ""
+#   CloudFront to ALB for renders. Empty: https-only with domain_name set,
+#   else http-only.
 # image_cache_expire_days = 180
 #   Rendered derivatives are deleted from S3 this many days after they were
 #   made (re-rendered on demand).
@@ -180,9 +187,9 @@ prewarm_origin_fraction = 0.1
 # worker_scale_out_queue = 10
 #   Ready jobs waiting (Volt/JobsQueued) above which a worker is added.
 # db_pool_max_per_task = 10
-# alb_origin_protocol = "http-only"
-#   CloudFront to ALB. Use https-only once the ALB has an HTTPS listener and
-#   certificate.
+# alb_origin_protocol = ""
+#   CloudFront to ALB. Empty: https-only with domain_name set (the ALB then
+#   has an HTTPS listener), else http-only.
 # waf_rate_limit_per_ip = 6000
 #   Requests per IP per 5 minutes across the API (households and mobile
 #   carriers share IPs: keep generous).

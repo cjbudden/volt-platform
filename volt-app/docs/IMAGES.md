@@ -439,7 +439,7 @@ copy it into the console and the package (the check fails until you do).
 Variables: `enable_image_edge` (true), `image_edge_aliases` and
 `image_edge_certificate_arn` (custom domain such as `img.example.com`, ACM
 certificate in us-east-1), `image_edge_price_class`,
-`image_edge_origin_protocol` (set `https-only` once the ALB has HTTPS),
+`image_edge_origin_protocol` (empty: `https-only` once `domain_name` gives the ALB HTTPS),
 `image_cache_expire_days`, `image_max_dimension`, `image_formats`,
 `images_force_destroy` (false: `terraform destroy` will not delete customer
 originals unless you set it).

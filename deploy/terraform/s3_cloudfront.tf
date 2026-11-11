@@ -151,6 +151,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   comment         = "${local.name} OTT delivery"
   is_ipv6_enabled = true
   price_class     = "PriceClass_100"
+  aliases         = local.cdn_aliases
 
   origin {
     domain_name              = aws_s3_bucket.origin.bucket_regional_domain_name
@@ -168,12 +169,12 @@ resource "aws_cloudfront_distribution" "cdn" {
   dynamic "origin" {
     for_each = var.edge_rights_enabled ? [1] : []
     content {
-      domain_name = aws_lb.cp.dns_name
+      domain_name = local.alb_origin_host
       origin_id   = "variants"
       custom_origin_config {
         http_port                = 80
         https_port               = 443
-        origin_protocol_policy   = var.alb_origin_protocol
+        origin_protocol_policy   = local.alb_origin_protocol
         origin_ssl_protocols     = ["TLSv1.2"]
         origin_read_timeout      = 30
         origin_keepalive_timeout = 60
@@ -302,8 +303,12 @@ resource "aws_cloudfront_distribution" "cdn" {
     }
   }
 
+  # cdn.<domain> with domain_name set (dns_https.tf), else cloudfront.net.
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = !local.https
+    acm_certificate_arn            = local.https ? local.cdn_certificate_arn : null
+    ssl_support_method             = local.https ? "sni-only" : null
+    minimum_protocol_version       = local.https ? "TLSv1.2_2021" : "TLSv1"
   }
 
   tags = { Name = "${local.name}-cdn" }

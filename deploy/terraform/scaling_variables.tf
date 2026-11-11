@@ -131,7 +131,7 @@ variable "enable_api_edge" {
 variable "api_edge_aliases" {
   type        = list(string)
   default     = []
-  description = "Custom domains for the API edge (e.g. [\"api.volt.example\"]). Needs api_edge_certificate_arn."
+  description = "Custom domains for the API edge (e.g. [\"api.volt.example\"]). Needs api_edge_certificate_arn. Empty with domain_name set: api.<domain> and its certificate are made for you (dns_https.tf)."
 }
 
 variable "api_edge_certificate_arn" {
@@ -142,8 +142,12 @@ variable "api_edge_certificate_arn" {
 
 variable "alb_origin_protocol" {
   type        = string
-  default     = "http-only"
-  description = "CloudFront to ALB. Use https-only once the ALB has an HTTPS listener and certificate."
+  default     = ""
+  description = "CloudFront to ALB: http-only, https-only or match-viewer. Empty: https-only with domain_name set (the ALB then has an HTTPS listener), else http-only."
+  validation {
+    condition     = contains(["", "http-only", "https-only", "match-viewer"], var.alb_origin_protocol)
+    error_message = "alb_origin_protocol must be empty, http-only, https-only or match-viewer."
+  }
 }
 
 variable "waf_rate_limit_per_ip" {

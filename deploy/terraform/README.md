@@ -136,8 +136,9 @@ URL-signing secret, and passes `IMAGE_*` settings to every control-plane role. A
 ```bash
 terraform output -raw image_cdn_base_url     # where signed image URLs point
 ```
-For a custom domain set `image_edge_aliases = ["img.example.com"]` and
-`image_edge_certificate_arn` (ACM, us-east-1), then point DNS at the distribution. Smoke test:
+With `domain_name` set the image CDN answers on `img.<domain>` by itself. To use another
+name set `image_edge_aliases = ["img.example.com"]` and `image_edge_certificate_arn` (ACM,
+us-east-1), then point DNS at the distribution. Smoke test:
 upload an image in the console, copy a URL from the URL builder, fetch it twice and check
 `X-Image-Cache` (`MISS`, then `MEMORY`, `HIT` or a CloudFront `Hit`). The images bucket is not
 force-emptied on destroy unless `images_force_destroy = true`. Full guide, secret rotation and
@@ -152,9 +153,11 @@ down cleanly. For `env = "prod"` the DB gets deletion protection + a final
 snapshot and the bucket won't force‑empty — intentional guard rails.
 
 ## Notes & prod hardening
-- **HTTPS/domain.** The ALB is HTTP‑only here so it stands up without a domain.
-  For prod add an ACM cert + an HTTPS listener and redirect 80→443; put a custom
-  domain (Route 53) on both the ALB and the CloudFront distribution.
+- **HTTPS/domain.** Set `domain_name` (and `route53_zone_id` when Route 53
+  hosts it): `dns_https.tf` makes the certificates, the ALB's HTTPS listener
+  with port 80 redirecting, the CloudFront aliases and the DNS records
+  (APPLY.md, step 3). Without a domain the ALB stays HTTP-only, so a throwaway
+  env stands up with none.
 - **GPU captions.** Whisper captions run on their own GPU pool
   (`ecs_capacity_gpu.tf`: `gpu_instance_types`, `gpu_max`), on demand, from
   zero servers. Check the account's G-instance vCPU quota first.
