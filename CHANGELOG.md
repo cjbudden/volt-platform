@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.102.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- fixed · FAST: FAST channels keep playing on deployments that enforce play tokens at the CDN: each channel's playlists carry a shared token that opens only the titles it airs, and a title withdrawn while in the guide stops within about a minute.
+
 ## 0.101.0 (2026-11-11)
 
 ### Internal
