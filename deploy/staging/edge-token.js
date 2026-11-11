@@ -17,6 +17,9 @@
 //  token-free title: "f:<asset id>" in the store, not past its end (build
 //  queue P2-2c; plainPathVerdict in services/edgeTokens.ts).
 //
+//  A shared token (build queue P2-2f, `k: "shared"`) opens the encode folders
+//  of the titles it names, for any viewer, each title's revocation applying.
+//
 //  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked),
 //  "503" (no key yet: the scheduler has not synced). `refusal` gives the
 //  words for the refusal's body, the same as the CloudFront Function's
@@ -26,6 +29,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 
 var TOK = /^\/t\/([A-Za-z0-9_-]{8,2048})\.([0-9a-f]{32})(\/.*)$/;
+var SHARED = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
 
 function storePath() {
   return (process.env && process.env.EDGE_STORE_FILE) || '/data/edge/store.json';
@@ -56,17 +60,27 @@ function decide(uri, cc, store, now) {
   var m = TOK.exec(uri);
   if (!m) return ['403', NOPE];
   var c = claimsOf(m[1]);
-  if (!c || typeof c.p !== 'string' || typeof c.a !== 'string') return ['403', NOPE];
+  var shared = !!c && c.k === 'shared';
+  if (shared ? !Array.isArray(c.A) : (!c || typeof c.p !== 'string' || typeof c.a !== 'string')) return ['403', NOPE];
   var key = store['k:pt'];
   if (!key) return ['503', 'Try again shortly'];
   var want = crypto.createHmac('sha256', key).update(m[1]).digest('hex').slice(0, 32);
   if (want !== m[2]) return ['403', NOPE];
   if (now + 60 < c.n || !(now < c.e)) return ['403', EXPIRED];
   var rest = m[3];
-  if (!c.p || rest.indexOf(c.p) !== 0 || rest.indexOf('/../') >= 0) return ['403', NOPE];
-  cc = (cc || '').toUpperCase();
-  if (c.c && cc && c.c !== cc) return ['403', REGION];
-  var rv = store['r:' + c.a];
+  var title;
+  if (shared) {
+    // A shared token (build queue P2-2f): the titles it names, any viewer.
+    var sm = SHARED.exec(rest);
+    if (!sm || rest.indexOf('/../') >= 0 || c.A.indexOf(sm[1].replace(/-/g, '').toLowerCase()) < 0) return ['403', NOPE];
+    title = sm[1].toLowerCase();
+  } else {
+    if (!c.p || rest.indexOf(c.p) !== 0 || rest.indexOf('/../') >= 0) return ['403', NOPE];
+    cc = (cc || '').toUpperCase();
+    if (c.c && cc && c.c !== cc) return ['403', REGION];
+    title = c.a;
+  }
+  var rv = store['r:' + title];
   if (rv && c.n <= Number(rv)) return ['403', GONE];
   return ['ok', ''];
 }

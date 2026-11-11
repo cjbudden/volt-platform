@@ -71,6 +71,38 @@
 //  the ad stitcher, the archive, skip markers, social) read the files on disk
 //  or in the bucket, never through the public path. Other folders under
 //  /clips/ (ad creatives in /clips/ads/) are not titles and pass as before.
+//
+//  SHARED TOKENS (build queue P2-2f, decided by Christian 11 Nov 2026, option
+//  B). A FAST channel's playlist and a guided ad playlist are written once for
+//  every viewer and cached at the CDN, so they cannot carry one viewer's
+//  token. They carry a shared one instead, one per FAST channel or guided
+//  playlist version, whose claims name the titles it opens rather than one
+//  folder:
+//    k  "shared"
+//    g  what it is for ("fast:<channel id>", "guided:<version>"): logs only
+//    A  the titles it opens, each as its 32 hex id (dashes dropped to keep
+//       the token short: it sits in front of every segment line). It opens
+//       /vod/<id>/ and /clips/vod/<id>/ of each, nothing else.
+//    d  0 (clear)
+//    n  issued at, e expiry, as above
+//  No country: country rules stay where they are today (the channel playlist
+//  and its rights variants), a shared token is for every viewer. The
+//  revocation set still applies per title: the edge takes the title from the
+//  path and checks "r:<that id>", so a withdrawn title stops within a minute
+//  even though the token also opens other titles.
+//
+//  ROTATION. sharedEdgeToken() mints on a fixed clock: a new token every
+//  `periodSec` (default 3 hours) that lives `periodSec + overlapSec` (default
+//  1 hour more), so the token written before a switch keeps opening the
+//  segments still in a live window for the overlap, and a copied segment
+//  address stops at the end of its period plus the overlap. The same inputs
+//  give the same token in every process, so the API and a playout writer
+//  agree without sharing state, and a cached playlist stays valid. A title
+//  revoked inside the current period moves `n` past its revocation, so it
+//  plays again as soon as it is republished, without waiting for a rotation.
+//  At most SHARED_TOKEN_MAX_TITLES titles a token (CloudFront takes a path
+//  segment up to 2048 characters here); sharedEdgeTokens() splits a longer
+//  list into several tokens.
 // ============================================================================
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { query } from '../db';
@@ -80,6 +112,8 @@ import type { Request, Response, NextFunction } from 'express';
 
 export type PolicyClass = 'open' | 'members' | 'premium' | 'rights';
 export interface EdgeClaims { a: string; p: string; c: string; k: PolicyClass; d: 0 | 1; s?: string; n: number; e: number }
+/** A shared token's claims (P2-2f): the titles it opens, for every viewer. */
+export interface SharedClaims { k: 'shared'; g: string; A: string[]; d: 0; n: number; e: number }
 
 /** Where the edge reads the key ("k:pt") and the revocations ("r:<asset id>"). */
 export const TOKEN_KEY = 'k:pt';
@@ -210,6 +244,68 @@ export function mintEdgeToken(o: {
 
 export type EdgeVerdict = 'ok' | 'malformed' | 'signature' | 'early' | 'expired' | 'path' | 'country' | 'revoked';
 
+// ---------------------------------------------------------------------------
+//  Shared tokens (P2-2f)
+// ---------------------------------------------------------------------------
+/** The title folders a shared token can open: an encode's, local or in the bucket. */
+export const SHARED_PATH_RE = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+/** The most titles one shared token names (the token must stay under 2048 characters). */
+export const SHARED_TOKEN_MAX_TITLES = 32;
+const hex32 = (id: string) => id.replace(/-/g, '').toLowerCase();
+
+export function sharedRotation(): { periodSec: number; overlapSec: number } {
+  const n = (v: string | undefined, dflt: number, min: number) => { const x = Number(v); return Number.isFinite(x) && x >= min ? Math.floor(x) : dflt; };
+  return { periodSec: n(process.env.EDGE_SHARED_TOKEN_PERIOD_SEC, 3 * 3600, 300), overlapSec: n(process.env.EDGE_SHARED_TOKEN_OVERLAP_SEC, 3600, 60) };
+}
+
+/**
+ * The shared token in force at `nowSec` for these titles (at most
+ * SHARED_TOKEN_MAX_TITLES; see sharedEdgeTokens for more). `revokedAt`: the
+ * titles' revocation times (epoch s) where they have one, so a title
+ * republished inside the period gets a token issued after its revocation.
+ * `periodStart` and `nextAt` say when this token was due and when the next is.
+ * The caller names only titles that may play now: a revoked title named here
+ * would play again (that is how a republished one does).
+ */
+export function sharedEdgeToken(o: {
+  scope: string; assetIds: string[]; nowSec?: number; key?: string; periodSec?: number; overlapSec?: number;
+  revokedAt?: Record<string, number | null | undefined>; effectiveUntil?: Date | null;
+}): { token: string; claims: SharedClaims; periodStart: number; nextAt: number } {
+  const now = o.nowSec ?? Math.floor(Date.now() / 1000);
+  const dflt = sharedRotation();
+  const P = o.periodSec ?? dflt.periodSec, O = o.overlapSec ?? dflt.overlapSec;
+  const ids = [...new Set(o.assetIds.map(hex32))].sort();
+  if (!ids.length) throw new Error('a shared token opens at least one title');
+  if (ids.length > SHARED_TOKEN_MAX_TITLES) throw new Error(`a shared token opens at most ${SHARED_TOKEN_MAX_TITLES} titles`);
+  const start = Math.floor(now / P) * P;
+  let n = start;
+  for (const [id, at] of Object.entries(o.revokedAt ?? {})) {
+    if (at != null && ids.includes(hex32(id)) && at >= n && at < now) n = at + 1;
+  }
+  let e = start + P + O;
+  if (o.effectiveUntil) e = Math.min(e, Math.floor(o.effectiveUntil.getTime() / 1000));
+  const claims: SharedClaims = { k: 'shared', g: o.scope.slice(0, 80), A: ids, d: 0, n, e };
+  const body = b64u(JSON.stringify(claims));
+  return { token: `${body}.${sig(o.key ?? edgeTokenKey(), body)}`, claims, periodStart: start, nextAt: start + P };
+}
+
+/**
+ * Shared tokens for any number of titles: one per SHARED_TOKEN_MAX_TITLES,
+ * and which token opens which title (keyed by the id as given).
+ */
+export function sharedEdgeTokens(o: Omit<Parameters<typeof sharedEdgeToken>[0], 'assetIds'> & { assetIds: string[] }):
+  { tokens: string[]; byAsset: Map<string, string>; nextAt: number } {
+  const uniq = [...new Map(o.assetIds.map((id) => [hex32(id), id])).values()].sort((x, y) => hex32(x) < hex32(y) ? -1 : 1);
+  const tokens: string[] = []; const byAsset = new Map<string, string>(); let nextAt = 0;
+  for (let i = 0; i < uniq.length; i += SHARED_TOKEN_MAX_TITLES) {
+    const part = uniq.slice(i, i + SHARED_TOKEN_MAX_TITLES);
+    const t = sharedEdgeToken({ ...o, assetIds: part });
+    tokens.push(t.token); nextAt = t.nextAt;
+    for (const id of part) byAsset.set(id, t.token);
+  }
+  return { tokens, byAsset, nextAt };
+}
+
 /**
  * The words in an edge refusal's body (build queue P2-2), the same at both
  * edges and on the play gate: a URL taken across a border says what the gate
@@ -228,20 +324,42 @@ export const EDGE_REFUSAL_TEXT: Record<Exclude<EdgeVerdict, 'ok'>, string> = {
  * against (test/edge-tokens.check.ts runs all three on the same cases).
  * `uri` is the path after the /t/<token> prefix.
  */
-export function verifyEdgeToken(token: string, uri: string, o: { country?: string | null; nowSec: number; revokedAt?: number | null; key?: string }): { verdict: EdgeVerdict; claims?: EdgeClaims } {
+export function verifyEdgeToken(token: string, uri: string, o: {
+  country?: string | null; nowSec: number; key?: string;
+  /** The revocation time of the title the path is in (for a shared token, the path's title, see sharedAssetOf). */
+  revokedAt?: number | null;
+}): { verdict: EdgeVerdict; claims?: EdgeClaims; shared?: SharedClaims; asset?: string } {
   const m = /^([A-Za-z0-9_-]{8,2048})\.([0-9a-f]{32})$/.exec(token);
   if (!m) return { verdict: 'malformed' };
   const want = Buffer.from(sig(o.key ?? edgeTokenKey(), m[1])), got = Buffer.from(m[2]);
   if (want.length !== got.length || !timingSafeEqual(want, got)) return { verdict: 'signature' };
   let c: EdgeClaims;
   try { c = JSON.parse(Buffer.from(m[1], 'base64url').toString('utf8')); } catch { return { verdict: 'malformed' }; }
+  if ((c as any)?.k === 'shared') {
+    // P2-2f: the titles it names, any viewer; the revocation set per title.
+    const sc = c as unknown as SharedClaims;
+    if (!Array.isArray(sc.A)) return { verdict: 'malformed' };
+    if (o.nowSec + 60 < sc.n) return { verdict: 'early', shared: sc };
+    if (o.nowSec >= sc.e) return { verdict: 'expired', shared: sc };
+    const asset = sharedAssetOf(uri);
+    if (!asset || sc.A.indexOf(hex32(asset)) < 0) return { verdict: 'path', shared: sc };
+    if (o.revokedAt != null && sc.n <= o.revokedAt) return { verdict: 'revoked', shared: sc, asset };
+    return { verdict: 'ok', shared: sc, asset };
+  }
+  if (typeof c?.p !== 'string' || typeof c?.a !== 'string') return { verdict: 'malformed' };
   if (o.nowSec + 60 < c.n) return { verdict: 'early', claims: c };
   if (o.nowSec >= c.e) return { verdict: 'expired', claims: c };
   if (!c.p || uri.indexOf(c.p) !== 0 || uri.indexOf('/../') >= 0) return { verdict: 'path', claims: c };
   const cc = (o.country ?? '').toUpperCase();
   if (c.c && cc && c.c !== cc) return { verdict: 'country', claims: c };
-  if (o.revokedAt != null && c.n <= o.revokedAt) return { verdict: 'revoked', claims: c };
-  return { verdict: 'ok', claims: c };
+  if (o.revokedAt != null && c.n <= o.revokedAt) return { verdict: 'revoked', claims: c, asset: c.a };
+  return { verdict: 'ok', claims: c, asset: c.a };
+}
+
+/** The title a shared token's path is in (lower case, with dashes), or null when it is not a title folder it can open. */
+export function sharedAssetOf(uri: string): string | null {
+  const m = SHARED_PATH_RE.exec(uri);
+  return m && uri.indexOf('/../') < 0 ? m[1].toLowerCase() : null;
 }
 
 /**
@@ -426,8 +544,11 @@ export function tokenPathMiddleware() {
     const nowSec = Math.floor(Date.now() / 1000);
     const v = verifyEdgeToken(m[1], m[2], { country: viewerGeo(req) ?? null, nowSec });
     if (v.verdict !== 'ok') return refuseText(res, 403, EDGE_REFUSAL_TEXT[v.verdict]);
-    const rv = await revokedAtFor(v.claims!.a).catch(() => null);
-    if (rv != null && v.claims!.n <= rv) return refuseText(res, 403, EDGE_REFUSAL_TEXT.revoked);
+    // The title the request is in: the token's own, or for a shared token
+    // (P2-2f) the one in the path, so each title's revocation applies.
+    const rv = await revokedAtFor(v.asset!).catch(() => null);
+    const issued = v.claims?.n ?? v.shared!.n;
+    if (rv != null && issued <= rv) return refuseText(res, 403, EDGE_REFUSAL_TEXT.revoked);
     const q = req.url.indexOf('?');
     req.url = m[2] + (q >= 0 ? req.url.slice(q) : '');
     next();

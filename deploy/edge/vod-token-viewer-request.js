@@ -18,6 +18,10 @@
 //    pass    strip /t/<token> and go on to S3 with the plain path, so the
 //            cache key is the plain path and viewers share every segment
 //
+//  SHARED TOKENS (build queue P2-2f): claims {k:"shared", A:[32 hex ids], n, e}
+//  open /vod/<id>/ and /clips/vod/<id>/ of each title named, for any viewer
+//  (no country); the revocation checked is the path's title's.
+//
 //  No key in the store (only before the control plane's first sync): 503 Try
 //  again shortly. Not "open content plays": without the key the claims cannot
 //  be trusted, so a forged "open" token would open anything. A revocation that
@@ -28,6 +32,7 @@ import crypto from 'crypto';
 
 const kvs = cf.kvs('${kvs_id}');
 const TOK = /^\/t\/([A-Za-z0-9_-]{8,2048})\.([0-9a-f]{32})(\/.*)$/;
+const SHARED = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
 
 function refuse(code, text) {
   return {
@@ -58,16 +63,26 @@ async function handler(event) {
   var want = crypto.createHmac('sha256', key).update(m[1]).digest('hex').slice(0, 32);
   if (want !== m[2]) return refuse(403, 'Not available');
   var c = claimsOf(m[1]);
-  if (!c || typeof c.p !== 'string' || typeof c.a !== 'string') return refuse(403, 'Not available');
+  var uri = m[3];
+  var title = null;
+  if (c && c.k === 'shared') {
+    if (!Array.isArray(c.A)) return refuse(403, 'Not available');
+  } else if (!c || typeof c.p !== 'string' || typeof c.a !== 'string') return refuse(403, 'Not available');
   var now = Math.floor(Date.now() / 1000);
   if (now + 60 < c.n || !(now < c.e)) return refuse(403, 'This link has expired');
-  var uri = m[3];
-  if (!c.p || uri.indexOf(c.p) !== 0 || uri.indexOf('/../') >= 0) return refuse(403, 'Not available');
-  var h = req.headers['cloudfront-viewer-country'];
-  var cc = h && h.value ? h.value.toUpperCase() : '';
-  if (c.c && cc && c.c !== cc) return refuse(403, 'Not available in your region');
+  if (c.k === 'shared') {
+    var sm = SHARED.exec(uri);
+    if (!sm || uri.indexOf('/../') >= 0 || c.A.indexOf(sm[1].replace(/-/g, '').toLowerCase()) < 0) return refuse(403, 'Not available');
+    title = sm[1].toLowerCase();
+  } else {
+    if (!c.p || uri.indexOf(c.p) !== 0 || uri.indexOf('/../') >= 0) return refuse(403, 'Not available');
+    var h = req.headers['cloudfront-viewer-country'];
+    var cc = h && h.value ? h.value.toUpperCase() : '';
+    if (c.c && cc && c.c !== cc) return refuse(403, 'Not available in your region');
+    title = c.a;
+  }
   var rv = null;
-  try { rv = await kvs.get('r:' + c.a); } catch (e) { rv = null; }
+  try { rv = await kvs.get('r:' + title); } catch (e) { rv = null; }
   if (rv && c.n <= Number(rv)) return refuse(403, 'No longer available');
   req.uri = uri;
   return req;
