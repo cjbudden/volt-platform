@@ -41,7 +41,9 @@ locals {
     ["/vod-ads/*"],
     # /api/cmcd: players' CMCD v2 event reports (modules/cmcd.ts)
     # /api/journey: apps' journey to play events (modules/journey.ts)
-    ["/api/cmcd", "/api/cmcd/*", "/api/journey", "/api/journey/*"],
+    # /t/*: on-demand media behind a play token on the API's own address (the
+    # console's previews and share pages; services/edgeTokens.ts, build queue P2-2b)
+    ["/api/cmcd", "/api/cmcd/*", "/api/journey", "/api/journey/*", "/t/*"],
   ]
 }
 

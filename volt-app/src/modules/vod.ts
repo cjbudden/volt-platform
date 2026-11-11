@@ -37,6 +37,7 @@ import { SITE_NAME_SQL, encodePlaceOf, withEncodePlace } from '../services/sites
 import { PUBLIC_STATUSES, computePublicStatus, publiclyVisible, publiclyListed, archiveAsset, unarchiveAsset, setListing } from '../services/publicStatus';
 import { rightsForAsset, appTypeOf } from '../services/rightsProfiles';
 import { whoCanWatch, VIEWER_KINDS } from '../services/whoCanWatch';
+import { tokenisedUrls } from '../services/edgeTokens';
 export const vodRouter = Router();
 vodRouter.use(requireAuth);
 
@@ -496,6 +497,22 @@ async function statusFields(row: any) {
   };
 }
 
+/**
+ * THE CONSOLE'S PREVIEW ADDRESSES (build queue P2-2b). With play tokens on, the
+ * manifests and files carry a token like a viewer's, so the preview keeps
+ * playing when VOLT_EDGE_TOKENS=enforce refuses plain paths. Any status: a
+ * draft or an archived title must be previewable by the people working on it,
+ * so the token is not clamped to the window and names no country. Null when
+ * tokens are off: the console then uses the plain keys.
+ */
+function previewUrls(row: any) {
+  const hls = row.master_key || null;
+  const dash = row.formats?.dash && typeof hls === 'string' && /master\.m3u8$/.test(hls) ? hls.replace(/master\.m3u8$/, 'manifest.mpd') : null;
+  const t = tokenisedUrls({ hls, dash, progressive: row.progressive_key || null, mp3: row.export_mp3_key || null, m4a: row.export_m4a_key || null },
+    { assetId: row.id, policyClass: 'rights' });
+  return t ? { ...t.urls, expiresAt: new Date(t.expiresAt * 1000).toISOString() } : null;
+}
+
 vodRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -541,7 +558,7 @@ vodRouter.get(
       ? (await one<any>(`SELECT name FROM sites WHERE id::text = $1 AND account_id = $2`, [row.ingest.siteSource.siteId, accountId(req)]))?.name ?? null
       : null;
     res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), encode_place: encodePlaceOf(row.ingest, siteName),
-      ...(await statusFields(row)), ...extra });
+      ...(await statusFields(row)), preview: previewUrls(row), ...extra });
   })
 );
 

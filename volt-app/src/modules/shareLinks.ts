@@ -167,7 +167,12 @@ const resolveSchema = z.object({
 });
 publicShareRouter.post('/api/share/:token/resolve', asyncHandler(async (req, res) => {
   const { pin, email, code: verifyCode, visit } = resolveSchema.parse(req.body ?? {});
-  const geo = (req.get('cloudfront-viewer-country') || req.query.geo || undefined) as string | undefined;
+  // The viewer's country as the edge says it when the edge is trusted (the
+  // staging nginx sends X-Viewer-Country, not CloudFront's header), else what
+  // the request carries, as before. It matters more now: the page's on-demand
+  // addresses carry a play token bound to this country (build queue P2-2b).
+  const { viewerGeo } = await import('../scale/edge');
+  const geo = viewerGeo(req, (req.get('cloudfront-viewer-country') || (typeof req.query.geo === 'string' ? req.query.geo : '')) || null);
   const out = await openShare(req.params.token, { pin, email, code: verifyCode, geo, visit });
   if (!out.ok) {
     const needsAuth = ['pin_required', 'pin_wrong', 'code_required', 'code_wrong', 'code_expired'].includes(out.reason);

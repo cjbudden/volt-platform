@@ -192,6 +192,8 @@ services:
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
       EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:?set EDGE_SHARED_SECRET in .env}
       EDGE_STORE_FILE: /data/edge/store.json
+      # Under enforce the edge refuses plain /clips/vod/ paths (build queue P2-2b).
+      VOLT_EDGE_TOKENS: ${VOLT_EDGE_TOKENS:-issue}
     volumes:
       - ./nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
       - ./edge-token.js:/etc/nginx/edge-token.js:ro

@@ -60,6 +60,14 @@ native tools are missing but Docker is up, the script picks Docker by itself.
 Docker on a Mac still uses the Mac's CPU, so keep test ladders light (720p and
 480p).
 
+**Play tokens** (`volt-app/src/services/edgeTokens.ts`, build queue P2 and
+P2-2b). `VOLT_EDGE_TOKENS=issue` hands out on-demand addresses with a play
+token, `/t/<token>/clips/vod/...`, which the API checks itself when no edge
+is in front; `VOLT_EDGE_TOKENS=enforce` also refuses plain `/clips/vod/`
+addresses. The console's previews and share pages carry tokens either way. The
+staging stack (`deploy/staging/docker-compose.yml`) passes the same mode to its
+nginx edge. Unset (the default on the Mac) is off: plain addresses as before.
+
 **Server-guided quality (CMSD) and delivery paths** (`volt-app/src/services/delivery`,
 build queue 2.10). The Mac serves viewers from its own uplink, so tell it how
 much it may use: `DELIVERY_ALLOWANCE_MBPS=40` (off when unset). Above 90 % of

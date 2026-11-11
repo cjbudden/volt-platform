@@ -14,10 +14,13 @@
 #   5. CHECKS ON-DEMAND PLAY TOKENS (/t/<token>/clips/...) the way the
 #      CloudFront Function deploy/edge/vod-token-viewer-request.js does, with
 #      njs (edge-token.js) reading the keys the scheduler writes to
-#      /data/edge/store.json (EDGE_STORE_FILE). Build queue P2.
+#      /data/edge/store.json (EDGE_STORE_FILE). Build queue P2. With
+#      VOLT_EDGE_TOKENS=enforce, plain /clips/vod/ paths are refused here
+#      (build queue P2-2b), as CloudFront refuses plain /vod/ and /clips/vod/.
 
 load_module modules/ngx_http_js_module.so;
 env EDGE_STORE_FILE;
+env VOLT_EDGE_TOKENS;
 
 worker_processes auto;
 events { worker_connections 8192; }
@@ -48,6 +51,8 @@ http {
   js_set $edge_token edgetoken.verdict;
   # The words of a refusal, the same as CloudFront's (build queue P2-2).
   js_set $edge_refusal edgetoken.refusal;
+  # "403" for a plain on-demand path under VOLT_EDGE_TOKENS=enforce, else "ok".
+  js_set $edge_plain edgetoken.plain;
 
   upstream api_public {
     zone api_public 64k;
@@ -106,17 +111,25 @@ http {
     }
 
     # On-demand media with a play token in the path: checked here on every
-    # manifest and segment request, then served by api-public from the plain
-    # path (as CloudFront strips the prefix before S3). Only /clips/ can sit
-    # behind a token: the token's folder is checked by edge-token.js.
+    # manifest and segment request, then passed to api-public WITH the token
+    # (build queue P2-2b), which checks it again and serves the plain path:
+    # under enforce the API refuses a plain /clips/vod/ path from anyone, the
+    # edge included. Only /clips/ can sit behind a token: the token's folder is
+    # checked by edge-token.js.
     location ~ ^/t/[^/]+/clips/ {
       limit_req zone=viewer_rl burst=200 nodelay;
       default_type text/plain;
       if ($edge_token = "503") { return 503 "Try again shortly\n"; }
       if ($edge_token != "ok") { return 403 $edge_refusal; }
-      rewrite ^/t/[^/]+(/.*)$ $1 break;
       proxy_pass http://api_public;
       add_header Cache-Control "no-store" always;
+    }
+    # A plain on-demand path: refused under enforce, served as before otherwise.
+    location ~ ^/clips/vod/ {
+      limit_req zone=viewer_rl burst=200 nodelay;
+      default_type text/plain;
+      if ($edge_plain != "ok") { return 403 "Not available\n"; }
+      proxy_pass http://api_public;
     }
     # Any other /t/ path (regexes are tried in order, so after the one above).
     location ~ ^/t/ { default_type text/plain; return 403 "Not available\n"; }

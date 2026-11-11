@@ -42,14 +42,20 @@
 //
 //  VOLT_EDGE_TOKENS: "off" (default: URLs as before), "issue" (the gate hands
 //  out tokenised URLs; the edge checks every /t/ request; plain paths still
-//  play, so nothing breaks while players and caches turn over). Refusing plain
-//  paths ("enforce") comes with the console and share previews carrying tokens
-//  (build queue P2-2).
+//  play, so nothing breaks while players and caches turn over), "enforce"
+//  (as issue, and plain on-demand paths, /clips/vod/ and /vod/, are refused:
+//  at CloudFront, at the staging nginx and by the API itself). The console's
+//  previews (GET /api/vod/:id `preview`) and share pages carry tokens in both
+//  issue and enforce, so they keep playing when enforce is turned on (build
+//  queue P2-2b). The API checks /t/<token>/ paths itself too
+//  (tokenPathMiddleware), so a single Mac with no edge in front, and the ALB's
+//  /clips/* route on AWS, honour the same tokens.
 // ============================================================================
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { query } from '../db';
 import { config } from '../config';
 import type { EdgeStore } from './edgeRights';
+import type { Request, Response, NextFunction } from 'express';
 
 export type PolicyClass = 'open' | 'members' | 'premium' | 'rights';
 export interface EdgeClaims { a: string; p: string; c: string; k: PolicyClass; d: 0 | 1; s?: string; n: number; e: number }
@@ -58,9 +64,47 @@ export interface EdgeClaims { a: string; p: string; c: string; k: PolicyClass; d
 export const TOKEN_KEY = 'k:pt';
 export const revocationKey = (assetId: string) => `r:${assetId}`;
 
-export function edgeTokensMode(): 'off' | 'issue' {
+export function edgeTokensMode(): 'off' | 'issue' | 'enforce' {
   const v = String(process.env.VOLT_EDGE_TOKENS ?? '').trim().toLowerCase();
-  return v === 'issue' || v === 'on' || v === 'enforce' ? 'issue' : 'off';
+  return v === 'enforce' ? 'enforce' : v === 'issue' || v === 'on' ? 'issue' : 'off';
+}
+
+/** The plain on-demand paths enforce refuses: an encode's folder and an S3-served copy. */
+export const PLAIN_VOD_RE = /^\/(clips\/vod|vod)\//;
+
+/**
+ * TOKENISED PREVIEW URLS for people who are not a viewer of an app: the
+ * console's preview of a title (any status: a draft must be previewable) and a
+ * share page. Every URL under the folder the manifests share gets the same
+ * token (manifests, the MP4 and MP3 files, a clip's own folder). URLs outside
+ * that folder, or absolute URLs on another host, are left as they are. Null
+ * when tokens are off or there is nothing to tokenise.
+ */
+export function tokenisedUrls<T extends Record<string, string | null | undefined>>(urls: T, o: {
+  assetId: string; country?: string | null; policyClass?: PolicyClass; effectiveUntil?: Date | null; lifetimeSec?: number | null; nowSec?: number;
+}): { urls: { [K in keyof T]: string | null }; expiresAt: number } | null {
+  if (edgeTokensMode() === 'off') return null;
+  const list = Object.values(urls).filter((u): u is string => !!u);
+  // The folder the manifests share; when the other files sit beside it (a
+  // clip's MP4 next to its hls/ folder), the folder above, never shallower
+  // than tokenPrefix allows.
+  const prefix = tokenPrefix(list) ?? tokenPrefix(list.filter((u) => /\.(m3u8|mpd)(\?|$)/i.test(u)));
+  if (!prefix) return null;
+  const t = mintEdgeToken({ assetId: o.assetId, prefix, country: o.country ?? null, policyClass: o.policyClass ?? 'rights',
+    effectiveUntil: o.effectiveUntil ?? null, lifetimeSec: o.lifetimeSec ?? null, nowSec: o.nowSec });
+  const pathOf = (u: string) => { try { return new URL(u, 'http://x').pathname; } catch { return ''; } };
+  const out: any = {};
+  for (const [k, u] of Object.entries(urls)) out[k] = u && pathOf(u).startsWith(prefix) ? withToken(u, t.token) : (u ?? null);
+  return { urls: out, expiresAt: t.claims.e };
+}
+
+/** The latest revocation time of an asset (epoch seconds), cached briefly: the API's own token check reads it per request. */
+export async function revokedAtFor(assetId: string): Promise<number | null> {
+  const { cached } = await import('../scale/cache');
+  return cached<number | null>(`edgerev:${assetId}`, { ttlSec: 5, tags: [`asset:${assetId}`] }, async () => {
+    const r = await query<any>(`SELECT extract(epoch FROM revoked_at)::bigint AS at FROM edge_revocations WHERE asset_id::text = $1 AND expires_at > now()`, [assetId]);
+    return r[0] ? Number(r[0].at) : null;
+  });
 }
 
 /**
@@ -247,5 +291,48 @@ export async function fileEdgeStore(path: string): Promise<EdgeStore> {
     async get(k) { const o = await read(); return k in o ? o[k] : null; },
     async put(k, v) { const o = await read(); o[k] = v; await write(o); },
     async delete(k) { const o = await read(); if (k in o) { delete o[k]; await write(o); } },
+  };
+}
+
+// ---------------------------------------------------------------------------
+//  The API as its own edge (build queue P2-2b)
+// ---------------------------------------------------------------------------
+const refuseText = (res: Response, code: number, text: string) => {
+  res.status(code).set({ 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }).end(text + '\n');
+};
+
+/**
+ * /t/<token>/clips/... served by the API itself: the same check as the two
+ * edges (signature, time, folder, the viewer's country, the revocation set),
+ * then the plain path is served by the /clips routes below it. A single Mac
+ * with no edge in front plays tokenised URLs this way, the staging nginx
+ * passes its checked /t/ requests on unchanged, and on AWS the ALB's /clips/*
+ * route (the API's own address) answers the same as CloudFront.
+ *
+ * ENFORCE: a plain /clips/vod/ or /vod/ request is refused. Mounted before
+ * every /clips route, so nothing under it can serve a plain path.
+ */
+export function tokenPathMiddleware() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    let path = req.path;
+    try { path = decodeURIComponent(req.path); } catch { /* the raw path is checked */ }
+    if (!path.startsWith('/t/')) {
+      // /clips/vod/ only: the API serves no /vod/ media (that is S3 behind
+      // CloudFront), and /vod is the console's Media Library page.
+      if (edgeTokensMode() === 'enforce' && path.startsWith('/clips/vod/')) return refuseText(res, 403, EDGE_REFUSAL_TEXT.path);
+      return next();
+    }
+    const m = /^\/t\/([^/]+)(\/.*)$/.exec(req.path);
+    // Only what the API itself serves can sit behind a token here.
+    if (!m || !m[2].startsWith('/clips/')) return refuseText(res, 403, EDGE_REFUSAL_TEXT.malformed);
+    const { viewerGeo } = await import('../scale/edge');
+    const nowSec = Math.floor(Date.now() / 1000);
+    const v = verifyEdgeToken(m[1], m[2], { country: viewerGeo(req) ?? null, nowSec });
+    if (v.verdict !== 'ok') return refuseText(res, 403, EDGE_REFUSAL_TEXT[v.verdict]);
+    const rv = await revokedAtFor(v.claims!.a).catch(() => null);
+    if (rv != null && v.claims!.n <= rv) return refuseText(res, 403, EDGE_REFUSAL_TEXT.revoked);
+    const q = req.url.indexOf('?');
+    req.url = m[2] + (q >= 0 ? req.url.slice(q) : '');
+    next();
   };
 }

@@ -212,11 +212,15 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
   // HLS manifest otherwise; MediaPreview handles both and puts up an audio
   // surface or a video one on the server's word (`audioOnly`).
   const audioOnly: boolean = d.audioOnly === true
-  const file = audioOnly ? (d.export_mp3_key || d.export_m4a_key || d.progressive_key || null) : (d.progressive_key || null)
-  const hls = d.master_key || null
+  // WITH A PLAY TOKEN when the server hands one out (`preview`, build queue
+  // P2-2b): the edge may refuse plain on-demand paths, and a preview must keep
+  // playing. Without one, the plain keys as before.
+  const pv = d.preview ?? null
+  const file = audioOnly ? (pv?.mp3 || pv?.m4a || pv?.progressive || d.export_mp3_key || d.export_m4a_key || d.progressive_key || null) : (pv?.progressive || d.progressive_key || null)
+  const hls = pv?.hls || d.master_key || null
   // DASH is packaged beside the HLS master when the asset's formats say so (the
   // same rule as the server's deliveries list, services/vodLibrary.ts).
-  const dash = d.formats?.dash && typeof d.master_key === 'string' && /master\.m3u8$/.test(d.master_key) ? d.master_key.replace(/master\.m3u8$/, 'manifest.mpd') : null
+  const dash = pv?.dash || (d.formats?.dash && typeof d.master_key === 'string' && /master\.m3u8$/.test(d.master_key) ? d.master_key.replace(/master\.m3u8$/, 'manifest.mpd') : null)
   // WHAT IT IS, as the library card says it: Video, Audio or Song. The stored
   // vod kind (clip | full_event | export) is how it was cut from a recording, so
   // it is shown only for assets made from one; an upload is just video or audio.
@@ -340,7 +344,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
               onChanged={() => { load(); onChanged() }} />
             {d.master_key && !noMedia && (
               <div style={{ marginTop: 10 }}>
-                <a className="btn ghost" href={d.master_key} target="_blank" rel="noreferrer">HLS manifest</a>
+                <a className="btn ghost" href={hls ?? d.master_key} target="_blank" rel="noreferrer">HLS manifest</a>
                 {dash && <a className="btn ghost" href={dash} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>DASH manifest</a>}
                 {/* Downloads follow the Downloads permission (modules/downloads.ts), not the page. */}
                 <DownloadFiles id={d.id} compact />

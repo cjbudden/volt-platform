@@ -970,7 +970,7 @@
   },
   "GET /api/vod/:id": {
     "summary": "One VOD asset",
-    "description": "The asset with its metadata, content type and publications. Its public status is computed at the moment you ask: `public_status`, `status_reason`, `status_until` (the next moment it can change on its own), `editorial_state` (draft, published or archived), `effective_from` and `effective_until` (the publish window inside the rights window), `listed_from` and `unlisted`, `archived_at`, and whether a public route shows it now (`publicly_visible`) and lists it in browse and search (`publicly_listed`). Needs `vod: view`."
+    "description": "The asset with its metadata, content type and publications. Its public status is computed at the moment you ask: `public_status`, `status_reason`, `status_until` (the next moment it can change on its own), `editorial_state` (draft, published or archived), `effective_from` and `effective_until` (the publish window inside the rights window), `listed_from` and `unlisted`, `archived_at`, and whether a public route shows it now (`publicly_visible`) and lists it in browse and search (`publicly_listed`). With play tokens on (VOLT_EDGE_TOKENS issue or enforce), `preview` holds the asset's addresses with a play token for previewing it in the console at any status (`hls`, `dash`, `progressive`, `mp3`, `m4a`, `expiresAt`); null when tokens are off. Needs `vod: view`."
   },
   "PUT /api/vod/:id/availability": {
     "summary": "Set when an asset is listed",
@@ -990,10 +990,18 @@
   },
   "POST /api/public/availability": {
     "summary": "Play gate: may this viewer play this asset",
-    "description": "The answer for one viewer: 200 with a playback token and the addresses to play; 402 (`mode: paywall`) or 403 (`mode: sign_in` or `blocked`) with what would let them in; 451 (`mode: blocked`) where the region or the rights say no. An on-demand title that is not public (draft, in review, processing, restricted, expired or archived) is answered exactly as an unknown id: 404. A Scheduled title past its Listed from date is a teaser: 403 with `mode: scheduled`, `until` (when it becomes available; `availableFrom` is the same date for older players), `notify` and `meta` (title, description and artwork), never a token or an address."
+    "description": "The answer for one viewer: 200 with a playback token and the addresses to play (on-demand addresses carry a play token in the path, `/t/<token>/...`, which the CDN checks on every manifest and segment request); 402 (`mode: paywall`, with `products` or `packages`) or 403 (`mode: sign_in` or `blocked`) with what would let them in and `message`; 451 (`mode: blocked`) where the region or the rights say no, with `code` (`region` or `rights`), `message` (the account's block message, default \"Not available in your region\") and `notify` (true when the account offers Notify me; see `POST /api/public/availability/notify`). An on-demand title that is not public (draft, in review, processing, restricted, expired or archived) is answered exactly as an unknown id: 404. A Scheduled title past its Listed from date is a teaser: 403 with `mode: scheduled`, `until` (when it becomes available; `availableFrom` is the same date for older players), `message`, `notify` and `meta` (title, description and artwork), never a token or an address."
   },
   "GET /api/public/availability": {
     "summary": "Play gate for anonymous viewers (edge-cacheable)",
     "description": "The same decision as POST for a viewer who is not signed in, with `appKey`, `assetId` and optionally `geo` in the query, so the edge can cache it. A Scheduled title past its Listed from date answers 403 `mode: scheduled` with `until`, and the edge keeps that answer no longer than until the title opens."
+  },
+  "POST /api/public/availability/notify": {
+    "summary": "Notify me when a title becomes available",
+    "description": "Body: `appKey`, `assetId`, optionally `geo` and `email`. Kept only when the play gate refuses this viewer right now with a 451 (region or rights) or a Scheduled teaser and the account offers Notify me (the gate's `notify: true`); the same decision is run, so it reveals nothing the gate would not. A signed-in viewer (viewer session in `Authorization`) is remembered by their id, anyone else by `email`; asking twice for the same title changes nothing. Answers 201 (or 200 when already asked) with `notify`, `created` and `reason` (`scheduled`, `region` or `rights`). 404 as the gate for an unknown or unpublished title; 409 when the title plays for this viewer or Notify me is not offered; 400 with neither a session nor an email. At most 30 an hour from one address."
+  },
+  "GET /api/analytics/rights-demand": {
+    "summary": "Rights demand: who was refused where",
+    "description": "Viewers the play gate refused for a region or the rights (and play tokens the CDN refused from another country), by title and country, beside the plays where the title is licensed; unique viewers are counted from hashed viewer keys, never addresses. Read from daily rollups, up to a minute behind. Query: `from` and `to` (YYYY-MM-DD; default the last 30 days, at most 400), `assetId`, `country`, `kind` (`vod`, `channel` or `event`), `limit` (titles, default 50, at most 200) and `format=csv` for a spreadsheet by title and country."
   }
 }

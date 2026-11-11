@@ -67,6 +67,7 @@ The link opens a page branded with your account's logo and colours, marked **Pri
 - For verified recipients, the page asks them to **Confirm your email** and choose **Email me a code**, then **Enter your access code** (6 digits, valid for 10 minutes) and choose **Unlock preview**.
 - If the stream is not running, the page says **Preview not live right now** and offers **Check again**.
 - Once the link has ended, the page says **Link no longer available** and why.
+- For an on-demand title, the video on the page plays in the country where the link was opened, and stops when the link expires or when the title's window ends, whichever comes first. Reloading the page in another country starts it again there, if the title may be watched there.
 
 Each visit counts as one view. Reloading the page, choosing **Check again** or leaving it open for a long time is the same visit, for as long as that browser tab stays open; opening the link in a new tab, another browser or another device is a new visit. A viewer whose one allowed view was their own visit can reload it.
 
@@ -103,6 +104,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 
 | You see | What it means | What to do |
 |---|---|---|
+| The video on a share page stops with *This link has expired* or *Not available in your region* | The page's on-demand video carries a play token: it ended with the link or the title's window, or the page was moved to another country | Reload the page. If the link or the window has ended, make a new link or extend the window |
 | **Add at least one recipient email address.** | **Send by email** or **Verified recipients only** needs at least one address | Type the addresses, separated by commas |
 | **Set a PIN of at least 3 characters, or choose a different security option.** | The PIN is too short | Type a longer PIN |
 | **Link created** although you chose **Send by email** | The email could not be sent | Copy the link and send it yourself |

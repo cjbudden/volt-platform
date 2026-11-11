@@ -35,6 +35,7 @@ import { timelineRouter, daypartPresetsRouter } from './modules/timeline';
 import { timelineGridRouter } from './modules/timelineGrid';
 import { storageRouter } from './modules/storage';
 import { vodRouter } from './modules/vod';
+import { tokenPathMiddleware } from './services/edgeTokens';
 import { vodBulkRouter } from './modules/vodBulk';
 import { contentLinksRouter } from './modules/contentLinks';
 import { filenameRulesRouter } from './modules/filenameRules';
@@ -162,6 +163,10 @@ export function createServer() {
   // watch folder drops (vod-src/, which 2.1a-2b also keeps from the CDN) and
   // the encoder's probe scratch. express.static below served them to anyone
   // who knew an asset id and the file's extension.
+  // ON-DEMAND PLAY TOKENS (services/edgeTokens.ts, build queue P2 and P2-2b):
+  // /t/<token>/clips/... checked here and served from the plain path below,
+  // and under VOLT_EDGE_TOKENS=enforce a plain /clips/vod/ path refused.
+  app.use(tokenPathMiddleware());
   app.use('/clips', (req, res, next) => {
     let rel = req.path;
     try { rel = decodeURIComponent(req.path); } catch { /* the raw path is checked */ }

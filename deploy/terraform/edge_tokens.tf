@@ -11,22 +11,30 @@
 #  plane's edge sync. Needs edge_rights_enabled (the store).
 #
 #  "issue" (default): tokens handed out and checked; plain paths still play.
-#  "off": the gate hands out plain URLs as before. Refusing plain paths comes
-#  with tokenised console and share previews (build queue P2-2).
+#  "enforce": as issue, and plain on-demand paths (/vod/* and /clips/vod/*)
+#  are refused by a second function (deploy/edge/vod-plain-refuse.js); the API
+#  refuses plain /clips/vod/ on its own address too. The console's previews
+#  and share pages carry tokens, so they keep playing (build queue P2-2b).
+#  "off": the gate hands out plain URLs as before.
 # ============================================================================
 
 variable "edge_tokens" {
-  description = "On-demand play tokens at the edge: issue (hand out /t/<token>/ URLs and check them) or off."
+  description = "On-demand play tokens at the edge: issue (hand out /t/<token>/ URLs and check them), enforce (also refuse plain on-demand paths) or off."
   type        = string
   default     = "issue"
   validation {
-    condition     = contains(["off", "issue"], var.edge_tokens)
-    error_message = "edge_tokens must be off or issue."
+    condition     = contains(["off", "issue", "enforce"], var.edge_tokens)
+    error_message = "edge_tokens must be off, issue or enforce."
   }
 }
 
 locals {
   edge_tokens_on = var.edge_rights_enabled && var.edge_tokens != "off"
+  # What the control plane is told (VOLT_EDGE_TOKENS): off without the store.
+  edge_tokens_mode = local.edge_tokens_on ? var.edge_tokens : "off"
+  # Under enforce: the plain on-demand paths, refused. Listed after the /t/
+  # behaviours and before *.m3u8 and *.mpd, which would otherwise take them.
+  edge_plain_vod_paths = local.edge_tokens_mode == "enforce" ? ["/vod/*", "/clips/vod/*"] : []
   # Manifests first (short cache), then everything else under /t/ (segments,
   # long cache). The function strips /t/<token>, so the cache key is the
   # plain path and every viewer shares one cached copy.
@@ -47,6 +55,15 @@ resource "aws_cloudfront_function" "vod_token" {
     kvs_id = aws_cloudfront_key_value_store.rights[0].id
   })
   key_value_store_associations = [aws_cloudfront_key_value_store.rights[0].arn]
+}
+
+resource "aws_cloudfront_function" "vod_plain_refuse" {
+  count   = local.edge_tokens_mode == "enforce" ? 1 : 0
+  name    = "${local.name}-vod-plain-refuse"
+  runtime = "cloudfront-js-2.0"
+  comment = "Volt on-demand play tokens enforced: refuse a plain path"
+  publish = true
+  code    = file("${path.module}/../edge/vod-plain-refuse.js")
 }
 
 # The function compares the token's country with the viewer's, so the

@@ -41,7 +41,7 @@ const fmtLen = (ms: number) => { const s = ms / 1000; return s < 60 ? `${s.toFix
 
 type Drag = { kind: VodMarkerKind; edge: 'start' | 'end' | 'move'; x0: number; s0: number; e0: number; w: number }
 
-export default function SkipMarkers({ asset }: { asset: { id: string; master_key?: string | null; duration_ms?: number | string | null; title?: string | null } }) {
+export default function SkipMarkers({ asset }: { asset: { id: string; master_key?: string | null; duration_ms?: number | string | null; title?: string | null; preview?: { hls?: string | null } | null } }) {
   const notify = useNotify()
   const [v, setV] = useState<VodMarkersView | null>(null)
   const [draft, setDraft] = useState<Partial<Record<VodMarkerKind, { startMs: number; endMs: number }>>>({})
@@ -137,12 +137,14 @@ export default function SkipMarkers({ asset }: { asset: { id: string; master_key
     for (let t = 0; t <= durMs; t += step) ticks.push(t)
   }
 
+  const src = asset.preview?.hls || asset.master_key || ''
   if (!asset.master_key) return <div className="hintxt">This asset has no playlist yet, so there is nothing to mark. Markers can be set once it is built.</div>
 
   return (
     <div className="skm">
       <div className="skm-main">
-        <VoltPlayerView src={`${asset.master_key}${asset.master_key.includes('?') ? '&' : '?'}m=${ver}`} skin="admin" title={asset.title ?? null} mediaRef={media} autoplay={false} />
+        {/* With the play token the server hands out (build queue P2-2b), so the editor keeps playing under enforce. */}
+        <VoltPlayerView src={`${src}${src.includes('?') ? '&' : '?'}m=${ver}`} skin="admin" title={asset.title ?? null} mediaRef={media} autoplay={false} />
         <div className="skm-tl">
           <div className="skm-track" ref={track}
             onPointerMove={move} onPointerUp={up} onPointerCancel={up}

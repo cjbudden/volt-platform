@@ -214,6 +214,27 @@ resource "aws_cloudfront_distribution" "cdn" {
     }
   }
 
+  # Under edge_tokens = "enforce" (edge_tokens.tf, build queue P2-2b): a plain
+  # on-demand path is refused; only /t/<token>/ addresses play. After the /t/
+  # behaviours, before *.m3u8 and *.mpd.
+  dynamic "ordered_cache_behavior" {
+    for_each = local.edge_plain_vod_paths
+    content {
+      path_pattern               = ordered_cache_behavior.value
+      target_origin_id           = "s3-origin"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+      cached_methods             = ["GET", "HEAD"]
+      cache_policy_id            = aws_cloudfront_cache_policy.segment.id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.delivery.id
+      compress                   = true
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.vod_plain_refuse[0].arn
+      }
+    }
+  }
+
   # A variant asked for by its own path: the rights function still decides
   # (only its own audience gets it), the variants origin answers. Listed
   # before the *.m3u8 and *.mpd behaviours so they never send it to S3.

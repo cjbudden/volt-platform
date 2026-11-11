@@ -244,6 +244,20 @@ export interface CreateShareInput {
   sendEmail?: boolean;
 }
 
+/** A share page's hls and dash: tokenised for on-demand titles when play tokens are on. */
+async function shareMedia(row: { resource_kind: string; expires_at: string }, resource: any, geo: string | null): Promise<{ hls: string | null; dash: string | null }> {
+  const plain = { hls: resource.hls ?? null, dash: resource.dash ?? null };
+  if (resource.kind !== 'vod') return plain;
+  const { tokenisedUrls } = await import('./edgeTokens');
+  const { publicDecision } = await import('./publicStatus');
+  const ps = await publicDecision(resource.id).catch(() => null);
+  const linkEnd = new Date(row.expires_at);
+  const winEnd = ps?.effectiveUntil ?? null;
+  const until = winEnd && winEnd < linkEnd ? winEnd : linkEnd;
+  const t = tokenisedUrls(plain, { assetId: resource.id, country: geo, policyClass: 'rights', effectiveUntil: until });
+  return t ? { hls: t.urls.hls, dash: t.urls.dash } : plain;
+}
+
 /** Create a share link. Returns the row + the ONE-TIME raw URL (+ email delivery info). */
 export async function createShareLink(inp: CreateShareInput): Promise<{ id: string; url: string; token: string; expiresAt: string; emailed: number }> {
   const resource = await loadResource(inp.resourceKind, inp.resourceId, inp.accountId);
@@ -431,7 +445,11 @@ export async function openShare(raw: string, opts: { pin?: string; email?: strin
       available: resource.kind === 'vod' ? true : liveOutputFresh(resource.id),
       durationMs: resource.durationMs,
       metadata: row.allow_metadata || row.access_type === 'preview_only' ? resource.metadata : resource.metadata, // metadata always visible on the page; download is separate
-      hls: resource.hls, dash: resource.dash,
+      // ON-DEMAND MEDIA WITH A PLAY TOKEN (build queue P2-2b), so a share page
+      // keeps playing when the edge refuses plain paths: bound to the viewer's
+      // country and ending at the earlier of the link's expiry and the title's
+      // window (publish window inside the rights). Live previews are untouched.
+      ...(await shareMedia(row, resource, opts.geo ?? null)),
       mode,
       playbackToken: tok.token, expiresIn: tok.expiresIn,
       // the account's logo and colours (Admin > Account settings)

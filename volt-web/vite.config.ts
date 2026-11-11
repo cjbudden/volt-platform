@@ -30,6 +30,9 @@ export default defineConfig({
       '/radio': 'http://localhost:8080',   // live MP3 fan-out (radio stations)
       '/filler': 'http://localhost:8080',  // uploaded slates & loops
       '/clips': 'http://localhost:8080',   // rendered clip outputs
+      // On-demand media behind a play token (the API checks it; build queue P2-2b).
+      // A pattern, not '/t': console pages such as /tickets start with /t.
+      '^/t/[^/]+/clips/': 'http://localhost:8080',
       '/gfx': 'http://localhost:8080',     // graphics template files (previews, player overlay)
       '^/player/': 'http://localhost:8080',  // the embed bundle (Player setup snippet, share pages)
       // Public playback (/live/<id>/master.m3u8, manifest.mpd, stream.mp3). Only the

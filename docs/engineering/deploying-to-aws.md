@@ -21,6 +21,7 @@ apply`, pushes images or touches credentials.
 | `deploy/terraform/rds.tf`, `deploy/terraform/scaling_rds_proxy.tf` | Postgres on RDS, optionally behind RDS Proxy |
 | `deploy/terraform/s3_cloudfront.tf` | the S3 origin and the CloudFront distribution viewers use |
 | `deploy/terraform/edge_rights.tf` | the CloudFront Function and KeyValueStore for edge rights variants |
+| `deploy/terraform/edge_tokens.tf` | on-demand play tokens: the token function on `/t/*` and, with `edge_tokens = "enforce"`, a second function that refuses plain `/vod/*` and `/clips/vod/*` (`deploy/edge/vod-plain-refuse.js`); the control plane gets the same mode as `VOLT_EDGE_TOKENS` |
 | `deploy/terraform/images.tf` | the image library bucket, image CDN and signing secret |
 | `deploy/terraform/qoe_raw.tf` | the raw player-report store for QoE |
 | `deploy/terraform/clickhouse.tf` | the ClickHouse analytics store, off by default: two replicas, three keepers, nightly backups (build queue 2.11) |
@@ -166,5 +167,10 @@ the next morning. The code is `volt-app/src/services/qoe/sidRoute.ts` and
 - `env = "prod"` turns on deletion protection and a final database snapshot
   and stops the bucket being force-emptied on destroy. Staging tears down
   cleanly with `terraform destroy`.
+- Play tokens: leave `edge_tokens` at `issue` for the first deploy and switch
+  to `enforce` once players that saved plain on-demand addresses have turned
+  over (a day is enough: no token lives longer). The console's previews and
+  share pages already carry tokens. `terraform test -filter=tests/edge_tokens.tftest.hcl`
+  checks both modes.
 - The ALB is HTTP only until a certificate and domain are added (see "Notes
   and prod hardening" in `deploy/terraform/README.md`).

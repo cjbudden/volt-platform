@@ -72,7 +72,7 @@ const check = (m: string, got: unknown, want: unknown) => {
   (globalThis as any).__crypto = crypto;
   const cfHandler = new Function(`${cfSrc.replace("import cf from 'cloudfront';", 'const cf = globalThis.__cf;').replace("import crypto from 'crypto';", 'const crypto = globalThis.__crypto;').replace('${kvs_id}', 'kvs-test')}\nreturn handler;`)();
   const njsSrc = readFileSync(join(__dirname, '../../deploy/staging/edge-token.js'), 'utf8');
-  check('the staging edge file exports what nginx.conf calls', /export default \{ verdict, check, refusal, words \}/.test(njsSrc), true);
+  check('the staging edge file exports what nginx.conf calls', /export default \{ verdict, check, refusal, words, plain, plainVerdict \}/.test(njsSrc), true);
   const njs = new Function(`${njsSrc.replace("import fs from 'fs';", 'const fs = null;').replace("import crypto from 'crypto';", 'const crypto = globalThis.__crypto;').replace(/export default .*/, 'return { verdict, check, words };')}`)();
   const realNow = Date.now;
   const three = async (uri: string, cc: string, at = NOW) => {
@@ -138,7 +138,8 @@ const check = (m: string, got: unknown, want: unknown) => {
   // ---- the staging nginx config wires the file in
   const conf = readFileSync(join(__dirname, '../../deploy/staging/nginx.conf.template'), 'utf8');
   check('nginx: njs loaded and the verdict set', [/load_module modules\/ngx_http_js_module\.so;/.test(conf), /js_set \$edge_token edgetoken\.verdict;/.test(conf)], [true, true]);
-  check('nginx: /t/ only to /clips/, refused unless ok, prefix stripped', [/location ~ \^\/t\/\[\^\/\]\+\/clips\/ \{/.test(conf), conf.includes('if ($edge_token != "ok") { return 403 $edge_refusal; }'), conf.includes('rewrite ^/t/[^/]+(/.*)$ $1 break;'), conf.includes('location ~ ^/t/ { default_type text/plain; return 403 "Not available\\n"; }')], [true, true, true, true]);
+  // Since P2-2b the checked request goes on WITH its token: the API checks it again and serves the plain path.
+  check('nginx: /t/ only to /clips/, refused unless ok, passed on with the token', [/location ~ \^\/t\/\[\^\/\]\+\/clips\/ \{/.test(conf), conf.includes('if ($edge_token != "ok") { return 403 $edge_refusal; }'), !conf.includes('rewrite ^/t/[^/]+(/.*)$ $1 break;'), conf.includes('location ~ ^/t/ { default_type text/plain; return 403 "Not available\\n"; }')], [true, true, true, true]);
   check('nginx: a refusal\'s words from the same file (P2-2)', [/js_set \$edge_refusal edgetoken\.refusal;/.test(conf), conf.includes('default_type text/plain;')], [true, true]);
 
   // ---------------------------------------------------------------- database

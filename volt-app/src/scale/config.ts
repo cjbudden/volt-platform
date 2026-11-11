@@ -172,7 +172,8 @@ export const scaleConfig = {
    * segment redirects (the beacons), the ad timeline and clicks (modules/vodAds.ts).
    */
   publicPrefixes: (process.env.PUBLIC_PATH_PREFIXES ??
-    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/gfx/,/fast/,/vod-ads/,/channel/,/event/,' +
+    // /t/: on-demand media behind a play token (services/edgeTokens.ts, build queue P2-2b)
+    '/health,/live/,/share/,/api/share/,/xmltv/,/img/,/library/,/player,/clips/,/t/,/gfx/,/fast/,/vod-ads/,/channel/,/event/,' +
     '/api/public/,/api/availability,/api/access,/api/player/,/api/analytics/beacon,/api/cmcd,/api/journey,/api/payments/verify')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };

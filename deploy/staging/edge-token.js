@@ -12,6 +12,9 @@
 //  the shared volume (EDGE_STORE_FILE, default /data/edge/store.json). The
 //  viewer's country is the X-Test-Country header, as everywhere on staging.
 //
+//  `plain`: "403" for a plain /clips/vod/ path when VOLT_EDGE_TOKENS is
+//  "enforce" (build queue P2-2b), "ok" otherwise.
+//
 //  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked),
 //  "503" (no key yet: the scheduler has not synced). `refusal` gives the
 //  words for the refusal's body, the same as the CloudFront Function's
@@ -78,9 +81,19 @@ function verdict(r) {
   return check(r.uri, r.headersIn['X-Test-Country'] || '', readStore(), Math.floor(Date.now() / 1000));
 }
 
+// A plain on-demand path under enforce. mode: VOLT_EDGE_TOKENS.
+function plainVerdict(uri, mode) {
+  var m = String(mode || '').trim().toLowerCase();
+  return m === 'enforce' && /^\/(clips\/vod|vod)\//.test(uri) ? '403' : 'ok';
+}
+
+function plain(r) {
+  return plainVerdict(r.uri, process.env && process.env.VOLT_EDGE_TOKENS);
+}
+
 // Read only on a refusal (nginx evaluates js_set variables when used).
 function refusal(r) {
   return words(r.uri, r.headersIn['X-Test-Country'] || '', readStore(), Math.floor(Date.now() / 1000)) + '\n';
 }
 
-export default { verdict, check, refusal, words };
+export default { verdict, check, refusal, words, plain, plainVerdict };
