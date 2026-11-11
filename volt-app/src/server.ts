@@ -96,6 +96,7 @@ import { auditRouter } from './modules/audit';
 import { graphicsRouter, graphicsFilesRouter, graphicsPlayerRouter } from './modules/graphics';
 import { reportsRouter } from './modules/reports';
 import { planRouter } from './modules/plan';
+import { billingRouter, platformBillingRouter } from './modules/billing';
 import { isBootReconciled } from './services/orchestrator';
 import { mountHealth, publicOnlyGuard } from './scale/health';
 import { publicAuthRouter, publicMeRouter } from './modules/publicApi';
@@ -469,6 +470,7 @@ export function createServer() {
   app.use('/api/sources', sourcesRouter);
   app.use('/api/groups', groupsRouter);
   app.use('/api/plan', planRouter);
+  app.use('/api/billing', billingRouter);                // the account's charges and invoices (build queue B1)
   app.use('/api/account-settings/reframe', reframeSettingsRouter);   // social formats: Admin > Formats and reframing (modules/reframe.ts)
   app.use('/api/account-settings/captions', captionsSettingsRouter);  // live captions: provider and per-profile settings (modules/captionsSettings.ts)
   app.use('/api/account-settings', accountSettingsRouter);  // logo and colours (docs/ACCOUNT_SETTINGS.md)  // the account's plan and how groups share it (docs/PLAN_AND_GROUPS.md)
@@ -649,6 +651,7 @@ export function createServer() {
   app.use('/api/platform/signups', platformSignupsRouter); // SaaS-admin: promo site registrations
   app.use('/api/platform/graphics', platformGraphicsRouter); // SaaS-admin: Volt graphics library, sets per account
   app.use('/api/platform/global-lists', platformGlobalListsRouter); // SaaS-admin: global reference lists
+  app.use('/api/platform/billing', platformBillingRouter); // SaaS-admin: billing handling, invoices, charges, prices (B1)
   app.use('/api/platform', platformRouter);              // SaaS-admin cross-tenant dashboard
   app.use('/api/platform/tickets', platformTicketsRouter); // SaaS-admin ticket triage
   app.use('/api/publish-targets', publishTargetsRouter); // social account config

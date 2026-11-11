@@ -87,9 +87,14 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|
 | `GET /api/plan` | The plan, what is used, and each group's share |
 | `PATCH /api/plan` | Changes the plan (`planTier`, `maxChannels`, `maxConcurrent`), where you may |
+| `GET /api/billing` | What your plan and use cost: this month so far and your latest invoices (Account settings: View) |
+| `GET /api/billing/invoices` | Every invoice, one per calendar month, issued on the 1st for the month before |
+| `GET /api/billing/invoices/{id}` and `.../csv` | One invoice with its lines, or the same as CSV for your accounts team |
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" "https://your-volt-host/api/plan"
 ```
+
+Billing is only shown where your Volt provider bills through Volt; otherwise `GET /api/billing` answers with `mode` set to `off`. Amounts are US dollars, and an issued invoice never changes: a correction appears as a credit on a later one.
 
 Every route is in the [API reference](/api-reference).

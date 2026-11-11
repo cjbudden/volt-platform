@@ -20,6 +20,12 @@ export interface SaasPlan {
   tagline: string;
   /** What the site prints, e.g. "$99 per month". Null hides the price. */
   priceLabel: string | null;
+  /**
+   * The monthly platform fee as a number, for the charges ledger (build queue
+   * B1). The same figure as priceLabel; null for a plan priced per customer,
+   * whose fee is set on the account (accounts.subscription_fee_month).
+   */
+  monthlyUsd?: number | null;
   /** Small print under the price, e.g. "plus $0.12 per GB delivered". */
   priceNote: string | null;
   features: string[];
@@ -36,19 +42,19 @@ export interface SaasPlan {
 const DEFAULT_PLANS: SaasPlan[] = [
   {
     key: 'starter', name: 'Starter', tagline: 'One channel or a run of events, on air today.',
-    priceLabel: '$99 per month', priceNote: 'Server time for events and $0.12 per GB delivered are billed on use',
+    priceLabel: '$99 per month', monthlyUsd: 99, priceNote: 'Server time for events and $0.12 per GB delivered are billed on use',
     features: ['2 live channels or stations', '1 running at once', 'Live → VOD recordings and clips', 'Web player and share links', 'Email support'],
     maxChannels: 2, maxConcurrent: 1, maxRenditions: 4, trialDays: 14,
   },
   {
     key: 'pro', name: 'Pro', tagline: 'A small network: channels, events, radio and FAST.',
-    priceLabel: '$490 per month', priceNote: 'Server time for events and $0.12 per GB delivered are billed on use',
+    priceLabel: '$490 per month', monthlyUsd: 490, priceNote: 'Server time for events and $0.12 per GB delivered are billed on use',
     features: ['10 live channels or stations', '5 running at once', 'EPG, FAST and VOD → Live', 'Captions and translation add-ons', 'Analytics and operating reports', 'Priority support'],
     maxChannels: 10, maxConcurrent: 5, maxRenditions: 6, highlight: true, trialDays: 14,
   },
   {
     key: 'enterprise', name: 'Enterprise', tagline: 'Your own capacity, rights rules, DRM and single sign-on.',
-    priceLabel: null, priceNote: 'Committed capacity and bandwidth, priced to your workload',
+    priceLabel: null, monthlyUsd: null, priceNote: 'Committed capacity and bandwidth, priced to your workload',
     features: ['Channels and concurrency to suit', 'DRM and geo rights at the edge', 'Single sign-on and sub-accounts', 'Dedicated servers on request', 'Named engineer'],
     maxChannels: 50, maxConcurrent: 20, maxRenditions: 8, contactSales: true,
   },

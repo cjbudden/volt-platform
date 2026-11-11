@@ -611,6 +611,107 @@
  },
  {
   "method": "GET",
+  "path": "/api/billing/invoices",
+  "search": [
+   "number"
+  ],
+  "defaultSort": "-period_month",
+  "defaultLimit": 24,
+  "maxLimit": 120,
+  "allowOffset": false,
+  "unpagedLimit": 120,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "number": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "period_month": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "status": {
+    "type": "enum",
+    "values": [
+     "issued",
+     "paid",
+     "failed",
+     "void"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "total_usd": {
+    "type": "number",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "issued_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
   "path": "/api/channels",
   "search": [
    "name",

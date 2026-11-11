@@ -170,7 +170,7 @@ export const CATALOGUE: FeatureDef[] = [
   { key: 'apps', label: 'Apps, API keys & players', area: 'admin', prefixes: ['/api/apps', '/api/player-config'] },
   { key: 'payments', label: 'Payments & products', area: 'admin', prefixes: ['/api/payments'] },
   { key: 'settings', label: 'Account settings', area: 'admin',
-    prefixes: ['/api/groups', '/api/plan', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/metadata-lists', '/api/notification-templates',
+    prefixes: ['/api/groups', '/api/plan', '/api/billing', '/api/account-settings', '/api/output-profiles', '/api/metadata-schemas', '/api/metadata-lists', '/api/notification-templates',
       '/api/publish-targets', '/api/engines', '/api/addons', '/api/workflows',
       '/api/ingest', '/api/publishing-rules', '/api/sites'],
     // The channel, event and station forms read these to fill their pickers.

@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**973 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 752 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**989 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 756 · Platform API: 56 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -379,6 +379,15 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/auth/sso/saml/acs/:id` | admin session (Bearer) | own account (any admin user) |  |
 | GET | `/api/auth/sso/saml/metadata/:id` | admin session (Bearer) | own account (any admin user) |  |
 | GET | `/api/auth/sso/start/:id` | admin session (Bearer) | own account (any admin user) |  |
+
+### `/api/billing`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/billing` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/billing/invoices` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/billing/invoices/:id` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/billing/invoices/:id/csv` | admin session (Bearer) or account secret key | settings: view |  |
 
 ### `/api/channels`
 
@@ -1337,6 +1346,23 @@ Volt staff only. Needs a platform session, minted after the authenticator step.
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | POST | `/api/platform/auth/step-up` | admin session (Bearer) | platform staff |  |
+
+### `/api/platform/billing`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/platform/billing` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/accounts/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| PATCH | `/api/platform/billing/accounts/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/charges` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/billing/charges` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/billing/close` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/invoices` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/invoices/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/invoices/:id/csv` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/billing/invoices/:id/paid` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/prices` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/billing/prices` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 
 ### `/api/platform/costs`
 

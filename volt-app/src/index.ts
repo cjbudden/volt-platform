@@ -117,7 +117,10 @@ boot().then(async () => {
       // The workflow report's minute and day rollups (services/workflows/rollup.ts, build queue W1).
       let stopWfRollup = () => {};
       void import('./services/workflows/rollup').then((m) => { stopWfRollup = m.startWorkflowRollup(); }).catch((e) => console.warn('[workflows] report rollup not started', e));
-      return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); stopWfRollup(); };
+      // Billing: close last month into invoices on the 1st (services/invoicing, build queue B1). Off unless VOLT_BILLING says otherwise.
+      let stopInvoiceClose = () => {};
+      void import('./services/invoicing').then((m) => { stopInvoiceClose = m.startInvoiceClose(); }).catch((e) => console.warn('[billing] month close not started', e));
+      return () => { stopSched(); stopPrewarm(); stopMetrics(); stopGraphics(); stopWfRollup(); stopInvoiceClose(); };
     });
     setLeaderCheck(() => !!leadership?.isLeader());
   }

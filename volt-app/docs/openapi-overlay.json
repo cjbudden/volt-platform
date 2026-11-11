@@ -154,6 +154,10 @@
       "displayName": "Availability (play gate)",
       "description": "The play gate decides whether an asset or stream may be played here and now, explains why not, and issues the short-lived playback token.\n\n**Use it to:**\n- Check anonymous playback with `GET /api/public/availability`\n- Check playback for a signed-in viewer, using their groups and entitlements, with `POST /api/public/availability`\n- Pass the returned playback token to the player and to analytics beacons\n\n**Credential:** publishable key, with a viewer session optional.\n\n**Good to know:** the anonymous GET is cached at the edge per app, asset and country, the signed-in POST is never cached. `/api/availability` is an older alias."
     },
+    "Billing": {
+      "displayName": "Billing",
+      "description": "What Volt charges your account: the plan fee, server time and any charges or credits, gathered into one invoice per calendar month.\n\n**Use it to:**\n- See this month so far and your latest invoices with `GET /api/billing`\n- List invoices with `GET /api/billing/invoices` and read one with its lines\n- Download an invoice as CSV for your accounts team with `GET /api/billing/invoices/{id}/csv`\n\n**Credential:** admin session (Bearer) or account secret key, with Account settings: View.\n\n**Good to know:** amounts are US dollars. Invoices are issued on the 1st for the month before and never change afterwards; a correction appears as a credit on a later invoice. When the deployment does not bill (`mode` is `off`) nothing is charged."
+    },
     "Channels": {
       "displayName": "Channels",
       "description": "Channels are your 24/7 linear streams: their sources, output, on-air state, redundancy and timeline.\n\n**Use it to:**\n- Create and configure channels with `POST /api/channels` and `PATCH /api/channels/{id}`\n- Start, stop and put a channel on air with `POST /api/channels/{id}/start`, `.../stop` and `.../air`\n- Set filler, auto connect and run failover or test-stream checks with `POST /api/channels/{id}/filler`, `.../auto-connect` and `.../failover-test`\n- Read coverage, history, timeline, dayparts and thumbnails with `GET /api/channels/{id}/timeline` and related requests\n\n**Credential:** admin session (Bearer) or account secret key, with `channels: view` to read, `channels: operate` to start, stop or air, and `channels: manage` to change. Radio stations need the same `radio` level.\n\n**Good to know:** creating a channel counts against your group's channel limit. Check `GET /api/channels/{id}/delete-impact` before deleting."
@@ -1051,5 +1055,21 @@
   "GET /api/analytics/rights-demand": {
     "summary": "Rights demand: who was refused where",
     "description": "Viewers the play gate refused for a region or the rights (and play tokens the CDN refused from another country), by title and country, beside the plays where the title is licensed; unique viewers are counted from hashed viewer keys, never addresses. Read from daily rollups, up to a minute behind. Query: `from` and `to` (YYYY-MM-DD; default the last 30 days, at most 400), `assetId`, `country`, `kind` (`vod`, `channel` or `event`), `limit` (titles, default 50, at most 200) and `format=csv` for a spreadsheet by title and country."
+  },
+  "GET /api/billing": {
+    "summary": "Billing: this month so far and recent invoices",
+    "description": "What Volt charges this account. `mode` is the deployment's billing (`off`: nothing is charged or invoiced; `contract`: invoices are issued and settled outside Volt; `automated`: invoices are charged to the card on file). `handling` is how this account's invoices are settled (`automated` or `contract`). `currentMonth` is the open month worked out so far (plan fee, server time at the current price, charges and credits), with `subtotalUsd`, `taxUsd` and `totalUsd`; it is null when billing is off. `invoices` is the latest twelve. All amounts are US dollars. Needs Account settings: View."
+  },
+  "GET /api/billing/invoices": {
+    "summary": "List invoices",
+    "description": "Every invoice of the account, newest month first, with the list standard (filter on `status` and `number`, sort, paging). One invoice per calendar month (UTC), issued on the 1st for the month before. `status`: `issued`, `paid`, `failed` or `void`."
+  },
+  "GET /api/billing/invoices/:id": {
+    "summary": "Get an invoice",
+    "description": "One invoice with its lines: each line's `source` (`plan`, `usage`, `addon`, `addon_pack` or `manual`), description, quantity, unit, unit price and amount, then subtotal, tax rate, tax and total. A line is never changed once issued; a correction appears as its own line (a credit) on a later invoice."
+  },
+  "GET /api/billing/invoices/:id/csv": {
+    "summary": "Download an invoice as CSV",
+    "description": "The invoice's lines as CSV (`text/csv`), one row per line, then Subtotal, Tax and Total rows, for your accounts team or a spreadsheet."
   }
 }
