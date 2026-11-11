@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.101.0 (2026-11-11)
+
+### Internal
+
+- added · API: Edge play tokens: a shared token that opens several titles for every viewer, rotating on a fixed clock, checked at CloudFront, the staging edge and the API (groundwork for FAST and guided ad playlists under enforce).
+
 ## 0.100.0 (2026-11-11)
 
 ### Product (in customer release notes)
