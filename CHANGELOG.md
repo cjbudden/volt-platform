@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.106.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Billing: Where your invoices are charged to the card on file, each monthly invoice is now charged automatically; a failed payment is tried again and your owners and administrators are told, without your service being interrupted. Every invoice can also be downloaded as a PDF (GET /api/billing/invoices/{id}/pdf).
+
+### Internal
+
+- added · Billing: Automated invoices sent to Volt's Stripe account after the month closes, with idempotent keys and retries, paid and failed webhooks on the existing Stripe endpoint, a send-now route for the System Admin, and a small built-in PDF writer. New suite billing-stripe.
+
 ## 0.105.0 (2026-11-11)
 
 ### Product (in customer release notes)
