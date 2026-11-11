@@ -95,7 +95,7 @@ function fakeS3(req: IncomingMessage, res: ServerResponse) {
     : objects.get(`${BUCKET}/${key}`)?.type;
 
   const { createServer } = await import('../src/server');
-  const { pool, one } = await import('../src/db');
+  const { pool, one, query } = await import('../src/db');
   const { signAccess } = await import('../src/auth/jwt');
   const { imageStore } = await import('../src/services/imageStore');
   const fs = await import('../src/services/media/fillerStore');
@@ -213,6 +213,8 @@ function fakeS3(req: IncomingMessage, res: ServerResponse) {
     // becomes a FAST library asset.
     if (spawnSync(process.env.FFMPEG_BIN || 'ffmpeg', ['-version']).status === 0) {
       const sl = await upload('Bucket slate', 'bucket.png', 'slate', png);
+      // approved, as a person would before a FAST channel may use it (migration 0161)
+      await query(`UPDATE filler_assets SET review_state = 'approved' WHERE id = $1`, [sl.row.id]);
       const v = await vodForFiller(acct, sl.row.id).catch((e) => ({ error: String(e?.message ?? e) } as any));
       const va = v.assetId ? await one<any>(`SELECT source_bytes FROM vod_assets WHERE id = $1`, [v.assetId]) : null;
       ok(!!v.assetId && Number(va?.source_bytes) > 0, 'a slate held only in the bucket renders for a FAST channel', JSON.stringify(v).slice(0, 200));

@@ -13,6 +13,15 @@
 //  first hover and kept for the page's life. The sheets are drawn as a CSS
 //  background, scaled to the box, so no canvas and no decoding. A viewer who
 //  asks for reduced motion gets the thumbnail only.
+//
+//  SMOOTH AT THE WRAP AND BETWEEN SHEETS (11 Nov 2026). Every sheet is its own
+//  layer, painted once and shown or hidden, because swapping one element's
+//  background image could blank it for a frame each time the preview moved
+//  to the next sheet. The steps are spread evenly over the whole loop and
+//  always end on its last tile, so the jump back to the start is one ordinary
+//  step, not a skip of a varying size. (The black frame at the wrap was a
+//  server fault, fixed in fillerThumbs.ts: the sheets claimed one tile more
+//  than they held.)
 // ============================================================================
 import { useEffect, useRef, useState } from 'react'
 
@@ -80,10 +89,12 @@ export function SpriteHover({ id, poster, width, height, loadVtt, label }: {
     p.then((s) => {
       if (!s.tiles.length || !hovering.current || timer.current) return
       setSheets(s)
-      const step = Math.max(1, Math.ceil(s.tiles.length / FRAMES))
-      let k = 0
+      const n = s.tiles.length, frames = Math.min(n, FRAMES)
+      // step j shows tile round(j * (n-1) / (frames-1)): 0 first, the last tile last
+      const at = (j: number) => (frames <= 1 ? 0 : Math.round((j * (n - 1)) / (frames - 1)))
+      let j = 0
       setI(0)
-      timer.current = setInterval(() => { k = (k + step) % s.tiles.length; setI(k) }, STEP_MS)
+      timer.current = setInterval(() => { j = (j + 1) % frames; setI(at(j)) }, STEP_MS)
     }).catch(() => { /* no sprites: the thumbnail stays */ })
   }
 
@@ -95,13 +106,16 @@ export function SpriteHover({ id, poster, width, height, loadVtt, label }: {
   const box = { width: width ?? '100%', height: height ?? '100%', borderRadius: 4, background: '#000', overflow: 'hidden', position: 'relative' as const, display: 'block' }
   return (
     <span ref={el} style={box} onMouseEnter={start} onMouseLeave={stop} onFocus={start} onBlur={stop} aria-label={label}>
-      {t && sheet ? (
-        <span aria-hidden="true" style={{
-          position: 'absolute', inset: 0,
-          backgroundImage: `url("${t.url}")`, backgroundRepeat: 'no-repeat',
-          backgroundSize: `${sheet.w * scale}px ${sheet.h * scale}px`,
-          backgroundPosition: `${-t.x * scale + (W - t.w * scale) / 2}px ${-t.y * scale + (H - t.h * scale) / 2}px`,
-        }} />
+      {t && sheet && sheets ? (
+        // one layer per sheet, all painted; only the current tile's sheet is shown
+        [...sheets.size.entries()].map(([url, sz]) => (
+          <span key={url} aria-hidden="true" style={{
+            position: 'absolute', inset: 0, visibility: url === t.url ? 'visible' : 'hidden',
+            backgroundImage: `url("${url}")`, backgroundRepeat: 'no-repeat',
+            backgroundSize: `${sz.w * scale}px ${sz.h * scale}px`,
+            backgroundPosition: url === t.url ? `${-t.x * scale + (W - t.w * scale) / 2}px ${-t.y * scale + (H - t.h * scale) / 2}px` : '0 0',
+          }} />
+        ))
       ) : poster ? (
         <img src={poster} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
       ) : null}

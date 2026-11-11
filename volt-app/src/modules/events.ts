@@ -294,7 +294,7 @@ const editEvent = asyncHandler(async (req, res) => {
   if (has('autoFailback')) patch.auto_failback = b.autoFailback;
   if (has('inputLossBehavior')) patch.input_loss_behavior = b.inputLossBehavior;
   if (has('fillerSlateRef')) patch.filler_slate_ref = b.fillerSlateRef ?? null;
-  if (has('fillerAssetId')) { await assertFillerAsset(accountId(req), b.fillerAssetId); patch.filler_asset_id = b.fillerAssetId ?? null; }
+  if (has('fillerAssetId')) { await assertFillerAsset(accountId(req), b.fillerAssetId, current.filler_asset_id); patch.filler_asset_id = b.fillerAssetId ?? null; }
   if (has('schemaId') || has('metadata') || has('name')) {
     if (has('schemaId') && b.schemaId == null) throw badRequest('A content type is required. Choose another type instead of clearing it.');
     const md = await validateEntityMetadata(accountId(req), (has('schemaId') ? b.schemaId : current.schema_id) ?? null,

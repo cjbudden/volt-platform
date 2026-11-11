@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { zoneList, browserZone } from '../lib/timeZones'
-import { api, thumbUrl, type FillerAsset } from '../api'
+import { api, thumbUrl, fillerUsable, type FillerAsset } from '../api'
 import { PageHead, NewButton, EntityCell, StatusTag } from '../scaffold'
 import { navigate } from '../router'
 import { Notice, usePageNotice, useNotify } from '../notices'
@@ -1387,6 +1387,9 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
     if (sources[ads.brand?.loopAssetId ?? '']) { const r = await fastApi.saveFiller(channelId, { loopFillerId: null }).catch(() => null); if (r) setAds(r) }
     return save({ loopAssetId: v ? v.slice(2) : null })
   }
+  // Only available and approved slates and loops can be chosen (migration 0161); the ones
+  // this channel already plays stay listed so the selects show what is on air.
+  const pickable = fillers.filter(f => fillerUsable(f) || Object.values(sources).includes(f.id))
   const fillerName = (assetId: string | null | undefined) => { const fid = assetId ? sources[assetId] : null; return fid ? fillers.find(f => f.id === fid)?.name ?? null : null }
   const brand = ads.brand ?? { mode: 'off' as BrandMode, identIds: [], idents: [], loopAssetId: null, identBetweenSec: 0, every: 1 }
   const every = brand.every ?? 1
@@ -1460,7 +1463,7 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
             <select className="inp" value={valueOf(brand.loopAssetId)} onChange={e => pickLoop(e.target.value)}>
               <option value="">None: gaps show the slate</option>
               {brand.loopAssetId && !loopName && <option value={valueOf(brand.loopAssetId)}>The chosen loop (being prepared)</option>}
-              {fillers.some(f => f.kind === 'loop') && <optgroup label="Loops & Fillers">{fillers.filter(f => f.kind === 'loop').map(f => <option key={f.id} value={`f:${f.id}`}>{f.name}{fDur(f.duration_ms)}</option>)}</optgroup>}
+              {pickable.some(f => f.kind === 'loop') && <optgroup label="Loops & Fillers">{pickable.filter(f => f.kind === 'loop').map(f => <option key={f.id} value={`f:${f.id}`}>{f.name}{fDur(f.duration_ms)}</option>)}</optgroup>}
               {loops.length > 0 && <optgroup label="Media Library">{loops.map(a => <option key={a.id} value={`a:${a.id}`}>{a.title} · {fmtDur(a.durationSec)}</option>)}</optgroup>}
             </select>
             <div className="hintxt">Fills what is left of a gap between programmes (after the ident, grid padding, the daily restart), repeating as needed. Up to 3 minutes.</div></div>
@@ -1468,7 +1471,7 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
             <select className="inp" value={valueOf(slateId)} onChange={e => pickSlate(e.target.value)}>
               <option value="">None: the default black slate</option>
               {slateId && !slateName && <option value={valueOf(slateId)}>The chosen slate (being prepared)</option>}
-              {fillers.length > 0 && <optgroup label="Loops & Fillers">{fillers.map(f => <option key={f.id} value={`f:${f.id}`}>{f.name}{f.kind === 'loop' ? fDur(f.duration_ms) : ' · still'}</option>)}</optgroup>}
+              {pickable.length > 0 && <optgroup label="Loops & Fillers">{pickable.map(f => <option key={f.id} value={`f:${f.id}`}>{f.name}{f.kind === 'loop' ? fDur(f.duration_ms) : ' · still'}</option>)}</optgroup>}
               {slateLib.length > 0 && <optgroup label="Media Library">{slateLib.map(a => <option key={a.id} value={`a:${a.id}`}>{a.title} · {fmtDur(a.durationSec)}</option>)}</optgroup>}
             </select>
             <div className="hintxt">Plays in ad breaks nobody sold, and in gaps when there is no loop. A still becomes 10 s of picture with silence and repeats; packaged in 1 s segments, every break lands to the second.</div></div>
@@ -1480,7 +1483,7 @@ function BrandTab({ channelId, lib }: { channelId: string; lib: { assets: LibAss
           {!brand.loopAssetId && <div className="hintxt">Choose a brand loop to use it in ad breaks.</div>}
         </div>
       </div>
-      <FastGeoReplacementCard channelId={channelId} fillers={fillers} />
+      <FastGeoReplacementCard channelId={channelId} fillers={pickable} />
     </div>
   )
 }

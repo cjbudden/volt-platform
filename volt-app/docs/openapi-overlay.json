@@ -200,7 +200,7 @@
     },
     "Filler Assets": {
       "displayName": "Slates and loops",
-      "description": "Slates (still images) and loops (short videos) are what a channel, station or event shows when every source is lost. Loops & Fillers is the one place they are kept.\n\n**Use it to:**\n- List filler assets, each with the streams that use it (`used_by`), with `GET /api/filler-assets`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n- Find streams whose fallback is still an Image Library image or a pasted address with `GET /api/filler-assets/elsewhere`\n- Copy an Image Library slate in, moving every stream that uses it, with `POST /api/filler-assets/copy-from-library`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** point a channel or event at an asset with `fillerAssetId` on `PATCH /api/channels/{id}` or `PATCH /api/events/{id}`; it must be a ready asset in the same account. Deleting an asset that streams use is refused with `409` and the streams named, unless you add `force=true`."
+      "description": "Slates (still images) and loops (short videos) are what a channel, station or event shows when every source is lost. Loops & Fillers is the one place they are kept.\n\n**Use it to:**\n- List filler assets, each with the streams that use it (`used_by`), with `GET /api/filler-assets` (search with `q`; filter by `kind`, `review_state`, `availability` and `tag`; page with `limit` and `offset`)\n- Watch a slate or loop as viewers will, read its QC and approve it with `GET /api/filler-assets/{id}/house` and `POST /api/filler-assets/{id}/review`\n- Archive it or make it available with `POST /api/filler-assets/{id}/availability`, and tag it with `PUT /api/filler-assets/{id}/tags`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n- Find streams whose fallback is still an Image Library image or a pasted address with `GET /api/filler-assets/elsewhere`\n- Copy an Image Library slate in, moving every stream that uses it, with `POST /api/filler-assets/copy-from-library`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** point a channel or event at an asset with `fillerAssetId` on `PATCH /api/channels/{id}` or `PATCH /api/events/{id}`; it must be a ready, approved and available asset in the same account (a stream keeps the one it already has). Deleting an asset that streams use is refused with `409` and the streams named, unless you add `force=true`."
     },
     "Fleet": {
       "displayName": "Fleet and usage",
@@ -753,6 +753,34 @@
     "tag": "Recordings",
     "summary": "Recorded sources",
     "description": "One row per channel, radio station or event with recorded content, with its counts, available range and live state. `q` matches the source's name, or a programme or song title that aired inside one of its recordings (guide entries and a station's now-playing log); a guide entry with no recording under it is not a match. With `q`, each row's `match` says why: `{ \"by\": \"name\" }`, or `{ \"by\": \"aired\", \"title\", \"atMs\", \"count\" }` naming the latest matching entry and how many matched. Also `type` (csv of channel, radio, event), `sort`, `dir`, `recordedFrom`/`recordedTo`, `createdFrom`/`createdTo` (epoch ms) and `recordingNow=1`."
+  },
+  "GET /api/filler-assets/tags": {
+    "summary": "Tags in use on slates and loops",
+    "description": "Every tag on a slate or loop in this account, with how many carry it: `[{ \"tag\": \"Sport\", \"count\": 4 }]`. Filter the list with `GET /api/filler-assets?tag=Sport` (a comma list means all of them)."
+  },
+  "PUT /api/filler-assets/:id/tags": {
+    "summary": "Set a slate or loop's tags",
+    "description": "`{ \"tags\": [\"Sport\", \"Brand A\"] }` replaces its tags. Tags are trimmed, kept to 40 characters and 20 per item, and a tag that differs from another only in case is dropped."
+  },
+  "GET /api/filler-assets/:id/house": {
+    "summary": "A slate or loop's house preview, QC and approval",
+    "description": "`status` (queued, building, ready, failed) and `preview` (the HLS address in `preview.url`, which plays the loop three times over with a discontinuity between rounds; the house format used; the length played and the file's length); `qc` with `state` (pass, warnings, failed), `findings` (each with `check`, `severity`, `message`, `measured`, `expected` and where in the loop) and `skipped`; `review` (pending, approved, rejected, who, when, note); `availability` (available or archived)."
+  },
+  "POST /api/filler-assets/:id/house": {
+    "summary": "Build a slate or loop's house preview again",
+    "description": "Queues the house preview and its QC again, for example after the account's output profiles change. 202. 409 while the file is still uploading."
+  },
+  "POST /api/filler-assets/:id/qc": {
+    "summary": "Run QC again over a house preview",
+    "description": "Measures the existing house preview again and answers as `GET /api/filler-assets/{id}/house`."
+  },
+  "POST /api/filler-assets/:id/review": {
+    "summary": "Approve or reject a slate or loop",
+    "description": "`{ \"decision\": \"approve\" | \"reject\" | \"reset\", \"note\": \"...\" }`. Only an approved slate or loop can be newly given to a channel, station, event or FAST channel. Approving over a QC error, or with no house preview, needs a `note` (400 without). Rejecting does not take it off streams that already use it: the answer's `usedBy` names them. `reset` sends it back to waiting."
+  },
+  "POST /api/filler-assets/:id/availability": {
+    "summary": "Archive a slate or loop, or make it available",
+    "description": "`{ \"state\": \"archived\" | \"available\" }`. An archived slate or loop is kept but cannot be newly given to anything and is left off the pickers. Refused (409, with `inUseBy`) while a channel, station, event or FAST channel uses it."
   },
   "PUT /api/filler-assets/:id/poster": {
     "summary": "Choose a loop's thumbnail",

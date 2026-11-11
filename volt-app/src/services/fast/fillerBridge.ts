@@ -70,11 +70,22 @@ export class FillerError extends Error { constructor(message: string, public sta
  * The library asset that carries this filler asset on FAST channels, made on
  * first use. Returns its id; the caller prepares it (1 s segments) for air.
  */
-export async function vodForFiller(accountId: string, fillerId: string): Promise<{ assetId: string; created: boolean; name: string; kind: 'slate' | 'loop' }> {
+export async function vodForFiller(accountId: string, fillerId: string, opts: { current?: string[] } = {}): Promise<{ assetId: string; created: boolean; name: string; kind: 'slate' | 'loop' }> {
   const fa = await one<any>(`SELECT * FROM filler_assets WHERE id = $1 AND account_id = $2`, [fillerId, accountId]);
   if (!fa) throw new FillerError('That slate or loop is not in this account.', 404);
   if (fa.status !== 'ready') throw new FillerError(`"${fa.name}" is not ready yet (${fa.status}).`);
   const existing = await one<any>(`SELECT id FROM vod_assets WHERE account_id = $1 AND metadata->>'fillerAssetId' = $2 ORDER BY created_at DESC LIMIT 1`, [accountId, fillerId]);
+  // ONLY AVAILABLE AND APPROVED (migration 0161), unless this FAST channel
+  // already plays it: the channel's settings are saved whole, and saving them
+  // again must not take its loop or slate off air.
+  if (!(opts.current ?? []).includes(fillerId)) {
+    if (fa.availability === 'archived') throw new FillerError(`"${fa.name}" is archived. Make it available again in Loops & Fillers to use it.`);
+    if (fa.review_state && fa.review_state !== 'approved') {
+      throw new FillerError(fa.review_state === 'rejected'
+        ? `"${fa.name}" was rejected in Loops & Fillers and cannot be used.`
+        : `"${fa.name}" is waiting for approval. Check its house preview and approve it in Loops & Fillers first.`);
+    }
+  }
   if (existing) return { assetId: String(existing.id), created: false, name: fa.name, kind: fa.kind };
 
   const src = await fillerSource(fa);

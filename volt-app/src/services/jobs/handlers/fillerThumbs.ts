@@ -11,6 +11,7 @@ import { registerHandler, type JobContext } from '../worker';
 import { enqueue } from '../queue';
 import { query } from '../../../db';
 import { buildFillerThumbs } from '../../media/fillerThumbs';
+import { queueFillerPreview, registerFillerPreviewHandlers, sweepFillerPreviews } from './fillerPreview';
 
 export const FILLER_THUMBS = 'filler.thumbs';
 
@@ -33,6 +34,10 @@ async function handle(ctx: JobContext): Promise<void> {
     await query(`UPDATE filler_assets SET thumb_status = 'failed', thumb_error = $2, thumbs_at = now() WHERE id = $1`, [id, why]);
     await ctx.progress(100, `failed: ${why}`);
   }
+  // Then the house preview and its QC (migration 0161): queued here so it
+  // follows every path a thumbnail follows. It does not need the thumbnails,
+  // so a failed thumbnail does not hold it back.
+  await queueFillerPreview(id);
 }
 
 /** Ready slates and loops never given thumbnails. */
@@ -49,11 +54,15 @@ let timer: NodeJS.Timeout | null = null;
 /** Leader only: every two minutes, like the asset image sweep. */
 export function startFillerThumbsSweep(everyMs = 120_000): void {
   if (timer) return;
-  const tick = () => { sweepFillerThumbs().catch((e) => console.error('[filler.thumbs] sweep failed:', e)); };
+  const tick = () => {
+    sweepFillerThumbs().catch((e) => console.error('[filler.thumbs] sweep failed:', e));
+    sweepFillerPreviews().catch((e) => console.error('[filler.preview] sweep failed:', e));
+  };
   setTimeout(tick, 20_000).unref?.();
   timer = setInterval(tick, everyMs); timer.unref?.();
 }
 
 export function registerFillerThumbsHandlers(): void {
   registerHandler(FILLER_THUMBS, handle);
+  registerFillerPreviewHandlers();
 }

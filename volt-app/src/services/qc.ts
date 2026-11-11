@@ -178,7 +178,7 @@ export function mediaInputFor(asset: any): string | null {
 }
 
 // ---- parsing ---------------------------------------------------------------
-function parseSilence(log: string): { fromMs: number; toMs: number }[] {
+export function parseSilence(log: string): { fromMs: number; toMs: number }[] {
   const out: { fromMs: number; toMs: number }[] = [];
   let start: number | null = null;
   for (const line of log.split('\n')) {
@@ -196,7 +196,7 @@ function parseSilence(log: string): { fromMs: number; toMs: number }[] {
   return out;
 }
 
-function parseBlack(log: string): { fromMs: number; toMs: number }[] {
+export function parseBlack(log: string): { fromMs: number; toMs: number }[] {
   const out: { fromMs: number; toMs: number }[] = [];
   for (const line of log.split('\n')) {
     const m = /black_start:\s*([\d.]+).*?black_end:\s*([\d.]+)/.exec(line);
@@ -205,7 +205,7 @@ function parseBlack(log: string): { fromMs: number; toMs: number }[] {
   return out;
 }
 
-function parseLoudness(log: string): { lufs: number | null; truePeak: number | null } {
+export function parseLoudness(log: string): { lufs: number | null; truePeak: number | null } {
   // ebur128's summary block is printed at the end; take the LAST occurrence so a
   // per-frame line cannot be mistaken for the integrated figure.
   const i = log.lastIndexOf('Integrated loudness');

@@ -14,7 +14,7 @@
 //  same mark here, at the same place and size the settings frame shows.
 // ============================================================================
 import { useEffect, useState } from 'react'
-import { api, thumbUrl, type FillerAsset } from '../api'
+import { api, thumbUrl, fillerUsable, type FillerAsset } from '../api'
 import { useNotify, Notice } from '../notices'
 import { useAccess } from '../access'
 import { navigate } from '../router'
@@ -643,7 +643,9 @@ export function FastFillerCard({ channelId }: { channelId: string }) {
   const slateFromLibrary = !!(ads.policy as any)?.slateAssetId && !slateFiller
   const loopFiller = ads.brand?.loopAssetId ? src[ads.brand.loopAssetId] ?? null : null
   const loopFromLibrary = !!ads.brand?.loopAssetId && !loopFiller
-  const ready = items.filter(i => i.status === 'ready')
+  // Only available and approved slates and loops can be chosen (migration 0161); the ones
+  // this channel already plays stay listed so the selects show what is on air.
+  const ready = items.filter(i => fillerUsable(i) || i.id === slateFiller || i.id === loopFiller)
   const save = async (b: { slateFillerId?: string | null; loopFillerId?: string | null; breaksUseLoop?: boolean }, what: string) => {
     setBusy(true)
     try {

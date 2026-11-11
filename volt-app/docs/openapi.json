@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.92.0",
+  "version": "0.0.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -136,7 +136,7 @@
   {
    "name": "Filler Assets",
    "x-displayName": "Slates and loops",
-   "description": "Slates (still images) and loops (short videos) are what a channel, station or event shows when every source is lost. Loops & Fillers is the one place they are kept.\n\n**Use it to:**\n- List filler assets, each with the streams that use it (`used_by`), with `GET /api/filler-assets`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n- Find streams whose fallback is still an Image Library image or a pasted address with `GET /api/filler-assets/elsewhere`\n- Copy an Image Library slate in, moving every stream that uses it, with `POST /api/filler-assets/copy-from-library`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** point a channel or event at an asset with `fillerAssetId` on `PATCH /api/channels/{id}` or `PATCH /api/events/{id}`; it must be a ready asset in the same account. Deleting an asset that streams use is refused with `409` and the streams named, unless you add `force=true`."
+   "description": "Slates (still images) and loops (short videos) are what a channel, station or event shows when every source is lost. Loops & Fillers is the one place they are kept.\n\n**Use it to:**\n- List filler assets, each with the streams that use it (`used_by`), with `GET /api/filler-assets` (search with `q`; filter by `kind`, `review_state`, `availability` and `tag`; page with `limit` and `offset`)\n- Watch a slate or loop as viewers will, read its QC and approve it with `GET /api/filler-assets/{id}/house` and `POST /api/filler-assets/{id}/review`\n- Archive it or make it available with `POST /api/filler-assets/{id}/availability`, and tag it with `PUT /api/filler-assets/{id}/tags`\n- Register an asset and get an upload address with `POST /api/filler-assets`\n- Mark it ready or rename it with `PATCH /api/filler-assets/{id}`, and remove it with `DELETE /api/filler-assets/{id}`\n- Find streams whose fallback is still an Image Library image or a pasted address with `GET /api/filler-assets/elsewhere`\n- Copy an Image Library slate in, moving every stream that uses it, with `POST /api/filler-assets/copy-from-library`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** point a channel or event at an asset with `fillerAssetId` on `PATCH /api/channels/{id}` or `PATCH /api/events/{id}`; it must be a ready, approved and available asset in the same account (a stream keeps the one it already has). Deleting an asset that streams use is refused with `409` and the streams named, unless you add `force=true`."
   },
   {
    "name": "Fleet",
@@ -15353,7 +15353,7 @@
     "tags": [
      "Filler Assets"
     ],
-    "description": "Uploaded slate/loop assets.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `kind`, `status`, `filename`, `content_type`, `width`, `height`, `duration_ms`, `bytes`, `uploaded_at`, `created_at`, `updated_at`.",
+    "description": "Uploaded slate/loop assets.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `kind`, `status`, `review_state`, `availability`, `preview_status`, `qc_state`, `filename`, `content_type`, `width`, `height`, `duration_ms`, `bytes`, `uploaded_at`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -15463,6 +15463,51 @@
       "description": "Filter: `status=value` (comma list = any of), or `status[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
      },
      {
+      "name": "review_state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "pending",
+        "approved",
+        "rejected"
+       ]
+      },
+      "description": "Filter: `review_state=value` (comma list = any of), or `review_state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "availability",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "available",
+        "archived"
+       ]
+      },
+      "description": "Filter: `availability=value` (comma list = any of), or `availability[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "preview_status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `preview_status=value` (comma list = any of), or `preview_status[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "qc_state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `qc_state=value` (comma list = any of), or `qc_state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
       "name": "filename",
       "in": "query",
       "required": false,
@@ -15554,7 +15599,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, name, kind, status, filename, content_type, width, height, duration_ms, bytes, uploaded_at, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, name, kind, status, review_state, availability, preview_status, qc_state, filename, content_type, width, height, duration_ms, bytes, uploaded_at, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",
@@ -15576,6 +15621,17 @@
        "type": "string"
       },
       "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 100000
+      },
+      "description": "Skip this many rows (page jumps). Prefer cursor."
      },
      {
       "name": "count",
@@ -15820,6 +15876,42 @@
     }
    }
   },
+  "/api/filler-assets/{id}/availability": {
+   "post": {
+    "operationId": "postFillerAssetsByIDAvailability",
+    "summary": "Archive a slate or loop, or make it available",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "`{ \"state\": \"archived\" | \"available\" }`. An archived slate or loop is kept but cannot be newly given to anything and is left off the pickers. Refused (409, with `inUseBy`) while a channel, station, event or FAST channel uses it.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/filler-assets/{id}/details": {
    "get": {
     "operationId": "getFillerAssetsByIDDetails",
@@ -15828,6 +15920,76 @@
      "Filler Assets"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/house": {
+   "get": {
+    "operationId": "getFillerAssetsByIDHouse",
+    "summary": "A slate or loop's house preview, QC and approval",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "`status` (queued, building, ready, failed) and `preview` (the HLS address in `preview.url`, which plays the loop three times over with a discontinuity between rounds; the house format used; the length played and the file's length); `qc` with `state` (pass, warnings, failed), `findings` (each with `check`, `severity`, `message`, `measured`, `expected` and where in the loop) and `skipped`; `review` (pending, approved, rejected, who, when, note); `availability` (available or archived).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postFillerAssetsByIDHouse",
+    "summary": "Build a slate or loop's house preview again",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "Queues the house preview and its QC again, for example after the account's output profiles change. 202. 409 while the file is still uploading.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
     "security": [
      {
       "adminBearer": []
@@ -15892,6 +16054,42 @@
     }
    }
   },
+  "/api/filler-assets/{id}/qc": {
+   "post": {
+    "operationId": "postFillerAssetsByIDQc",
+    "summary": "Run QC again over a house preview",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "Measures the existing house preview again and answers as `GET /api/filler-assets/{id}/house`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/filler-assets/{id}/rebuild": {
    "post": {
     "operationId": "postFillerAssetsByIDRebuild",
@@ -15900,6 +16098,78 @@
      "Filler Assets"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/review": {
+   "post": {
+    "operationId": "postFillerAssetsByIDReview",
+    "summary": "Approve or reject a slate or loop",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "`{ \"decision\": \"approve\" | \"reject\" | \"reset\", \"note\": \"...\" }`. Only an approved slate or loop can be newly given to a channel, station, event or FAST channel. Approving over a QC error, or with no house preview, needs a `note` (400 without). Rejecting does not take it off streams that already use it: the answer's `usedBy` names them. `reset` sends it back to waiting.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/tags": {
+   "put": {
+    "operationId": "putFillerAssetsByIDTags",
+    "summary": "Set a slate or loop's tags",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "`{ \"tags\": [\"Sport\", \"Brand A\"] }` replaces its tags. Tags are trimmed, kept to 40 characters and 20 per item, and a tag that differs from another only in case is dropped.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
     "security": [
      {
       "adminBearer": []
@@ -16034,6 +16304,32 @@
      "Filler Assets"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/tags": {
+   "get": {
+    "operationId": "getFillerAssetsTags",
+    "summary": "Tags in use on slates and loops",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "Every tag on a slate or loop in this account, with how many carry it: `[{ \"tag\": \"Sport\", \"count\": 4 }]`. Filter the list with `GET /api/filler-assets?tag=Sport` (a comma list means all of them).\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: view",
     "security": [
      {
       "adminBearer": []

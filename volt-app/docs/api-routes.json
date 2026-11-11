@@ -2628,11 +2628,38 @@
   "group": "/api/filler-assets"
  },
  {
+  "method": "POST",
+  "path": "/api/filler-assets/:id/availability",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
   "method": "GET",
   "path": "/api/filler-assets/:id/details",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets/:id/house",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/filler-assets/:id/house",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
   "viewerTier": false,
   "group": "/api/filler-assets"
  },
@@ -2647,7 +2674,34 @@
  },
  {
   "method": "POST",
+  "path": "/api/filler-assets/:id/qc",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
   "path": "/api/filler-assets/:id/rebuild",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
+  "path": "/api/filler-assets/:id/review",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/filler-assets/:id/tags",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: manage",
@@ -2684,6 +2738,15 @@
  {
   "method": "GET",
   "path": "/api/filler-assets/elsewhere",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "GET",
+  "path": "/api/filler-assets/tags",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "media: view",

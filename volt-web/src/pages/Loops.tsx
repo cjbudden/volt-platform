@@ -9,6 +9,11 @@ import {
 } from '../uploadManager'
 import { pressable } from '../a11y'
 import { PageError, useNotify, usePageNotice } from '../notices'
+import { ReviewTag, QcTag } from './LoopHouse'
+import { TagChips } from './FillerTags'
+
+/** Rows per page of the list (Christian, 11 Nov: search and pages). */
+const PAGE = 25
 
 /* ============================================================================
    LOOPS & FILLERS
@@ -277,6 +282,19 @@ function LoopsList() {
   const notify = useNotify()
   const fail = (m: string) => notify({ kind: 'error', message: m })
   const [filter, setFilter] = useState<'all' | 'slate' | 'loop'>('all')
+  // SEARCH, PAGES, TAGS, REVIEW AND ARCHIVED (Christian, 11 Nov; migration 0161).
+  // Done by the server (the list standard: q, filters, offset, count), so a
+  // library of thousands pages as fast as one of ten.
+  const [q, setQ] = useState('')
+  const [qDebounced, setQDebounced] = useState('')
+  const [review, setReview] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [avail, setAvail] = useState<'available' | 'archived' | 'all'>('available')
+  const [tag, setTag] = useState<string | null>(null)
+  const [allTags, setAllTags] = useState<{ tag: string; count: number }[]>([])
+  const [page, setPage] = useState(0)
+  const [total, setTotal] = useState<number | null>(null)
+  useEffect(() => { const h = setTimeout(() => setQDebounced(q.trim()), 250); return () => clearTimeout(h) }, [q])
+  useEffect(() => { setPage(0) }, [qDebounced, filter, review, avail, tag])
   const [renaming, setRenaming] = useState<string | null>(null)
   const [rename, setRename] = useState('')
   const resumeInput = useRef<HTMLInputElement | null>(null)
@@ -284,13 +302,28 @@ function LoopsList() {
 
   const [elsewhere, setElsewhere] = useState<FillerElsewhere[]>([])
   async function load() {
-    try { setAssets(await api.fillerAssets()); setErr('') }
+    const params: Record<string, string> = { limit: String(PAGE), offset: String(page * PAGE), count: 'true' }
+    if (qDebounced) params.q = qDebounced
+    if (filter !== 'all') params.kind = filter
+    if (review !== 'all') params.review_state = review
+    if (avail !== 'all') params.availability = avail
+    if (tag) params.tag = tag
+    try { const r = await api.fillerAssetsPage(params); setAssets(r.rows); setTotal(r.total); setErr('') }
     catch (e: any) { setErr(e.message) }
+    api.fillerTags().then(setAllTags).catch(() => setAllTags([]))
     api.fillerElsewhere().then(r => setElsewhere(r.items)).catch(() => setElsewhere([]))
+  }
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [page, qDebounced, filter, review, avail, tag])
+  // follow previews being built
+  const building = (assets ?? []).some(a => a.status === 'ready' && (!a.preview_status || a.preview_status === 'queued' || a.preview_status === 'building'))
+  useEffect(() => { if (!building) return; const h = setInterval(load, 5000); return () => clearInterval(h) /* eslint-disable-next-line */ }, [building, page, qDebounced, filter, review, avail, tag])
+
+  async function setAvailability(a: FillerAsset, state: 'available' | 'archived') {
+    try { await api.setFillerAvailability(a.id, state); notify({ kind: 'ok', message: state === 'archived' ? `"${a.name}" archived.` : `"${a.name}" is available again.` }); load() }
+    catch (ex: any) { fail(ex instanceof ApiError && ex.body?.message ? ex.body.message : ex.message) }
   }
 
   useEffect(() => {
-    load()
     // The manager is a module singleton, so this only attaches a view to
     // whatever is already running — including uploads started before this page
     // was opened.
@@ -307,7 +340,8 @@ function LoopsList() {
     }
   }, [kind])
 
-  const shown = (assets ?? []).filter(a => filter === 'all' || a.kind === filter)
+  const shown = assets ?? []
+  const pages = total != null ? Math.max(1, Math.ceil(total / PAGE)) : 1
 
   usePageNotice('load', err && assets ? { kind: 'error', title: "Couldn't load loops and fillers.", message: err, actions: [{ label: 'Retry', onClick: () => { load() } }] } : null)
 
@@ -386,22 +420,44 @@ function LoopsList() {
       )}
 
       <div className="card">
-        <div className="flex items-center gap-2" style={{ padding: '12px 14px 0' }}>
+        <div className="flex items-center gap-2" style={{ padding: '12px 14px 0', flexWrap: 'wrap' }}>
+          <input className="inp" type="search" placeholder="Search names and files…" value={q} onChange={e => setQ(e.target.value)}
+            aria-label="Search loops and fillers" style={{ width: 240, maxWidth: '100%' }} />
           {(['all', 'loop', 'slate'] as const).map(f => (
-            <button key={f} className={`btn ${filter === f ? 'primary' : 'ghost'}`}
-              style={{ padding: '3px 10px', fontSize: 'var(--fs-sm)' }}
-              onClick={() => setFilter(f)}>
-              {f === 'all' ? 'All' : `${KIND_LABEL[f]}s`}
+            <button key={f} className={`chip ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
+              {f === 'all' ? 'All kinds' : `${KIND_LABEL[f]}s`}
             </button>
           ))}
+          <select className="inp" value={review} onChange={e => setReview(e.target.value as any)} aria-label="Approval" style={{ width: 'auto' }}>
+            <option value="all">Any approval</option>
+            <option value="pending">Awaiting approval</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <select className="inp" value={avail} onChange={e => setAvail(e.target.value as any)} aria-label="Active or archived" style={{ width: 'auto' }}>
+            <option value="available">Active</option>
+            <option value="archived">Archived</option>
+            <option value="all">Active and archived</option>
+          </select>
           <div className="flex-1" />
           <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>
-            {shown.length} of {assets.length}
+            {total == null ? `${shown.length}` : total === 0 ? 'None' : `${page * PAGE + 1}–${page * PAGE + shown.length} of ${total}`}
           </span>
         </div>
+        {allTags.length > 0 && (
+          <div className="flex items-center gap-2" style={{ padding: '8px 14px 0', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Tags</span>
+            <button className={`chip ${tag === null ? 'active' : ''}`} onClick={() => setTag(null)}>Any</button>
+            {allTags.map(t => (
+              <button key={t.tag} className={`chip ${tag === t.tag ? 'active' : ''}`} onClick={() => setTag(tag === t.tag ? null : t.tag)}>
+                {t.tag}<span className="ct">{t.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <table>
           <thead>
-            <tr><th style={{ width: 130 }}>Preview</th><th>Name</th><th>Kind</th><th>Used by</th><th>Size</th><th>Status</th><th>Added</th><th /></tr>
+            <tr><th style={{ width: 130 }}>Preview</th><th>Name</th><th>Kind</th><th>Used by</th><th>Size</th><th>Status</th><th>Approval</th><th>Added</th><th /></tr>
           </thead>
           <tbody>
             {shown.map(a => (
@@ -461,6 +517,7 @@ function LoopsList() {
                   {a.filename && a.filename !== a.name && (
                     <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>{a.filename}</div>
                   )}
+                  {(a.tags?.length ?? 0) > 0 && <div style={{ marginTop: 4 }}><TagChips tags={a.tags} onPick={setTag} /></div>}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{KIND_LABEL[a.kind] ?? a.kind}</td>
                 <td><UsedBy users={a.used_by} /></td>
@@ -469,10 +526,25 @@ function LoopsList() {
                   {a.status}
                   {a.error && <div style={{ color: 'var(--danger,#f87171)', fontSize: 'var(--fs-micro)' }}>{a.error}</div>}
                 </td>
+                <td>
+                  {a.status === 'ready' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                      <ReviewTag state={a.review_state} />
+                      <QcTag state={a.qc_state} preview={a.preview_status ?? null} />
+                      {a.availability === 'archived' && <span className="tag idle">Archived</span>}
+                    </div>
+                  )}
+                </td>
                 <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleString()}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <a className="btn ghost" href={`/loops/${a.id}`}
-                    onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>Details</a>
+                    onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>{a.review_state === 'pending' && a.status === 'ready' ? 'Review' : 'Details'}</a>
+                  {/* IN USE CANNOT BE ARCHIVED (Christian, 11 Nov): the server refuses and names the streams. */}
+                  {a.availability === 'archived'
+                    ? <button className="btn ghost" style={{ marginLeft: 6 }} onClick={() => setAvailability(a, 'available')}>Make available</button>
+                    : <button className="btn ghost" style={{ marginLeft: 6 }} disabled={(a.used_by?.length ?? 0) > 0}
+                        title={(a.used_by?.length ?? 0) > 0 ? 'In use: choose another slate or loop for those streams first' : 'Keep it, but take it off every picker'}
+                        onClick={() => setAvailability(a, 'archived')}>Archive</button>}
                   <button className="btn ghost" style={{ marginLeft: 6 }}
                     onClick={async () => {
                       // A FAST channel plays its own copy, so deleting this does not take its loop away.
@@ -491,12 +563,21 @@ function LoopsList() {
               </tr>
             ))}
             {shown.length === 0 && (
-              <tr><td colSpan={8} style={{ color: 'var(--faint)' }}>
-                Nothing here yet. Drop a file above to add one.
+              <tr><td colSpan={9} style={{ color: 'var(--faint)' }}>
+                {qDebounced || tag || filter !== 'all' || review !== 'all' || avail !== 'available'
+                  ? 'Nothing matches. Clear the search or filters to see more.'
+                  : 'Nothing here yet. Drop a file above to add one.'}
               </td></tr>
             )}
           </tbody>
         </table>
+        {pages > 1 && (
+          <div className="flex items-center gap-2" style={{ padding: '10px 14px 14px', justifyContent: 'flex-end' }}>
+            <button className="btn ghost" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>Previous</button>
+            <span style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>Page {page + 1} of {pages}</span>
+            <button className="btn ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>Next</button>
+          </div>
+        )}
       </div>
     </>
   )

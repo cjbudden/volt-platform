@@ -506,20 +506,23 @@ fastRouter.put('/channels/:id/filler', asyncHandler(async (req, res) => {
   const policy: any = { ...(cur?.policy ?? {}) };
   const sources: Record<string, string> = { ...(policy.fillerSources ?? {}) };
   const brand: any = { mode: 'off', identIds: [], ...(policy.brand ?? {}) };
+  // The slates and loops this channel already plays keep working when it is
+  // saved again, even if archived or no longer approved (migration 0161).
+  const current = { current: Object.values(sources).map(String) };
   try {
     if (b.slateFillerId !== undefined) {
       if (policy.slateAssetId && sources[policy.slateAssetId]) delete sources[policy.slateAssetId];
-      if (b.slateFillerId) { const v = await vodForFiller(String(ch.account_id), b.slateFillerId); policy.slateAssetId = v.assetId; sources[v.assetId] = b.slateFillerId; }
+      if (b.slateFillerId) { const v = await vodForFiller(String(ch.account_id), b.slateFillerId, current); policy.slateAssetId = v.assetId; sources[v.assetId] = b.slateFillerId; }
       else policy.slateAssetId = null;
     }
     if (b.loopFillerId !== undefined) {
       if (brand.loopAssetId && sources[brand.loopAssetId]) delete sources[brand.loopAssetId];
-      if (b.loopFillerId) { const v = await vodForFiller(String(ch.account_id), b.loopFillerId); brand.loopAssetId = v.assetId; sources[v.assetId] = b.loopFillerId; }
+      if (b.loopFillerId) { const v = await vodForFiller(String(ch.account_id), b.loopFillerId, current); brand.loopAssetId = v.assetId; sources[v.assetId] = b.loopFillerId; }
       else brand.loopAssetId = null;
     }
     if (b.geoFillerId !== undefined) {
       if (policy.geoAssetId && sources[policy.geoAssetId] && policy.geoAssetId !== brand.loopAssetId && policy.geoAssetId !== policy.slateAssetId) delete sources[policy.geoAssetId];
-      if (b.geoFillerId) { const v = await vodForFiller(String(ch.account_id), b.geoFillerId); policy.geoAssetId = v.assetId; sources[v.assetId] = b.geoFillerId; }
+      if (b.geoFillerId) { const v = await vodForFiller(String(ch.account_id), b.geoFillerId, current); policy.geoAssetId = v.assetId; sources[v.assetId] = b.geoFillerId; }
       else policy.geoAssetId = null;
     }
   } catch (e: any) {

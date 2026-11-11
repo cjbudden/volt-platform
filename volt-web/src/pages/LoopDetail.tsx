@@ -15,6 +15,9 @@ import MediaPreview from '../MediaPreview'
 import { SpriteHover } from '../SpriteHover'
 import { navigate } from '../router'
 import { Notice, useNotify } from '../notices'
+import type { FillerHouse } from '../api'
+import LoopHouse, { ReviewTag } from './LoopHouse'
+import { TagEditor } from './FillerTags'
 
 interface Rendition { label: string; width: number; height: number; fps: number; bitrate_kbps: number; profile?: string }
 interface StreamUse {
@@ -30,8 +33,10 @@ interface StreamUse {
 interface Details {
   asset: { id: string; name: string; kind: 'slate' | 'loop'; status: string; filename: string | null; width: number | null; height: number | null
     duration_ms: number | string | null; bytes: number | string | null; content_type: string | null; created_at: string; uploaded_at: string | null; error: string | null }
-    & Pick<FillerAsset, 'poster_key' | 'poster_source' | 'poster_candidates' | 'sprite' | 'thumb_status' | 'thumb_error' | 'probe'>
+    & Pick<FillerAsset, 'poster_key' | 'poster_source' | 'poster_candidates' | 'sprite' | 'thumb_status' | 'thumb_error' | 'probe' | 'tags'>
   media: string | null
+  /** The house preview, QC, approval and availability (migration 0161). */
+  house: FillerHouse
   streams: StreamUse[]
   /** FAST channels playing it: each plays a copy made for its own ladder (Build > Brand & filler). */
   fast?: FastUse[]
@@ -250,6 +255,7 @@ export default function LoopDetail({ id }: { id: string }) {
   // follow a rebuild while it runs
   const running = !!d?.streams.some((s) => s.build && (s.build.status === 'queued' || s.build.status === 'building'))
     || (d?.asset.status === 'ready' && !d.asset.thumb_status)
+    || d?.house?.status === 'queued' || d?.house?.status === 'building' || (d?.asset.status === 'ready' && !d?.house?.status)
   // A loop's scrub previews (sprite sheets): loaded once they exist.
   const sheets = d?.asset.sprite?.sheets?.length ?? 0
   useEffect(() => {
@@ -283,13 +289,19 @@ export default function LoopDetail({ id }: { id: string }) {
           <h1 style={{ margin: 0, fontSize: 'var(--fs-h1, 23px)' }}>{a.name}</h1>
           <span className="tag type">{KIND[a.kind]}</span>
           {a.status !== 'ready' && <span className="tag warn">{a.status}</span>}
+          {d.house && <ReviewTag state={d.house.review.state} />}
+          {d.house?.availability.state === 'archived' && <span className="tag idle">Archived</span>}
         </div>
         <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 4 }}>
           {d.summary.streams === 0 ? 'Not used by any stream' : `Fallback for ${d.summary.streams} stream${d.summary.streams === 1 ? '' : 's'} · ${d.summary.renditions} rendition${d.summary.renditions === 1 ? '' : 's'} built`}
           {d.summary.outOfDate > 0 && <span style={{ color: 'var(--warn)' }}> · {d.summary.outOfDate} out of date</span>}
           {d.summary.failed > 0 && <span style={{ color: 'var(--down)' }}> · {d.summary.failed} failed</span>}
         </div>
+        <div style={{ marginTop: 10 }}><TagEditor id={a.id} tags={a.tags ?? []} onChanged={load} /></div>
       </div>
+
+      {/* THE HOUSE PREVIEW FIRST (migration 0161): the slate or loop as viewers see it, its QC and its approval. */}
+      {d.house && <LoopHouse id={a.id} kind={a.kind} house={d.house} inUse={d.streams.length + fast.length} onChanged={load} />}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
         <section className="card" style={{ flex: '1 1 380px', minWidth: 0 }}>

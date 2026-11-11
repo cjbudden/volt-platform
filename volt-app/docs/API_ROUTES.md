@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**962 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 741 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**969 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 748 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -618,13 +618,20 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | DELETE | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: view |  |
 | PATCH | `/api/filler-assets/:id` | admin session (Bearer) or account secret key | media: manage |  |
+| POST | `/api/filler-assets/:id/availability` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/:id/details` | admin session (Bearer) or account secret key | media: view |  |
+| GET | `/api/filler-assets/:id/house` | admin session (Bearer) or account secret key | media: view |  |
+| POST | `/api/filler-assets/:id/house` | admin session (Bearer) or account secret key | media: manage |  |
 | PUT | `/api/filler-assets/:id/poster` | admin session (Bearer) or account secret key | media: manage |  |
+| POST | `/api/filler-assets/:id/qc` | admin session (Bearer) or account secret key | media: manage |  |
 | POST | `/api/filler-assets/:id/rebuild` | admin session (Bearer) or account secret key | media: manage |  |
+| POST | `/api/filler-assets/:id/review` | admin session (Bearer) or account secret key | media: manage |  |
+| PUT | `/api/filler-assets/:id/tags` | admin session (Bearer) or account secret key | media: manage |  |
 | POST | `/api/filler-assets/:id/thumbnails` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/:id/thumbnails.vtt` | admin session (Bearer) or account secret key | media: view |  |
 | POST | `/api/filler-assets/copy-from-library` | admin session (Bearer) or account secret key | media: manage |  |
 | GET | `/api/filler-assets/elsewhere` | admin session (Bearer) or account secret key | media: view |  |
+| GET | `/api/filler-assets/tags` | admin session (Bearer) or account secret key | media: view |  |
 
 ### `/api/fleet`
 

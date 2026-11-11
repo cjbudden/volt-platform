@@ -146,6 +146,7 @@ one box have code and tests but no production exercise.**
 
 | Capability | Status | Notes / source |
 |---|---|---|
+| **Loops & Fillers: house preview, QC, approval, archive, tags (11 Nov 2026)** | ✅ | `services/media/fillerPreview.ts` builds each slate and loop in the account's house format with `filler_build.py` and keeps it under ORIGIN_DIR/filler-preview/<id>/; the console plays it continuously (three rounds per playlist, then round again) with the joins marked. QC of the build: media, playback, black, silence, loudness, the cut to whole segments, a jump (SSIM across the join against the loop's own motion) and a click or cut in the sound at the join, upscaling, bars, frame rate, interlacing. Approve/reject (a note to approve over an error), Available/Archived (refused while in use), tags, list search and offset pages. Only approved, available items can be newly chosen for channels, events and FAST. Migration 0161. Checks: `filler-preview.check.ts` 79/79 with real ffmpeg and Shaka. Not yet: house previews in the bucket on AWS (with 2.1a-3) |
 | Recordings (channel-day/event, retention→expiry) | ✅ | `recordings.ts` + orchestrator |
 | VOD library + custom metadata schemas (validated) | ✅ | `vod.ts`, `metadataValidator.ts` |
 | Multi-recording compose-clip (`clip_spec`) | ✅ | extractor renders it - `vod-extractor-job.ts` composes across recordings w/ discontinuities; 16 unit + real-media e2e |

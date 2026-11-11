@@ -11,7 +11,7 @@
 // A stream that still points at a pasted address (an Image Library image) keeps
 // working; it is shown as such, with a one-step copy into Loops & Fillers.
 import { useEffect, useRef, useState } from 'react'
-import { api, thumbUrl, type FillerAsset } from './api'
+import { api, thumbUrl, fillerUsable, type FillerAsset } from './api'
 import { pressable } from './a11y'
 import { startUpload, subscribe } from './uploadManager'
 import { navigate } from './router'
@@ -125,6 +125,7 @@ function FillerPicker({ behavior, assets, selected, onPick, onClose, onReload }:
   const [tab, setTab] = useState<'slate' | 'loop'>(kinds[0])
   const [q, setQ] = useState('')
   const [up, setUp] = useState<{ id: string; pct: number; error?: string | null } | null>(null)
+  const [landed, setLanded] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const waitFor = useRef<string | null>(null)
 
@@ -136,7 +137,13 @@ function FillerPicker({ behavior, assets, selected, onPick, onClose, onReload }:
     if (it.status === 'done' && it.assetId) {
       const id = it.assetId
       waitFor.current = null
-      onReload().then(() => api.fillerAssets().then(list => { const a = list.find(x => x.id === id); if (a) onPick(a) }))
+      // A new slate or loop waits for approval (migration 0161), so it cannot be
+      // chosen yet: say where to approve it rather than pick it.
+      onReload().then(() => api.fillerAssets().then(list => {
+        const a = list.find(x => x.id === id)
+        if (a && fillerUsable(a)) onPick(a)
+        else setLanded(id)
+      }))
     }
   }), [])
 
@@ -147,7 +154,12 @@ function FillerPicker({ behavior, assets, selected, onPick, onClose, onReload }:
   }, [onClose])
 
   const needle = q.trim().toLowerCase()
-  const list = (assets ?? []).filter(a => a.kind === tab && a.status === 'ready' && (!needle || a.name.toLowerCase().includes(needle)))
+  // ONLY AVAILABLE AND APPROVED can be chosen (Christian, 11 Nov; migration 0161);
+  // the one already chosen stays visible so the picker shows the truth.
+  const usable = (a: FillerAsset) => fillerUsable(a) || a.id === selected
+  const list = (assets ?? []).filter(a => a.kind === tab && usable(a) && (!needle || a.name.toLowerCase().includes(needle)
+    || (a.tags ?? []).some(t => t.toLowerCase().includes(needle))))
+  const waiting = (assets ?? []).filter(a => a.kind === tab && a.status === 'ready' && a.review_state === 'pending' && (a.availability ?? 'available') === 'available')
 
   return (
     <div className="drawer-scrim" style={{ alignItems: 'center', justifyContent: 'center', zIndex: 80 }} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -162,7 +174,7 @@ function FillerPicker({ behavior, assets, selected, onPick, onClose, onReload }:
           {kinds.length > 1 && kinds.map(k => (
             <button key={k} type="button" className={`chip ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
               {k === 'loop' ? IC.loop : IC.slate}{k === 'loop' ? 'Loops' : 'Slates'}
-              <span className="ct">{(assets ?? []).filter(a => a.kind === k && a.status === 'ready').length}</span>
+              <span className="ct">{(assets ?? []).filter(a => a.kind === k && usable(a)).length}</span>
             </button>
           ))}
           <div style={{ flex: 1 }} />
@@ -179,6 +191,16 @@ function FillerPicker({ behavior, assets, selected, onPick, onClose, onReload }:
           </button>
         </div>
         {up?.error && <div className="ff-err" style={{ margin: '0 18px 8px' }}>{up.error}</div>}
+        {landed && (
+          <div className="ff-sub" style={{ margin: '0 18px 8px' }}>
+            Uploaded. It can be chosen once it is approved: <a href={`/loops/${landed}`} onClick={e => { e.preventDefault(); onClose(); navigate(`/loops/${landed}`) }}>check its preview and approve it</a>.
+          </div>
+        )}
+        {!landed && waiting.length > 0 && (
+          <div className="ff-sub" style={{ margin: '0 18px 8px' }}>
+            {waiting.length} {tab === 'loop' ? (waiting.length === 1 ? 'loop is' : 'loops are') : (waiting.length === 1 ? 'slate is' : 'slates are')} waiting for approval and cannot be chosen yet. <a href="/loops" onClick={e => { e.preventDefault(); onClose(); navigate('/loops') }}>Review in Loops &amp; Fillers</a>.
+          </div>
+        )}
         <div className="card-b ff-grid-wrap">
           {assets === null ? <div className="loading">Loading…</div>
             : list.length === 0 ? (

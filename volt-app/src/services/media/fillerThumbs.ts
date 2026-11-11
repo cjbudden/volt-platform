@@ -131,12 +131,20 @@ async function loopSprites(acct: string, id: string, input: string, durMs: numbe
   const perSheet = L.cols * L.rows;
   const dir = await mkdtemp(join(tmpdir(), 'volt-filler-sprite-'));
   try {
+    // TWO PASSES, so the sheets claim only frames that exist (11 Nov 2026). In one
+    // pass the count was worked out as ceil(length / interval), one more than the
+    // fps filter draws for most lengths, and tile= fills the missing slot with
+    // black: the hover preview showed a black frame every time it wrapped.
+    // The frames are counted as files, then tiled.
     const vf = [`fps=1000/${intervalMs}`, `scale=${L.tileW}:${L.tileH}:force_original_aspect_ratio=decrease`,
-      `pad=${L.tileW}:${L.tileH}:(ow-iw)/2:(oh-ih)/2:color=black`, `tile=${L.cols}x${L.rows}`].join(',');
-    await run('ffmpeg', ['-loglevel', 'error', '-y', '-i', input, '-an', '-vf', vf, '-q:v', '4', join(dir, 'sheet-%03d.jpg')], { timeout: 10 * 60_000 });
+      `pad=${L.tileW}:${L.tileH}:(ow-iw)/2:(oh-ih)/2:color=black`].join(',');
+    await run('ffmpeg', ['-loglevel', 'error', '-y', '-i', input, '-an', '-vf', vf, '-q:v', '3', join(dir, 'f-%05d.jpg')], { timeout: 10 * 60_000 });
+    const frameFiles = (await readdir(dir)).filter((f) => /^f-\d+\.jpg$/.test(f));
+    if (!frameFiles.length) return null;
+    await run('ffmpeg', ['-loglevel', 'error', '-y', '-framerate', '1', '-i', join(dir, 'f-%05d.jpg'), '-vf', `tile=${L.cols}x${L.rows}`, '-q:v', '4', join(dir, 'sheet-%03d.jpg')], { timeout: 5 * 60_000 });
     const files = (await readdir(dir)).filter((f) => /^sheet-\d+\.jpg$/.test(f)).sort();
     if (!files.length) return null;
-    const total = Math.max(1, Math.ceil(durMs / intervalMs));
+    const total = Math.max(1, Math.min(Math.ceil(durMs / intervalMs), frameFiles.length));
     const sheets: FileSprite['sheets'] = [];
     for (const [i, f] of files.entries()) {
       const from = i * perSheet * intervalMs, tiles = Math.min(perSheet, total - i * perSheet);

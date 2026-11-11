@@ -30,6 +30,11 @@ const FILLER_LIST = defineList({
     name: { sql: 'name', type: 'string' },
     kind: { sql: 'kind', type: 'enum', values: ['slate', 'loop'] },
     status: { sql: 'status', type: 'enum', values: ['uploading', 'processing', 'ready', 'error'] },
+    // migration 0161: the review, whether it may be used, and its preview and QC
+    review_state: { sql: 'review_state', type: 'enum', values: ['pending', 'approved', 'rejected'] },
+    availability: { sql: 'availability', type: 'enum', values: ['available', 'archived'] },
+    preview_status: { sql: 'preview_status', type: 'string' },
+    qc_state: { sql: 'qc_state', type: 'string' },
     filename: { sql: 'filename', type: 'string' },
     content_type: { sql: 'content_type', type: 'string' },
     width: { sql: 'width', type: 'number' },
@@ -41,6 +46,11 @@ const FILLER_LIST = defineList({
     updated_at: { sql: 'updated_at', type: 'timestamp' },
   },
   search: ['name', 'filename'],
+  // tag=a,b: every one of those tags (tags is an array, so it is read by the
+  // route itself rather than as a list-standard filter)
+  extraParams: ['tag'],
+  // the console's Loops & Fillers pages jump to a page (Christian, 11 Nov)
+  allowOffset: true,
   defaultSort: '-created_at',
   unpagedLimit: 1000,
 });
@@ -61,11 +71,21 @@ const FILLER_LIST = defineList({
  * account and be ready. Without this a uuid from another tenant would be
  * accepted and the orchestrator would hand that tenant's file to the encoder.
  */
-export async function assertFillerAsset(acc: string, id: string | null | undefined): Promise<void> {
+export async function assertFillerAsset(acc: string, id: string | null | undefined, current?: string | null): Promise<void> {
   if (!id) return;
-  const fa = await one<any>(`SELECT status FROM filler_assets WHERE id = $1 AND account_id = $2`, [id, acc]);
+  const fa = await one<any>(`SELECT name, status, review_state, availability FROM filler_assets WHERE id = $1 AND account_id = $2`, [id, acc]);
   if (!fa) throw notFound('That slate or loop is not in this account\'s Loops & Fillers');
   if (fa.status !== 'ready') throw conflict(`That slate or loop is still ${fa.status}; choose it once it is ready`);
+  // ONLY AVAILABLE AND APPROVED (Christian, 11 Nov; migration 0161). Checked
+  // when the choice CHANGES: a stream keeps what it already has when the form
+  // is saved again, so archiving or rejecting never takes a fallback off air.
+  if (current && current === id) return;
+  if (fa.availability === 'archived') throw conflict(`"${fa.name}" is archived. Make it available again in Loops & Fillers to use it.`);
+  if (fa.review_state !== 'approved') {
+    throw conflict(fa.review_state === 'rejected'
+      ? `"${fa.name}" was rejected in Loops & Fillers and cannot be used.`
+      : `"${fa.name}" is waiting for approval. Check its house preview and approve it in Loops & Fillers first.`);
+  }
 }
 
 export interface FillerUser { kind: 'channel' | 'radio' | 'event' | 'fast'; id: string; name: string; href: string }
@@ -254,6 +274,14 @@ fillerAssetsRouter.post(
       [acc, row.id, variants]
     );
     const who = actor(req);
+    // ALREADY ON AIR, SO ALREADY APPROVED (migration 0161): the picture was these
+    // streams' fallback before it was copied in, byte for byte. Holding it for
+    // approval would leave them pointing at something marked "waiting".
+    if (relinked.length) {
+      await query(`UPDATE filler_assets SET review_state = 'approved', reviewed_at = now(), reviewed_by = $2, reviewed_by_label = $3, review_note = $4 WHERE id = $1`,
+        [row.id, who.userId ?? null, who.label ?? null, `Copied in from the Image Library while it was the fallback of ${relinked.length} stream${relinked.length === 1 ? '' : 's'}`]);
+      ready.review_state = 'approved';
+    }
     await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
       action: 'create', entityType: 'filler_asset', entityId: row.id,
       snapshot: { copiedFrom: file.path, mediaFileId: file.id, relinked: relinked.map((r: any) => ({ owner: r.owner, id: r.id, name: r.name })) } });
@@ -267,14 +295,55 @@ fillerAssetsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const params: unknown[] = [accountId(req)];
+    // tags first, so the list standard's own parameters (and the count's) follow them
+    const tags = normaliseTags(String(req.query.tag ?? '').split(','));
+    const tagSql = tags.length ? ` AND tags @> $${params.push(tags)}::text[]` : '';
     const pl = parseList(FILLER_LIST, req.query, params);
-    const where = `FROM filler_assets WHERE account_id = $1${whereSql(pl)}`;
-    const whereCount = `FROM filler_assets WHERE account_id = $1${countWhereSql(pl)}`;  // totals ignore the cursor
+    const where = `FROM filler_assets WHERE account_id = $1${tagSql}${whereSql(pl)}`;
+    const whereCount = `FROM filler_assets WHERE account_id = $1${tagSql}${countWhereSql(pl)}`;  // totals ignore the cursor
     const rows = await query<any>(`SELECT * ${where} ${pageSql(pl)}`, params);
     const total = pl.count ? Number((await one<any>(`SELECT count(*)::int AS n ${whereCount}`, countParams(pl, params)))?.n ?? 0) : undefined;
     const usage = await withFast(accountId(req), rows.map((r: any) => r.id), await usageFor(accountId(req), rows.map((r: any) => r.id)));
     for (const r of rows) r.used_by = usage.get(r.id) ?? [];
     res.json(finishPage(req, res, pl, rows, total));
+  })
+);
+
+/** Tags: trimmed, at most 40 characters, no duplicates whatever their case, at most 20. */
+export function normaliseTags(raw: unknown[]): string[] {
+  const out: string[] = [];
+  for (const t of raw) {
+    const v = String(t ?? '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (v && !out.some((x) => x.toLowerCase() === v.toLowerCase())) out.push(v);
+  }
+  return out.slice(0, 20);
+}
+
+/** Every tag in use in this account, with how many slates and loops carry it (the filter chips). */
+fillerAssetsRouter.get(
+  '/tags',
+  asyncHandler(async (req, res) => {
+    const rows = await query<any>(
+      `SELECT t AS tag, count(*)::int AS count FROM filler_assets, unnest(tags) t
+        WHERE account_id = $1 GROUP BY t ORDER BY lower(t)`, [accountId(req)]);
+    res.json(rows);
+  })
+);
+
+/** Replace a slate or loop's tags. */
+fillerAssetsRouter.put(
+  '/:id/tags',
+  asyncHandler(async (req, res) => {
+    const b = z.object({ tags: z.array(z.string()).max(50) }).parse(req.body ?? {});
+    const acc = accountId(req);
+    const before = await one<any>(`SELECT tags FROM filler_assets WHERE id = $1 AND account_id = $2`, [req.params.id, acc]);
+    if (!before) throw notFound('Filler asset not found');
+    const tags = normaliseTags(b.tags);
+    const row = await one<any>(`UPDATE filler_assets SET tags = $2::text[], updated_at = now() WHERE id = $1 RETURNING *`, [req.params.id, tags]);
+    const who = actor(req);
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
+      entityId: String(req.params.id), changes: { tags: { from: before.tags ?? [], to: tags } } }).catch(() => {});
+    res.json(row);
   })
 );
 
@@ -370,6 +439,7 @@ fillerAssetsRouter.get(
     }
     res.json({
       fast,
+      house: houseOf(row),
       asset: row,
       media: row.source_key ? `/${String(row.source_key).replace(/^\//, '')}` : null,
       streams,
@@ -454,6 +524,112 @@ fillerAssetsRouter.put(
   })
 );
 
+// ---------------------------------------------------------------------------
+//  HOUSE PREVIEW, QC, REVIEW AND ARCHIVE (migration 0161,
+//  services/media/fillerPreview.ts). Christian, 11 Nov: see a slate or loop
+//  as viewers will, read what QC found, approve it before anything can use it,
+//  and archive what is no longer wanted without deleting it.
+// ---------------------------------------------------------------------------
+async function ownFiller(req: any): Promise<any> {
+  const row = await one<any>(`SELECT * FROM filler_assets WHERE id = $1 AND account_id = $2`, [req.params.id, accountId(req)]);
+  if (!row) throw notFound('Filler asset not found');
+  return row;
+}
+
+/** The house preview, QC and review of one slate or loop. */
+export function houseOf(row: any) {
+  return {
+    status: row.preview_status ?? null, error: row.preview_error ?? null, preview: row.preview ?? null, at: row.preview_at ?? null,
+    qc: { state: row.qc_state ?? null, findings: row.qc_findings ?? [], skipped: row.qc_skipped ?? [], at: row.qc_at ?? null },
+    review: { state: row.review_state, note: row.review_note ?? null, by: row.reviewed_by_label ?? null, at: row.reviewed_at ?? null },
+    availability: { state: row.availability, at: row.archived_at ?? null, by: row.archived_by_label ?? null },
+  };
+}
+
+fillerAssetsRouter.get(
+  '/:id/house',
+  asyncHandler(async (req, res) => { res.json(houseOf(await ownFiller(req))); })
+);
+
+/** Build the house preview again (and QC it). */
+fillerAssetsRouter.post(
+  '/:id/house',
+  asyncHandler(async (req, res) => {
+    const row = await ownFiller(req);
+    if (row.status !== 'ready') throw conflict(`It is ${row.status}; a preview is made once its file has landed`);
+    const { queueFillerPreview } = await import('../services/jobs/handlers/fillerPreview');
+    await queueFillerPreview(row.id);
+    res.status(202).json({ queued: true });
+  })
+);
+
+/** Run QC again over the existing preview (thresholds changed, or a finding was disputed). */
+fillerAssetsRouter.post(
+  '/:id/qc',
+  asyncHandler(async (req, res) => {
+    const row = await ownFiller(req);
+    const { runFillerQc } = await import('../services/media/fillerPreview');
+    await runFillerQc(row.id);
+    res.json(houseOf(await ownFiller(req)));
+  })
+);
+
+/** Approve, reject, or send back to waiting. */
+fillerAssetsRouter.post(
+  '/:id/review',
+  asyncHandler(async (req, res) => {
+    const b = z.object({ decision: z.enum(['approve', 'reject', 'reset']), note: z.string().max(2000).optional().nullable() }).parse(req.body ?? {});
+    const acc = accountId(req);
+    const who = actor(req);
+    const { reviewFiller, ReviewError } = await import('../services/media/fillerPreview');
+    let r: any;
+    try {
+      r = await reviewFiller({ id: String(req.params.id), accountId: acc, decision: b.decision, note: b.note ?? null, userId: who.userId ?? null, label: who.label ?? null });
+    } catch (e: any) {
+      if (e instanceof ReviewError) return res.status(e.status).json({ error: e.message, message: e.message });
+      throw e;
+    }
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
+      entityId: String(req.params.id), changes: { review: { from: r.from, to: r.to }, ...(b.note ? { review_note: { from: null, to: b.note } } : {}) } }).catch(() => {});
+    // Rejecting never takes it off streams that use it (they would fall back to
+    // black mid-outage): say who still uses it so the page can.
+    const users = (await withFast(acc, [r.asset.id], await usageFor(acc, [r.asset.id]))).get(r.asset.id) ?? [];
+    res.json({ ...houseOf(r.asset), usedBy: users });
+  })
+);
+
+/**
+ * Archive or make available again. An archived slate or loop is kept but out
+ * of use: off every picker and refused for anything new. IN USE CANNOT BE
+ * ARCHIVED (Christian, 11 Nov), with no override: change the streams first.
+ */
+fillerAssetsRouter.post(
+  '/:id/availability',
+  asyncHandler(async (req, res) => {
+    const b = z.object({ state: z.enum(['available', 'archived']) }).parse(req.body ?? {});
+    const acc = accountId(req);
+    const row = await ownFiller(req);
+    if (b.state === 'archived') {
+      const users = (await withFast(acc, [row.id], await usageFor(acc, [row.id]))).get(row.id) ?? [];
+      if (users.length) {
+        return res.status(409).json({ error: 'In use', inUseBy: users,
+          message: `"${row.name}" is used by ${users.map((u) => u.name).join(', ')}. Choose another slate or loop for ${users.length === 1 ? 'it' : 'them'} first, then archive it.` });
+      }
+    }
+    const who = actor(req);
+    const upd = await one<any>(
+      `UPDATE filler_assets SET availability = $2,
+              archived_at = CASE WHEN $2 = 'archived' THEN now() ELSE NULL END,
+              archived_by_label = CASE WHEN $2 = 'archived' THEN $3 ELSE NULL END, updated_at = now()
+        WHERE id = $1 RETURNING *`, [row.id, b.state, who.label ?? null]);
+    if (row.availability !== b.state) {
+      await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
+        entityId: row.id, changes: { availability: { from: row.availability, to: b.state } } }).catch(() => {});
+    }
+    res.json(upd);
+  })
+);
+
 const createSchema = z.object({
   kind: z.enum(['slate', 'loop']),
   name: z.string().min(1),
@@ -527,6 +703,8 @@ fillerAssetsRouter.delete(
     if (!row) throw notFound('Filler asset not found');
     // Its thumbnail, frames and sprite sheets go with it (sprite_sheets rows cascade).
     await (await import('../services/media/fillerThumbs')).deleteFillerThumbs(accountId(req), String(req.params.id)).catch(() => {});
+    // and its house preview (migration 0161)
+    await (await import('../services/media/fillerPreview')).removeFillerPreview(String(req.params.id)).catch(() => {});
     res.status(204).end();
   })
 );

@@ -1570,7 +1570,7 @@
   "defaultSort": "-created_at",
   "defaultLimit": 50,
   "maxLimit": 200,
-  "allowOffset": false,
+  "allowOffset": true,
   "unpagedLimit": 1000,
   "aliases": {},
   "fields": {
@@ -1631,6 +1631,67 @@
      "ne",
      "in",
      "nin",
+     "exists"
+    ]
+   },
+   "review_state": {
+    "type": "enum",
+    "values": [
+     "pending",
+     "approved",
+     "rejected"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "availability": {
+    "type": "enum",
+    "values": [
+     "available",
+     "archived"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ]
+   },
+   "preview_status": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "qc_state": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
      "exists"
     ]
    },

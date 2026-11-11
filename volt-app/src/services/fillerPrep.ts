@@ -31,7 +31,7 @@ export const FILLER_BUILD = 'filler.build';
 type Kind = 'channel' | 'event';
 const PULL = new Set(['hls', 'http', 'https', 'dash']);
 
-function py(script: string, args: string[], timeoutMs = 180000): Promise<{ code: number; out: string; err: string }> {
+export function py(script: string, args: string[], timeoutMs = 180000): Promise<{ code: number; out: string; err: string }> {
   return new Promise((done) => {
     const p = spawn(config.testStream.pythonBin, [join(config.testStream.encoderBin, script), ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -46,7 +46,7 @@ function py(script: string, args: string[], timeoutMs = 180000): Promise<{ code:
   });
 }
 
-function lastJson(s: string): any | null {
+export function lastJson(s: string): any | null {
   for (const l of s.trim().split('\n').reverse()) {
     try { return JSON.parse(l.trim()); } catch { /* not this line */ }
   }

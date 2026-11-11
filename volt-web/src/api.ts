@@ -1966,6 +1966,22 @@ export const api = {
   // ---- loops & fillers ----
   fillerAssets: (kind?: 'slate' | 'loop'): Promise<FillerAsset[]> =>
     req(`/filler-assets${kind ? `?kind=${kind}` : ''}`),
+  /** One page of Loops & Fillers (the list standard: q, filters, offset, count). */
+  fillerAssetsPage: async (params: Record<string, string>): Promise<{ rows: FillerAsset[]; total: number | null }> => {
+    const { body, headers } = await apiRequestWithHeaders('/filler-assets?' + new URLSearchParams(params).toString())
+    const t = headers.get('X-Total-Count')
+    return { rows: body ?? [], total: t == null ? null : Number(t) }
+  },
+  fillerHouse: (id: string): Promise<FillerHouse> => req(`/filler-assets/${id}/house`),
+  rebuildFillerHouse: (id: string): Promise<{ queued: boolean }> => req(`/filler-assets/${id}/house`, { method: 'POST' }),
+  rerunFillerQc: (id: string): Promise<FillerHouse> => req(`/filler-assets/${id}/qc`, { method: 'POST' }),
+  reviewFiller: (id: string, b: { decision: 'approve' | 'reject' | 'reset'; note?: string | null }): Promise<FillerHouse & { usedBy: FillerUser[] }> =>
+    req(`/filler-assets/${id}/review`, { method: 'POST', body: JSON.stringify(b) }),
+  fillerTags: (): Promise<{ tag: string; count: number }[]> => req('/filler-assets/tags'),
+  setFillerTags: (id: string, tags: string[]): Promise<FillerAsset> =>
+    req(`/filler-assets/${id}/tags`, { method: 'PUT', body: JSON.stringify({ tags }) }),
+  setFillerAvailability: (id: string, state: 'available' | 'archived'): Promise<FillerAsset> =>
+    req(`/filler-assets/${id}/availability`, { method: 'POST', body: JSON.stringify({ state }) }),
   patchFillerAsset: (id: string, b: { name?: string }): Promise<FillerAsset> =>
     req(`/filler-assets/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
   fillerThumbnailsVtt: (id: string): Promise<string> => textReq(`/filler-assets/${id}/thumbnails.vtt`),
@@ -3122,6 +3138,47 @@ export interface FillerAsset {
   updated_at: string
   /** The channels, stations and events that fall back to this asset. */
   used_by?: FillerUser[]
+  /** Migration 0161: only approved and available ones can be newly chosen. */
+  review_state?: 'pending' | 'approved' | 'rejected'
+  review_note?: string | null
+  reviewed_by_label?: string | null
+  reviewed_at?: string | null
+  availability?: 'available' | 'archived'
+  archived_at?: string | null
+  /** The house preview (built in the account's house format) and its QC. */
+  preview_status?: 'queued' | 'building' | 'ready' | 'failed' | null
+  preview_error?: string | null
+  qc_state?: 'pass' | 'warnings' | 'failed' | null
+  /** Free tags, a simple grouping to filter by. */
+  tags?: string[]
+}
+
+/** Can this slate or loop be newly given to a channel, station, event or FAST
+ *  channel? Ready, available (not archived) and approved; the server refuses
+ *  anything else (modules/fillerAssets.ts assertFillerAsset). */
+export const fillerUsable = (a: FillerAsset) =>
+  a.status === 'ready' && (a.availability ?? 'available') === 'available' && (a.review_state ?? 'approved') === 'approved'
+
+/** One QC finding on a house preview (services/media/fillerPreview.ts). */
+export interface FillerFinding {
+  check: string; severity: 'info' | 'warning' | 'error'; message: string
+  fromMs?: number | null; toMs?: number | null; measured?: string | null; expected?: string | null
+}
+/** The house preview, QC, review and availability of one slate or loop. */
+export interface FillerHouse {
+  status: 'queued' | 'building' | 'ready' | 'failed' | null
+  error: string | null
+  at: string | null
+  preview: null | {
+    url: string; repeats: number; segmentSeconds: number; loopSeconds: number; sourceMs: number | null
+    house: { profileId: string | null; profileName: string; usedBy: number; standard: boolean }
+    renditions: { label: string; width: number; height: number; fps: number; bitrateKbps: number }[]
+    audio: { sample_rate: number; channels: number; bitrate_kbps: number } | null
+    buildSeconds: number | null; builtAt: string
+  }
+  qc: { state: 'pass' | 'warnings' | 'failed' | null; findings: FillerFinding[]; skipped: { check: string; reason: string }[]; at: string | null }
+  review: { state: 'pending' | 'approved' | 'rejected'; note: string | null; by: string | null; at: string | null }
+  availability: { state: 'available' | 'archived'; at: string | null; by: string | null }
 }
 export interface FillerProbe {
   container: string | null; bitrateKbps: number | null

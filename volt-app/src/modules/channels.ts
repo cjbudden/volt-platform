@@ -551,7 +551,7 @@ const editChannel = asyncHandler(async (req, res) => {
   if (has('autoFailback')) patch.auto_failback = body.autoFailback;
   if (has('inputLossBehavior')) patch.input_loss_behavior = body.inputLossBehavior;
   if (has('fillerSlateRef')) patch.filler_slate_ref = body.fillerSlateRef ?? null;
-  if (has('fillerAssetId')) { await assertFillerAsset(accountId(req), body.fillerAssetId); patch.filler_asset_id = body.fillerAssetId ?? null; }
+  if (has('fillerAssetId')) { await assertFillerAsset(accountId(req), body.fillerAssetId, current.filler_asset_id); patch.filler_asset_id = body.fillerAssetId ?? null; }
   if (has('fallbackTranscode')) patch.fallback_transcode = body.fallbackTranscode;
   if (has('watermark') && body.watermark) {
     const w = body.watermark;
