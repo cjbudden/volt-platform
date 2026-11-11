@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.109.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Billing: Billing now lists your add-ons: turn one on, change its pack or turn it off, with what it costs shown before you confirm, and a meter of how much of this month's quantity is used and when it starts again.
+
+### Internal
+
+- added: System Admin > Billing gains the add-on catalogue (add and edit add-ons and packs, set one not offered) and each account's add-ons in its drawer; the docs seed has two add-ons.
+
 ## 0.108.0 (2026-11-11)
 
 ### Product (in customer release notes)
