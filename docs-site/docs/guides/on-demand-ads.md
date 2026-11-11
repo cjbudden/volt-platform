@@ -94,6 +94,8 @@ When a viewer pauses, resumes, mutes or unmutes during an ad, Volt tells the ad 
 
 Captions carry on across a break: they go quiet during the ads and come back in step with the title. Titles protected with DRM play their ads in the clear, and the title's protection applies again as soon as it resumes.
 
+Where play tokens are enforced at the CDN, ads keep playing: the viewer's stream with the ads carries the viewer's own tokens for the title and for each ad, so a copied address does not play in another country, and the stream stops when the title is withdrawn, like the title's own address (see [The play gate](../api/play-gate.md#ad-sessions)).
+
 ## How it connects
 
 | Section | How it relates |

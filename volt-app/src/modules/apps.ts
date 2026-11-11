@@ -450,9 +450,23 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   // the content without them. The answer then belongs to this viewer (a session
   // of their own), so it is never shared at the edge.
   let ads: Awaited<ReturnType<typeof adsForPlay>> = null;
+  // What the title's play token would carry for this viewer (country, policy
+  // class, the title's window, the rule's lifetime): a stitched session signs
+  // its addresses with the same claims (build queue P2-2e). Read once, used by
+  // the session and by the plain answer below.
+  let edgeRead: { row: any; prof: any; policyClass: ReturnType<typeof policyClassOf> } | null = null;
+  const readEdge = async () => {
+    if (edgeRead) return edgeRead;
+    const row = await vodAvailabilityRow(b.assetId);
+    const prof = row ? await rightsForAsset(row) : null;
+    edgeRead = { row, prof, policyClass: policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }) };
+    return edgeRead;
+  };
   if (kind === 'vod' && delivery) {
+    const er = edgeTokensMode() !== 'off' ? await readEdge() : null;
     ads = await adsForPlay({ accountId: key.account_id, assetId: b.assetId, via: (rights as any).rule?.allowed ? (rights as any).rule.via : (rights as any).via ?? null, preferred: b.adDelivery ?? null, caps: b.caps,
-      playSid: b.sid ?? null, ctx: { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null, country: geo ?? null, appId: key.app_id ?? null } })
+      playSid: b.sid ?? null, ctx: { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null, country: geo ?? null, appId: key.app_id ?? null },
+      edge: er ? { country: geo ?? null, policyClass: er.policyClass, effectiveUntil: vodStatus?.effectiveUntil ?? null, lifetimeSec: deliveryPolicyOf(er.row?.availability).tokenLifetimeSec } : null })
       .catch((e) => { console.warn('[vod-ads] play gate: playing without ads:', e?.message ?? e); return null; });
     if (ads) { delivery = { hls: ads.hls, dash: ads.dash }; edgeSec = 0; }
   }
@@ -460,8 +474,9 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   // carry a signed token in the path that the edge checks on every manifest
   // and segment request: bound to this asset's folder and the viewer's
   // country, ending at the earlier of its lifetime and the asset's window.
-  // An ad session's addresses are the stitcher's own (per viewer) and are left
-  // as they are. Everything it reads is cached: no database read when warm.
+  // An ad session's addresses are the stitcher's own (per viewer): its
+  // playlists carry the same claims in each folder's token (services/vodAds,
+  // P2-2e). Everything it reads is cached: no database read when warm.
   //
   // TOKEN-FREE (build queue P2-2c): a title whose rule asks for it, that no
   // viewer condition applies to (services/deliveryPolicy.ts tokenFreeNow), and
@@ -470,9 +485,10 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
   // under enforce while the title is Available.
   if (kind === 'vod' && delivery && !ads && edgeTokensMode() !== 'off') {
     const prefix = tokenPrefix([delivery.hls, delivery.dash]);
-    const row = prefix ? await vodAvailabilityRow(b.assetId) : null;
-    const prof = row ? await rightsForAsset(row) : null;
-    const openPlay = policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }) === 'open';
+    const er = prefix ? await readEdge() : null;
+    const row = er?.row ?? null;
+    const prof = er?.prof ?? null;
+    const openPlay = er?.policyClass === 'open';
     const tf = prefix && openPlay && row?.availability?.protection?.tokenFree === true
       ? await tokenFreeNow(b.assetId, { accountId: key.account_id }) : null;
     if (tf?.open) {
@@ -480,7 +496,7 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     } else if (prefix) {
       // The title's rule may set the token's lifetime (Protection, P3-4b); otherwise the policy class decides.
       const et = mintEdgeToken({ assetId: b.assetId, prefix, country: geo ?? null, sid: b.sid ?? null,
-        policyClass: policyClassOf({ territoryMode: prof?.territoryMode ?? null, via: (rights as any).rule?.via ?? null }),
+        policyClass: er!.policyClass,
         effectiveUntil: vodStatus?.effectiveUntil ?? null, lifetimeSec: deliveryPolicyOf(row?.availability).tokenLifetimeSec });
       delivery = { ...delivery, hls: withToken(delivery.hls, et.token), dash: withToken(delivery.dash, et.token) };
       // A shared (edge-cached) answer never outlives the token in it.

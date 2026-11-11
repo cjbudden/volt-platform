@@ -152,7 +152,11 @@ Where the operator enforces tokens, a plain on-demand address with no token (`/v
 
 A title whose publishing rule turns on **Token-free playback** (`protection.tokenFree`, see [Publishing rules](../guides/publishing-rules.md#play-without-tokens-token-free-playback)) is answered with its plain addresses, with no `/t/` token, and they play at the CDN even where tokens are enforced, for as long as the title is available. Only titles nothing about the viewer decides qualify: no country limit, rights territories, paywall, sign-in, DRM, referrer domains or streams limit. A title that gains one of these goes back to tokenised addresses within about a minute, and its plain address is refused again, as it is once the title stops being available. Treat both kinds the same way: play the address the gate gave you.
 
-The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available* or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not. Ad sessions (step 6) keep their own addresses.
+The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available* or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not.
+
+#### Ad sessions
+
+A stitched ad session (step 6) is this viewer's own, so its playlists carry this viewer's tokens: the title's segments, and each ad's and house spot's, have a token in front of their folder, bound to the viewer's country and lasting as long as the title's own token would. Nothing changes for your player: play `delivery.hls` or `delivery.dash` as they are. When the title stops being public, the session's playlists, its segment addresses and its timeline answer `403` *No longer available*, and so do the title's segments already in the player. Ask the gate again, as for any other `403`. With guided ads, each break's ads carry tokens the same way.
 
 ## Troubleshooting
 

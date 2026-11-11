@@ -27,7 +27,8 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, badRequest } from '../util/http';
+import { asyncHandler, notFound, badRequest, forbidden } from '../util/http';
+import { revokedAtFor, EDGE_REFUSAL_TEXT } from '../services/edgeTokens';
 import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
@@ -185,6 +186,14 @@ async function session(req: Request, wait = false) {
   if (!validSid(sid)) throw notFound();
   const row = wait ? await readySession(sid) : await sessionRow(sid);
   if (!row) throw notFound();
+  // A session carrying the viewer's play token (P2-2e) stops with it: once the
+  // title is withdrawn, archived or restricted after the session opened, its
+  // playlists, segments and timeline are refused like the token is at the edge.
+  const edge = (row.ctx as SessionCtx | null)?.edge;
+  if (edge) {
+    const at = await revokedAtFor(String(row.vod_asset_id));
+    if (at != null && edge.n <= at) throw forbidden(EDGE_REFUSAL_TEXT.revoked);
+  }
   return row;
 }
 const int = (v: string, max = 10_000) => { const n = Number(v); if (!Number.isInteger(n) || n < 0 || n > max) throw notFound(); return n; };

@@ -25,6 +25,21 @@
 //
 //  THE SESSION ID IS THE CAPABILITY for its playlists, segments, timeline,
 //  events and click: random, unguessable, scoped to one asset.
+//
+//  PLAY TOKENS (build queue P2-2e). Under VOLT_EDGE_TOKENS=enforce the edge
+//  refuses a title's plain address, and a session's playlists name the
+//  title's segments, and each ad's (a conditioned creative or a house ad is a
+//  title of its own, under /clips/vod/ or /vod/), by address. A stitched
+//  session belongs to one viewer, so its addresses carry that viewer's token:
+//  the play gate passes what it would put in the title's own token (country,
+//  policy class, the title's window, the rule's lifetime) and the session
+//  keeps it (ctx.edge: c, k, n, e). Every playlist and the segment redirect
+//  then sign, from those same claims, one token per folder: the title's and
+//  each ad's. The same claims every time, so a playlist reads the same on
+//  every request, and a withdrawn title's tokens (issued before the
+//  revocation) stop at the edge while the session's own routes refuse too.
+//  Guided sessions: the ads are tokenised the same way (fresh claims, the
+//  viewer's country); the shared content playlist is P2-2f.
 // ============================================================================
 import { randomBytes, createHash } from 'node:crypto';
 import { query, one } from '../../db';
@@ -46,6 +61,9 @@ import {
   type MasterEntry, type Media, type Segment,
 } from './hls';
 import { parseMpd, stitchMpd, contentEdges, sidecarText, cutVtt, type Mpd, type DashAd, type DashAdTrack } from './dash';
+import {
+  edgeTokensMode, mintEdgeToken, signEdgeToken, tokenPrefix, tokenLifetimeSec, withToken, PLAIN_VOD_RE, type PolicyClass,
+} from '../edgeTokens';
 
 // ---------------------------------------------------------------- rules
 
@@ -313,7 +331,79 @@ export interface SessionPlan {
   /** VMAP rule: how asking the ad server for this viewer's schedule went. */
   vmap?: { state: 'ok' | 'timeout' | 'error'; message: string | null; problems: string[]; elapsedMs: number };
 }
-export interface SessionCtx { ip?: string | null; userAgent?: string | null; country?: string | null; appId?: string | null; ifa?: string | null; lmt?: boolean; gdpr?: string | null; usPrivacy?: string | null }
+export interface SessionCtx {
+  ip?: string | null; userAgent?: string | null; country?: string | null; appId?: string | null; ifa?: string | null; lmt?: boolean; gdpr?: string | null; usPrivacy?: string | null;
+  /** The claims of the viewer's play token (P2-2e), kept so every playlist signs the same tokens. */
+  edge?: SessionEdge;
+}
+/** What the gate would put in the title's token: country, policy class, issued at, expiry (edgeTokens.ts EdgeClaims). */
+export interface SessionEdge { c: string; k: PolicyClass; n: number; e: number }
+/** What the play gate knows about the viewer's token, before the session has an id. */
+export interface EdgeSpec { country?: string | null; policyClass: PolicyClass; effectiveUntil?: Date | null; lifetimeSec?: number | null }
+
+/** The session's token claims from the gate's spec: the title's own token's, to the second. */
+export function sessionEdgeOf(spec: EdgeSpec, nowSec?: number): SessionEdge {
+  const { claims } = mintEdgeToken({ assetId: '-', prefix: '/', country: spec.country ?? null, policyClass: spec.policyClass,
+    effectiveUntil: spec.effectiveUntil ?? null, lifetimeSec: spec.lifetimeSec ?? null, nowSec });
+  return { c: claims.c, k: claims.k, n: claims.n, e: claims.e };
+}
+
+type FolderToken = { prefix: string; token: string };
+
+/**
+ * The token for one asset's folder in this session, or null (tokens off, a
+ * folder the edge does not guard such as /clips/ads/, or the session's own
+ * content with no claims: a guided session's, which is P2-2f). The title's
+ * folder gets the viewer's claims; an ad's folder the same times and country,
+ * policy class open (an ad has no rights of its own to the viewer).
+ */
+export function folderToken(row: any, assetId: string, masterKey: string, nowSec = Math.floor(Date.now() / 1000)): FolderToken | null {
+  if (edgeTokensMode() === 'off' || !masterKey) return null;
+  const prefix = tokenPrefix([keyUrl(masterKey)]);
+  if (!prefix || !PLAIN_VOD_RE.test(prefix)) return null;
+  const ctx = (row?.ctx ?? {}) as SessionCtx;
+  const edge = ctx.edge;
+  const content = String(assetId) === String(row?.vod_asset_id);
+  if (content && !edge) return null;
+  const n = edge?.n ?? nowSec;
+  const e = edge?.e ?? nowSec + tokenLifetimeSec('open');
+  const token = signEdgeToken({ a: String(assetId), p: prefix, c: edge?.c ?? String(ctx.country ?? '').toUpperCase(), k: content ? edge!.k : 'open', d: 0,
+    ...(content && row?.play_sid ? { s: String(row.play_sid) } : {}), n, e });
+  return { prefix, token };
+}
+
+/** A URL with the token of the folder it is in, when one of `toks` covers it. */
+function tokUrl(u: string, toks: FolderToken[]): string {
+  if (!u || !toks.length) return u;
+  let path: string;
+  try { path = new URL(u, 'http://x').pathname; } catch { return u; }
+  if (path.startsWith('/t/')) return u;
+  const t = toks.find((x) => path.startsWith(x.prefix));
+  return t ? (withToken(u, t.token) ?? u) : u;
+}
+/** Every address in an HLS playlist (URI lines and URI="..." attributes) tokenised. */
+export function tokeniseHls(text: string, toks: FolderToken[]): string {
+  if (!toks.length) return text;
+  return text.split('\n').map((l) => (l && !l.startsWith('#') ? tokUrl(l, toks) : l.replace(/URI="([^"]+)"/g, (_w, u) => `URI="${tokUrl(u, toks)}"`))).join('\n');
+}
+/** Every address in an MPD (BaseURL text, media, initialization and sourceURL attributes) tokenised. */
+export function tokeniseMpd(text: string, toks: FolderToken[]): string {
+  if (!toks.length) return text;
+  return text.replace(/<BaseURL>([^<]+)<\/BaseURL>/g, (_w, u) => `<BaseURL>${tokUrl(u, toks)}</BaseURL>`)
+    .replace(/\b(media|initialization|sourceURL)="([^"]+)"/g, (_w, a, u) => `${a}="${tokUrl(u, toks)}"`);
+}
+/** The tokens a session's playlists need: its title's folder and each played ad's. */
+function sessionTokens(row: any, assetKey: string | null): FolderToken[] {
+  if (edgeTokensMode() === 'off') return [];
+  const out: FolderToken[] = [];
+  const t = assetKey ? folderToken(row, row.vod_asset_id, assetKey) : null;
+  if (t) out.push(t);
+  for (const b of playedBreaks(row.plan as SessionPlan)) for (const x of b.pod!) {
+    const at = folderToken(row, x.assetId, x.masterKey);
+    if (at && !out.some((o) => o.prefix === at.prefix)) out.push(at);
+  }
+  return out;
+}
 
 export const newSessionId = () => `va${randomBytes(18).toString('base64url')}`;
 const SID_RE = /^va[A-Za-z0-9_-]{20,40}$/;
@@ -328,6 +418,8 @@ export interface OpenInput {
   /** guided sessions are opened per break as the player reaches it; stitched decide everything now. */
   decide?: 'all' | 'none';
   id?: string;
+  /** The viewer's play token as the gate would mint it (P2-2e); kept on the session when tokens are on. */
+  edge?: EdgeSpec | null;
 }
 
 /** Open a session: plan its breaks, and (stitched) start deciding every one of them. */
@@ -335,6 +427,7 @@ export async function openSession(i: OpenInput): Promise<{ id: string; plan: Ses
   const asset = await assetFor(i.assetId, i.accountId);
   if (!asset?.master_key) throw new Error('asset has no playlist');
   const id = i.id ?? newSessionId();
+  if (i.edge && edgeTokensMode() !== 'off') i = { ...i, ctx: { ...i.ctx, edge: sessionEdgeOf(i.edge) } };
   // A VMAP rule: this viewer's schedule, asked with the viewer's macros.
   const { contentSec, breaks, cuts, vmap } = await breaksForRule(asset, i.rule, { sessionId: id, ctx: i.ctx }, i.fetcher);
   const plan: SessionPlan = {
@@ -508,7 +601,7 @@ export const playedBreaks = (plan: SessionPlan) => plan.breaks.filter((b) => b.p
 export async function sessionMaster(row: any): Promise<string> {
   const asset = await assetFor(row.vod_asset_id);
   const h = await assetHls(asset!.master_key!);
-  return rewriteMaster(h.masterText, h.masterUrl, (e) => `${sessionBase(row.id)}/${e.track}.m3u8`);
+  return tokeniseHls(rewriteMaster(h.masterText, h.masterUrl, (e) => `${sessionBase(row.id)}/${e.track}.m3u8`), sessionTokens(row, asset!.master_key));
 }
 
 /** One ad's segments for a content track, each through the session's segment route. */
@@ -538,7 +631,9 @@ export async function sessionMedia(row: any, track: string): Promise<string | nu
     else for (let p = 0; p < b.pod!.length; p++) segs.push(...await adSegments(row.id, b, p, entry));
     breaks.push({ index: b.index, atSec: b.atSec, segments: segs });
   }
-  return stitchMedia(content, breaks);
+  // The title's segments and init segments, and each ad's init segment, with
+  // the viewer's token (the ads' own segments go through the redirect).
+  return tokeniseHls(stitchMedia(content, breaks), sessionTokens(row, asset!.master_key));
 }
 
 // ---------------------------------------------------------------- stitched DASH
@@ -602,7 +697,8 @@ export async function sessionMpd(row: any): Promise<string | null> {
     }
     breaks.push({ index: b.index, atSec: b.atSec, ads });
   }
-  return stitchMpd(mpd, keyUrl(mpdKeyOf(asset)!), breaks, BLANK_VTT, (k, rep) => `${sessionBase(row.id)}/text/${k}/${encodeURIComponent(rep)}.vtt`);
+  return tokeniseMpd(stitchMpd(mpd, keyUrl(mpdKeyOf(asset)!), breaks, BLANK_VTT, (k, rep) => `${sessionBase(row.id)}/text/${k}/${encodeURIComponent(rep)}.vtt`),
+    sessionTokens(row, asset.master_key));
 }
 
 /** A content Period's part of the asset's sidecar WebVTT, on that Period's clock (dash.ts cutVtt). */
@@ -691,7 +787,8 @@ export async function adMaster(row: any, b: number, p: number): Promise<string |
   const e = podEntry(row, b, p);
   if (!e) return null;
   const ah = await assetHls(e.masterKey);
-  return rewriteMaster(ah.masterText, ah.masterUrl, (x) => `${sessionBase(row.id)}/ad/${b}/${p}/${x.track}.m3u8`);
+  const t = folderToken(row, e.assetId, e.masterKey);
+  return tokeniseHls(rewriteMaster(ah.masterText, ah.masterUrl, (x) => `${sessionBase(row.id)}/ad/${b}/${p}/${x.track}.m3u8`), t ? [t] : []);
 }
 export async function adMedia(row: any, b: number, p: number, track: string): Promise<string | null> {
   const e = podEntry(row, b, p);
@@ -699,7 +796,8 @@ export async function adMedia(row: any, b: number, p: number, track: string): Pr
   const ah = await assetHls(e.masterKey);
   const media = ah.media.get(track);
   if (!media) return null;
-  return stitchMedia({ ...media, segments: media.segments.map((s, n) => ({ ...s, url: `${sessionBase(row.id)}/seg/${b}/${p}/${track}/${n}` })) }, []);
+  const t = folderToken(row, e.assetId, e.masterKey);
+  return tokeniseHls(stitchMedia({ ...media, segments: media.segments.map((s, n) => ({ ...s, url: `${sessionBase(row.id)}/seg/${b}/${p}/${track}/${n}` })) }, []), t ? [t] : []);
 }
 
 const podEntry = (row: any, b: number, p: number): PodEntry | null =>
@@ -753,7 +851,8 @@ export async function segmentRedirect(row: any, b: number, p: number, track: str
     const due = eventsDueAt(e, start, n === media.segments.length - 1);
     void sendSessionEvents(row, b, p, e, due).catch(() => null);
   }
-  return seg.url;
+  const t = folderToken(row, e.assetId, e.masterKey);
+  return t ? tokUrl(seg.url, [t]) : seg.url;
 }
 
 const chains = new Map<string, Promise<void>>();
@@ -912,6 +1011,8 @@ export function invalidateRuleCache(accountId: string): void {
 export async function adsForPlay(i: {
   accountId: string; assetId: string; via?: string | null; preferred?: Delivery | null; caps?: string[];
   playSid?: string | null; ctx: SessionCtx; fetcher?: Fetcher;
+  /** The viewer's play token as the gate would mint it for the title (P2-2e); a stitched session carries it. */
+  edge?: EdgeSpec | null;
 }): Promise<PlayAds | null> {
   const asset = await gateAssetFor(i.assetId, i.accountId);
   if (!asset?.master_key) return null;
@@ -934,7 +1035,7 @@ export async function adsForPlay(i: {
     // Guided DASH (alternative content) is not built: a guided viewer gets HLS only.
     return { delivery, hls: `${guidedBase(asset.id, await guidedVersion(asset, rule, i.fetcher))}/master.m3u8`, dash: null, sessionId: null, timelineUrl: null };
   }
-  const s = await openSession({ accountId: i.accountId, assetId: asset.id, delivery: 'stitched', playSid: i.playSid, ctx: i.ctx, rule, fetcher: i.fetcher });
+  const s = await openSession({ accountId: i.accountId, assetId: asset.id, delivery: 'stitched', playSid: i.playSid, ctx: i.ctx, rule, fetcher: i.fetcher, edge: i.edge ?? null });
   // The ad server's schedule for this viewer has no breaks: play the title as it is.
   if (!s.plan.breaks.length) return null;
   const dash = !s.plan.cuts?.length && await assetMpd(asset).catch(() => null) ? `${sessionBase(s.id)}/manifest.mpd` : null;
