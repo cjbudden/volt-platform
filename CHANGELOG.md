@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.96.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Storage: An original taken out of the cloud can now be brought back from its archive copy with Restore under Originals out of the cloud: a server at your site uploads the copy and Volt checks it against the archived checksum before the asset uses it again. Needs site agent 0.12.0 or later.
+
+### Internal
+
+- added: retention-originals-restore suite (31 assertions) with the real site agent code; site agent 0.12.0 runs archive.restore jobs.
+
 ## 0.95.0 (2026-11-11)
 
 ### Product (in customer release notes)
