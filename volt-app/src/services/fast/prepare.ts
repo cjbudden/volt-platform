@@ -85,6 +85,28 @@ export async function assetsInUse(channelId: string): Promise<Map<string, Role>>
 }
 
 
+/** Restore jobs still on their way (archive.restore queued or running), by id. */
+async function restoresInFlight(ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await query<any>(`SELECT id FROM jobs WHERE id = ANY($1::uuid[]) AND state IN ('queued', 'running')`, [ids]);
+  return new Set(rows.map((x) => String(x.id)));
+}
+
+/**
+ * An asset whose original is in the archive only: what readiness says. Waiting
+ * when the restore is on its way and this channel is prepared once it lands;
+ * failed when the last restore failed (an automatic Prepare does not start it
+ * again on every save, the Prepare button does).
+ */
+function archiveNeed(r: any, channelId: string, restoring: Set<string>): { waiting: boolean; failed: boolean; why: string } {
+  const onItsWay = !!r.original_restore_job_id && restoring.has(String(r.original_restore_job_id));
+  const forUs = (Array.isArray(r.original_restore_then) ? r.original_restore_then : []).some((t: any) => t?.kind === 'fast' && t.channelId === channelId);
+  if (onItsWay && forUs) return { waiting: true, failed: false, why: 'the original is coming back from the archive; it is prepared once it lands' };
+  if (onItsWay) return { waiting: false, failed: false, why: 'the original is coming back from the archive' };
+  if (r.original_restore_error) return { waiting: false, failed: true, why: `the original is in the archive and the last restore failed: ${String(r.original_restore_error).slice(0, 200)}` };
+  return { waiting: false, failed: false, why: 'the original is in the archive: Prepare brings it back first' };
+}
+
 /** Where an Encode at site original is kept (`ingest.siteSource`), when it is. */
 function siteSourceOf(ingest: any): { siteId: string; sitePath: string } | null {
   const s = ingest?.siteSource;
@@ -121,8 +143,10 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
   const ladder = await channelLadder(channelId);
   if (!use.size) return { items: [], ladder };
   const ids = [...use.keys()];
-  const rows = await query<any>(`SELECT id, title, metadata, master_key, source_key, encode_result, ingest, top_height FROM vod_assets WHERE id = ANY($1::uuid[])`, [ids]);
+  const rows = await query<any>(`SELECT id, title, metadata, master_key, source_key, encode_result, ingest, top_height,
+      original_removed_at, original_restore_job_id, original_restore_error, original_restore_then FROM vod_assets WHERE id = ANY($1::uuid[])`, [ids]);
   const busy = await inFlight(ids);
+  const restoring = await restoresInFlight(rows.map((r) => r.original_restore_job_id).filter(Boolean));
   const variants = ladder ? await variantsOf(ids, ladder.groupId) : [];
   const top = ladder?.rungs[0] ?? null;
   const items: Readiness[] = [];
@@ -138,6 +162,13 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
     // never in the cloud (H4-5), and so is a channel ladder's variant beside
     // it (H4-6).
     const atSite = !hasSource && !!siteSourceOf(r.ingest);
+    // AN ORIGINAL IN THE ARCHIVE ONLY (retention took it out of the cloud,
+    // H3-5) is not lost either: Prepare brings it back first (H3-5d) and the
+    // asset is prepared once it lands. While it comes back for this channel
+    // the asset reads as preparing, so a second Prepare does nothing more.
+    const archived = !hasSource && !atSite && !!r.original_removed_at;
+    const back = archived ? archiveNeed(r, channelId, restoring) : null;
+    if (back?.waiting) { items.push({ ...base, state: 'preparing', why: back.why }); continue; }
     if (ladder) {
       const need = needFor(role, ladder);
       const fit = fitToTop(sourceQuality(r), top);
@@ -157,8 +188,8 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
         : v?.state === 'failed'
         ? `packaging to ${ladder.groupName} failed: ${String(v.error ?? 'no reason given').slice(0, 200)}`
         : `not yet packaged to the channel's ladder (${ladder.groupName}: ${ladder.rungs.map((x) => `${x.height}p`).join(', ')}${need.segmentSeconds !== ladder.segmentSeconds ? `, ${need.segmentSeconds} s segments` : ''}${need.loudnorm ? ', broadcast loudness' : ''})`;
-      items.push(hasSource || atSite
-        ? { ...base, state: 'needs-prepare', why: atSite ? `${why}; packaged at the site that keeps the original` : why, failed: v?.state === 'failed' }
+      items.push(hasSource || atSite || back
+        ? { ...base, state: 'needs-prepare', why: atSite ? `${why}; packaged at the site that keeps the original` : back ? `${why}; ${back.why}` : why, failed: v?.state === 'failed' || back?.failed }
         : { ...base, state: 'no-source', why: `${why}; the source file is not on this server${r.master_key ? ', so it airs on its own encode' : ''}` });
       continue;
     }
@@ -170,8 +201,8 @@ export async function readinessWithLadder(channelId: string): Promise<{ items: R
     else if ((role === 'house' || role === 'ident' || role === 'loop') && er.loudnorm !== true) why = 'loudness not normalised';
     else if ((role === 'slate' || role === 'loop') && Number(er.segmentSeconds) !== 1) why = 'not in 1 s segments';
     if (!why) { items.push({ ...base, state: 'ready', why: null, packaging: 'main' }); continue; }
-    items.push(hasSource || atSite
-      ? { ...base, state: 'needs-prepare', why: atSite ? `${why}; encoded again at the site that keeps the original` : why }
+    items.push(hasSource || atSite || back
+      ? { ...base, state: 'needs-prepare', why: atSite ? `${why}; encoded again at the site that keeps the original` : back ? `${why}; ${back.why}` : why, ...(back?.failed ? { failed: true } : {}) }
       : { ...base, state: 'no-source', why: `${why}; the source file is not on this server` });
   }
   items.sort((a, b) => a.state.localeCompare(b.state) || a.title.localeCompare(b.title));
@@ -189,7 +220,7 @@ export async function prepare(channelId: string, opts: { auto?: boolean } = {}):
   const { enqueue } = await import('../jobs/queue');
   const queued: string[] = [];
   const skipped: Readiness[] = [];
-  const rows = new Map((await query<any>(`SELECT id, account_id, source_key, ingest FROM vod_assets WHERE id = ANY($1::uuid[])`, [list.map((r) => r.assetId)]))
+  const rows = new Map((await query<any>(`SELECT id, account_id, source_key, ingest, original_removed_at FROM vod_assets WHERE id = ANY($1::uuid[])`, [list.map((r) => r.assetId)]))
     .map((r) => [String(r.id), r]));
   for (const r of list) {
     if (r.state === 'no-source') { skipped.push(r); continue; }
@@ -197,7 +228,17 @@ export async function prepare(channelId: string, opts: { auto?: boolean } = {}):
     if (opts.auto && r.failed) continue;
     const a = rows.get(r.assetId);
     if (!a) continue;
-    if (ladder && !vodSourceAvailable(a.source_key) && siteSourceOf(a.ingest)) {
+    if (!vodSourceAvailable(a.source_key) && !siteSourceOf(a.ingest) && a.original_removed_at) {
+      // In the archive only (H3-5d): bring it back, then prepare this channel
+      // again (services/archive/originals.ts runAfterRestore).
+      try {
+        const { restoreThen } = await import('../archive/originals');
+        await restoreThen(r.assetId, { kind: 'fast', channelId });
+      } catch (e: any) {
+        skipped.push({ ...r, state: 'no-source', why: `${r.why ?? 'needs preparing'}; the original is in the archive and cannot be brought back: ${String(e?.message ?? e).slice(0, 200)}` });
+        continue;
+      }
+    } else if (ladder && !vodSourceAvailable(a.source_key) && siteSourceOf(a.ingest)) {
       // The variant is made at the site that keeps the original, as vod.ladder
       // would make it here; the asset keeps airing its own encode meanwhile.
       const need = needFor(r.role, ladder);

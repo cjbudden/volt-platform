@@ -127,7 +127,13 @@ async function run(ctx: JobContext, p: VodLadderPayload, log: JobLog): Promise<R
   const given = p.sourcePath || asset.source_key;
   const { fetchVodSource } = await import('../../media/vodSource');
   const fetched = given ? await fetchVodSource(given) : null;
-  if (!fetched) throw new PermanentError(`the source file is not on this server: ${given ?? '(none)'}`, 'source_missing');
+  if (!fetched) {
+    // In the archive only (H3-5d): brought back, and this packaging queued again once it lands.
+    const { restoreForJob } = await import('../../archive/originals');
+    const why = await restoreForJob(ctx.job, p.vodAssetId).catch(() => null);
+    if (why) throw new PermanentError(why, 'original_in_archive');
+    throw new PermanentError(`the source file is not on this server: ${given ?? '(none)'}`, 'source_missing');
+  }
   try { return await runFrom(ctx, p, log, asset, fetched.path); }
   finally { await fetched.release(); }
 }

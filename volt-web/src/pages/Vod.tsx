@@ -42,7 +42,7 @@ import { LibIcon } from './vod/icons'
 import { AssetStatusPanel, QcChecks, UsageBadge, USAGE_LABEL, hasNoMedia } from './vod/AssetStatus'
 import './vod/library.css'
 import { SourceFacts } from './vod/SourceFacts'
-import { EncodePlaceLine, EncodePlaceTag, encodePlaceText, encodeProgressWords } from './vod/EncodePlace'
+import { EncodePlaceLine, EncodePlaceTag, OriginalReturnLine, encodePlaceText, encodeProgressWords } from './vod/EncodePlace'
 import { AddToCollectionDialog, CollectionTree, ColIcon, NewCollection, collectionsApi, flatten, pathName, useCollections } from './vod/collections'
 import { longTitle, seriesLabel } from './vod/libraryTitles'
 
@@ -315,6 +315,8 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
                       {d.ingest?.probe?.width ? ` · ${d.ingest.probe.width}×${d.ingest.probe.height}` : d.encode_result?.probe?.width ? ` · ${d.encode_result.probe.width}×${d.encode_result.probe.height}` : ''}</td></tr>
                   {/* WHERE IT IS ENCODED: at the customer's site, or in the cloud and why (H4-8). */}
                   {d.encode_place && <tr><td style={{ color: 'var(--faint)' }}>Encoded</td><td><EncodePlaceLine asset={d} /></td></tr>}
+                  {/* THE ORIGINAL IN THE ARCHIVE: where it is, and whether it is coming back for a re-encode (H3-5d). */}
+                  {d.original_return && <tr><td style={{ color: 'var(--faint)' }}>Original</td><td><OriginalReturnLine value={d.original_return} /></td></tr>}
                   {d.sha256 && <tr><td style={{ color: 'var(--faint)' }}>SHA-256</td><td className="mono" title={d.sha256}>{String(d.sha256).slice(0, 16)}…</td></tr>}
                   <tr><td style={{ color: 'var(--faint)' }}>Ladder</td>
                     <td>{d.encode_result?.ladder?.name ?? '—'}{d.encode_result?.ladder?.origin?.kind === 'tracked' ? ` (tracks the live profile${d.encode_result.ladder.origin.profileName ? ` ${d.encode_result.ladder.origin.profileName}` : ''})` : ''}

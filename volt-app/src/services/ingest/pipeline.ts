@@ -410,7 +410,19 @@ export async function queueEncodeFor(assetId: string): Promise<string | null> {
     const job = await requestSiteEncode({ vodAssetId: a.id, accountId: a.account_id, siteId: a.site_source.siteId, sitePath: a.site_source.sitePath, ladderGroupId: a.ladder_group_id ?? null });
     return job.id;
   }
-  if (!a?.source_key) return null;
+  if (!a?.source_key) {
+    // Encoded already: a later call (the metadata gate lifting) must not bring it back.
+    if (a?.encode_job_id && ['queued', 'running', 'succeeded'].includes(String(a.job_state))) return a.encode_job_id;
+    // In the archive only (H3-5d): the restore is started and the encode
+    // queued once the original lands. Nothing to say when it is not there.
+    if (a?.id) {
+      const { restoreThen } = await import('../archive/originals');
+      const { VOD_ENCODE } = await import('../jobs/handlers/vodEncode');
+      await restoreThen(a.id, { kind: 'job', type: VOD_ENCODE, payload: { vodAssetId: a.id, accountId: a.account_id, ladderGroupId: a.ladder_group_id ?? null },
+        dedupeKey: `vod.encode:${a.id}`, maxAttempts: 2 }).catch((e) => console.warn('[ingest] original not brought back from the archive', a.id, e?.message ?? e));
+    }
+    return null;
+  }
   // Encoded (or encoding) already, because the metadata gate no longer holds the
   // media: filling the field later must not encode the same file twice.
   if (a.encode_job_id && ['queued', 'running', 'succeeded'].includes(String(a.job_state))) return a.encode_job_id;

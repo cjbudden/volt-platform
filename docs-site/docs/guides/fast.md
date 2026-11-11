@@ -209,7 +209,7 @@ The **Last 7 days** card (stitched ads only) shows decisions, paid fill, house s
 
 **▶ Start** starts the playout without making the channel public (and activates the run order first if none is active). **Restart the playout** stops and starts it; it carries on from where the guide says it should be, and is needed after a ladder change for viewers to get the new renditions.
 
-**Media** on Overview lists every title, house spot, ident, loop and slate the channel uses, with its role and whether it is ready. **Prepare N** packages any that are not. **Playout** shows where the channel runs, when it was last heard from, restarts and segments published.
+**Media** on Overview lists every title, house spot, ident, loop and slate the channel uses, with its role and whether it is ready. **Prepare N** packages any that are not. A title whose original is in the archive only (taken out of the cloud by a retention rule) is brought back first and prepared once it lands; meanwhile it shows as being prepared. **Playout** shows where the channel runs, when it was last heard from, restarts and segments published.
 
 **Trick-play.** When the output profile of the channel's group has **Trick-play for Apple and smart-TV players** on (see [Account settings](account-settings.md#turn-on-trick-play-for-apple-and-smart-tv-players)), the channel's HLS lists a keyframe list for each video size from its next start, and its DASH a trick-mode track, so Apple devices and smart TVs show pictures while viewers scrub. Nothing is re-encoded. Viewers who get their own ads (stitched per viewer) are not offered it, since the list shows the house fill rather than their ads.
 

@@ -76,3 +76,40 @@ export function EncodePlaceLine({ asset, className }: { asset: WithPlace; classN
     </span>
   )
 }
+
+// ============================================================================
+//  THE ORIGINAL IN THE ARCHIVE (build queue H3-5, H3-5d). A retention rule can
+//  take an asset's original out of the cloud once an archive copy of it is
+//  verified; the renditions still play. When an encode or a FAST channel
+//  needs it again, Volt brings it back by itself and runs that work once it
+//  lands. The server answers `original_return` (volt-app services/archive/
+//  originals.ts originalReturnOf); this is the sentence the asset page shows.
+// ============================================================================
+export interface OriginalReturn {
+  removedAt: string
+  targetName: string | null
+  restoring: boolean
+  error: string | null
+  waiting: { kind: 'encode' | 'fast'; label: string }[]
+}
+
+const andList = (xs: string[]) => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
+
+export function originalReturnText(o: OriginalReturn): string {
+  const where = o.targetName ? ` at ${o.targetName}` : ''
+  const then = o.waiting.length ? ` ${sentenceCase(andList(o.waiting.map((w) => w.label)))} ${o.waiting.length > 1 ? 'follow' : 'follows'} once it lands.` : ''
+  if (o.restoring) return `Coming back from the archive${where}.${then}`
+  const since = ` since ${new Date(o.removedAt).toISOString().slice(0, 10)}`
+  if (o.error) return `In the archive${where}${since}. The last restore failed: ${stop(o.error)}${then ? `${then.replace(' once it lands', ' once a restore lands')}` : ''}`
+  return `In the archive${where}${since}. The renditions still play; a re-encode brings it back first.`
+}
+
+/** One line for the asset page's Facts: icon and sentence. */
+export function OriginalReturnLine({ value }: { value: OriginalReturn | null | undefined }) {
+  if (!value) return null
+  return (
+    <span className="lib-place-line" data-original-return={value.restoring ? 'restoring' : value.error ? 'failed' : 'archived'}>
+      {value.restoring ? LibIcon.cloud : LibIcon.site}<span>{originalReturnText(value)}</span>
+    </span>
+  )
+}

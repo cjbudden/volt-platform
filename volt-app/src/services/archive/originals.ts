@@ -124,7 +124,7 @@ const landedAt = (a: any) => new Date(a.original_restored_at ?? a.created_at).ge
 const ASSET_SELECT = `
   SELECT v.id, v.title, v.channel_id, v.event_id, v.source_key, v.sha256, v.created_at,
          v.original_removed_at, v.original_removed_key, v.original_copy_id, v.original_wait_code, v.original_wait, v.original_checked_at,
-         v.original_restore_job_id, v.original_restore_error, v.original_restored_at,
+         v.original_restore_job_id, v.original_restore_error, v.original_restored_at, v.original_restore_then,
          COALESCE(gc.account_id, ge.account_id, CASE WHEN c.id IS NULL AND e.id IS NULL THEN v.account_id END) AS account_id,
          (c.id IS NULL AND e.id IS NULL) AS via_own
     FROM vod_assets v
@@ -354,12 +354,16 @@ export async function judgeRestore(job: JobRow, result: any): Promise<{ ok: true
     return { ok: false, status: 422, code: 'checksum_mismatch', message: 'The restored file does not match the archived checksum, so it was removed; the restore is tried again' };
   }
   return { ok: true, apply: async () => {
+    // The work that waited for the original (H3-5d) is taken in the same
+    // statement that points the asset at it, so two judges never both run it.
     const r = await one<any>(
-      `UPDATE vod_assets SET source_key = original_removed_key, original_removed_at = NULL, original_removed_key = NULL, original_copy_id = NULL,
+      `UPDATE vod_assets v SET source_key = v.original_removed_key, original_removed_at = NULL, original_removed_key = NULL, original_copy_id = NULL,
               original_restore_job_id = NULL, original_restore_error = NULL, original_restored_at = now(),
-              original_wait_code = NULL, original_wait = NULL, original_checked_at = now()
-        WHERE id = $1 AND original_removed_at IS NOT NULL AND original_removed_key = $2 RETURNING id`, [a.id, dest]);
+              original_wait_code = NULL, original_wait = NULL, original_checked_at = now(), original_restore_then = '[]'::jsonb
+         FROM (SELECT id, original_restore_then AS waited FROM vod_assets WHERE id = $1 FOR UPDATE) o
+        WHERE v.id = o.id AND v.original_removed_at IS NOT NULL AND v.original_removed_key = $2 RETURNING v.id, o.waited`, [a.id, dest]);
     if (!r) return;
+    await runAfterRestore(a.id, Array.isArray(r.waited) ? r.waited : []);
     const acct = a.account_id ?? (await one<any>(`SELECT COALESCE(g.account_id, v.account_id) AS id FROM vod_assets v
       LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN events e ON e.id = v.event_id
       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id) WHERE v.id = $1`, [a.id]))?.id ?? null;
@@ -374,4 +378,113 @@ export async function restoreFailed(job: JobRow, message: string, code: string |
     `UPDATE vod_assets SET original_restore_error = $2, original_restore_job_id = CASE WHEN $3 THEN NULL ELSE original_restore_job_id END
       WHERE id = $1 AND original_restore_job_id = $4`,
     [job.payload?.vodAssetId, `${message}${code ? ` (${code})` : ''}`.slice(0, 2000), exhausted, job.id]);
+}
+
+// ============================================================================
+//  A RE-ENCODE BRINGS THE ORIGINAL BACK BY ITSELF (H3-5d).
+//
+//  Where an encode or a FAST channel's preparation needs an asset's original
+//  and it is in the archive only, the restore is started (or joined, when one
+//  is already on its way) and the work is written on the asset
+//  (`original_restore_then`). When the restore lands (judgeRestore above) the
+//  list is taken and run: the FAST channel is prepared again, the encode is
+//  queued again with the restored address. Before this the encode failed with
+//  "the source file is not there" and the channel said "no source", as if no
+//  original had been kept.
+//
+//  A restore that cannot start (the copy is no longer verified, the target or
+//  the site is disabled) adds nothing: the caller says why instead. A restore
+//  that fails for good keeps the list, so a Restore started by hand later
+//  still runs what waited.
+// ============================================================================
+export type AfterRestore =
+  | { kind: 'fast'; channelId: string }
+  | { kind: 'job'; type: string; payload: Record<string, unknown>; dedupeKey?: string | null; channelId?: string | null; priority?: number; maxAttempts?: number };
+
+const sameThen = (x: any, y: AfterRestore) => x?.kind === y.kind
+  && (y.kind === 'fast' ? x.channelId === y.channelId : x.type === y.type && (x.dedupeKey ?? null) === (y.dedupeKey ?? null)
+    && (y.dedupeKey != null || JSON.stringify(x.payload ?? {}) === JSON.stringify(y.payload ?? {})));
+
+/**
+ * The original is needed and is in the archive only: start (or join) its
+ * restore and keep `then` to run once it lands. Null when the original is not
+ * in the archive (nothing to do here). Throws the ApiError requestRestore
+ * gives when the restore cannot start, with its reason.
+ */
+export async function restoreThen(assetId: string, then: AfterRestore): Promise<{ jobId: string; created: boolean } | null> {
+  const a = await one<any>(`SELECT a.account_id, a.original_removed_at FROM (${ASSET_SELECT} WHERE v.id = $1) a`, [assetId]);
+  if (!a?.original_removed_at || !a.account_id) return null;
+  const r = await requestRestore(a.account_id, null, assetId);
+  // Appended under the row lock, so two callers at once keep both entries.
+  await query(
+    `UPDATE vod_assets SET original_restore_then = COALESCE(original_restore_then, '[]'::jsonb) || $2::jsonb
+      WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(original_restore_then, '[]'::jsonb)) e WHERE e @> $3::jsonb)`,
+    [assetId, JSON.stringify([then]), JSON.stringify(then.kind === 'fast' ? { kind: 'fast', channelId: then.channelId }
+      : then.dedupeKey ? { kind: 'job', type: then.type, dedupeKey: then.dedupeKey } : then)]);
+  return r;
+}
+
+/** What a job that found no original says: the restore it started, or why none could start. Null when the original is not in the archive. */
+export async function restoreForJob(job: JobRow, assetId: string): Promise<string | null> {
+  const payload = { ...(job.payload ?? {}) };
+  delete payload.sourcePath;   // the restored address is filled in when it lands
+  try {
+    const r = await restoreThen(assetId, { kind: 'job', type: job.type, payload, dedupeKey: job.dedupe_key, channelId: job.channel_id,
+      priority: job.priority, maxAttempts: job.max_attempts });
+    if (!r) return null;
+    return 'the original is in the archive: it is being brought back to the cloud, and this encode is queued again once it lands';
+  } catch (e: any) {
+    return `the original is in the archive and cannot be brought back from Volt: ${String(e?.message ?? e)}`;
+  }
+}
+
+/** The restore landed: run what waited for it. One failing entry does not stop the others. */
+export async function runAfterRestore(assetId: string, list: any[]): Promise<void> {
+  if (!list.length) return;
+  const a = await one<any>(`SELECT id, source_key FROM vod_assets WHERE id = $1`, [assetId]);
+  if (!a?.source_key) return;
+  // Channels with a ladder first: their packaging is a job of its own, while
+  // a channel without one re-encodes the asset, and an encode in flight reads
+  // as "preparing" on every channel, so preparing it first would leave the
+  // ladder channel waiting for a Prepare nobody presses.
+  const fastIds = list.filter((t) => t?.kind === 'fast').map((t) => t.channelId);
+  const laddered = new Set((fastIds.length ? await query<any>(
+    `SELECT id FROM channels WHERE id = ANY($1::uuid[]) AND fast_ladder_group_id IS NOT NULL`, [fastIds]) : []).map((c) => String(c.id)));
+  const rank = (t: any) => t?.kind === 'fast' ? (laddered.has(String(t.channelId)) ? 0 : 1) : 2;
+  list = [...list].sort((x, y) => rank(x) - rank(y));
+  for (const t of list) {
+    try {
+      if (t?.kind === 'fast' && typeof t.channelId === 'string') {
+        const { prepare } = await import('../fast/prepare');
+        await prepare(t.channelId);
+      } else if (t?.kind === 'job' && typeof t.type === 'string') {
+        const job = await enqueue({
+          type: t.type, payload: { ...(t.payload ?? {}), sourcePath: a.source_key }, dedupeKey: t.dedupeKey ?? null,
+          channelId: t.channelId ?? null, priority: Number.isFinite(t.priority) ? t.priority : undefined,
+          maxAttempts: Number.isFinite(t.maxAttempts) ? t.maxAttempts : undefined,
+        });
+        // The asset's own encode: the asset follows it again (Processing, then ready).
+        if (t.type === 'vod.encode') await query(`UPDATE vod_assets SET encode_job_id = $2 WHERE id = $1`, [assetId, job.id]);
+      }
+    } catch (e: any) {
+      console.warn(`[archive] ${assetId}: what waited for the restored original did not start (${t?.kind}):`, e?.message ?? e);
+    }
+  }
+}
+
+/** For the asset page: where the original is when it is not in the cloud, and what waits for it. Null when it is in the cloud. */
+export async function originalReturnOf(row: any): Promise<any | null> {
+  if (!row?.original_removed_at) return null;
+  const c = row.original_copy_id ? await one<any>(
+    `SELECT t.name FROM archive_copies c JOIN archive_targets t ON t.id = c.target_id WHERE c.id = $1`, [row.original_copy_id]) : null;
+  const rj = row.original_restore_job_id ? await one<any>(`SELECT state FROM jobs WHERE id = $1`, [row.original_restore_job_id]) : null;
+  const restoring = !!rj && (rj.state === 'queued' || rj.state === 'running');
+  const then: any[] = Array.isArray(row.original_restore_then) ? row.original_restore_then : [];
+  const fastIds = then.filter((t) => t?.kind === 'fast').map((t) => t.channelId);
+  const names = fastIds.length ? await query<any>(`SELECT id, name FROM channels WHERE id = ANY($1::uuid[])`, [fastIds]) : [];
+  const waiting = [
+    ...then.filter((t) => t?.kind === 'job').map((t) => ({ kind: 'encode' as const, label: t.type === 'vod.ladder' ? 'packaging for a FAST channel' : 'the encode' })),
+    ...fastIds.map((id) => ({ kind: 'fast' as const, label: `preparing for ${names.find((n) => n.id === id)?.name ?? 'a FAST channel'}` })),
+  ];
+  return { removedAt: row.original_removed_at, targetName: c?.name ?? null, restoring, error: restoring ? null : (row.original_restore_error ?? null), waiting };
 }

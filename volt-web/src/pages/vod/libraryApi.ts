@@ -4,7 +4,7 @@
 //  rather than in api.ts (see apiRequest there).
 // ============================================================================
 import { apiRequest, apiRequestWithHeaders, type VodAssetRow } from '../../api'
-import type { EncodePlace } from './EncodePlace'
+import type { EncodePlace, OriginalReturn } from './EncodePlace'
 
 export interface LibraryRow extends VodAssetRow {
   /** What a viewer gets now, its reason and next moment (build queue P1-2, services/publicStatus.ts). */
@@ -41,6 +41,8 @@ export interface LibraryRow extends VodAssetRow {
   encode_result?: any
   /** Encode at site items: at the site, or in the cloud and why (H4-8). Null for every other asset. */
   encode_place?: EncodePlace | null
+  /** The original in the archive only, and whether it is coming back (H3-5d). Null while it is in the cloud. */
+  original_return?: OriginalReturn | null
 }
 
 export interface LibraryPage {

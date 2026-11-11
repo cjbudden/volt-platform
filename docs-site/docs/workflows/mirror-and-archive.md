@@ -140,7 +140,9 @@ Once your originals are archived, the retention rule on the **Storage** page can
 
 An original is removed only once a **Verified** copy of that very file is at one of your targets, and never while another copy is still being made from it or a job is using it. Until then it stays, and **Originals out of the cloud** in this section says why and what to do.
 
-To bring one back (for a re-encode, say), choose **Restore** on its row. A server at the site reads the copy, checks it against the checksum it was archived with and uploads it; Volt checks it again before the asset uses it. The site's servers need agent 0.12.0 or later for this.
+To bring one back, choose **Restore** on its row. A server at the site reads the copy, checks it against the checksum it was archived with and uploads it; Volt checks it again before the asset uses it. The site's servers need agent 0.12.0 or later for this.
+
+A re-encode brings it back by itself: when an encode or a FAST channel's **Prepare** needs an original that is in the archive only, Volt starts the restore and runs that work once the original lands, so nothing has to be done by hand first.
 
 ### 6. See how the archive is doing over time
 
@@ -164,6 +166,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | An archive copy shows **Corrupt** or **Missing** | A check found the file changed or gone from the folder | Copy it again; look at what changes files on that storage |
 | An original is **Kept, waiting** under **Originals out of the cloud** | Its retention rule is due but no verified copy of that file is held yet | Follow **What to do** on its row; it goes at the next sweep once the copy is verified |
 | **The last restore failed** with *no longer matches* or *no longer at the target* | The copy at the site changed or went since it was archived | Check the copy again; the original has to come from elsewhere if the copy is gone |
+| A FAST title says *the original is in the archive and cannot be brought back* | Its archive copy is no longer verified, or the target or site is disabled | Check the copy again, or enable the target or site, then choose **Prepare** |
 | A restore stays **Being restored** | No server of the site with agent 0.12.0 or later is online | Update the agent and start it on a server of the site |
 | A copy to an object store stays **Queued** with *No keys named ...* | The server running the agent has no keys under the target's key name | Add them to `archive-keys.json` on every server of the site, or set the environment variables the message names |
 | A copy to an object store stays **Queued** with *can be read by others* | The key file is readable by other users of the server | `chmod 600` the key file |

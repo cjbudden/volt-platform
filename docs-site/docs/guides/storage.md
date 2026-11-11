@@ -180,6 +180,8 @@ A rule on a channel or event decides for that stream's media before the account'
 
 **Bring an original back.** To re-encode a title whose original is in the archive only, choose **Restore** on its row under **Originals out of the cloud**. A server at the copy's site reads the copy, checks it is still the file that was archived and uploads it; Volt checks what arrived against the archived checksum before the asset uses it again. While it runs the row says **Being restored**; if it fails, the row says why (for example the copy no longer matches). A restored original stays in the cloud for the rule's number of days again, counted from the restore. **Restore** needs a verified copy: check a missing or corrupt one again first.
 
+You do not have to restore by hand before a re-encode. When an encode, or a FAST channel's **Prepare**, needs an original that is in the archive only, Volt starts the restore itself and runs that work once the original lands. The asset's page says **Coming back from the archive** under **Original**, with what waits for it, and the FAST channel shows the title as being prepared. If the restore cannot start (the copy is no longer verified, or the target or site is disabled), the encode or the channel says why.
+
 ## How it connects
 
 | Section | How it relates |

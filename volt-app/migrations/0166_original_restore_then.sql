@@ -1,0 +1,14 @@
+-- ============================================================================
+--  0166: WHAT WAITS FOR A RESTORED ORIGINAL (build queue H3-5d).
+--
+--  A re-encode or a FAST preparation that needs an asset's original while it
+--  is in the archive only (0164, 0165) starts the restore and waits for it,
+--  instead of answering as if no original was kept. The work that waits is
+--  kept on the asset, so it runs once the original lands, whichever server
+--  judges the restore: a list of {kind:'fast', channelId} (prepare that FAST
+--  channel again) and {kind:'job', type, payload, ...} (queue that encode
+--  again, with the restored address).
+--
+--  Add only (RELEASING.md "Schema: add only"): a column with a default.
+-- ============================================================================
+ALTER TABLE vod_assets ADD COLUMN IF NOT EXISTS original_restore_then jsonb NOT NULL DEFAULT '[]'::jsonb;

@@ -224,6 +224,12 @@ async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unkn
   const { fetchVodSource } = await import('../../media/vodSource');
   const src = await fetchVodSource(given.sourcePath);
   if (!src) {
+    // TAKEN OUT OF THE CLOUD BY RETENTION, KEPT IN THE ARCHIVE (H3-5d): the
+    // restore is started and this encode is queued again once it lands,
+    // rather than failing as if no original had been kept.
+    const { restoreForJob } = await import('../../archive/originals');
+    const why = await restoreForJob(ctx.job, given.vodAssetId).catch(() => null);
+    if (why) throw new PermanentError(why, 'original_in_archive');
     // A retry cannot make a missing file appear.
     throw new PermanentError(`the source file is not there: ${given.sourcePath}`, 'source_missing');
   }

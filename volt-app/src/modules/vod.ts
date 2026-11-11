@@ -557,8 +557,12 @@ vodRouter.get(
     const siteName = row.ingest?.siteSource?.siteId
       ? (await one<any>(`SELECT name FROM sites WHERE id::text = $1 AND account_id = $2`, [row.ingest.siteSource.siteId, accountId(req)]))?.name ?? null
       : null;
+    // THE ORIGINAL IN THE ARCHIVE (H3-5, H3-5d): where it is, whether it is
+    // coming back, and what waits for it. Null while it is in the cloud.
+    const { originalReturnOf } = await import('../services/archive/originals');
+    const originalReturn = await originalReturnOf(row).catch(() => null);
     res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), encode_place: encodePlaceOf(row.ingest, siteName),
-      ...(await statusFields(row)), preview: previewUrls(row), ...extra });
+      original_return: originalReturn, ...(await statusFields(row)), preview: previewUrls(row), ...extra });
   })
 );
 
