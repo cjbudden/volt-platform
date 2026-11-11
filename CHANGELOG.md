@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.90.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Media Library: Titles from an Encode at site watchfolder show At site beside Building in the Media Library and on their page, with Queued at site or Encoding at site and the site's name. A title that fell back to the cloud shows Sending to cloud or In the cloud, and its Facts and Encode tab say why it was encoded in the cloud.
+
+### Internal
+
+- added · Tests: New encode-place check suite: the VOD API's encode_place answer for site-kept assets, driven by the real site agent.
+
 ## 0.89.0 (2026-11-11)
 
 ### Product (in customer release notes)
