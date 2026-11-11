@@ -2,6 +2,22 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.93.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Loops & Fillers: Every new slate and loop gets a house preview: it is built by the same encoder and packager your streams use, in your house format, and plays continuously in the console so you can see whether its join is seamless. QC checks the preview (black, silence, loudness, the cut to whole segments, a jump or click where the loop restarts, upscaling, bars, frame rate and interlacing), and each finding jumps to its place in the loop.
+- added · Loops & Fillers: Search, pages of 25, tags and an Active or Archived filter on Loops & Fillers. Archive keeps a slate or loop but takes it off every picker, and is refused while a stream uses it.
+- added · Loops & Fillers: Slates and loops are approved or rejected before use. Channels, radio stations, events and FAST channels can only be given approved, active ones; a stream keeps the one it already has. Existing slates and loops count as approved.
+- fixed · Loops & Fillers: The hover preview of a loop no longer flashes black or jumps where it wraps: its sprite sheets claimed one frame more than they held, and moving between sheets could blank the picture. Older loops' previews are made again automatically.
+- added · Publishing Rules: Token-free playback: a publishing rule can let titles anyone may watch play by their plain address, without a play token, even where play tokens are enforced. It cannot be turned on where geo, rights, DRM, a paywall, sign-in, allowed referrer domains or a concurrent streams limit apply, and a title that gains one of these plays with tokens again.
+- changed · Publishing: Where play tokens are enforced, clips cut from recordings are protected like other on-demand titles: their files are refused by plain address and play only through the address the play gate, the console or a share page hands out. Recording download links now carry a token too, valid for four hours.
+
+### Internal
+
+- added · Testing: New edge-clip-outputs suite: clip output folders under enforce at the API, the staging edge and CloudFront, the recording export's links, token-free clips; the staging nginx plain-path location is quoted so its regex loads.
+- added · Testing: New edge-token-free suite and token-free browser check; the edge-tokens-enforce window-end check no longer fails on rounding.
+
 ## 0.92.0 (2026-11-11)
 
 ### Product (in customer release notes)
