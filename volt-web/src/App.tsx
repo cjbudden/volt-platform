@@ -26,6 +26,7 @@ import AuditLogPage from './pages/AuditLog'
 import NewStreamChooser from './NewStreamChooser'
 import UiSamplesPage from './pages/UiSamples'
 import PlanLimitsPage from './pages/PlanLimits'
+import BillingPage from './pages/Billing'
 import AccountSettingsPage from './pages/AccountSettings'
 import CaptionsPage from './pages/Captions'
 import SitesPage from './pages/Sites'
@@ -115,7 +116,7 @@ const NAV_FEATURE: Record<string, string> = {
   review: 'vod', watchfolders: 'media', storage: 'media',
   // The encode jobs are read and controlled through /api/jobs: Files, uploads & storage.
   'encode-jobs': 'media',
-  encoding: 'encoding', groups: 'settings', captions: 'settings', reframing: 'settings', plan: 'settings', 'account-settings': 'settings', permissions: 'access', sso: 'users',
+  encoding: 'encoding', groups: 'settings', captions: 'settings', reframing: 'settings', plan: 'settings', billing: 'settings', 'account-settings': 'settings', permissions: 'access', sso: 'users',
   // Admin sections
   'content-types': 'settings', genres: 'settings', rights: 'rights', publishing: 'settings', ingest: 'settings', social: 'settings',
   // On-demand ads are read and changed through /api/vod/ads: Media library & publishing.
@@ -181,6 +182,7 @@ const ADMIN_NAV: NavGroup[] = [
   { group: 'Account', items: [
     { key: 'account-settings', label: 'Account settings', icon: I.palette },
     { key: 'plan', label: 'Plan & limits', icon: I.fleet },
+    { key: 'billing', label: 'Billing', icon: I.fleet },
     { key: 'fleet', label: 'Fleet & Usage', icon: I.fleet },
     { key: 'payments', label: 'Payments', icon: I.fleet },
     { key: 'social', label: 'Social accounts', icon: I.vod },
@@ -314,7 +316,7 @@ export default function App() {
   // Everything comes from /auth/me (the server), never from the email domain.
   const who = me?.displayName?.trim() || me?.email || email
   const initials = (who.includes('@') ? who.split('@')[0] : who).split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '·'
-  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', sso: 'Single sign-on', system: 'System Admin', 'content-types': 'Content Types', genres: 'Genres', rights: 'Rights', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts', 'on-demand-ads': 'On-demand ads' }
+  const EXTRA_LABEL: Record<string, string> = { plan: 'Plan & limits', billing: 'Billing', 'account-settings': 'Account settings', permissions: 'Permissions map', 'ui-samples': 'Notices and errors: samples', account: 'My account', groups: 'Channel Groups', apikeys: 'API Keys & Apps', users: 'Users & Roles', sso: 'Single sign-on', system: 'System Admin', 'content-types': 'Content Types', genres: 'Genres', rights: 'Rights', publishing: 'Publishing Rules', ingest: 'Ingest Rules', payments: 'Payments', notifications: 'Notifications', social: 'Social accounts', 'on-demand-ads': 'On-demand ads' }
   const label = [...NAV, ...ADMIN_NAV].flatMap(g => g.items).find(i => i.key === section)?.label
     || EXTRA_LABEL[section]
     || (section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Channels')
@@ -745,6 +747,8 @@ export default function App() {
             ? <ChannelGroupsPage />
             : section === 'plan'
             ? <PlanLimitsPage />
+            : section === 'billing'
+            ? <BillingPage />
             : section === 'account-settings'
             ? <AccountSettingsPage />
             : section === 'reframing'

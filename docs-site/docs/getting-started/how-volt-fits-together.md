@@ -73,6 +73,7 @@ The console has a daily area, for running streams and media, and an **Admin** ar
 |---|---|
 | **Account settings** | Your logo and colours, and where your content can be watched ([guide](../guides/account-settings.md)) |
 | **Plan & limits** | What your plan allows, and how the channel groups share it ([guide](../guides/plan-and-limits.md)) |
+| **Billing** | What Volt charges: this month so far, your invoices with their PDF and CSV, and how they are paid ([guide](../guides/billing.md)) |
 | **Fleet & Usage** | The servers running your streams and the billable time they have used ([guide](../guides/fleet-and-usage.md)) |
 | **Payments** | The payment providers you use and what each product buys ([guide](../guides/payments.md)) |
 | **Social accounts** | The social channels, Pages and accounts clips can be published to ([guide](../guides/social-accounts.md)) |

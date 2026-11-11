@@ -63,6 +63,27 @@ async function customerFor(accountId: string): Promise<string> {
   return id;
 }
 
+/**
+ * WHY ONLY FOR AUTOMATED ACCOUNTS ON AN AUTOMATED DEPLOYMENT: the card is kept
+ * by Stripe, never by Volt, so the account changes it in Stripe's own customer
+ * portal. A contract account pays its invoices outside Volt, and a deployment
+ * that is off or contract never charges a card, so there is nothing to change.
+ */
+export function paymentMethodState(mode: string, handling: string): { portal: boolean; reason: string | null } {
+  if (mode !== 'automated') return { portal: false, reason: 'Invoices on this deployment are not charged to a card.' };
+  if (handling !== 'automated') return { portal: false, reason: 'This account pays its invoices under a contract, outside Volt.' };
+  if (!stripeConfigured()) return { portal: false, reason: 'Card payments are not set up on this deployment yet.' };
+  return { portal: true, reason: null };
+}
+
+/** A one-off link into Stripe's customer portal, where the account changes its card. */
+export async function portalSession(accountId: string, returnUrl: string): Promise<string> {
+  const customer = await customerFor(accountId);
+  // No idempotency key: every session is new and short-lived by design.
+  const s = await stripe('/v1/billing_portal/sessions', { customer, return_url: returnUrl });
+  return String(s.url);
+}
+
 /** Send one issued automated invoice to Stripe. Returns the Stripe invoice id, or null with the reason kept on the invoice. */
 export async function sendInvoiceToStripe(invoiceId: string): Promise<string | null> {
   const inv = await one<any>(`SELECT * FROM billing_invoices WHERE id = $1`, [invoiceId]);

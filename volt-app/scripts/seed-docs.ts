@@ -178,6 +178,7 @@ async function main() {
   await seedCollectionAccess();
   await seedMetadataRules();
   await seedLifecycle();
+  await seedBilling();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -986,6 +987,37 @@ async function seedLifecycle() {
       WHERE id = $1 AND account_id = $2`, [PROMO, ACCOUNT]);
   const { refreshPublicStatus } = await import('../src/services/publicStatus');
   await refreshPublicStatus(PROMO);
+}
+
+// BILLING (build queue B1-3): two months already invoiced, one paid with a
+// reference and one waiting, a price for server time and a charge on the open
+// month, so the Billing guide shows a real history. The account pays under
+// contract, which needs no Stripe. The ledger is append only, so a rerun adds
+// nothing to a month already invoiced and the open month's charge is added once.
+// The page itself shows billing only when the API runs with VOLT_BILLING set.
+async function seedBilling() {
+  const before = process.env.VOLT_BILLING;
+  process.env.VOLT_BILLING = 'contract';
+  try {
+    const I = await import('../src/services/invoicing');
+    await query(`UPDATE accounts SET billing_handling = 'contract', billing_tax_rate = 0.1 WHERE id = $1`, [ACCOUNT]);
+    if (!(await one(`SELECT 1 FROM billing_prices WHERE unit_key = 'server_hour' AND instance_type IS NULL`))) {
+      await query(`INSERT INTO billing_prices(unit_key, instance_type, name, unit, unit_usd, effective_from) VALUES ('server_hour', NULL, 'Streaming server', 'hour', 0.42, now() - interval '120 days')`);
+    }
+    const open = I.monthOf(), last = I.previousMonth(open), older = I.previousMonth(last);
+    for (const [m, desc, amt] of [[older, 'Onboarding workshop', 450], [last, 'Extra storage, 2 TB', 80]] as [string, string, number][]) {
+      if (await one(`SELECT 1 FROM billing_invoices WHERE account_id = $1 AND period_month = $2`, [ACCOUNT, m])) continue;
+      await I.addManualCharge({ accountId: ACCOUNT, amountUsd: amt, description: desc, month: m, userId: null });
+      await I.closeMonth(m, { accountId: ACCOUNT });
+    }
+    const paid = await one<any>(`SELECT id, status FROM billing_invoices WHERE account_id = $1 AND period_month = $2`, [ACCOUNT, older]);
+    if (paid && paid.status === 'issued') await I.markPaid(paid.id, 'Bank transfer, ref. 40172', null);
+    if (!(await one(`SELECT 1 FROM billing_charges WHERE account_id = $1 AND period_month = $2 AND source = 'manual'`, [ACCOUNT, open]))) {
+      await I.addManualCharge({ accountId: ACCOUNT, amountUsd: -25, description: 'Credit: outage on the 3rd', month: open, userId: null });
+    }
+  } finally {
+    if (before === undefined) delete process.env.VOLT_BILLING; else process.env.VOLT_BILLING = before;
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

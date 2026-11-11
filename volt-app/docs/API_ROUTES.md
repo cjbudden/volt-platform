@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**992 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 757 · Platform API: 58 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**993 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 758 · Platform API: 58 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -389,6 +389,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | GET | `/api/billing/invoices/:id` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/billing/invoices/:id/csv` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/billing/invoices/:id/pdf` | admin session (Bearer) or account secret key | settings: view |  |
+| POST | `/api/billing/portal` | admin session (Bearer) or account secret key | settings: manage |  |
 
 ### `/api/channels`
 

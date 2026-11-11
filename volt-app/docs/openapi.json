@@ -6202,7 +6202,7 @@
     "tags": [
      "Billing"
     ],
-    "description": "What Volt charges this account. `mode` is the deployment's billing (`off`: nothing is charged or invoiced; `contract`: invoices are issued and settled outside Volt; `automated`: invoices are charged to the card on file). `handling` is how this account's invoices are settled (`automated` or `contract`). `currentMonth` is the open month worked out so far (plan fee, server time at the current price, charges and credits), with `subtotalUsd`, `taxUsd` and `totalUsd`; it is null when billing is off. `invoices` is the latest twelve. All amounts are US dollars. Needs Account settings: View.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "description": "What Volt charges this account. `mode` is the deployment's billing (`off`: nothing is charged or invoiced; `contract`: invoices are issued and settled outside Volt; `automated`: invoices are charged to the card on file). `handling` is how this account's invoices are settled (`automated` or `contract`). `currentMonth` is the open month worked out so far (plan fee, server time at the current price, charges and credits), with `subtotalUsd`, `taxUsd` and `totalUsd`; it is null when billing is off. `invoices` is the latest twelve. `paymentMethod.portal` says whether the card can be changed through `POST /api/billing/portal`; when it is false, `paymentMethod.reason` says why. All amounts are US dollars. Needs Account settings: View.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
     "security": [
      {
       "adminBearer": []
@@ -6455,6 +6455,32 @@
       "schema": {
        "type": "string"
       }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/billing/portal": {
+   "post": {
+    "operationId": "postBillingPortal",
+    "summary": "Change the card invoices are charged to",
+    "tags": [
+     "Billing"
+    ],
+    "description": "Answers `{ url }`: a one-off link to the payment provider's customer portal, where the account changes its card and sees its payments, and which returns to the console's Billing page. Only for an account whose invoices are charged to a card (`handling` and `mode` both `automated`); otherwise 409 with the reason. The card is kept by the payment provider, never by Volt. Needs Account settings: Manage.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
      }
     ],
     "responses": {

@@ -46,6 +46,7 @@ const fake = httpServer((req, res) => {
     if (path === '/v1/customers') out = { id: `cus_${++n}` };
     else if (path === '/v1/invoices') { out = { id: `in_${++n}` }; invoices.set(out.id, { items: [], meta: Object.fromEntries(Object.entries(body).filter(([k]) => k.startsWith('metadata['))) }); }
     else if (path === '/v1/invoiceitems') { out = { id: `ii_${++n}` }; invoices.get(body.invoice)?.items.push(Number(body.amount)); }
+    else if (path === '/v1/billing_portal/sessions') out = { id: `bps_${++n}`, url: `https://billing.stripe.test/p/${n}` };
     else if (/^\/v1\/invoices\/[^/]+\/finalize$/.test(path)) {
       const id = path.split('/')[3]; const inv = invoices.get(id);
       out = { id, status: 'open', number: `FAKE-${id}`, total: (inv?.items ?? []).reduce((a, b) => a + b, 0) };
@@ -154,9 +155,22 @@ const fake = httpServer((req, res) => {
       lines: Array.from({ length: 40 }, (_, i) => ({ source: 'manual', itemKey: 'charge', description: `Line ${i + 1} (with brackets) and a café`, quantity: 1, unit: 'item', unitUsd: 1, amountUsd: 1, reference: null })) } as any, { accountName: 'Many Lines' }).toString('latin1');
     check('a long invoice runs onto a second page, numbered; brackets are escaped', [/\/Count 2\b/.test(many), many.includes('(Page 2 of 2)'), many.includes('(Line 1 \\(with brackets\\) and a caf\xe9)')], [true, true, true]);
 
+    // ---------------------------------------------------------------- the payment method (B1-3)
+    const ga = await call('GET', '/api/billing'), gb = await call('GET', '/api/billing', undefined, { sub: UB, acct: B });
+    check('the Billing page offers the card portal to an automated account only', [ga.j?.paymentMethod, gb.j?.paymentMethod?.portal, /contract/.test(gb.j?.paymentMethod?.reason ?? '')],
+      [{ portal: true, reason: null }, false, true]);
+    const pp = await call('POST', '/api/billing/portal', {});
+    const ps = seen.filter((q) => q.path === '/v1/billing_portal/sessions');
+    check('Change card opens a Stripe portal session for the account\'s own customer, back to /billing',
+      [pp.s, pp.j?.url?.startsWith('https://billing.stripe.test/p/'), ps.length, ps[0]?.body.customer, ps[0]?.body.return_url?.endsWith('/billing')],
+      [200, true, 1, (await one<any>(`SELECT stripe_customer_id FROM accounts WHERE id = $1`, [A]))!.stripe_customer_id, true]);
+    check('a contract account gets no portal', (await call('POST', '/api/billing/portal', {}, { sub: UB, acct: B })).s, 409);
+
     // ---------------------------------------------------------------- no Stripe set up
     delete process.env.SAAS_STRIPE_SECRET_KEY;
     check('with no Stripe key nothing is sent', await S.sendPendingToStripe(), { sent: 0, failed: 0 });
+    const g0 = await call('GET', '/api/billing');
+    check('with no Stripe key there is no card portal either', [g0.j?.paymentMethod?.portal, (await call('POST', '/api/billing/portal', {})).s], [false, 409]);
   } catch (e) {
     console.log('FAIL unexpected error', e); fail++;
   } finally {

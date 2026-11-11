@@ -52,6 +52,7 @@ Giving more of the plan to a group, or taking some back, is done on [Channel Gro
 | [Channel Groups](channel-groups.md) | Each group's share of the plan, which together never exceed it |
 | [Channels](channels.md), [Radio](radio.md) | Each one counts towards the plan; **New channel** is unavailable when the plan or the group is full |
 | [Events](events.md) | Listed here, not counted in the plan |
+| [Billing](billing.md) | What the plan and your use cost: this month so far and your invoices |
 | [Account settings](account-settings.md) | Has a **Plan & limits** button that opens this page |
 | [Audit log](audit-log.md) | Plan changes are recorded |
 
@@ -95,6 +96,6 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 curl -H "Authorization: Bearer $TOKEN" "https://your-volt-host/api/plan"
 ```
 
-Billing is only shown where your Volt provider bills through Volt; otherwise `GET /api/billing` answers with `mode` set to `off`. Amounts are US dollars, and an issued invoice never changes: a correction appears as a credit on a later one. Where invoices are charged to the card on file, a failed payment is tried again by the payment provider and the account's owners and administrators are told in Notifications; nothing is suspended meanwhile.
+The same invoices are on the [Billing](billing.md) page, with the PDF and CSV and the card they are charged to. Billing is only shown where your Volt provider bills through Volt; otherwise `GET /api/billing` answers with `mode` set to `off`. Amounts are US dollars, and an issued invoice never changes: a correction appears as a credit on a later one. Where invoices are charged to the card on file, a failed payment is tried again by the payment provider and the account's owners and administrators are told in Notifications; nothing is suspended meanwhile.
 
 Every route is in the [API reference](/api-reference).

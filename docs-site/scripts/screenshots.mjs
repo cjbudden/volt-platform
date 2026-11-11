@@ -32,6 +32,10 @@
 // rest as usual, then the skipped ones with the API in saas mode:
 //   (volt-app)  VOLT_DEPLOYMENT=saas PORT=8080 npx tsx src/index.ts
 //   (docs-site) node scripts/screenshots.mjs social-accounts notifications fleet-and-usage
+// `billingOn: true` marks a page that shows a bill only when the API bills
+// (build queue B1-3): start the API with VOLT_BILLING=contract for those shots.
+// The script reads `mode` from /api/billing as the page loads and skips the
+// shot, saying so, when billing is off.
 // Env: BASE (default http://127.0.0.1:5173), EMAIL, PASSWORD (the docs seed's
 // login by default), PLAYWRIGHT (path to playwright's index.mjs if it is not
 // installed here), CHROMIUM (a browser binary), OUT (default static/img/screens),
@@ -86,7 +90,13 @@ for (const s of shots) {
   const injected = [];
   // The session lives in memory, so move inside the app instead of reloading.
   if (s.fresh) { await page.evaluate(() => { history.pushState(null, '', '/'); dispatchEvent(new PopStateEvent('popstate')); }); await page.waitForTimeout(400); }
+  const billingAnswer = s.billingOn ? page.waitForResponse((r) => /\/api\/billing$/.test(new URL(r.url()).pathname), { timeout: 15000 }).then((r) => r.json()).catch(() => null) : null;
   await page.evaluate((u) => { history.pushState(null, '', u); dispatchEvent(new PopStateEvent('popstate')); }, s.path);
+  if (billingAnswer && (await billingAnswer)?.mode !== 'contract' && (await billingAnswer)?.mode !== 'automated') {
+    skipped.push(s.name);
+    console.log(`SKIP  ${s.name.padEnd(22)} billing is off on this API (start it with VOLT_BILLING=contract)`);
+    continue;
+  }
   try {
     if (s.waitFor) await page.waitForSelector(s.waitFor, { timeout: 15000 });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});

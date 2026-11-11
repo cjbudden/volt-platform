@@ -42,6 +42,7 @@
     { "key": "reframing", "label": "Formats & reframing", "batch": "G2", "guides": ["guides/formats-and-reframing.md"] },
     { "key": "account-settings", "label": "Account settings", "batch": "G4", "guides": ["guides/account-settings.md"] },
     { "key": "plan", "label": "Plan & limits", "batch": "G4", "guides": ["guides/plan-and-limits.md"] },
+    { "key": "billing", "label": "Billing", "batch": "B1-3", "guides": ["guides/billing.md"] },
     { "key": "fleet", "label": "Fleet & Usage", "batch": "G4", "guides": ["guides/fleet-and-usage.md"] },
     { "key": "payments", "label": "Payments", "batch": "G4", "guides": ["guides/payments.md"] },
     { "key": "social", "label": "Social accounts", "batch": "G4", "guides": ["guides/social-accounts.md"] },

@@ -972,6 +972,15 @@
   "group": "/api/billing"
  },
  {
+  "method": "POST",
+  "path": "/api/billing/portal",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/billing"
+ },
+ {
   "method": "GET",
   "path": "/api/caption-languages",
   "api": "discovery",

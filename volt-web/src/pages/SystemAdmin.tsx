@@ -5,6 +5,7 @@ import { pressable } from '../a11y'
 import { FormStatus, Notice, usePageNotice } from '../notices'
 import { GraphicsLibraryAdmin, AccountGraphicsSets } from './SystemGraphics'
 import { GlobalListsAdmin } from './SystemGlobalLists'
+import { BillingAdmin } from './SystemBilling'
 
 /* ============================================================================
    System Admin — SaaS-provider controls, visible ONLY to platform staff
@@ -31,11 +32,11 @@ export default function SystemAdmin() {
   const [editing, setEditing] = useState<PlatformAccountRow | null>(null)
   const [creds, setCreds] = useState<{ account: string; email: string; password: string } | null>(null)
   // Client accounts, or Volt's graphics library (sets of default templates, on or off per account).
-  const [tab, setTab] = useState<'accounts' | 'graphics' | 'lists'>(() => {
+  const [tab, setTab] = useState<'accounts' | 'graphics' | 'lists' | 'billing'>(() => {
     const t = new URLSearchParams(window.location.search).get('tab')
-    return t === 'graphics' || t === 'lists' ? t : 'accounts'
+    return t === 'graphics' || t === 'lists' || t === 'billing' ? t : 'accounts'
   })
-  const go = (t: 'accounts' | 'graphics' | 'lists') => { setTab(t); window.history.replaceState(null, '', t === 'accounts' ? window.location.pathname : `?tab=${t}`) }
+  const go = (t: 'accounts' | 'graphics' | 'lists' | 'billing') => { setTab(t); window.history.replaceState(null, '', t === 'accounts' ? window.location.pathname : `?tab=${t}`) }
 
   // PLATFORM STEP-UP. /api/platform only accepts a session verified with the
   // authenticator code (ACCESS_CONTROL.md), so a signed-in admin session gets
@@ -115,6 +116,7 @@ export default function SystemAdmin() {
     <>
       <PageHead title="System Admin" sub={tab === 'graphics'
           ? "Volt's own graphics templates, the sets they belong to, and which client accounts each set is on for."
+          : tab === 'billing' ? 'How each client account pays, the invoices still open, charges and credits, the price list, and closing a month.'
           : tab === 'lists' ? 'Reference lists every client reads: countries, timezones, and any list made here. Built-in lists retire items rather than delete them.'
           : 'Client accounts across the whole platform: create accounts with their primary admin user, set plans and quotas, suspend access.'}
         action={tab === 'accounts' ? <NewButton label="New client account" onClick={() => setCreateOpen(true)} /> : undefined} />
@@ -122,8 +124,9 @@ export default function SystemAdmin() {
         <button role="tab" aria-selected={tab === 'accounts'} className={`selchip ${tab === 'accounts' ? 'sel' : ''}`} onClick={() => go('accounts')}>Client accounts</button>
         <button role="tab" aria-selected={tab === 'graphics'} className={`selchip ${tab === 'graphics' ? 'sel' : ''}`} onClick={() => go('graphics')}>Graphics library</button>
         <button role="tab" aria-selected={tab === 'lists'} className={`selchip ${tab === 'lists' ? 'sel' : ''}`} onClick={() => go('lists')}>Global lists</button>
+        <button role="tab" aria-selected={tab === 'billing'} className={`selchip ${tab === 'billing' ? 'sel' : ''}`} onClick={() => go('billing')}>Billing</button>
       </div>
-      {tab === 'lists' ? <GlobalListsAdmin /> : tab === 'graphics' ? <GraphicsLibraryAdmin /> : rows === null ? (
+      {tab === 'billing' ? <BillingAdmin /> : tab === 'lists' ? <GlobalListsAdmin /> : tab === 'graphics' ? <GraphicsLibraryAdmin /> : rows === null ? (
         <div className="loading">Loading accounts…</div>
       ) : (
         <>

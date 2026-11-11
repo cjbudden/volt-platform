@@ -23,7 +23,8 @@ import {
   addManualCharge, closeMonth, markPaid, parseMonth, previousMonth, monthOf, invoiceAdminView,
 } from '../services/invoicing';
 import { invoicePdf } from '../services/invoicing/pdf';
-import { sendInvoiceToStripe } from '../services/invoicing/stripe';
+import { sendInvoiceToStripe, paymentMethodState, portalSession } from '../services/invoicing/stripe';
+import { consoleBase } from '../services/onboarding';
 
 /** Send an invoice as a PDF download, named by its number. */
 async function sendPdf(res: any, inv: any) {
@@ -62,11 +63,25 @@ billingRouter.get('/', asyncHandler(async (req, res) => {
   const invoices = (await query<any>(`SELECT * FROM billing_invoices WHERE account_id = $1 ORDER BY period_month DESC LIMIT 12`, [acc])).map(invoiceView);
   res.json({
     mode, handling: effectiveHandling(a?.billing_handling), currency: 'USD',
+    paymentMethod: paymentMethodState(mode, effectiveHandling(a?.billing_handling)),
     // Off: nothing is charged, so there is no month to show (earlier invoices still are).
     currentMonth: mode === 'off' ? null : await draftFor(acc),
     invoices,
     _links: { self: { href: '/api/billing' }, invoices: { href: '/api/billing/invoices' } },
   });
+}));
+
+/**
+ * Open Stripe's customer portal to change the card (build queue B1-3). A POST,
+ * so it needs Account settings: Manage (auth/roles.ts): seeing the invoices is
+ * not the same as changing how they are paid.
+ */
+billingRouter.post('/portal', asyncHandler(async (req, res) => {
+  const acc = accountId(req);
+  const a = await one<any>(`SELECT billing_handling FROM accounts WHERE id = $1`, [acc]);
+  const st = paymentMethodState(billingMode(), effectiveHandling(a?.billing_handling));
+  if (!st.portal) throw conflict(st.reason ?? 'There is no card to change.');
+  res.json({ url: await portalSession(acc, `${consoleBase()}/billing`) });
 }));
 
 billingRouter.get('/invoices', asyncHandler(async (req, res) => {

@@ -3783,6 +3783,26 @@ export interface VodMarkersView {
   detection: { group: string | null; at: string | null; note: string | null; running: boolean }
 }
 
+/** Download a file the API answers as an attachment (an invoice's PDF or CSV,
+ *  build queue B1-3). Through send(), so a System Admin path carries the
+ *  platform session and a refusal reads as the server's reason. */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  await refreshIfDueSoon()
+  let r = await send(path, {})
+  if (r.status === 401 && token && canRefresh && await refreshAccess()) r = await send(path, {})
+  if (!r.ok) {
+    let msg = `${r.status}`
+    try { const b = await r.json(); msg = b.error || b.message || msg } catch { /* not json */ }
+    throw new ApiError(r.status, msg, null)
+  }
+  const blob = await r.blob()
+  const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || fallbackName
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = name
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
 /** The authenticated request helper, for feature clients kept in their own
  *  files (graphics/gfxApi.ts) so this file does not grow without end. */
 export const apiRequest = req

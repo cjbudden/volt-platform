@@ -1665,3 +1665,21 @@ select.log-class{padding:3px 8px;font-size:var(--fs-xs);border-radius:var(--radi
 .mark-frame{margin:0;display:flex;flex-direction:column;gap:4px}
 .mark-frame img{width:160px;aspect-ratio:16/9;object-fit:contain;background:#000;border-radius:6px;border:1px solid var(--border)}
 .mark-frame figcaption{font-size:var(--fs-xs);font-family:ui-monospace,monospace;color:var(--muted)}
+
+/* Billing (build queue B1-3, pages/Billing.tsx and SystemBilling.tsx). Money
+   lines up on the right in tabular figures so totals can be read down a column. */
+th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bill-card{margin-bottom:22px}
+.bill-card-flat{margin-top:12px}
+.bill-lines tfoot td{padding:9px 14px;border-top:1px solid var(--border);color:var(--muted);font-size:var(--fs-body)}
+.bill-lines tfoot tr.bill-total td{color:var(--text);font-weight:700;font-size:var(--fs-body)}
+.bill-sofar{margin-left:8px;font-size:var(--fs-xs)}
+.bill-foot{padding:12px 16px;border-top:1px solid var(--border)}
+.bill-pay{display:flex;align-items:center;gap:14px;padding:16px 18px;margin-bottom:22px}
+.bill-pay-ic{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--panel-3);color:var(--brand);flex:none}
+.bill-pay-t{flex:1;min-width:0}
+.bill-pay .btn svg,.bill-dl .btn svg{margin-right:6px;vertical-align:-2px}
+.bill-dl{display:inline-flex;gap:6px;margin-left:6px}
+.bill-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:10px}
+.bill-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:640px){.bill-pay{flex-wrap:wrap}.bill-pay>.btn{width:100%}.plan-head{flex-wrap:wrap}}
