@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.92.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Playback: Operators can now enforce play tokens: with VOLT_EDGE_TOKENS=enforce (edge_tokens = "enforce" on AWS), a plain on-demand address with no token is refused at the CDN, the staging edge and the API, so the play gate's address is the only one that plays.
+- improved · Media Library: Previews in the Media Library and Skip markers, and share pages, play through play tokens, so they keep working when tokens are enforced. A share page's video stops when the link expires or the title's window ends, whichever is first, and plays in the country where it was opened.
+- improved · API: The API reference now describes the play gate's 451 answer (code, message, notify), Notify me (POST /api/public/availability/notify), the rights demand report (GET /api/analytics/rights-demand) and the preview addresses on GET /api/vod/{id}.
+
+### Internal
+
+- added: edge-tokens-enforce suite and the edge_tokens Terraform test; the staging nginx passes checked token requests on to the API.
+
 ## 0.91.0 (2026-11-11)
 
 ### Product (in customer release notes)
