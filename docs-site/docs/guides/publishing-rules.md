@@ -161,6 +161,8 @@ It is only for content with nothing that depends on who or where the viewer is. 
 
 A title that gains one of these later, for example from a rights profile or a change on the item itself, plays with tokens again within about a minute: the setting is ignored for it rather than letting anyone in. Token-free titles stop playing by their plain address when they stop being available (window ended, withdrawn, archived), within about a minute.
 
+The title's schema.org data for search engines and partners (`GET /api/vod/{id}/schema.org`) follows the same rule: a token-free title lists its plain video addresses there; where tokens are enforced, other titles list only their watch page. Where tokens are not enforced, a title with any of the conditions above lists only its watch page too, so the data never offers a way round them.
+
 ### What a change does to published titles
 
 A saved rule reaches the titles that are already published within about a minute, with nothing to publish again:

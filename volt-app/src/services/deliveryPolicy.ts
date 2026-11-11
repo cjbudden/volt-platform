@@ -172,12 +172,45 @@ export async function tokenFreeNow(assetId: string, o: { accountId?: string | nu
   const { publicDecision } = await import('./publicStatus');
   const ps = await publicDecision(assetId, now);
   if (!ps || ps.status !== 'available') return no;
+  const blockers = await blockersOf(assetId, row, o.accountId);
+  return { open: !blockers.length, until: ps.effectiveUntil ?? null, blockers };
+}
+
+/** tokenFreeBlockers for an asset's own row, with its rights, its account's geo and its collections. */
+async function blockersOf(assetId: string, row: any, accountId?: string | null): Promise<TokenFreeBlocker[]> {
   const { rightsForAsset } = await import('./rightsProfiles');
   const { accountGeo } = await import('./geoAccess');
-  const acct = o.accountId ?? await accountOf(assetId);
-  const blockers = tokenFreeBlockers(row.availability, {
-    rights: await rightsForAsset(row), accountGeo: acct ? await accountGeo(acct) : null, collectionAccess: row.collection_access ?? null });
-  return { open: !blockers.length, until: ps.effectiveUntil ?? null, blockers };
+  const acct = accountId ?? await accountOf(assetId);
+  return tokenFreeBlockers(row?.availability, {
+    rights: row ? await rightsForAsset(row) : null, accountGeo: acct ? await accountGeo(acct) : null, collectionAccess: row?.collection_access ?? null });
+}
+
+/**
+ * MAY THE schema.org DATA NAME THE TITLE'S MEDIA? (build queue P2-2g,
+ * decided by Christian, 11 Nov 2026.) `GET /api/vod/{id}/schema.org` puts the
+ * plain MP4 in `contentUrl` and the plain HLS, DASH and MP4 in
+ * `associatedMedia`. Those are plain addresses with no play token: where
+ * tokens are enforced they answer 403, and where they are only issued (or
+ * off) they are a ready-made way round the play gate for a title the gate
+ * would refuse some viewers. So they are named only where a plain address is
+ * the right answer anyway:
+ *   - a token-free title (tokenFreeNow: it plays by its plain address at the
+ *     edge), in every mode;
+ *   - under issue or off, a title with no viewer condition at all (the same
+ *     test as tokenFreeBlockers: geo, rights territories or apps, paywall or
+ *     paid access, sign-in, a collection's access, DRM, referrers, a streams
+ *     limit).
+ * Never under enforce otherwise. `embedUrl` (the watch page) is not decided
+ * here: it always stays, so the title can still get video results.
+ */
+export async function schemaOrgMediaAllowed(assetId: string, o: { accountId?: string | null } = {}): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(assetId)) return false;
+  const tf = await tokenFreeNow(assetId, o).catch(() => null);
+  if (tf?.open) return true;
+  const { edgeTokensMode } = await import('./edgeTokens');
+  if (edgeTokensMode() === 'enforce') return false;
+  const row = await vodAvailabilityRow(assetId);
+  return (await blockersOf(assetId, row, o.accountId)).length === 0;
 }
 
 /** The account an asset belongs to, cached (an asset never changes account). */

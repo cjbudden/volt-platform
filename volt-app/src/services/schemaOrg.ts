@@ -66,16 +66,25 @@ export interface PublicationForSchema {
   status?: string;
 }
 
-/** Build a schema.org VideoObject (JSON-LD) for a VOD asset. */
-export function videoObjectFromAsset(a: AssetForSchema, pubs: PublicationForSchema[] = []): Record<string, any> {
+/**
+ * Build a schema.org VideoObject (JSON-LD) for a VOD asset. `media: false`
+ * leaves out the plain media addresses (`contentUrl`, `associatedMedia`):
+ * where play tokens decide who plays, they would go round the play gate
+ * (deliveryPolicy.ts schemaOrgMediaAllowed, build queue P2-2g). `embedUrl`,
+ * the watch page, always stays.
+ */
+export function videoObjectFromAsset(a: AssetForSchema, pubs: PublicationForSchema[] = [], o: { media?: boolean } = {}): Record<string, any> {
   const md = a.metadata ?? {};
+  const media = o.media !== false;
   const associatedMedia: any[] = [];
-  if (a.formats?.hls !== false && a.master_key)
-    associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'application/vnd.apple.mpegurl', contentUrl: cdn(a.master_key) });
-  if (a.formats?.dash && a.master_key)
-    associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'application/dash+xml', contentUrl: cdn(a.master_key.replace(/master\.m3u8$/, 'manifest.mpd')) });
-  if (a.formats?.progressive && a.progressive_key)
-    associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'video/mp4', contentUrl: cdn(a.progressive_key) });
+  if (media) {
+    if (a.formats?.hls !== false && a.master_key)
+      associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'application/vnd.apple.mpegurl', contentUrl: cdn(a.master_key) });
+    if (a.formats?.dash && a.master_key)
+      associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'application/dash+xml', contentUrl: cdn(a.master_key.replace(/master\.m3u8$/, 'manifest.mpd')) });
+    if (a.formats?.progressive && a.progressive_key)
+      associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'video/mp4', contentUrl: cdn(a.progressive_key) });
+  }
 
   const totalViews = pubs.reduce((n, p) => n + (p.views ?? 0), 0);
   const portalUrl = `${config.aws.cdnBaseUrl.replace(/\/$/, '')}/portal/watch/${a.id}`;
@@ -90,12 +99,12 @@ export function videoObjectFromAsset(a: AssetForSchema, pubs: PublicationForSche
     duration: isoDuration(a.duration_ms),
     thumbnail: imageObject(a.poster_key),
     thumbnailUrl: cdn(a.poster_key),
-    contentUrl: a.formats?.progressive ? cdn(a.progressive_key) : undefined,
+    contentUrl: media && a.formats?.progressive ? cdn(a.progressive_key) : undefined,
     embedUrl: portalUrl,
     isLiveBroadcast: false,
     genre: md.genre,
     keywords: Array.isArray(md.tags) ? md.tags.join(', ') : md.keywords,
-    associatedMedia,
+    associatedMedia: media ? associatedMedia : undefined,
     isFamilyFriendly: md.rating ? undefined : undefined,
   };
   if (a.kind === 'clip' && a.start_epoch_ms != null && a.end_epoch_ms != null) {

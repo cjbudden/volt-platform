@@ -1000,6 +1000,10 @@
     "summary": "Which Find details an asset uses",
     "description": "The finder for the asset's content type: `song` (Songs and Music videos use the song service: `POST /api/vod/{id}/song/find`) or `general` (every other type: `POST /api/vod/{id}/details/find`), the default search `term` (the type's title field, else the asset title) and, for the song finder, `song` (artist and title). Needs `vod: view`."
   },
+  "GET /api/vod/:id/schema.org": {
+    "summary": "An asset as schema.org JSON-LD",
+    "description": "The asset as a schema.org `VideoObject` (a `Clip` for a clip) for search engines and partners: name, description, duration, thumbnail, publications, view count and `embedUrl`, the title's watch page, always. The plain media addresses (`contentUrl`, the MP4, and `associatedMedia`, HLS, DASH and MP4) carry no play token, so they are only included where they would not go round the play gate: for a token-free title, and, where play tokens are not enforced, for a title with no viewer condition (no country limit, rights territories or apps, payment, sign-in, DRM, allowed referrer domains or streams limit). Every other title has neither. Needs `vod: view`."
+  },
   "POST /api/vod/:id/details/find": {
     "summary": "Find details for an asset",
     "description": "Searches Wikidata for `q` (default: the title field's value) and maps each item onto the asset's content type fields through their schema.org names (`proposed`, field key to value, shaped to the field type), with the asset's `current` metadata, provenance and fields to compare, and `unmapped`, the fields this finder cannot fill. Saves nothing. Answers `200` with `error` set when Wikidata cannot be reached, `400` when the asset has no content type, `409` when the type uses the song finder. Needs `vod: manage`."

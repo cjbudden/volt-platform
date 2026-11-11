@@ -5,6 +5,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { validateMetadata, SchemaField } from '../services/metadataValidator';
 import { videoObjectFromAsset } from '../services/schemaOrg';
+import { schemaOrgMediaAllowed } from '../services/deliveryPolicy';
 import { traceClip } from '../services/clips/provenance';
 import { enqueueClipBuild } from '../services/clips';
 import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, qcFailedQueue, IllegalReview } from '../services/review';
@@ -561,7 +562,7 @@ vodRouter.get(
     // coming back, and what waits for it. Null while it is in the cloud.
     const { originalReturnOf } = await import('../services/archive/originals');
     const originalReturn = await originalReturnOf(row).catch(() => null);
-    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any), encode_place: encodePlaceOf(row.ingest, siteName),
+    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any, { media: await schemaOrgMediaAllowed(row.id, { accountId: accountId(req) }).catch(() => false) }), encode_place: encodePlaceOf(row.ingest, siteName),
       original_return: originalReturn, ...(await statusFields(row)), preview: previewUrls(row), ...extra });
   })
 );
@@ -843,7 +844,9 @@ vodRouter.get(
     const row = await fetchOwned(req.params.id, accountId(req));
     if (!row) throw notFound('VOD asset not found');
     const pubs = await query('SELECT platform, external_url, views, published_at, status FROM publications WHERE vod_asset_id=$1', [req.params.id]);
-    res.type('application/ld+json').json(videoObjectFromAsset(row, pubs as any));
+    // Plain media addresses only where they would not go round the play gate (P2-2g).
+    const media = await schemaOrgMediaAllowed(row.id, { accountId: accountId(req) }).catch(() => false);
+    res.type('application/ld+json').json(videoObjectFromAsset(row, pubs as any, { media }));
   })
 );
 
