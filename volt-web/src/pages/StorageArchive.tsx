@@ -12,6 +12,11 @@
 //                     for it: a copy only counts as Verified once the site
 //                     agent has read it back and it matched the original.
 //
+//  MIRROR MODE (H3-10): a copy made under a mirror-mode rule is deleted at
+//  the target once its asset has left Volt for good (out of the restore bin)
+//  and the target's grace period has passed. Each target says its period and
+//  what is waiting; each copy says when it goes, or that it went.
+//
 //  Shown only to account administrators of an account with the
 //  `mirror_archive` add-on (Storage.tsx); the API refuses everyone else the
 //  same way. Keys for an S3-compatible store are never typed here: they stay
@@ -35,6 +40,8 @@ const IC = {
   wait: ic(<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>),
   archived: ic(<><path d="M3 7h18v13H3z" /><path d="M1 3h22v4H1z" /><path d="M10 12h4" /></>),
   restore: ic(<><path d="M12 19V7" /><path d="M7 11l5-5 5 5" /><path d="M5 21h14" /></>),
+  mirror: ic(<><path d="M4 7h13l-3-3" /><path d="M20 17H7l3 3" /></>),
+  trash: ic(<><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></>),
 }
 
 /** What to do about an original that waits (services/archive/originals.ts codes). */
@@ -118,6 +125,7 @@ export const COPY_STATE: Record<ArchiveCopyState, { label: string; cls: string; 
   failed: { label: 'Failed', cls: 'down', about: 'The copy could not be made after every retry. Copy it again once the cause is fixed.' },
   corrupt: { label: 'Corrupt', cls: 'down', about: 'The copy on the target no longer matches the original: it was changed or damaged after it was made.' },
   missing: { label: 'Missing', cls: 'down', about: 'The copy is no longer on the target: it was moved or deleted there.' },
+  removed: { label: 'Removed', cls: 'idle', about: 'Mirror mode: the asset left Volt, so the copy was deleted at the target once the grace period was over.' },
 }
 
 // What to do about each of the site agent's error codes (volt-agent
@@ -139,6 +147,8 @@ const ERROR_HINT: Record<string, string> = {
   checksum_mismatch: 'Check the storage at the site. A copy is made again by itself; a re-check that fails means the file changed after it was made.',
   size_mismatch: 'Check the storage at the site, then copy it again.',
   missing: 'Find out what removed it at the site, then copy it again.',
+  changed_kept: 'Nothing: Volt never deletes a file someone changed at the site. Remove it there yourself if it is no longer wanted.',
+  already_gone: 'Nothing: the file had already been removed at the site.',
   site_error: 'Look at the agent\'s log on the site\'s server. The copy retries by itself.',
 }
 
@@ -150,6 +160,8 @@ const fmtBytes = (n: number | null) => {
 }
 const when = (t: string | null) => t ? new Date(t).toLocaleString() : '–'
 const recheckText = (d: number | null) => d == null ? 'Never on a schedule' : d === 1 ? 'Every day' : `Every ${d} days`
+const day = (t: string) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+const graceText = (d: number) => d === 0 ? 'As soon as it leaves Volt' : d === 1 ? 'After 1 day' : `After ${d} days`
 
 /** Where a target writes, in one line. */
 export function targetWhere(t: ArchiveTarget): string {
@@ -177,6 +189,7 @@ function TargetForm({ sites, target, onDone, onCancel }: {
   const [keyName, setKeyName] = useState(target?.s3?.credentialRef ?? '')
   const [cap, setCap] = useState(target?.bandwidthMbps != null ? String(target.bandwidthMbps) : '')
   const [recheck, setRecheck] = useState(target ? (target.recheckDays == null ? '' : String(target.recheckDays)) : '30')
+  const [grace, setGrace] = useState(String(target?.mirrorGraceDays ?? 7))
   const [status, setStatus] = useState<'active' | 'disabled'>(target?.status ?? 'active')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -185,16 +198,17 @@ function TargetForm({ sites, target, onDone, onCancel }: {
     setBusy(true); setErr('')
     const bandwidthMbps = cap.trim() === '' ? null : Number(cap)
     const recheckDays = recheck.trim() === '' ? null : Number(recheck)
+    const mirrorGraceDays = grace.trim() === '' ? 7 : Number(grace)
     const s3 = { endpoint: endpoint.trim(), bucket: bucket.trim(), ...(prefix.trim() ? { prefix: prefix.trim() } : {}), ...(region.trim() ? { region: region.trim() } : {}), ...(keyName.trim() ? { credentialRef: keyName.trim() } : {}) }
     try {
       if (editing) {
         await api.patchArchiveTarget(target!.id, {
-          name: name.trim(), bandwidthMbps, recheckDays, status,
+          name: name.trim(), bandwidthMbps, recheckDays, mirrorGraceDays, status,
           ...(kind === 'path' ? { path: path.trim() } : { s3 }),
         })
       } else {
         await api.createArchiveTarget({
-          name: name.trim(), siteId, kind, bandwidthMbps, recheckDays,
+          name: name.trim(), siteId, kind, bandwidthMbps, recheckDays, mirrorGraceDays,
           ...(kind === 'path' ? { path: path.trim() } : { s3 }),
         })
       }
@@ -253,6 +267,9 @@ function TargetForm({ sites, target, onDone, onCancel }: {
         <div className="field"><label htmlFor="at-recheck">Read copies back every (days)</label>
           <input id="at-recheck" className="inp" type="number" min={1} style={{ width: 140 }} value={recheck} placeholder="Never" onChange={e => setRecheck(e.target.value)} />
           <div className="hintxt">Catches copies changed or removed on the target. Empty: only when you ask.</div></div>
+        <div className="field"><label htmlFor="at-grace">Mirror deletes wait (days)</label>
+          <input id="at-grace" className="inp" type="number" min={0} max={90} style={{ width: 140 }} value={grace} onChange={e => setGrace(e.target.value)} />
+          <div className="hintxt" style={{ maxWidth: 300 }}>Only for copy rules set to Mirror. Counted from when the asset leaves Volt for good (after the restore bin). 0 to 90 days; 7 if unsure.</div></div>
         {editing && (
           <div className="field"><label htmlFor="at-status">Status</label>
             <select id="at-status" className="inp sel-sm" value={status} onChange={e => setStatus(e.target.value as 'active' | 'disabled')}>
@@ -307,7 +324,7 @@ export function MirrorArchive() {
       </div>
       <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 6 }}>
         Extra copies of your originals and recordings on storage you own at your sites. A copy counts as verified only once a server at the site has read it back and it matched what Volt sent. Copy rules in{' '}
-        <a href="/publishing" onClick={e => { e.preventDefault(); navigate('/publishing') }}>Publishing Rules</a> decide what is copied and when.
+        <a href="/publishing" onClick={e => { e.preventDefault(); navigate('/publishing') }}>Publishing Rules</a> decide what is copied and when, and whether a target keeps everything (Archive) or follows deletes (Mirror).
       </p>
       {err && <FormStatus error={err} />}
       {!targets ? (!err && <div className="loading">Loading…</div>) : (
@@ -325,7 +342,7 @@ export function MirrorArchive() {
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table>
-                <thead><tr><th>Target</th><th>Site</th><th>Where</th><th>Speed cap</th><th>Read back</th><th>Status</th><th /></tr></thead>
+                <thead><tr><th>Target</th><th>Site</th><th>Where</th><th>Speed cap</th><th>Read back</th><th>Mirror deletes</th><th>Status</th><th /></tr></thead>
                 <tbody>
                   {targets.map(t => (
                     <tr key={t.id} data-target={t.name} style={{ cursor: 'default' }}>
@@ -335,6 +352,9 @@ export function MirrorArchive() {
                       <td className="mono" style={{ fontSize: 'var(--fs-sm)', overflowWrap: 'anywhere' }}>{targetWhere(t)}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{t.bandwidthMbps ? `${t.bandwidthMbps} Mbit/s` : 'No cap'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{recheckText(t.recheckDays)}</td>
+                      <td style={{ whiteSpace: 'nowrap' }} data-target-mirror>{graceText(t.mirrorGraceDays ?? 7)}
+                        <div className="hintxt" style={{ margin: 0, display: 'flex', gap: 4, alignItems: 'center', color: t.pendingDeletes ? 'var(--warn)' : undefined }}>
+                          {t.pendingDeletes ? <>{IC.trash} {t.pendingDeletes} waiting{t.nextDeleteAt ? `, next ${day(t.nextDeleteAt)}` : ''}</> : 'Nothing waiting'}</div></td>
                       <td><span className={`tag ${t.status === 'active' ? 'live' : 'idle'}`}>{t.status === 'active' ? 'Active' : 'Disabled'}</span></td>
                       <td style={{ width: 1 }}><button className="btn sm ghost" onClick={() => setForm(t)} disabled={!!form}>{IC.edit} Change</button></td>
                     </tr>
@@ -353,7 +373,7 @@ export function MirrorArchive() {
             </select>
             <select className="inp sel-sm" aria-label="Show copies that are" style={{ width: 200 }} value={fState} onChange={e => setFState(e.target.value)}>
               <option value="">Any state</option>
-              {(['queued', 'verified', 'failed', 'corrupt', 'missing'] as ArchiveCopyState[]).map(s => <option key={s} value={s}>{COPY_STATE[s].label}</option>)}
+              {(['queued', 'verified', 'failed', 'corrupt', 'missing', 'removed'] as ArchiveCopyState[]).map(s => <option key={s} value={s}>{COPY_STATE[s].label}</option>)}
             </select>
             <span className="hintxt" style={{ margin: 0 }}>{Object.entries(counts).map(([s, n]) => `${n} ${COPY_STATE[s as ArchiveCopyState]?.label.toLowerCase() ?? s}`).join(' · ')}</span>
           </div>
@@ -381,9 +401,13 @@ export function MirrorArchive() {
                         <td>{c.targetName ?? '–'}</td>
                         <td><span className={`tag ${st.cls}`} title={st.about}>{st.label}</span>
                           {c.checking && <div className="hintxt" style={{ margin: 0 }}>Being read back now</div>}
-                          {(c.error || hint) && c.state !== 'verified' && (
+                          {c.mode === 'mirror' && c.state !== 'removed' && !c.deleteAfter && <div className="hintxt" style={{ margin: 0, display: 'flex', gap: 4, alignItems: 'center' }} data-copy-mirror>{IC.mirror} Mirror: deleted here once the asset leaves Volt</div>}
+                          {c.deleteAfter && c.state !== 'removed' && <div style={{ margin: '2px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warn)', display: 'flex', gap: 4, alignItems: 'center' }} data-copy-pending>
+                            {IC.trash} {c.deleting ? 'Being deleted at the site now' : `The asset has left Volt: deleted here on ${day(c.deleteAfter)}`}</div>}
+                          {c.state === 'removed' && c.removedAt && <div className="hintxt" style={{ margin: 0 }} data-copy-removed>Deleted at the target {when(c.removedAt)}</div>}
+                          {(c.error || hint) && (c.state !== 'verified' || c.errorCode === 'changed_kept') && (
                             <div style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', maxWidth: 380 }} data-copy-error={c.errorCode ?? ''}>
-                              {c.error && <div style={{ color: c.state === 'queued' || c.state === 'copying' ? 'var(--warn)' : 'var(--down)' }}>{c.error}</div>}
+                              {c.error && <div style={{ color: c.state === 'queued' || c.state === 'copying' || c.errorCode === 'changed_kept' || c.errorCode === 'already_gone' ? 'var(--warn)' : 'var(--down)' }}>{c.error}</div>}
                               {hint && <div className="hintxt" style={{ margin: '2px 0 0' }}><b>What to do:</b> {hint}</div>}
                             </div>)}</td>
                         <td style={{ whiteSpace: 'nowrap' }}>{fmtBytes(c.bytes)}</td>

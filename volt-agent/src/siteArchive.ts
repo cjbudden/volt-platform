@@ -24,6 +24,14 @@
 //                    `If-None-Match: *` and are all removed again if the
 //                    package does not finish or read back whole.
 //
+//    archive.delete (H3-10, mirror mode)
+//                    remove a copy Volt made, once its asset has left Volt for
+//                    good and the target's grace period is over. Read back
+//                    first: a file (or a package file) that no longer matches
+//                    what Volt copied was changed at the site and is KEPT,
+//                    and the cloud is told so. Nothing else is ever removed;
+//                    a package's folders go only once empty.
+//
 //  Two kinds of target: a FOLDER on the site's server or a mounted NAS share
 //  (`path`, H3-2), and an on-prem S3-COMPATIBLE STORE such as MinIO (`s3`,
 //  H3-4), written through its S3 API with keys that never leave this host
@@ -46,7 +54,7 @@
 //  OUTBOUND ONLY, like the rest of the agent.
 // ============================================================================
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rename, rm, stat, unlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rename, rm, rmdir, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -54,7 +62,7 @@ import { freeName, nameValue, safeFileName } from '../../volt-app/src/services/a
 import { cleanPackagePath, packageLayout, packageManifest, type PackageFile } from '../../volt-app/src/services/archive/packageManifest';
 import * as S3 from './s3Target';
 
-export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify', 'archive.copy-folder', 'archive.verify-folder', 'archive.restore'];
+export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify', 'archive.copy-folder', 'archive.verify-folder', 'archive.restore', 'archive.delete'];
 
 export interface ArchiveCtx {
   server: string;
@@ -524,6 +532,77 @@ async function runVerifyFolder(ctx: ArchiveCtx, job: any): Promise<Record<string
   return { present: true, sha256: packageManifest(back.list), bytes: back.bytes, files: back.list.length, missingFiles: back.missing, changedFiles: changedOf(back.list) };
 }
 
+// ---- mirror mode: remove a copy Volt made (H3-10) ---------------------------------------
+
+/** Remove the folders under `dir` (deepest first), then `dir` itself, each only if empty. */
+async function removeEmptyDirs(dir: string): Promise<void> {
+  let names: string[] = [];
+  try { names = await readdir(dir); } catch { return; }
+  for (const n of names) {
+    const p = join(dir, n);
+    try { if ((await stat(p)).isDirectory()) await removeEmptyDirs(p); } catch { /* gone meanwhile */ }
+  }
+  await rmdir(dir).catch(() => {});   // not empty: something that is not Volt's is in it; it stays
+}
+
+/**
+ * Delete a mirror-mode copy. Only the file Volt put there, and only while it
+ * still matches the checksum Volt recorded: a file changed at the site is
+ * kept and reported `changed`. A package is all or nothing: if any of its
+ * files changed, none is removed.
+ */
+async function runDelete(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  const want = String(job.payload?.sha256 ?? '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(want)) throw new Refused('The job does not say which checksum the copy has, so nothing is removed', 'bad_job', true);
+  const listed = Array.isArray(job.payload?.files) ? job.payload.files : null;
+  const isS3 = job?.payload?.target?.kind === 's3';
+
+  if (listed) {
+    const files = listed.map((f: any) => ({ path: cleanPackagePath(f?.path), bytes: Number(f?.bytes), sha256: typeof f?.sha256 === 'string' ? f.sha256.toLowerCase() : null }))
+      .filter((f: any) => f.path) as { path: string; bytes: number; sha256: string | null }[];
+    if (files.length !== listed.length) throw new Refused('A file of this package has a path outside it', 'outside_target', true);
+    const folder = String(job.payload?.storedPath ?? '');
+    let c: S3.S3Client | null = null; let dir = '';
+    let back: { list: PackageFile[]; missing: number; bytes: number };
+    if (isS3) { c = storeFor(ctx, job); storeKey(c, folder); back = await readStoreFolder(c, folder, files); }
+    else {
+      dir = insideTarget(await targetRoot(job), folder);
+      try { if (!(await stat(dir)).isDirectory()) return { present: false, deleted: false }; } catch { return { present: false, deleted: false }; }
+      back = await readFolder(dir, files);
+    }
+    if (!back.list.length) return { present: false, deleted: false };
+    const changed = back.list.filter((b) => { const f = files.find((x) => x.path === b.path)!; return f.sha256 ? f.sha256 !== b.sha256 : f.bytes !== b.bytes; }).length;
+    // Whole: the set must read back as the one Volt recorded.
+    if (changed || (!back.missing && packageManifest(back.list) !== want)) {
+      return { present: true, deleted: false, changed: true, changedFiles: changed || back.list.length };
+    }
+    for (const f of back.list) {
+      if (c) { const r = await S3.s3(c, 'DELETE', storeKey(c, `${folder}/${f.path}`)); await r.text().catch(() => {}); if (r.status !== 204 && r.status !== 200 && r.status !== 404) throw await S3.refusal(r, 'Removing the copy from the store failed'); }
+      else await unlink(insideTarget(dir, f.path));
+    }
+    if (!c) await removeEmptyDirs(dir);
+    return { present: true, deleted: true, files: back.list.length, missingFiles: back.missing, bytes: back.bytes, sha256: want };
+  }
+
+  if (isS3) {
+    const c = storeFor(ctx, job);
+    const key = storeKey(c, job.payload?.storedPath);
+    const back = await S3.readBack(c, key);
+    if (!back) return { present: false, deleted: false };
+    if (back.sha256 !== want) return { present: true, deleted: false, changed: true, sha256: back.sha256, bytes: back.bytes };
+    const r = await S3.s3(c, 'DELETE', key); await r.text().catch(() => {});
+    if (r.status !== 204 && r.status !== 200 && r.status !== 404) throw await S3.refusal(r, 'Removing the copy from the store failed');
+    return { present: true, deleted: true, sha256: back.sha256, bytes: back.bytes };
+  }
+  const root = await targetRoot(job);
+  const p = insideTarget(root, String(job.payload?.storedPath ?? ''));
+  try { if (!(await stat(p)).isFile()) return { present: false, deleted: false }; } catch { return { present: false, deleted: false }; }
+  const h = await hashFile(p);
+  if (h.sha256 !== want) return { present: true, deleted: false, changed: true, sha256: h.sha256, bytes: h.bytes };
+  await unlink(p);
+  return { present: true, deleted: true, sha256: h.sha256, bytes: h.bytes };
+}
+
 /**
  * Lease and run this site's archive jobs until there are none (or maxJobs).
  * Returns how many ran. A 403 (the add-on not held) or 204 ends the pass.
@@ -539,7 +618,7 @@ export async function archivePass(ctx: ArchiveCtx): Promise<number> {
     try {
       const result = job.type === 'archive.copy' ? await runCopy(ctx, job) : job.type === 'archive.verify' ? await runVerify(ctx, job)
         : job.type === 'archive.copy-folder' ? await runCopyFolder(ctx, job) : job.type === 'archive.verify-folder' ? await runVerifyFolder(ctx, job)
-        : job.type === 'archive.restore' ? await runRestore(ctx, job) : null;
+        : job.type === 'archive.restore' ? await runRestore(ctx, job) : job.type === 'archive.delete' ? await runDelete(ctx, job) : null;
       if (!result) throw new Refused(`this agent does not run ${job.type}`, 'unknown_type', true);
       const c = await call(ctx, `/api/site-agent/jobs/${job.id}/complete`, { leaseId: job.leaseId, result });
       if (c.status === 422 && job.type === 'archive.copy-folder' && typeof result.storedPath === 'string') {

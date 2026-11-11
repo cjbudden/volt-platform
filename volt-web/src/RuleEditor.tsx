@@ -58,9 +58,9 @@ function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTa
   if (v === undefined) return '—'
   switch (k) {
     case 'archive': {
-      const copies: { targetId: string; on: CopyOn[]; what?: CopyWhat[] }[] = v?.copies ?? []
+      const copies: { targetId: string; on: CopyOn[]; what?: CopyWhat[]; mode?: 'archive' | 'mirror' }[] = v?.copies ?? []
       if (!copies.length) return 'no copies'
-      const list = copies.map(c => `${archiveTargets.find(t => t.id === c.targetId)?.name ?? c.targetId.slice(0, 8)}${c.what?.length ? ` (${c.what.map(w => WHAT_LABEL[w]).join(' and ')})` : ''} ${c.on.map(o => ON_LABEL[o]).join(' and ')}`).join('; ')
+      const list = copies.map(c => `${archiveTargets.find(t => t.id === c.targetId)?.name ?? c.targetId.slice(0, 8)}${c.what?.length ? ` (${c.what.map(w => WHAT_LABEL[w]).join(' and ')})` : ''} ${c.on.map(o => ON_LABEL[o]).join(' and ')}${c.mode === 'mirror' ? ', mirrored (follows deletes)' : ''}`).join('; ')
       return v.offPeak ? `${list}; only between ${v.offPeak.from} and ${v.offPeak.to}${v.offPeak.timeZone ? ` (${v.offPeak.timeZone})` : ' (UTC)'}` : list
     }
     case 'targets': {
@@ -475,7 +475,7 @@ function FieldControl({ k, value, points, onChange, scopeKind, archiveTargets = 
  * so the box is not offered there.
  */
 function ArchiveControl({ value, targets, onChange, recordings = false }: { value: any; targets: ArchiveTarget[]; onChange: (v: any) => void; recordings?: boolean }) {
-  const copies: { targetId: string; on: CopyOn[]; what?: CopyWhat[] }[] = value?.copies ?? []
+  const copies: { targetId: string; on: CopyOn[]; what?: CopyWhat[]; mode?: 'archive' | 'mirror' }[] = value?.copies ?? []
   const offPeak: { from: string; to: string; timeZone?: string } | null = value?.offPeak ?? null
   const put = (c: typeof copies, o: typeof offPeak) => onChange({ copies: c, offPeak: o })
   const setOn = (targetId: string, when: CopyOn, yes: boolean) => {
@@ -486,7 +486,16 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
     // Order kept as ingest, publish, recording, nightly, so the saved rule
     // reads the same way the form does; a target with none ticked is not
     // copied to. What it takes (H3-8) stays as it was.
-    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish', 'recording', 'schedule'] as const).filter(w => on.has(w)), ...(cur?.what ? { what: cur.what } : {}) }] : rest, offPeak)
+    put(on.size ? [...rest, { targetId, on: (['ingest', 'publish', 'recording', 'schedule'] as const).filter(w => on.has(w)), ...(cur?.what ? { what: cur.what } : {}), ...(cur?.mode === 'mirror' ? { mode: 'mirror' as const } : {}) }] : rest, offPeak)
+  }
+  // Mirror mode (H3-10): the target follows deletes, after its own grace
+  // period. Archive (stored unsaid) never deletes anything at the site.
+  const setMode = (targetId: string, mode: 'archive' | 'mirror') => {
+    put(copies.map(c => {
+      if (c.targetId !== targetId) return c
+      const { mode: _old, ...rest } = c
+      return mode === 'mirror' ? { ...rest, mode } : rest
+    }), offPeak)
   }
   // What an asset copy takes (H3-8): the original, its sidecars, or both;
   // (H3-9) the file of a clip cut from a recording, which has no original.
@@ -499,7 +508,7 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
     if (yes) set.add(w); else set.delete(w)
     if (!set.size) return
     const what = (['source', 'sidecars', 'clips', 'packages'] as const).filter(x => set.has(x))
-    const next = { targetId, on: cur.on, ...(what.length === 1 && what[0] === 'source' ? {} : { what }) }
+    const next = { targetId, on: cur.on, ...(what.length === 1 && what[0] === 'source' ? {} : { what }), ...(cur.mode === 'mirror' ? { mode: 'mirror' as const } : {}) }
     put(copies.map(c => c.targetId === targetId ? next : c), offPeak)
   }
   const unknown = copies.filter(c => !targets.some(t => t.id === c.targetId))
@@ -520,7 +529,7 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!cur?.on.includes('publish')} onChange={e => setOn(t.id, 'publish', e.target.checked)} />When it is published</label>
             {(recordings || cur?.on.includes('recording')) && <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="One file per programme, or per hour without a guide, from the top rendition, with a metadata file beside it"><input type="checkbox" checked={!!cur?.on.includes('recording')} onChange={e => setOn(t.id, 'recording', e.target.checked)} />Recordings</label>}
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="Once a day, copy anything this rule covers that the target does not hold yet, such as files from before the rule existed"><input type="checkbox" checked={!!cur?.on.includes('schedule')} onChange={e => setOn(t.id, 'schedule', e.target.checked)} />Nightly</label>
-            {cur && cur.on.some(o => o !== 'recording') && <span style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--muted)' }} data-archive-what>
+            {cur && cur.on.some(o => o !== 'recording') && <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', color: 'var(--muted)' }} data-archive-what>
               Copy:
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!cur.what?.length || cur.what.includes('source')} onChange={e => setWhat(t.id, 'source', e.target.checked)} />Original</label>
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="A metadata file, the caption files, any other files that came with it, and the poster, named after the original"><input type="checkbox" checked={!!cur.what?.includes('sidecars')} onChange={e => setWhat(t.id, 'sidecars', e.target.checked)} />Sidecars</label>
@@ -528,6 +537,14 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
               {/* H3-11: the size a package means, measured, beside the box (services/archive/packages.ts). H3-12: offered on stores too, as a key prefix. */}
               <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title={t.kind === 's3' ? 'The HLS and DASH package under one folder in the store (<name>-package/): playlists, manifest and every segment' : 'The HLS and DASH package as a folder that plays as it is: playlists, manifest and every segment'}><input type="checkbox" checked={!!cur.what?.includes('packages')} onChange={e => setWhat(t.id, 'packages', e.target.checked)} />HLS/DASH package</label>
               {cur.what?.includes('packages') && <span style={{ color: 'var(--faint)' }} data-archive-package-size>usually about 1.7 times the original (0.1 to 6 times), a few hundred files{t.kind === 's3' ? ', each its own object in the store' : ''}</span>}
+            </span>}
+            {cur && <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', color: 'var(--muted)' }} data-archive-mode>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap', flex: '0 0 auto' }}>Keep:
+                <select className="inp sel-sm" aria-label={`What ${t.name} keeps`} style={{ fontSize: 'var(--fs-sm)', padding: '3px 6px', width: 'auto' }} value={cur.mode === 'mirror' ? 'mirror' : 'archive'} onChange={e => setMode(t.id, e.target.value as 'archive' | 'mirror')}>
+                  <option value="archive">Archive: everything, never deleted</option>
+                  <option value="mirror">Mirror: follows deletes</option>
+                </select></label>
+              {cur.mode === 'mirror' && <span style={{ color: 'var(--warn)' }} data-archive-mirror-note>deletes files at the site {t.mirrorGraceDays === 0 ? 'as soon as an asset leaves Volt' : `${t.mirrorGraceDays ?? 7} day${(t.mirrorGraceDays ?? 7) === 1 ? '' : 's'} after an asset leaves Volt`}</span>}
             </span>}
             <span style={{ color: 'var(--faint)' }}>{t.siteName ? `at ${t.siteName}` : ''}{t.status === 'active' ? '' : ', disabled: no new copies'}</span>
           </div>
@@ -547,7 +564,7 @@ function ArchiveControl({ value, targets, onChange, recordings = false }: { valu
         </>}
       </div>
       <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-micro)' }}>
-        The original file is copied once per target. Sidecars are a metadata file, the caption files, other files that came with the asset, and its poster. Clips are clips cut from a recording: the clip's file as made, named Title-Channel-date-time, with a metadata file beside it. The HLS/DASH package is every rendition and segment as a folder that plays as it is: on our test library about 1.7 times the size of the original (from 0.1 to 6 times), a few hundred files per asset, so tick it only where the room is there. Nightly copies anything the target does not hold yet.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. A rung with no target ticked switches copies off beneath it.
+        The original file is copied once per target. Sidecars are a metadata file, the caption files, other files that came with the asset, and its poster. Clips are clips cut from a recording: the clip's file as made, named Title-Channel-date-time, with a metadata file beside it. The HLS/DASH package is every rendition and segment as a folder that plays as it is: on our test library about 1.7 times the size of the original (from 0.1 to 6 times), a few hundred files per asset, so tick it only where the room is there. Nightly copies anything the target does not hold yet.{recordings ? ' Recordings are copied as each programme ends (each hour without a guide), one file each with a metadata file beside it.' : ''} Outside the window a copy waits for it to open. Archive keeps every copy; Mirror deletes a copy at the target once its asset has left Volt for good (out of the restore bin) and the target's waiting period (set on the Storage page) is over, and never a file someone changed at the site. Recordings are always kept. A rung with no target ticked switches copies off beneath it.
       </div>
     </div>
   )

@@ -10,7 +10,9 @@
  *                                            pathStyle?, credentialRef? } } an S3-compatible store at a site (H3-4;
  *                                            no keys: they stay on the agent host under credentialRef)
  *   GET    /api/archive/targets/:id
- *   PATCH  /api/archive/targets/:id          { name?, path?, s3?, bandwidthMbps?, recheckDays?, status? }
+ *   PATCH  /api/archive/targets/:id          { name?, path?, s3?, bandwidthMbps?, recheckDays?, mirrorGraceDays?, status? }
+ *                                            mirrorGraceDays (H3-10): 0 to 90, 7 by default; how long a copy made
+ *                                            under a mirror-mode rule stays after its asset left Volt for good
  *   GET    /api/archive/copies               archive copies, list standard (target_id, vod_asset_id, state)
  *   POST   /api/archive/copies               { targetId, vodAssetId } copy an asset's original to a target
  *   GET    /api/archive/copies/:id
@@ -63,7 +65,7 @@ archiveRouter.get('/targets', asyncHandler(async (req, res) => {
   const params: unknown[] = [accountId(req)];
   const pl = parseList(targetList, req.query, params);
   const rows = await query<any>(
-    `SELECT t.*, s.name AS site_name FROM archive_targets t JOIN sites s ON s.id = t.site_id
+    `SELECT t.*, s.name AS site_name, ${A.TARGET_PENDING} FROM archive_targets t JOIN sites s ON s.id = t.site_id
       WHERE t.account_id = $1${whereSql(pl)} ${pageSql(pl)}`, params);
   res.json({ items: finishPage(req, res, pl, rows).map(A.targetView) });
 }));
@@ -97,7 +99,9 @@ const copyList = defineList({
     vod_asset_id: { sql: 'c.vod_asset_id', type: 'uuid', doc: 'the Media Library asset whose original was copied' },
     stream_id: { sql: 'c.stream_id', type: 'uuid', doc: 'the channel or event whose recording was copied (recording copies)' },
     what: { sql: 'c.what', type: 'enum', values: ['source', 'recording', 'recording-sidecar'], notNull: true, doc: "source (an asset's original), recording (a programme's or an hour's recording, one file) or recording-sidecar (its metadata)" },
-    state: { sql: 'c.state', type: 'enum', values: [...A.COPY_STATES], notNull: true, doc: 'queued (shown as copying while a host runs it), verified, failed, corrupt, missing' },
+    state: { sql: 'c.state', type: 'enum', values: [...A.COPY_STATES], notNull: true, doc: 'queued (shown as copying while a host runs it), verified, failed, corrupt, missing, removed (a mirror-mode copy deleted at the target after its grace period)' },
+    mode: { sql: 'c.mode', type: 'enum', values: ['archive', 'mirror'], notNull: true, doc: 'archive: Volt never deletes the copy; mirror: made under a mirror-mode rule, deleted at the target once its asset has left Volt for good and the target\'s grace period has passed' },
+    delete_after: { sql: 'c.delete_after', type: 'timestamp', doc: 'when the site agent may delete this mirror-mode copy; empty while its asset is still in Volt (or in the restore bin)' },
     created_at: { sql: 'c.created_at', type: 'timestamp', notNull: true },
     updated_at: { sql: 'c.updated_at', type: 'timestamp', notNull: true },
   },

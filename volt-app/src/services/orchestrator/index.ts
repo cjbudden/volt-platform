@@ -172,6 +172,16 @@ export function startScheduler(): () => void {
     30 * 60_000
   );
   archiveSweep.unref?.();
+  // MIRROR MODE (build queue H3-10): every 15 minutes, start the grace period
+  // of mirror copies whose asset left Volt for good (out of the restore bin),
+  // cancel any whose asset came back, and hand the due deletes to the site.
+  const archiveMirror = setInterval(
+    () => import('../archive/mirror').then((m) => m.mirrorPass())
+      .then((r) => { if (r.started || r.queued || r.cancelled || r.kept) console.log(`[archive] mirror: ${r.started} grace period(s) started, ${r.queued} delete(s) queued, ${r.cancelled} cancelled, ${r.kept} kept`); })
+      .catch((e) => console.error('[archive] mirror pass error', e)),
+    15 * 60_000
+  );
+  archiveMirror.unref?.();
 
   // FAST LINEUPS: keep every active lineup's guide (and its breaks) a week
   // ahead. Deterministic, so a top-up only appends what comes next.

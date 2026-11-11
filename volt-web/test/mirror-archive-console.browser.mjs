@@ -18,6 +18,9 @@
 //     box, saved and kept
 //   H3-12: offered on a store target too (no longer greyed), its note says
 //     each file is its own object, saved and kept
+//   H3-10: mirror mode: the target's waiting period (0 to 90, saved), a
+//     pending and a removed copy (DATABASE_URL of the docs database, to write
+//     them), Keep: Archive / Mirror in the rule editor, saved and kept
 //   PLAYWRIGHT=<playwright index.mjs> CHROMIUM=<chrome> OUT=<dir> node volt-web/test/mirror-archive-console.browser.mjs
 const { chromium } = await import(process.env.PLAYWRIGHT);
 const B = 'http://127.0.0.1:5173', OUT = process.env.OUT || '/tmp';
@@ -242,6 +245,65 @@ ok('and it is still ticked when the page is opened again', await page.locator('[
   await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
   ok('and the package is still ticked when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="Machine room NAS"] [data-archive-what] label:has-text("HLS/DASH package") input').isChecked())
   ok('on the store too', await page.locator('[data-archive-control] [data-archive-target="On-site object store"] [data-archive-what] label:has-text("HLS/DASH package") input').isChecked())
+}
+// H3-10: mirror mode. The waiting period on the target, a pending and a done
+// delete on the copies (written straight into the docs database when
+// DATABASE_URL is given, as only time and the agent make them), and the
+// Keep: Archive / Mirror choice in the rule editor.
+{
+  await go(page, '/storage'); await page.waitForSelector('[data-mirror-archive] tr[data-target="Machine room NAS"]', { timeout: 15000 }).catch(() => {})
+  const sec = page.locator('[data-mirror-archive]'), nas = sec.locator('tr[data-target="Machine room NAS"]')
+  ok('each target says how long mirror deletes wait, and that nothing is waiting: ' + JSON.stringify(await nas.locator('[data-target-mirror]').innerText().catch(() => '')),
+    /After 7 days/.test(await nas.locator('[data-target-mirror]').innerText().catch(() => '')) && /Nothing waiting/.test(await nas.locator('[data-target-mirror]').innerText().catch(() => '')))
+  await nas.locator('button:has-text("Change")').click(); await page.waitForTimeout(400)
+  const form = sec.locator('[data-target-form]')
+  ok('the target form has the mirror waiting period, 7 by default', await form.locator('#at-grace').inputValue() === '7' && /Counted from when the asset leaves Volt for good/.test(await form.innerText()))
+  await form.locator('#at-grace').fill('120')
+  await form.locator('button:has-text("Save target")').click(); await page.waitForTimeout(1200)
+  ok('more than 90 days is refused, and says the range', /0 to 90/.test(await form.innerText().catch(() => '')))
+  await form.locator('#at-grace').fill('14')
+  const pr = page.waitForResponse(r => /\/api\/archive\/targets\//.test(r.url()) && r.request().method() === 'PATCH', { timeout: 10000 }).catch(() => null)
+  await form.locator('button:has-text("Save target")').click()
+  const prr = await pr; await page.waitForTimeout(1200)
+  ok('14 days saves: ' + (prr && prr.request().postData()), !!prr && prr.ok() && JSON.parse(prr.request().postData() || '{}').mirrorGraceDays === 14 && /After 14 days/.test(await nas.innerText()))
+  if (process.env.DATABASE_URL) {
+    const { execFileSync } = await import('node:child_process')
+    const sql = (q) => execFileSync('psql', [process.env.DATABASE_URL, '-Atc', q], { encoding: 'utf8' }).trim()
+    sql(`UPDATE archive_copies SET mode = 'mirror', delete_after = now() + interval '3 days' WHERE id = (SELECT c.id FROM archive_copies c JOIN archive_targets t ON t.id = c.target_id WHERE t.name = 'Machine room NAS' AND c.state = 'verified' AND c.stream_id IS NULL ORDER BY c.file_name LIMIT 1)`)
+    sql(`UPDATE archive_copies SET mode = 'mirror', state = 'removed', removed_at = now() - interval '1 hour', vod_asset_id = NULL WHERE id = (SELECT c.id FROM archive_copies c JOIN archive_targets t ON t.id = c.target_id WHERE t.name = 'Machine room NAS' AND c.state = 'missing' AND c.stream_id IS NULL ORDER BY c.file_name LIMIT 1)`)
+    await go(page, '/sites'); await go(page, '/storage'); await page.waitForSelector('[data-mirror-archive] [data-copy]', { timeout: 15000 }).catch(() => {})
+    const mt = await nas.locator('[data-target-mirror]').innerText().catch(() => '')
+    ok('the target shows the delete waiting and when: ' + JSON.stringify(mt), /1 waiting, next /.test(mt))
+    const pend = sec.locator('tr[data-copy]:has([data-copy-pending])')
+    ok('the copy says the asset has left Volt and the day it goes: ' + JSON.stringify(await pend.innerText().catch(() => '')), await pend.count() === 1 && /The asset has left Volt: deleted here on /.test(await pend.innerText()))
+    const rem = sec.locator('tr[data-copy]:has(.tag:text-is("Removed"))')
+    ok('a removed copy shows Removed and when it was deleted at the target', await rem.count() === 1 && /Deleted at the target/.test(await rem.innerText()) && await rem.locator('button:has-text("Check now")').count() === 0)
+    await sec.locator('select[aria-label="Show copies that are"]').selectOption('removed'); await page.waitForTimeout(1200)
+    ok('the state filter offers Removed', await sec.locator('tr[data-copy]').count() === 1)
+    await sec.locator('select[aria-label="Show copies that are"]').selectOption(''); await page.waitForTimeout(1000)
+    await pend.scrollIntoViewIfNeeded(); await page.screenshot({ path: OUT + '/ma-storage-mirror.png' })
+  } else console.log('SKIP the pending and removed copies (no DATABASE_URL for the docs database)')
+
+  await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
+  const row = page.locator('[data-archive-control] [data-archive-target="Machine room NAS"]')
+  const sel = row.locator('[data-archive-mode] select')
+  ok('a target copied to offers Keep: Archive or Mirror, Archive by default', await sel.count() === 1 && await sel.inputValue() === 'archive')
+  ok('a target not copied to offers no choice', await page.locator('[data-archive-control] [data-archive-target="Edit suite disk"] [data-archive-mode]').count() === 0)
+  await sel.selectOption('mirror'); await page.waitForTimeout(300)
+  ok('Mirror says what it does, with the target\'s own waiting period: ' + JSON.stringify(await row.locator('[data-archive-mirror-note]').innerText().catch(() => '')),
+    /deletes files at the site 14 days after an asset leaves Volt/.test(await row.locator('[data-archive-mirror-note]').innerText().catch(() => '')))
+  ok('the help says Archive keeps everything and Mirror never deletes a changed file', /Archive keeps every copy; Mirror deletes a copy at the target/.test(await page.locator('[data-archive-control]').first().innerText()) && /never a file someone changed at the site/.test(await page.locator('[data-archive-control]').first().innerText()))
+  await row.scrollIntoViewIfNeeded(); await page.screenshot({ path: OUT + '/ma-publishing-mirror.png' })
+  const resp = page.waitForResponse(r => /\/api\/publishing-rules/.test(r.url()) && r.request().method() === 'PUT', { timeout: 10000 }).catch(() => null)
+  await page.locator('button:has-text("Save publishing rule")').first().click()
+  const sr = await resp
+  const sent = sr ? JSON.parse(sr.request().postData() || '{}') : {}
+  const nasId = (await (await page.request.get(B + '/api/archive/targets').catch(() => null))?.json().catch(() => null) ?? []).find?.(t => t.name === 'Machine room NAS')?.id
+  const all = sent.settings?.archive?.copies ?? sent.archive?.copies ?? []
+  const nasCopy = all.find(c => c.targetId === nasId) ?? all.find(c => c.mode === 'mirror')
+  ok('saving sends the NAS as mirror, the rest unsaid: ' + JSON.stringify(all.map(c => c.mode ?? null)), !!sr && sr.ok() && nasCopy?.mode === 'mirror' && all.filter(c => c.mode === 'mirror').length === 1)
+  await go(page, '/storage'); await go(page, '/publishing'); await page.waitForSelector('[data-archive-control]', { timeout: 15000 }).catch(() => {})
+  ok('and it is still Mirror when the page is opened again', await page.locator('[data-archive-control] [data-archive-target="Machine room NAS"] [data-archive-mode] select').inputValue() === 'mirror')
 }
 ok('Sites is in the menu for this account', await navHas(page, 'Sites'))
 await ctx.close()

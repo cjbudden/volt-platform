@@ -18,7 +18,7 @@ Archivists, media managers and the administrators who look after your sites use 
 - wondering whether a copy is whole: a copy counts only once it has been read back and matched against the original, and it is read back again every 30 days unless you choose otherwise;
 - archive traffic in busy hours: copies can wait for an off-peak window, and each storage target can have a speed cap.
 
-Volt never replaces or deletes a verified copy at your storage. Keeping a target in step with deletes in Volt (mirror mode) is not available yet.
+Volt never replaces a verified copy at your storage, and deletes one only when you ask it to: a copy rule set to **Mirror** keeps a target in step with Volt, so a copy goes once its item has left Volt for good and the target's waiting period is over (see [Mirror: follow deletes](#mirror-follow-deletes)).
 
 ## Before you start
 
@@ -92,8 +92,9 @@ As with a folder, every copy is read back from the store and matched against the
 1. Open **Publishing Rules** and the rung that should copy: the account default for everything, a content type, a channel, station or event, or one item.
 2. Under **Archive copies**, tick the target and the moments: **When it lands**, **When it is published**, **Nightly**, and on a channel's, station's or event's rung (or the account default) **Recordings**.
 3. Under **Copy**, choose what goes there: **Original**, **Sidecars**, **Clips**, **HLS/DASH package**, or a mix.
-4. Optionally tick **Copy only between** and set an off-peak window.
-5. Choose **Save publishing rule**.
+4. Under **Keep**, leave **Archive: everything, never deleted**, or choose **Mirror: follows deletes** to have copies removed at the target once their item has left Volt (see [Mirror: follow deletes](#mirror-follow-deletes)).
+5. Optionally tick **Copy only between** and set an off-peak window.
+6. Choose **Save publishing rule**.
 
 The field is described in [Publishing Rules](../guides/publishing-rules.md#copy-originals-to-your-own-storage). What each choice copies:
 
@@ -104,8 +105,22 @@ A **copy rule** copies originals without anyone asking. It lives in the [publish
 - **Where and when:** each copy names a storage target and the moments to copy: **on ingest** (as soon as an upload or watch folder file has landed), **on publish** (when the item is published), **nightly** (once a day, anything the rule covers that the target does not hold yet, older items included) and **recordings** (as each programme or hour of a channel's or event's recording ends; see below).
 - **What:** the **original**, its **sidecars**, **clips**, the **HLS/DASH package**, or any mix (the original alone unless you say otherwise). Sidecars sit beside the original under its name: `<name>.json` with the item's details and metadata, each caption file as it was delivered (`<name>.en.srt`, `<name>.fr.vtt`), any other file that came with the item (`<name>.news.xml`) and the poster (`<name>.jpg`). Each is copied and read back like the original. **Clips** covers items cut from a recording (clips, full-event replays, exports): the clip's file as made, for example `GoaloftheDay-Channel1-20261103-1414.mp4`, and a metadata file of the same name saying where it was cut from. A clip asked for as HLS only has no single file to copy; its package can be copied instead. The **HLS/DASH package** is the item as Volt streams it, as one folder named after the original (`MorningNews-package/`): the master playlist, the DASH manifest, every rendition's playlist and segments, laid out so the folder plays as it is. Every file is read back, and the package counts as archived only when every file is there and matches; a folder missing one file is not. Plan for the room: on our test library a package was about 1.7 times the size of its original at the median, from 0.1 times (a lightly compressed original) to 6 times (a small phone file), and a few hundred files. Packages go to folder targets (a server folder or NAS share) and to S3-compatible stores. In a store the package is one folder of objects under the target's folder in the bucket (`MorningNews-package/master.m3u8` and so on), each object read back. A folder name already in use there, even by a single object, gets `-2` for the whole package, and nothing already in the store is ever replaced. If a package cannot be finished, or does not read back whole, every object written for it is removed again, so no half package stays.
 - **Off-peak window:** optionally, a window such as 22:00 to 06:00 in a time zone you choose. A copy asked for outside it waits until the window opens, so archive traffic stays out of busy hours.
-- **Once per target:** an original, sidecar, clip or package already copied, or waiting to be, is not copied again. Copies are kept, never replaced or deleted by Volt (keeping a target in step with deletes is mirror mode, not available yet). A level that sets no copies switches copies off below a level that has them.
+- **Once per target:** an original, sidecar, clip or package already copied, or waiting to be, is not copied again. Copies are kept and never replaced; Volt deletes one only under a rule set to **Mirror** (below). A level that sets no copies switches copies off below a level that has them.
 - **What is skipped, and why:** an item with no original kept, an item not packaged yet (for a package), or a disabled target or site, is skipped; the ingest or publish itself carries on.
+
+#### Mirror: follow deletes
+
+Each target in a copy rule has **Keep**: **Archive** (the default) keeps every copy for good, whatever happens in Volt. **Mirror** keeps the target in step with Volt: when an item is deleted, its copies at that target (the original, sidecars, clip file and package) are deleted there too, after a waiting period. Because this deletes files at your own site, it is careful:
+
+- **Nothing goes while it can still be restored.** A Media Library delete goes to the restore bin first; the waiting period starts only when the item leaves the bin for good. Restoring it from the bin cancels anything waiting.
+- **The waiting period is the target's.** Set **Mirror deletes wait (days)** on the target on the [Storage](../guides/storage.md#keep-copies-at-your-own-sites-mirror-and-archive) page: 7 days unless you change it, from 0 to 90. Changing it moves what is already waiting.
+- **Only Volt's own files, unchanged.** The site's server reads each file back before deleting it. A file changed at the site after Volt copied it is kept, and the copy says so; in a package, if any file changed, nothing of it is deleted. Files in a package folder that are not Volt's stay, with the folder.
+- **Only while a rule still says Mirror.** If no copy rule mirrors to the target any more when a delete is due, the copy is kept and becomes an archive copy.
+- **Caption and companion files** removed from an item that stays have their copies deleted the same way, after the waiting period.
+- **Recordings are always kept**, whatever the rule says.
+- **Every delete is in the audit trail**, with the file and the site, and so is every copy kept because it had changed.
+
+The target shows how many deletes are waiting and when the next is due. Each waiting copy says **The asset has left Volt: deleted here on** a date, then **Removed** once the site's server has deleted it. The site's servers need agent 0.13.0 or later; an older agent never deletes anything.
 
 #### Recordings in the archive
 
@@ -175,6 +190,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A copy to an object store stays **Queued** with *the store answered* and an error such as *AccessDenied* | The keys are wrong, or not allowed to write to that bucket | Check the keys and their permissions in the store |
 | A copy to an object store stays **Queued** with *cannot be reached* | The server cannot reach the store's address | Check the endpoint is the address as the site's server sees it, and the network between them |
 | A copy waits with a reason and **What to do** under it | The site's server could not make it yet; it is retried by itself | Follow **What to do**; the copy carries on once the cause is fixed |
+| A copy says **The asset has left Volt: deleted here on** a date | Its rule is set to **Mirror** and the item left Volt for good | Nothing, if that is what you want. To keep it, set the target's rule back to **Archive** before that date |
+| A mirror copy was kept with *the file at the target changed after Volt copied it* | Someone changed the file at the site, so it is not Volt's to delete | Remove it at the site yourself if it is no longer wanted |
+| A mirror delete is past its date and the copy is still there | No server of the site with agent 0.13.0 or later is online, or the site or target is disabled | Update and start the agent, or enable the site or target |
 
 ## Through the API
 
@@ -183,10 +201,10 @@ The same flow from code. Every request needs an account administrator's session 
 | Request | Does |
 |---|---|
 | `GET /api/sites`, `POST /api/sites`, `POST /api/sites/{id}/enrolment-tokens` | The sites, a new site, and a one-time enrolment token for a server (see [Sites](../guides/hybrid-sites.md#through-the-api)) |
-| `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Storage targets for Mirror and Archive: lists, makes and changes them (`recheckDays` sets the re-check cadence; `kind` `s3` with `s3` settings for an object store) |
-| `PUT /api/publishing-rules/{scopeKind}/{scopeId}` with `archive` | A copy rule: `copies` of `{ "targetId", "on": ["ingest", "publish"] }` and an optional `offPeak` window |
+| `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Storage targets for Mirror and Archive: lists, makes and changes them (`recheckDays` sets the re-check cadence; `mirrorGraceDays`, 0 to 90, how long a mirror delete waits; `kind` `s3` with `s3` settings for an object store). Each shows `pendingDeletes` and `nextDeleteAt` |
+| `PUT /api/publishing-rules/{scopeKind}/{scopeId}` with `archive` | A copy rule: `copies` of `{ "targetId", "on": ["ingest", "publish"], "mode": "mirror" }` (`mode` left out means archive) and an optional `offPeak` window |
 | `POST /api/archive/copies` | Copies an asset's original to a target (`targetId`, `vodAssetId`) |
-| `GET /api/archive/copies`, `GET /api/archive/copies/{id}` | Every copy with its state, where it is and when it was last confirmed |
+| `GET /api/archive/copies`, `GET /api/archive/copies/{id}` | Every copy with its state, where it is and when it was last confirmed; `mode`, `deleteAfter` and `removedAt` for mirror copies (filter with `mode` and `state=removed`) |
 | `POST /api/archive/copies/{id}/verify` | Checks a copy again now |
 | `PUT /api/storage/retention` with `originalAfterDays` | Removes originals from the cloud that many days after they land, once a verified copy is held |
 | `GET /api/archive/originals`, `GET /api/archive/originals/{assetId}` | What was removed and what waits, with why; where one asset's original is |

@@ -2419,14 +2419,16 @@ export interface ArchiveTarget {
   kind: 'path' | 's3'; path: string
   s3?: { endpoint: string; bucket: string; prefix?: string | null; region?: string | null; pathStyle?: boolean; credentialRef?: string | null } | null
   bandwidthMbps: number | null; recheckDays: number | null
+  /** Mirror mode (H3-10): days a mirror copy stays after its asset left Volt for good (0 to 90), and what waits to be deleted. */
+  mirrorGraceDays: number; pendingDeletes?: number; nextDeleteAt?: string | null
   status: 'active' | 'disabled'; createdAt: string; updatedAt: string
 }
 export interface ArchiveTargetInput {
   name: string; siteId: string; kind?: 'path' | 's3'; path?: string
   s3?: { endpoint: string; bucket: string; prefix?: string; region?: string; pathStyle?: boolean; credentialRef?: string }
-  bandwidthMbps?: number | null; recheckDays?: number | null
+  bandwidthMbps?: number | null; recheckDays?: number | null; mirrorGraceDays?: number
 }
-export type ArchiveCopyState = 'queued' | 'copying' | 'verified' | 'failed' | 'corrupt' | 'missing'
+export type ArchiveCopyState = 'queued' | 'copying' | 'verified' | 'failed' | 'corrupt' | 'missing' | 'removed'
 export interface ArchiveCopy {
   id: string; targetId: string; targetName?: string; vodAssetId: string | null; what: string
   /** Recording copies (H3-7): the channel or event, and the stretch of it. */
@@ -2435,6 +2437,8 @@ export interface ArchiveCopy {
   state: ArchiveCopyState; busy: boolean; checking: boolean
   error: string | null; errorCode: string | null; attempts: number | null
   copiedAt: string | null; verifiedAt: string | null; checkedAt: string | null; createdAt: string; updatedAt: string
+  /** Mirror mode (H3-10): made under a mirror rule; when the agent may delete it; when it did. */
+  mode?: 'archive' | 'mirror'; deleteAfter?: string | null; removedAt?: string | null; deleting?: boolean
 }
 export interface SiteRow {
   id: string; name: string; description: string | null; status: 'active' | 'disabled'; version: number; configVersion: number
@@ -3599,7 +3603,7 @@ export interface RuleSettings {
   accessRules?: AccessRule[]
   /** Copy rules (Mirror and Archive, H3-3): copy the original to these storage targets when it
    *  lands or is published, optionally only inside an off-peak window. Needs `mirror_archive`. */
-  archive?: { copies: { targetId: string; on: ('ingest' | 'publish')[] }[]; offPeak?: { from: string; to: string; timeZone?: string } | null }
+  archive?: { copies: { targetId: string; on: ('ingest' | 'publish')[]; mode?: 'archive' | 'mirror' }[]; offPeak?: { from: string; to: string; timeZone?: string } | null }
 }
 export type ForScope = 'this' | 'live' | 'ondemand'
 export interface AccessTerm {

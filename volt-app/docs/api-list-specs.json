@@ -325,7 +325,8 @@
      "verified",
      "failed",
      "corrupt",
-     "missing"
+     "missing",
+     "removed"
     ],
     "sort": true,
     "filter": true,
@@ -336,7 +337,38 @@
      "nin",
      "exists"
     ],
-    "doc": "queued (shown as copying while a host runs it), verified, failed, corrupt, missing"
+    "doc": "queued (shown as copying while a host runs it), verified, failed, corrupt, missing, removed (a mirror-mode copy deleted at the target after its grace period)"
+   },
+   "mode": {
+    "type": "enum",
+    "values": [
+     "archive",
+     "mirror"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "archive: Volt never deletes the copy; mirror: made under a mirror-mode rule, deleted at the target once its asset has left Volt for good and the target's grace period has passed"
+   },
+   "delete_after": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ],
+    "doc": "when the site agent may delete this mirror-mode copy; empty while its asset is still in Volt (or in the restore bin)"
    },
    "created_at": {
     "type": "timestamp",

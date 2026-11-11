@@ -37,15 +37,18 @@ export const ARCHIVE_COPY_FOLDER = 'archive.copy-folder';
 export const ARCHIVE_VERIFY_FOLDER = 'archive.verify-folder';
 /** An original back to the cloud from its archive copy (H3-5b, originals.ts): its own type, so an older agent never leases one. */
 export const ARCHIVE_RESTORE = 'archive.restore';
+/** A mirror-mode copy removed from its target (H3-10, mirror.ts): its own type, so an older agent never leases one. */
+export const ARCHIVE_DELETE = 'archive.delete';
 /** The job types the Mirror and Archive licence covers at a site. */
-export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY, ARCHIVE_COPY_FOLDER, ARCHIVE_VERIFY_FOLDER, ARCHIVE_RESTORE];
+export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY, ARCHIVE_COPY_FOLDER, ARCHIVE_VERIFY_FOLDER, ARCHIVE_RESTORE, ARCHIVE_DELETE];
 const isCopyJob = (type: string) => type === ARCHIVE_COPY || type === ARCHIVE_COPY_FOLDER;
 const isVerifyJob = (type: string) => type === ARCHIVE_VERIFY || type === ARCHIVE_VERIFY_FOLDER;
 export const isArchiveJob = (type: string) => ARCHIVE_JOB_TYPES.includes(type);
 
 /** path: a folder on the site's server or NAS. s3: an on-prem S3-compatible store (H3-4). */
 export const TARGET_KINDS = ['path', 's3'] as const;
-export const COPY_STATES = ['queued', 'copying', 'verified', 'failed', 'corrupt', 'missing'] as const;
+// removed (H3-10): a mirror-mode copy the agent deleted at the target, after the grace period.
+export const COPY_STATES = ['queued', 'copying', 'verified', 'failed', 'corrupt', 'missing', 'removed'] as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{64}$/;
@@ -122,14 +125,24 @@ export function targetView(t: any) {
     id: t.id, name: t.name, siteId: t.site_id, siteName: t.site_name ?? undefined, kind: t.kind, path: t.path,
     s3: t.kind === 's3' ? (t.s3 ?? null) : undefined,
     bandwidthMbps: t.bandwidth_mbps ?? null, recheckDays: t.recheck_days ?? null,
+    // Mirror mode (H3-10): how long a copy stays after its asset left Volt
+    // for good, and what is waiting to be deleted here now.
+    mirrorGraceDays: t.mirror_grace_days ?? 7,
+    pendingDeletes: t.pending_deletes === undefined ? undefined : Number(t.pending_deletes ?? 0),
+    nextDeleteAt: t.next_delete_at === undefined ? undefined : (t.next_delete_at ?? null),
     status: t.status, createdAt: t.created_at, updatedAt: t.updated_at,
   };
 }
 
+/** SQL columns: the mirror deletes waiting at target `t` (H3-10). */
+export const TARGET_PENDING = `
+  (SELECT count(*) FROM archive_copies pc WHERE pc.target_id = t.id AND pc.delete_after IS NOT NULL AND pc.state <> 'removed') AS pending_deletes,
+  (SELECT min(pc.delete_after) FROM archive_copies pc WHERE pc.target_id = t.id AND pc.delete_after IS NOT NULL AND pc.state <> 'removed') AS next_delete_at`;
+
 export async function ownedTarget(accountId: string, id: string) {
   if (!UUID.test(String(id))) throw notFound('storage target not found');
   const t = await one<any>(
-    `SELECT t.*, s.name AS site_name, s.status AS site_status FROM archive_targets t JOIN sites s ON s.id = t.site_id
+    `SELECT t.*, s.name AS site_name, s.status AS site_status, ${TARGET_PENDING} FROM archive_targets t JOIN sites s ON s.id = t.site_id
       WHERE t.id = $1 AND t.account_id = $2`, [id, accountId]);
   if (!t) throw notFound('storage target not found');
   return t;
@@ -139,6 +152,15 @@ function cleanBandwidth(v: unknown): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   if (!Number.isInteger(n) || n < 1 || n > 100_000) throw badRequest('bandwidthMbps must be a whole number of megabits per second, 1 to 100000, or null for no cap');
+  return n;
+}
+
+/** Mirror mode's grace period at a target (H3-10, decided 11 Nov 2026): 0 to 90 days, 7 by default. */
+function cleanGrace(v: unknown): number {
+  const n = Number(v);
+  if (v === null || typeof v === 'boolean' || v === '' || !Number.isInteger(n) || n < 0 || n > 90) {
+    throw badRequest('mirrorGraceDays must be a whole number of days, 0 to 90 (how long a mirror copy stays after its asset left Volt for good)');
+  }
   return n;
 }
 
@@ -160,6 +182,7 @@ export async function createTarget(accountId: string, userId: string | null, b: 
   const path = store ? storePath(store) : cleanTargetPath(b?.path);
   const bandwidth = cleanBandwidth(b?.bandwidthMbps);
   const recheck = b?.recheckDays === undefined ? 30 : cleanRecheckDays(b.recheckDays);
+  const grace = b?.mirrorGraceDays === undefined ? 7 : cleanGrace(b.mirrorGraceDays);
   if (!UUID.test(String(b?.siteId))) throw badRequest('siteId is required');
   const site = await one<any>(`SELECT id, status FROM sites WHERE id = $1 AND account_id = $2`, [b.siteId, accountId]);
   if (!site) throw notFound('site not found');
@@ -167,9 +190,9 @@ export async function createTarget(accountId: string, userId: string | null, b: 
     throw conflict('A storage target with this name already exists');
   }
   const row = await one<any>(
-    `INSERT INTO archive_targets (account_id, site_id, name, kind, path, bandwidth_mbps, recheck_days, s3, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(SELECT id FROM users WHERE id = $9)) RETURNING *`,
-    [accountId, site.id, name, kind, path, bandwidth, recheck, store ? JSON.stringify(store) : null, userId]);
+    `INSERT INTO archive_targets (account_id, site_id, name, kind, path, bandwidth_mbps, recheck_days, s3, created_by, mirror_grace_days)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,(SELECT id FROM users WHERE id = $9),$10) RETURNING *`,
+    [accountId, site.id, name, kind, path, bandwidth, recheck, store ? JSON.stringify(store) : null, userId, grace]);
   return ownedTarget(accountId, row.id);
 }
 
@@ -213,6 +236,18 @@ export async function updateTarget(accountId: string, id: string, b: any) {
   }
   if (b?.bandwidthMbps !== undefined) { const v = cleanBandwidth(b.bandwidthMbps); if (v !== t.bandwidth_mbps) set('bandwidth_mbps', 'bandwidthMbps', v); }
   if (b?.recheckDays !== undefined) { const v = cleanRecheckDays(b.recheckDays); if (v !== t.recheck_days) set('recheck_days', 'recheckDays', v); }
+  if (b?.mirrorGraceDays !== undefined) {
+    const v = cleanGrace(b.mirrorGraceDays);
+    if (v !== t.mirror_grace_days) {
+      set('mirror_grace_days', 'mirrorGraceDays', v);
+      // Deletes already waiting follow the new period, counted from when
+      // each one's grace started: a longer period is never cut short, a
+      // shorter one brings them forward. One already handed to the site stays.
+      await query(`UPDATE archive_copies SET delete_after = delete_after + make_interval(days => $2), updated_at = now()
+                    WHERE target_id = $1 AND delete_after IS NOT NULL AND state <> 'removed'
+                      AND (delete_job_id IS NULL OR delete_job_id NOT IN (SELECT id FROM jobs WHERE state IN ('queued', 'running')))`, [t.id, v - t.mirror_grace_days]);
+    }
+  }
   if (b?.status !== undefined) {
     if (b.status !== 'active' && b.status !== 'disabled') throw badRequest('status is active or disabled');
     if (b.status !== t.status) set('status', 'status', b.status);
@@ -238,17 +273,22 @@ export function copyView(c: any) {
     error: c.error, errorCode: c.error_code,
     attempts: c.job_attempts ?? null,
     copiedAt: c.copied_at, verifiedAt: c.verified_at, checkedAt: c.checked_at,
+    // Mirror mode (H3-10): the rule's mode when the copy was made, when the
+    // agent may delete it (its asset left Volt for good), and when it did.
+    mode: c.mode ?? 'archive', deleteAfter: c.delete_after ?? null, removedAt: c.removed_at ?? null,
+    deleting: c.delete_job_state === 'queued' || c.delete_job_state === 'running',
     createdAt: c.created_at, updatedAt: c.updated_at,
   };
 }
 
 export const COPY_SELECT = `
   SELECT c.*, t.name AS target_name, j.state AS job_state, j.attempts AS job_attempts, vj.state AS verify_job_state,
-         COALESCE(sch.name, sev.name) AS stream_name
+         dj.state AS delete_job_state, COALESCE(sch.name, sev.name) AS stream_name
     FROM archive_copies c
     JOIN archive_targets t ON t.id = c.target_id
     LEFT JOIN jobs j ON j.id = c.job_id
     LEFT JOIN jobs vj ON vj.id = c.verify_job_id
+    LEFT JOIN jobs dj ON dj.id = c.delete_job_id
     LEFT JOIN channels sch ON sch.id = c.stream_id
     LEFT JOIN events sev ON sev.id = c.stream_id`;
 
@@ -403,7 +443,9 @@ export type CopyMoment = CopyEvent | 'recording';
 /** What an asset copy takes (H3-8): the original, its sidecars, (H3-9) a clip's file, (H3-11) its HLS/DASH package. Original only when unsaid. */
 export type CopyWhat = 'source' | 'sidecars' | 'clips' | 'packages';
 export interface OffPeak { from: string; to: string; timeZone?: string }
-export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[]; what?: CopyWhat[] }[]; offPeak?: OffPeak | null }
+/** archive (the default): Volt never deletes the copy. mirror (H3-10): the target follows deletes, after its grace period. */
+export type CopyRuleMode = 'archive' | 'mirror';
+export interface ArchiveRule { copies: { targetId: string; on: CopyMoment[]; what?: CopyWhat[]; mode?: CopyRuleMode }[]; offPeak?: OffPeak | null }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const minutesOf = (hhmm: string) => { const m = HHMM.exec(hhmm)!; return Number(m[1]) * 60 + Number(m[2]); };
@@ -510,6 +552,11 @@ export async function copyOnRule(accountId: string, assetId: string, event: Copy
           out.skipped.push({ targetId: c.targetId, why: e?.code ?? e?.message ?? 'error' });
         }
       }
+      // Mirror mode (H3-10): every copy of this asset at this target carries
+      // the mode the rule says now, so a delete later knows whether it may
+      // follow. Archive (unsaid) turns an earlier mirror back to keeping.
+      try { await (await import('./mirror')).markMode(c.targetId, assetId, c.mode === 'mirror' ? 'mirror' : 'archive'); }
+      catch (e: any) { console.warn(`[archive] copy mode not recorded for asset ${assetId}:`, e?.message ?? e); }
     }
     if (out.queued.length) console.log(`[archive] ${event}: ${out.queued.length} copy rule(s) queued for asset ${assetId}${runAfter ? ` from ${runAfter.toISOString()}` : ''}`);
   } catch (e: any) {
@@ -540,6 +587,7 @@ function cleanStoredPath(v: unknown): string | null {
  */
 export async function judge(job: JobRow, result: any): Promise<Verdict> {
   if (job.type === ARCHIVE_RESTORE) return (await import('./originals')).judgeRestore(job, result);
+  if (job.type === ARCHIVE_DELETE) return (await import('./mirror')).judgeDelete(job, result);
   const copyId = job.payload?.copyId;
   const c = UUID.test(String(copyId)) ? await one<any>(`SELECT * FROM archive_copies WHERE id = $1`, [copyId]) : null;
   if (!c) return { ok: true, apply: async () => {} };   // the copy was removed meanwhile: nothing to record
@@ -606,6 +654,7 @@ export async function attemptFailed(job: JobRow, message: string, code: string |
   // A restore that failed says so on the asset, never on the copy: the copy
   // was not changed by a failed upload to the cloud.
   if (job.type === ARCHIVE_RESTORE) return (await import('./originals')).restoreFailed(job, message, code, exhausted);
+  if (job.type === ARCHIVE_DELETE) return (await import('./mirror')).deleteFailed(job, message, code, exhausted);
   const copyId = job.payload?.copyId;
   if (!UUID.test(String(copyId))) return;
   if (isCopyJob(job.type)) {

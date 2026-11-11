@@ -22,8 +22,8 @@
 //
 //  One copy of each file per target, as for originals: a sidecar already
 //  verified at a target is not copied again when the metadata later changes
-//  (archive mode keeps what was copied; keeping a target in step is mirror
-//  mode, which is not built yet).
+//  (archive mode keeps what was copied; mirror mode, H3-10 mirror.ts, follows
+//  deletes but not edits).
 //
 //  NIGHTLY. A rule moment `schedule` copies, once a day, everything the rule
 //  governs that the target does not hold yet: what came in before the rule

@@ -63,7 +63,7 @@ export interface RuleSettings {
    *  the HLS/DASH package as a folder (H3-11, services/archive/packages.ts);
    *  the original alone when unsaid. */
   archive?: {
-    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars' | 'clips' | 'packages')[] }[];
+    copies: { targetId: string; on: ('ingest' | 'publish' | 'recording' | 'schedule')[]; what?: ('source' | 'sidecars' | 'clips' | 'packages')[]; mode?: 'archive' | 'mirror' }[];
     offPeak?: { from: string; to: string; timeZone?: string } | null;
   };
   /** PROTECTION (build queue P3, PUBLISHING_POLICIES.md "What a policy

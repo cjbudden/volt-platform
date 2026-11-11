@@ -240,6 +240,15 @@ export async function restoreItem(id: string, opts: { accountId?: string | null;
     for (const r of it.rows as TrashRow[]) { await insertRow(c, r.table, r.row); res.rows++; }
     for (const l of it.relinks as TrashRelink[]) {
       await c.query(`UPDATE ${l.table} SET ${l.column} = $2 WHERE id::text = ANY($1::text[]) AND ${l.column} IS NULL`, [l.ids.map(String), l.value]);
+      // Archive copies of the asset (Mirror and Archive, H3-10): a restore
+      // cancels any mirror delete waiting for them, and the delete job if no
+      // site has taken it yet. Nothing is deleted at a customer's target for
+      // something that is back in Volt.
+      if (/(^|\.)archive_copies$/.test(l.table) && l.ids.length) {
+        await c.query(`UPDATE jobs SET state = 'cancelled', finished_at = now(), lease_until = NULL WHERE state = 'queued'
+                        AND id IN (SELECT delete_job_id FROM archive_copies WHERE id::text = ANY($1::text[]) AND delete_job_id IS NOT NULL)`, [l.ids.map(String)]);
+        await c.query(`UPDATE archive_copies SET delete_after = NULL, updated_at = now() WHERE id::text = ANY($1::text[]) AND delete_after IS NOT NULL AND state <> 'removed'`, [l.ids.map(String)]);
+      }
     }
     const h = it.restore_hint ?? {};
     // Media objects the removal marked deleted are readable again, and held so the next

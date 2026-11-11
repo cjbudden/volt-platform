@@ -89,6 +89,9 @@ export const settingsSchema = z.object({
       on: z.array(z.enum(['ingest', 'publish', 'recording', 'schedule'])).min(1),
       // What an asset copy takes (H3-8, clips H3-9, packages H3-11); the original alone when unsaid.
       what: z.array(z.enum(['source', 'sidecars', 'clips', 'packages'])).min(1).optional(),
+      // H3-10: mirror keeps the target in step, deletes included, after the
+      // target's grace period; archive (unsaid) never deletes anything.
+      mode: z.enum(['archive', 'mirror']).optional(),
     }).strict()).max(20),
     offPeak: z.object({
       from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'from is HH:MM'),
@@ -155,7 +158,8 @@ async function cleanArchive(account: string, a: NonNullable<RuleSettings['archiv
     // "Original only" is what an unsaid `what` means, so it is stored unsaid:
     // rules saved before sidecars existed and rules saved now read the same.
     const what = c.what ? [...new Set(c.what)] : undefined;
-    copies.push({ targetId: c.targetId, on: [...new Set(c.on)], ...(what && !(what.length === 1 && what[0] === 'source') ? { what } : {}) });
+    // Archive mode is what an unsaid mode means, so it is stored unsaid too.
+    copies.push({ targetId: c.targetId, on: [...new Set(c.on)], ...(what && !(what.length === 1 && what[0] === 'source') ? { what } : {}), ...(c.mode === 'mirror' ? { mode: 'mirror' as const } : {}) });
   }
   if (copies.length || a.offPeak) {
     const { requireLicence } = await import('../services/sites/licences');

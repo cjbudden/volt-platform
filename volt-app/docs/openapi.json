@@ -3381,7 +3381,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "Every copy made to the account's storage targets, newest first; filter by `target_id`, `vod_asset_id` or `state`. `state` is `queued` (shown as `copying` while a site host runs it), `verified` (read back from the target and matched to the original's checksum), `failed` (no attempts left; `error` says why), `corrupt` (a re-check found it changed) or `missing` (a re-check found it gone). `verifiedAt` is when it was last confirmed. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `target_id`, `vod_asset_id`, `stream_id`, `what`, `state`, `created_at`, `updated_at`.",
+    "description": "Every copy made to the account's storage targets, newest first; filter by `target_id`, `vod_asset_id` or `state`. `state` is `queued` (shown as `copying` while a site host runs it), `verified` (read back from the target and matched to the original's checksum), `failed` (no attempts left; `error` says why), `corrupt` (a re-check found it changed), `missing` (a re-check found it gone) or `removed` (a mirror-mode copy the site agent deleted after its asset left Volt and the grace period passed; `removedAt`). `mode` is `archive` (never deleted by Volt) or `mirror`; `deleteAfter` is when a mirror copy may be deleted, empty while its asset is still in Volt or its restore bin. `verifiedAt` is when it was last confirmed. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `target_id`, `vod_asset_id`, `stream_id`, `what`, `state`, `mode`, `delete_after`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -3465,10 +3465,34 @@
         "verified",
         "failed",
         "corrupt",
-        "missing"
+        "missing",
+        "removed"
        ]
       },
-      "description": "queued (shown as copying while a host runs it), verified, failed, corrupt, missing. Filter: `state=value` (comma list = any of), or `state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+      "description": "queued (shown as copying while a host runs it), verified, failed, corrupt, missing, removed (a mirror-mode copy deleted at the target after its grace period). Filter: `state=value` (comma list = any of), or `state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "mode",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "archive",
+        "mirror"
+       ]
+      },
+      "description": "archive: Volt never deletes the copy; mirror: made under a mirror-mode rule, deleted at the target once its asset has left Volt for good and the target's grace period has passed. Filter: `mode=value` (comma list = any of), or `mode[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "delete_after",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "when the site agent may delete this mirror-mode copy; empty while its asset is still in Volt (or in the restore bin). Filter: `delete_after=value`, or `delete_after[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
      },
      {
       "name": "created_at",
@@ -3498,7 +3522,7 @@
        "type": "string",
        "default": "-created_at"
       },
-      "description": "Comma list of: id, target_id, vod_asset_id, stream_id, what, state, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
+      "description": "Comma list of: id, target_id, vod_asset_id, stream_id, what, state, mode, delete_after, created_at, updated_at. Prefix `-` for descending. Default `-created_at`; ties by id."
      },
      {
       "name": "limit",
@@ -3837,7 +3861,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "The account's Mirror and Archive storage targets: folders at one of its sites (on the site's server or a mounted NAS share) where the site agent keeps extra copies. Each has its `siteId`, `kind` (`path`: a folder; `s3`: an S3-compatible store at the site, with its `s3` settings: `endpoint`, `bucket`, `prefix`, `region`, `pathStyle`, `credentialRef`, never keys), `path` on the site's server (for a store, the bucket and the folder in it), optional `bandwidthMbps` cap, `recheckDays` (how often its verified copies are read back again; null: only when asked) and `status`. Needs the Mirror and Archive add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `site_id`, `kind`, `status`, `created_at`, `updated_at`.",
+    "description": "The account's Mirror and Archive storage targets: folders at one of its sites (on the site's server or a mounted NAS share) where the site agent keeps extra copies. Each has its `siteId`, `kind` (`path`: a folder; `s3`: an S3-compatible store at the site, with its `s3` settings: `endpoint`, `bucket`, `prefix`, `region`, `pathStyle`, `credentialRef`, never keys), `path` on the site's server (for a store, the bucket and the folder in it), optional `bandwidthMbps` cap, `recheckDays` (how often its verified copies are read back again; null: only when asked), `mirrorGraceDays` (how long a copy made under a mirror-mode rule stays after its asset left Volt for good, 0 to 90, 7 by default), `pendingDeletes` and `nextDeleteAt` (mirror deletes waiting at it) and `status`. Needs the Mirror and Archive add-on: without it the answer is 403 with the code `licence_required`. Account administrators (owner or admin) only.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `name`, `site_id`, `kind`, `status`, `created_at`, `updated_at`.",
     "security": [
      {
       "adminBearer": []
@@ -3987,7 +4011,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "`name` (unique in the account, ignoring case), `siteId` (one of your sites), `path` (an absolute folder on the site's server, such as `/mnt/nas/archive`, `D:\\\\Archive` or `\\\\\\\\nas\\\\archive`; no `.` or `..` segments) an optional `bandwidthMbps` (1 to 100000; copies never go faster) and an optional `recheckDays` (how often verified copies are read back again, 1 to 3650 days; 30 when not given, null for no scheduled re-checks). For an S3-compatible store at the site (MinIO, NetApp StorageGRID and similar) send `kind` `s3` and `s3`: `endpoint` (`http(s)://host[:port]` as the site's server reaches it, no path), `bucket`, optional `prefix` (the folder in the bucket), `region` (default `us-east-1`), `pathStyle` (default true) and `credentialRef` (the name of the keys on the agent host, default `default`). Keys are never accepted: a request carrying `secretAccessKey`, `accessKeyId` or similar answers 400 `keys_stay_at_site`. Any other kind answers 422 `kind_not_available`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "`name` (unique in the account, ignoring case), `siteId` (one of your sites), `path` (an absolute folder on the site's server, such as `/mnt/nas/archive`, `D:\\\\Archive` or `\\\\\\\\nas\\\\archive`; no `.` or `..` segments) an optional `bandwidthMbps` (1 to 100000; copies never go faster) and an optional `recheckDays` (how often verified copies are read back again, 1 to 3650 days; 30 when not given, null for no scheduled re-checks) and an optional `mirrorGraceDays` (0 to 90, 7 when not given). For an S3-compatible store at the site (MinIO, NetApp StorageGRID and similar) send `kind` `s3` and `s3`: `endpoint` (`http(s)://host[:port]` as the site's server reaches it, no path), `bucket`, optional `prefix` (the folder in the bucket), `region` (default `us-east-1`), `pathStyle` (default true) and `credentialRef` (the name of the keys on the agent host, default `default`). Keys are never accepted: a request carrying `secretAccessKey`, `accessKeyId` or similar answers 400 `keys_stay_at_site`. Any other kind answers 422 `kind_not_available`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
     "security": [
      {
       "adminBearer": []
@@ -4047,7 +4071,7 @@
     "tags": [
      "Archive"
     ],
-    "description": "Change `name`, `path`, `bandwidthMbps` (null for no cap), `recheckDays` (null for no scheduled re-checks) or `status` (`active`, or `disabled`: no new copies are queued to it; copies already there are kept). For a store target change `s3` instead of `path` (fields not sent are kept; keys are refused with 400 `keys_stay_at_site`). A target keeps its kind. A target that already holds copies keeps its folder, store, bucket and prefix: changing them answers 409 `target_in_use`; its `credentialRef` and `region` can still change. The answer lists what `changed`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
+    "description": "Change `name`, `path`, `bandwidthMbps` (null for no cap), `recheckDays` (null for no scheduled re-checks), `mirrorGraceDays` (0 to 90; deletes already waiting move by the difference) or `status` (`active`, or `disabled`: no new copies are queued to it; copies already there are kept). For a store target change `s3` instead of `path` (fields not sent are kept; keys are refused with 400 `keys_stay_at_site`). A target keeps its kind. A target that already holds copies keeps its folder, store, bucket and prefix: changing them answers 409 `target_in_use`; its `credentialRef` and `region` can still change. The answer lists what `changed`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** operator tier or above",
     "security": [
      {
       "adminBearer": []

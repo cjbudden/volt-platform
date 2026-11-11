@@ -134,7 +134,7 @@ With the **Mirror and Archive** add-on, account administrators see a **Mirror an
 3. Choose the **Kind**:
    - **A folder or NAS share**: the **Folder on the site's server**, as that server sees it, for example `/mnt/nas/archive`.
    - **An S3-compatible store (MinIO and similar)**: the **Store address** as the site's server reaches it, the **Bucket**, optionally a **Folder in the bucket** and a **Region**, and the **Key name**. The store's keys are never typed into Volt: they stay on the site's server under that name (see [Copies to an object store](../workflows/mirror-and-archive.md#copies-to-an-object-store)).
-4. Optionally set a **Speed cap (Mbit/s)** so copies leave room for live contribution, and how often copies are **read back** (every 30 days unless you change it; empty means only when you ask).
+4. Optionally set a **Speed cap (Mbit/s)** so copies leave room for live contribution, how often copies are **read back** (every 30 days unless you change it; empty means only when you ask), and how long **Mirror deletes wait (days)**: for copy rules set to **Mirror**, how long a copy stays after its item has left Volt for good (7 unless you change it, 0 to 90). See [Mirror: follow deletes](../workflows/mirror-and-archive.md#mirror-follow-deletes).
 5. Choose **Add target**.
 
 To change a target, choose **Change** on its row. A target that holds copies keeps its folder, or its store, bucket and folder; make a new target to write somewhere else. Set **Status** to **Disabled** to stop new copies while keeping the ones it has.
@@ -151,8 +151,9 @@ Under **Copies**, every copy is listed with its target, its **State**, its size 
 | **Failed** | Could not be made after every retry |
 | **Corrupt** | A check found the copy changed since it was made |
 | **Missing** | A check found the copy gone from the target |
+| **Removed** | A copy under a **Mirror** rule, deleted at the target after its item left Volt and the waiting period was over |
 
-A copy of a recording says which channel and which programme or hour it is (**Recording of** the channel, from when to when) with **Open the recording**, and its metadata file says **Metadata of the recording of** the channel. A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
+A copy of a recording says which channel and which programme or hour it is (**Recording of** the channel, from when to when) with **Open the recording**, and its metadata file says **Metadata of the recording of** the channel. A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Each target's **Mirror deletes** column says how long they wait and how many are waiting; a copy waiting to be deleted says **The asset has left Volt: deleted here on** a date. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
 
 **Originals out of the cloud** lists the originals a retention rule has removed from the cloud (**In the archive only**, with the target and file of the copy) and those whose rule is due but which are **Kept, waiting**, with the reason and **What to do** (see below).
 
