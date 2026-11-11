@@ -2294,7 +2294,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-11 - Publishing policies 2b-6: the shared edge token (build queue P2-2f, first part; vVERSION)
+## 2026-11-11 - Publishing policies 2b-6: the shared edge token (build queue P2-2f, first part; v0.101.0)
 
 What: FAST channel playlists and guided on-demand ad playlists are written once for every viewer and cached at the CDN, so under `VOLT_EDGE_TOKENS=enforce` they cannot carry a viewer's token, and their plain content addresses are refused. Decided by Christian on 11 Nov 2026 (option B): a shared token per FAST channel or guided playlist version that opens only the titles it uses, rotating. This run builds the token and the checks at all three edges; the writers that put it in playlists are P2-2f-2.
 
