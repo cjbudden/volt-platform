@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**993 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 758 · Platform API: 58 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**1004 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 761 · Platform API: 66 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -385,6 +385,9 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | Method | Path | Credential | Access | Viewer tier |
 |---|---|---|---|---|
 | GET | `/api/billing` | admin session (Bearer) or account secret key | settings: view |  |
+| GET | `/api/billing/addons` | admin session (Bearer) or account secret key | settings: view |  |
+| DELETE | `/api/billing/addons/:key` | admin session (Bearer) or account secret key | settings: manage |  |
+| PUT | `/api/billing/addons/:key` | admin session (Bearer) or account secret key | settings: manage |  |
 | GET | `/api/billing/invoices` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/billing/invoices/:id` | admin session (Bearer) or account secret key | settings: view |  |
 | GET | `/api/billing/invoices/:id/csv` | admin session (Bearer) or account secret key | settings: view |  |
@@ -1356,6 +1359,14 @@ Volt staff only. Needs a platform session, minted after the authenticator step.
 | GET | `/api/platform/billing` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | GET | `/api/platform/billing/accounts/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | PATCH | `/api/platform/billing/accounts/:id` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/accounts/:id/addons` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| DELETE | `/api/platform/billing/accounts/:id/addons/:key` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| PUT | `/api/platform/billing/accounts/:id/addons/:key` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| GET | `/api/platform/billing/addons` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/billing/addons` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| PATCH | `/api/platform/billing/addons/:key` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| POST | `/api/platform/billing/addons/:key/packs` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
+| PATCH | `/api/platform/billing/addons/:key/packs/:pack` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | GET | `/api/platform/billing/charges` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | POST | `/api/platform/billing/charges` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |
 | POST | `/api/platform/billing/close` | platform session (aud volt:platform, after TOTP) | platform_role (saas_admin / support as the route says) |  |

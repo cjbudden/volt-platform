@@ -25,6 +25,7 @@ import {
 import { invoicePdf } from '../services/invoicing/pdf';
 import { sendInvoiceToStripe, paymentMethodState, portalSession } from '../services/invoicing/stripe';
 import { consoleBase } from '../services/onboarding';
+import { catalogue, accountAddons, setAddon, turnOffAddon, isLicence, addonsChanged } from '../services/invoicing/addons';
 
 /** Send an invoice as a PDF download, named by its number. */
 async function sendPdf(res: any, inv: any) {
@@ -82,6 +83,28 @@ billingRouter.post('/portal', asyncHandler(async (req, res) => {
   const st = paymentMethodState(billingMode(), effectiveHandling(a?.billing_handling));
   if (!st.portal) throw conflict(st.reason ?? 'There is no card to change.');
   res.json({ url: await portalSession(acc, `${consoleBase()}/billing`) });
+}));
+
+// ---- add-ons and packs (build queue B2, services/invoicing/addons.ts) ---------
+// Reading them is Account settings: View; turning one on, changing its pack or
+// turning it off is a POST/PUT/DELETE, so Account settings: Manage
+// (auth/roles.ts): an account administrator, as Christian asked.
+
+billingRouter.get('/addons', asyncHandler(async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ mode: billingMode(), currency: 'USD', addons: await accountAddons(accountId(req)), _links: { self: { href: '/api/billing/addons' } } });
+}));
+
+const addonPut = z.object({ pack: z.string().trim().min(1).max(40).nullable().optional() }).strict();
+
+billingRouter.put('/addons/:key', asyncHandler(async (req, res) => {
+  const b = addonPut.parse(req.body ?? {});
+  const r = await setAddon(accountId(req), String(req.params.key), b.pack ?? null, { userId: req.auth!.sub, label: 'account-admin' });
+  res.json({ ...r, addon: (await accountAddons(accountId(req))).find((a) => a.key === r.addonKey) ?? null });
+}));
+
+billingRouter.delete('/addons/:key', asyncHandler(async (req, res) => {
+  res.json(await turnOffAddon(accountId(req), String(req.params.key), { userId: req.auth!.sub, label: 'account-admin' }));
 }));
 
 billingRouter.get('/invoices', asyncHandler(async (req, res) => {
@@ -278,4 +301,115 @@ platformBillingRouter.post('/prices', ...requirePlatform('saas_admin'), asyncHan
   await writeAudit(null, { accountId: null, userId: req.auth!.sub, label: 'system-admin', action: 'create', entityType: 'billing_price', entityId: r.id,
     snapshot: { unitKey: r.unit_key, instanceType: r.instance_type, unitUsd: Number(r.unit_usd), effectiveFrom: r.effective_from } });
   res.status(201).json({ id: r.id, unitKey: r.unit_key, instanceType: r.instance_type, name: r.name, unit: r.unit, unitUsd: Number(r.unit_usd), effectiveFrom: r.effective_from });
+}));
+
+// ---- the add-on catalogue (build queue B2) ---------------------------------------
+// Held as data, edited here. Prices on charges already in the ledger never
+// change; a new price applies from the next charge (a turn-on, an upgrade or
+// the next 1st). An add-on or pack set inactive is no longer offered; accounts
+// that have it keep it, and it renews, until they turn it off.
+
+const qty = z.number().min(0).max(1e9);
+const usd = z.number().min(0).max(1_000_000);
+const addonBody = z.object({
+  key: z.string().regex(/^[a-z0-9_]{2,40}$/, 'key: 2 to 40 lower-case letters, digits or _'),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).nullable().optional(),
+  monthlyUsd: usd,
+  includedQuantity: qty.default(0),
+  unit: z.string().trim().min(1).max(40),
+  licence: z.string().nullable().optional().refine(isLicence, 'licence must be one of the platform licences'),
+  active: z.boolean().optional(),
+}).strict();
+const packBody = z.object({
+  key: z.string().regex(/^[a-z0-9_]{1,40}$/, 'key: 1 to 40 lower-case letters, digits or _'),
+  name: z.string().trim().min(1).max(120),
+  extraQuantity: z.number().gt(0).max(1e9),
+  monthlyUsd: usd,
+  active: z.boolean().optional(),
+}).strict();
+
+const auditCatalogue = (req: any, action: 'create' | 'update', snapshot: any, changes?: any) =>
+  writeAudit(null, { accountId: null, userId: req.auth!.sub, label: 'system-admin', action, entityType: 'billing_addon', entityId: '00000000-0000-0000-0000-000000000000', snapshot, changes });
+
+platformBillingRouter.get('/addons', ...requirePlatform('read_only'), asyncHandler(async (_req, res) => {
+  const held = await query<any>(`SELECT addon_key, count(*)::int AS n FROM account_addons GROUP BY addon_key`);
+  const n = new Map(held.map((h) => [h.addon_key, h.n]));
+  res.json((await catalogue()).map((a) => ({ ...a, accounts: n.get(a.key) ?? 0 })));
+}));
+
+platformBillingRouter.post('/addons', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  const b = addonBody.parse(req.body ?? {});
+  if (await one(`SELECT 1 FROM billing_addons WHERE key = $1`, [b.key])) throw conflict(`An add-on with the key ${b.key} already exists.`);
+  await query(`INSERT INTO billing_addons(key, name, description, monthly_usd, included_quantity, unit, licence, active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [b.key, b.name, b.description ?? null, b.monthlyUsd, b.includedQuantity, b.unit, b.licence ?? null, b.active ?? true]);
+  await auditCatalogue(req, 'create', { addon: b.key, monthlyUsd: b.monthlyUsd, includedQuantity: b.includedQuantity, unit: b.unit, licence: b.licence ?? null });
+  res.status(201).json((await catalogue()).find((a) => a.key === b.key));
+}));
+
+platformBillingRouter.patch('/addons/:key', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  const b = addonBody.omit({ key: true }).partial().strict().parse(req.body ?? {});
+  const cur = await one<any>(`SELECT * FROM billing_addons WHERE key = $1`, [req.params.key]);
+  if (!cur) throw notFound('Add-on not found');
+  const cols: Record<string, [string, unknown]> = {
+    name: ['name', b.name], description: ['description', b.description], monthlyUsd: ['monthly_usd', b.monthlyUsd],
+    includedQuantity: ['included_quantity', b.includedQuantity], unit: ['unit', b.unit], licence: ['licence', b.licence], active: ['active', b.active],
+  };
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  const sets: string[] = []; const params: unknown[] = [cur.key];
+  for (const [k, [col, v]] of Object.entries(cols)) {
+    if (v === undefined) continue;
+    params.push(v); sets.push(`${col} = $${params.length}`);
+    if (String(cur[col]) !== String(v)) changes[k] = { from: cur[col], to: v };
+  }
+  if (sets.length) await query(`UPDATE billing_addons SET ${sets.join(', ')}, updated_at = now() WHERE key = $1`, params);
+  if (Object.keys(changes).length) await auditCatalogue(req, 'update', { addon: cur.key }, changes);
+  // The allowance of every account that has it may have moved.
+  for (const h of await query<any>(`SELECT account_id FROM account_addons WHERE addon_key = $1`, [cur.key])) await addonsChanged(h.account_id);
+  res.json((await catalogue()).find((a) => a.key === cur.key));
+}));
+
+platformBillingRouter.post('/addons/:key/packs', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  const b = packBody.parse(req.body ?? {});
+  if (!(await one(`SELECT 1 FROM billing_addons WHERE key = $1`, [req.params.key]))) throw notFound('Add-on not found');
+  if (await one(`SELECT 1 FROM billing_addon_packs WHERE addon_key = $1 AND key = $2`, [req.params.key, b.key])) throw conflict(`A pack with the key ${b.key} already exists.`);
+  await query(`INSERT INTO billing_addon_packs(addon_key, key, name, extra_quantity, monthly_usd, active) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [req.params.key, b.key, b.name, b.extraQuantity, b.monthlyUsd, b.active ?? true]);
+  await auditCatalogue(req, 'create', { addon: req.params.key, pack: b.key, extraQuantity: b.extraQuantity, monthlyUsd: b.monthlyUsd });
+  res.status(201).json((await catalogue()).find((a) => a.key === req.params.key));
+}));
+
+platformBillingRouter.patch('/addons/:key/packs/:pack', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  const b = packBody.omit({ key: true }).partial().strict().parse(req.body ?? {});
+  const cur = await one<any>(`SELECT * FROM billing_addon_packs WHERE addon_key = $1 AND key = $2`, [req.params.key, req.params.pack]);
+  if (!cur) throw notFound('Pack not found');
+  const cols: Record<string, [string, unknown]> = { name: ['name', b.name], extraQuantity: ['extra_quantity', b.extraQuantity], monthlyUsd: ['monthly_usd', b.monthlyUsd], active: ['active', b.active] };
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  const sets: string[] = []; const params: unknown[] = [cur.addon_key, cur.key];
+  for (const [k, [col, v]] of Object.entries(cols)) {
+    if (v === undefined) continue;
+    params.push(v); sets.push(`${col} = $${params.length}`);
+    if (String(cur[col]) !== String(v)) changes[k] = { from: cur[col], to: v };
+  }
+  if (sets.length) await query(`UPDATE billing_addon_packs SET ${sets.join(', ')}, updated_at = now() WHERE addon_key = $1 AND key = $2`, params);
+  if (Object.keys(changes).length) await auditCatalogue(req, 'update', { addon: cur.addon_key, pack: cur.key }, changes);
+  for (const h of await query<any>(`SELECT account_id FROM account_addons WHERE addon_key = $1 AND pack_key = $2`, [cur.addon_key, cur.key])) await addonsChanged(h.account_id);
+  res.json((await catalogue()).find((a) => a.key === cur.addon_key));
+}));
+
+/** An account's add-ons as the account sees them, and the System Admin changing them for it. */
+platformBillingRouter.get('/accounts/:id/addons', ...requirePlatform('read_only'), asyncHandler(async (req, res) => {
+  if (!(await one(`SELECT 1 FROM accounts WHERE id = $1`, [req.params.id]).catch(() => null))) throw notFound('Account not found');
+  res.json(await accountAddons(String(req.params.id)));
+}));
+
+platformBillingRouter.put('/accounts/:id/addons/:key', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  const b = addonPut.parse(req.body ?? {});
+  if (!(await one(`SELECT 1 FROM accounts WHERE id = $1`, [req.params.id]).catch(() => null))) throw notFound('Account not found');
+  res.json(await setAddon(String(req.params.id), String(req.params.key), b.pack ?? null, { userId: req.auth!.sub, label: 'system-admin' }));
+}));
+
+platformBillingRouter.delete('/accounts/:id/addons/:key', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  if (!(await one(`SELECT 1 FROM accounts WHERE id = $1`, [req.params.id]).catch(() => null))) throw notFound('Account not found');
+  res.json(await turnOffAddon(String(req.params.id), String(req.params.key), { userId: req.auth!.sub, label: 'system-admin' }));
 }));

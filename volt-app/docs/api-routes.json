@@ -937,6 +937,33 @@
  },
  {
   "method": "GET",
+  "path": "/api/billing/addons",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/billing"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/billing/addons/:key",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/billing"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/billing/addons/:key",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: manage",
+  "viewerTier": false,
+  "group": "/api/billing"
+ },
+ {
+  "method": "GET",
   "path": "/api/billing/invoices",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -4412,6 +4439,78 @@
  {
   "method": "PATCH",
   "path": "/api/platform/billing/accounts/:id",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/billing/accounts/:id/addons",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "DELETE",
+  "path": "/api/platform/billing/accounts/:id/addons/:key",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/platform/billing/accounts/:id/addons/:key",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/billing/addons",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/billing/addons",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/billing/addons/:key",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/billing/addons/:key/packs",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "PATCH",
+  "path": "/api/platform/billing/addons/:key/packs/:pack",
   "api": "platform",
   "credential": "platform session (aud volt:platform, after TOTP)",
   "access": "platform_role (saas_admin / support as the route says)",

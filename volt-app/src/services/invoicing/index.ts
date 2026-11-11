@@ -16,7 +16,8 @@
 //
 //  THE LEDGER IS THE TRUTH; INVOICES ARE READ FROM IT. Every charge is a row
 //  with its price frozen on it (plan fee, metered usage at the price list,
-//  a System Admin's manual charge or credit; add-ons and packs come with B2).
+//  a System Admin's manual charge or credit, add-ons and packs from B2 in
+//  addons.ts, written when they are turned on and on the 1st).
 //  Rows are never edited, a correction is a new row. Closing a month turns
 //  that month's rows into one numbered invoice per account. The draft is the
 //  open month itself: the same lines worked out live and not yet written.
@@ -327,6 +328,9 @@ export async function closeDue(): Promise<CloseResult | null> {
   const due = previousMonth(monthOf());
   // Automated invoices still to reach Stripe (a fresh close, or a send that failed last pass).
   const pushPending = async () => { try { await (await import('./stripe')).sendPendingToStripe(); } catch (e) { console.error('[billing] sending to Stripe failed', (e as Error).message); } };
+  // This month's charge for every add-on that was on when the month began
+  // (B2). Idempotent, so every pass may try; the first one on the 1st writes them.
+  try { await (await import('./addons')).renewAddons(monthOf()); } catch (e) { console.error('[billing] add-on renewals failed, tried again next pass', (e as Error).message); }
   if (closedThrough === due) { await pushPending(); return null; }
   const r = await closeMonth(due);
   closedThrough = due;

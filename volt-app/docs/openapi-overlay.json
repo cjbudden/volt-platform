@@ -1064,6 +1064,18 @@
     "summary": "Change the card invoices are charged to",
     "description": "Answers `{ url }`: a one-off link to the payment provider's customer portal, where the account changes its card and sees its payments, and which returns to the console's Billing page. Only for an account whose invoices are charged to a card (`handling` and `mode` both `automated`); otherwise 409 with the reason. The card is kept by the payment provider, never by Volt. Needs Account settings: Manage."
   },
+  "GET /api/billing/addons": {
+    "summary": "List add-ons and what this account has",
+    "description": "The add-ons on offer and the ones this account has on. Each has a `monthlyUsd` price, an `includedQuantity` of its `unit`, and `packs` that add `extraQuantity` for their own `monthlyUsd`. For an add-on that is on: `pack` (or null), `since`, `paidThisMonth`, and `allowance` with `period`, `included` (included quantity plus the pack), `used`, `left` and `resets` (the 1st of next month; unused quantity does not carry over). `licence` names the feature the add-on opens, if any. `mode` is the deployment's billing; when it is `off`, add-ons are switched on by the System Admin instead. Needs Account settings: View."
+  },
+  "PUT /api/billing/addons/:key": {
+    "summary": "Turn an add-on on or change its pack",
+    "description": "Body: `{ \"pack\": \"<pack key>\" }`, or `{ \"pack\": null }` (or `{}`) for the add-on without a pack. Turning an add-on on, or moving to a bigger pack, charges the full monthly price for the current month; a month already paid for that add-on or pack is not charged again. Moving to a smaller pack, or to none, takes effect at once and is not refunded. The answer says what changed (`change`: `on`, `upgrade`, `reduce` or `same`), what was charged (`charged`), and the add-on as `GET /api/billing/addons` shows it. Charges appear on this month's invoice. 409 when billing is off on the deployment or the add-on or pack is no longer offered; 404 for an unknown add-on or pack. Needs Account settings: Manage."
+  },
+  "DELETE /api/billing/addons/:key": {
+    "summary": "Turn an add-on off",
+    "description": "Takes effect at once, with no refund for the rest of the month; the feature the add-on opened (its `licence`) closes unless your account has it under its own agreement. Nothing more is charged from the next month. 404 when the add-on is not on. Needs Account settings: Manage."
+  },
   "GET /api/billing/invoices": {
     "summary": "List invoices",
     "description": "Every invoice of the account, newest month first, with the list standard (filter on `status` and `number`, sort, paging). One invoice per calendar month (UTC), issued on the 1st for the month before. `status`: `issued`, `paid`, `failed` or `void`."

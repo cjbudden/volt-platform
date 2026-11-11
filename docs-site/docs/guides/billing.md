@@ -49,6 +49,21 @@ Only when your invoices are **Charged to the card on file**.
 
 Volt never sees or keeps your card number: it stays with the payment provider.
 
+### Add-ons and packs
+
+Add-ons are extra services your Volt provider offers for a monthly price, such as storage for archive copies. Each includes a quantity of something (for example 100 GB) and may offer **packs** that add more for their own monthly price. For now you turn add-ons on, change their pack and turn them off through the API (see [Through the API](#through-the-api)).
+
+How they are charged:
+
+- **Turning an add-on on**, or moving it to a **bigger pack**, charges the full monthly price for the current month. There is no part-month price.
+- A month already paid for an add-on or pack is not charged again, so turning it off and on again in the same month costs nothing more.
+- **Moving to a smaller pack** or **turning an add-on off** takes effect at once. Nothing is refunded for the rest of the month.
+- An add-on that stays on is charged again on the 1st of each month, at the price in force then.
+- The included quantity **starts again on the 1st**. What you did not use does not carry over to the next month.
+- When a month's quantity is used up, Volt refuses more until you move to a bigger pack or the month ends.
+
+Add-on charges are lines on your monthly invoice, beside the plan fee.
+
 ### What the statuses mean
 
 | Status | Means |
@@ -76,6 +91,8 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See this month, the invoices and how they are paid; download PDF and CSV | Account settings: View |
 | Change the card | Account settings: Manage |
+| See add-ons and how much of each is used | Account settings: View |
+| Turn an add-on on or off, or change its pack | Account settings: Manage |
 | Change how invoices are paid, the tax rate, or add a charge or credit | Your Volt provider |
 
 Users who can see the page but not change the card see **Changing the card needs Account settings: Manage.** in place of the button.
@@ -101,6 +118,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/billing/invoices` | Every invoice, newest month first, with the list standard |
 | `GET /api/billing/invoices/{id}` | One invoice with its lines |
 | `GET /api/billing/invoices/{id}/pdf` and `.../csv` | The invoice as a PDF or CSV |
+| `GET /api/billing/addons` | The add-ons on offer, the ones you have on, and how much of each is used this month (`allowance`) |
+| `PUT /api/billing/addons/{key}` | Turn an add-on on, or change its pack: `{ "pack": "large" }`, or `{ "pack": null }` for none (Account settings: Manage) |
+| `DELETE /api/billing/addons/{key}` | Turn an add-on off, at once and with no refund (Account settings: Manage) |
 | `POST /api/billing/portal` | A one-off link to the payment provider's page to change the card (Account settings: Manage) |
 
 ```bash

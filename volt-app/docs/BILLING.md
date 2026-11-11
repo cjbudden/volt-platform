@@ -32,9 +32,44 @@ Open **System Admin** (authenticator code needed) and choose the **Billing** tab
 
 Every change (handling, tax rate, charge, price, mark paid) is in the audit log.
 
+## Add-ons and packs (build queue B2)
+
+The catalogue is data (migration 0171, `src/services/invoicing/addons.ts`).
+Until the System Admin tab for it lands (B2-2), it is kept through the API
+with a platform session:
+
+| Request | Does |
+|---|---|
+| `GET /api/platform/billing/addons` | The catalogue, with how many accounts have each add-on |
+| `POST /api/platform/billing/addons` | Add one: `key`, `name`, `description`, `monthlyUsd`, `includedQuantity`, `unit`, `licence` (`hybrid_sites`, `mirror_archive` or null), `active` |
+| `PATCH /api/platform/billing/addons/{key}` | Change any of those but the key |
+| `POST /api/platform/billing/addons/{key}/packs` | Add a pack: `key`, `name`, `extraQuantity`, `monthlyUsd` |
+| `PATCH /api/platform/billing/addons/{key}/packs/{pack}` | Change a pack |
+| `GET`, `PUT`, `DELETE /api/platform/billing/accounts/{id}/addons[/{key}]` | An account's add-ons, set or turned off for it |
+
+Rules (Christian, 11 Nov 2026): the full monthly price for the current month
+when an add-on is turned on or moved to a bigger pack; a smaller pack or off
+at once, with no refund; charged again on the 1st while it stays on; the
+allowance resets on the 1st with no carry over. Each charge is a ledger row
+with a dedupe key per account, add-on or pack, and month, so a month is never
+charged twice for the same item (off and on again, or down a pack and back
+up, costs nothing more that month). A changed price applies from the next
+charge; rows already written keep theirs. An add-on or pack set inactive is
+no longer offered; accounts that have it keep it, and it renews, until they
+turn it off. An add-on with a `licence` grants that licence when turned on and
+takes it away when turned off, unless the account already had it (a licence
+you gave by hand stays).
+
+Usage against an allowance is `useAllowance(account, addon, quantity)`; it
+refuses over the allowance (409, `allowance_exceeded`) and the read is cached,
+so a warm check makes no database query. No feature counts against an
+allowance yet: which add-on counts what is B2-2.
+
+Every change is audited (`account_addon`, `billing_addon`).
+
 ## Checks
 
 `node scripts/check.js billing` runs `billing-ledger` (the ledger, the close,
-the routes) and `billing-stripe` (Stripe with a fake API, webhooks, the PDF,
+the routes), `billing-addons` (add-ons, packs, the charging rules, allowances) and `billing-stripe` (Stripe with a fake API, webhooks, the PDF,
 the card portal). With real Stripe test keys, see the B1-2 entry in
 `VOLT_BUILD_STATUS.md` for the end to end run with `stripe listen`.

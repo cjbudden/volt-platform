@@ -6221,6 +6221,102 @@
     }
    }
   },
+  "/api/billing/addons": {
+   "get": {
+    "operationId": "getBillingAddons",
+    "summary": "List add-ons and what this account has",
+    "tags": [
+     "Billing"
+    ],
+    "description": "The add-ons on offer and the ones this account has on. Each has a `monthlyUsd` price, an `includedQuantity` of its `unit`, and `packs` that add `extraQuantity` for their own `monthlyUsd`. For an add-on that is on: `pack` (or null), `since`, `paidThisMonth`, and `allowance` with `period`, `included` (included quantity plus the pack), `used`, `left` and `resets` (the 1st of next month; unused quantity does not carry over). `licence` names the feature the add-on opens, if any. `mode` is the deployment's billing; when it is `off`, add-ons are switched on by the System Admin instead. Needs Account settings: View.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/billing/addons/{key}": {
+   "delete": {
+    "operationId": "deleteBillingAddonsByKey",
+    "summary": "Turn an add-on off",
+    "tags": [
+     "Billing"
+    ],
+    "description": "Takes effect at once, with no refund for the rest of the month; the feature the add-on opened (its `licence`) closes unless your account has it under its own agreement. Nothing more is charged from the next month. 404 when the add-on is not on. Needs Account settings: Manage.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "put": {
+    "operationId": "putBillingAddonsByKey",
+    "summary": "Turn an add-on on or change its pack",
+    "tags": [
+     "Billing"
+    ],
+    "description": "Body: `{ \"pack\": \"<pack key>\" }`, or `{ \"pack\": null }` (or `{}`) for the add-on without a pack. Turning an add-on on, or moving to a bigger pack, charges the full monthly price for the current month; a month already paid for that add-on or pack is not charged again. Moving to a smaller pack, or to none, takes effect at once and is not refunded. The answer says what changed (`change`: `on`, `upgrade`, `reduce` or `same`), what was charged (`charged`), and the add-on as `GET /api/billing/addons` shows it. Charges appear on this month's invoice. 409 when billing is off on the deployment or the add-on or pack is no longer offered; 404 for an unknown add-on or pack. Needs Account settings: Manage.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/billing/invoices": {
    "get": {
     "operationId": "getBillingInvoices",
