@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.104.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- changed · Media Library: schema.org data (GET /api/vod/{id}/schema.org) lists a title's plain video addresses only for a token-free title or, where play tokens are not enforced, a title with no country, rights, payment, sign-in, DRM, referrer or streams condition. Every other title lists only its watch page, so the data is no way round the play gate.
+
+### Internal
+
+- added · Tests: New schema-org-tokens suite: schema.org media addresses under enforce, issue and off for token-free, open and conditioned titles.
+
 ## 0.103.0 (2026-11-11)
 
 ### Product (in customer release notes)
