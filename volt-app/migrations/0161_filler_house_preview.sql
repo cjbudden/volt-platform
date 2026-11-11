@@ -33,7 +33,8 @@
 --  beside this one inserts rows that take the new default, which is the
 --  safe direction.
 --
---  Add only: nullable columns, one column with a default, a check, an index.
+--  Add only: nullable columns, one column with a default, a check (the
+--  indexes are 0163).
 -- ============================================================================
 ALTER TABLE filler_assets
   ADD COLUMN IF NOT EXISTS preview_status    TEXT,
@@ -66,11 +67,8 @@ DO $$ BEGIN
     CHECK (availability IN ('available', 'archived'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-CREATE INDEX IF NOT EXISTS idx_filler_tags ON filler_assets USING gin (tags);
-
--- The leader sweep looks for ready slates and loops with no house preview yet.
-CREATE INDEX IF NOT EXISTS idx_filler_preview_todo ON filler_assets (created_at)
-  WHERE status = 'ready' AND preview_status IS NULL;
+-- The two indexes (tags, and the house preview sweep) are built concurrently
+-- in 0163, so building them never blocks writes to filler_assets.
 
 -- Loop sprite sheets claimed one frame more than they held, so the list's hover
 -- preview flashed black where it wrapped (services/media/fillerThumbs.ts, fixed

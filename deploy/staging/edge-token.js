@@ -85,10 +85,12 @@ function verdict(r) {
 
 // A plain on-demand path under enforce. mode: VOLT_EDGE_TOKENS; store and now
 // only matter for a token-free title ("f:<asset id>").
-var PLAIN_ID = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+// A clip's own folder, /clips/<asset id>/, is one too (build queue P2-2d).
+var PLAIN_ID = /^\/(?:clips\/vod|vod|clips)\/([0-9a-fA-F-]{36})\//;
+var PLAIN_GUARD = /^\/(clips\/vod|vod|clips\/[0-9a-fA-F-]{36})\//;
 function plainVerdict(uri, mode, store, now) {
   var m = String(mode || '').trim().toLowerCase();
-  if (m !== 'enforce' || !/^\/(clips\/vod|vod)\//.test(uri)) return 'ok';
+  if (m !== 'enforce' || !PLAIN_GUARD.test(uri)) return 'ok';
   var id = PLAIN_ID.exec(uri);
   if (!id || uri.indexOf('/../') >= 0 || !store) return '403';
   var open = store['f:' + id[1].toLowerCase()];

@@ -146,7 +146,7 @@ Play the address exactly as it is. Every manifest and segment request goes throu
 - the request comes from another country than the one the gate answered for (a copied link sent abroad);
 - the title stopped being public after the token was handed out (withdrawn, archived, its rights ended early). Within about a minute, every earlier token for it stops working.
 
-Where the operator enforces tokens, a plain on-demand address with no token (`/vod/...` or `/clips/vod/...`, for example one saved from before tokens or taken from a page) is refused with `403` *Not available*: the gate's address is the only one that plays. Volt's own console previews and share pages carry tokens too.
+Where the operator enforces tokens, a plain on-demand address with no token (`/vod/...`, `/clips/vod/...` or a clip's own folder `/clips/<title>/...`, for example one saved from before tokens or taken from a page) is refused with `403` *Not available*: the gate's address is the only one that plays. Volt's own console previews, share pages and recording download links carry tokens too.
 
 #### Token-free titles
 

@@ -15,8 +15,9 @@
 #      CloudFront Function deploy/edge/vod-token-viewer-request.js does, with
 #      njs (edge-token.js) reading the keys the scheduler writes to
 #      /data/edge/store.json (EDGE_STORE_FILE). Build queue P2. With
-#      VOLT_EDGE_TOKENS=enforce, plain /clips/vod/ paths are refused here
-#      (build queue P2-2b), as CloudFront refuses plain /vod/ and /clips/vod/.
+#      VOLT_EDGE_TOKENS=enforce, plain /clips/vod/ paths and clip output
+#      folders (/clips/<asset id>/) are refused here (build queue P2-2b and
+#      P2-2d), as CloudFront refuses plain /vod/, /clips/vod/ and clips.
 
 load_module modules/ngx_http_js_module.so;
 env EDGE_STORE_FILE;
@@ -124,8 +125,10 @@ http {
       proxy_pass http://api_public;
       add_header Cache-Control "no-store" always;
     }
-    # A plain on-demand path: refused under enforce, served as before otherwise.
-    location ~ ^/clips/vod/ {
+    # A plain on-demand path (an encode's folder or a clip's, P2-2d):
+    # refused under enforce, served as before otherwise. Quoted: nginx reads
+    # an unquoted { in a regex as the start of the block.
+    location ~ "^/clips/(vod|[0-9a-fA-F-]{36})/" {
       limit_req zone=viewer_rl burst=200 nodelay;
       default_type text/plain;
       if ($edge_plain != "ok") { return 403 "Not available\n"; }

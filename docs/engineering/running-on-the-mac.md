@@ -64,7 +64,9 @@ Docker on a Mac still uses the Mac's CPU, so keep test ladders light (720p and
 P2-2b). `VOLT_EDGE_TOKENS=issue` hands out on-demand addresses with a play
 token, `/t/<token>/clips/vod/...`, which the API checks itself when no edge
 is in front; `VOLT_EDGE_TOKENS=enforce` also refuses plain `/clips/vod/`
-addresses. The console's previews and share pages carry tokens either way. The
+addresses and clip output folders (`/clips/<asset id>/`, build queue P2-2d),
+and with them FAST channels and on-demand ad sessions, which still name
+content segments by plain address (P2-2e, P2-2f). The console's previews and share pages carry tokens either way. The
 staging stack (`deploy/staging/docker-compose.yml`) passes the same mode to its
 nginx edge. Unset (the default on the Mac) is off: plain addresses as before.
 

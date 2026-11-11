@@ -1,8 +1,8 @@
 // ============================================================================
 //  VOLT EDGE PLAY TOKENS, ENFORCED: CloudFront Function, viewer-request,
-//  cloudfront-js-2.0, on the plain on-demand behaviours /vod/* and
-//  /clips/vod/* (deploy/terraform/edge_tokens.tf, only when
-//  edge_tokens = "enforce"; build queue P2-2b).
+//  cloudfront-js-2.0, on the plain on-demand behaviours /vod/*,
+//  /clips/vod/* and /clips/* (deploy/terraform/edge_tokens.tf, only when
+//  edge_tokens = "enforce"; build queue P2-2b and P2-2d).
 //
 //  Under enforce an on-demand title plays only through a play token
 //  (/t/<token>/..., checked by vod-token-viewer-request.js), so a copied plain
@@ -17,11 +17,17 @@
 //  syncEdgeOpen). Its plain addresses pass through unchanged. The reference
 //  is plainPathVerdict in services/edgeTokens.ts; test/edge-token-free.check.ts
 //  runs this file against it.
+//
+//  CLIP OUTPUT FOLDERS (build queue P2-2d): a clip cut from a recording keeps
+//  its files in /clips/<asset id>/ (hls/, clip.mp4), refused plain the same
+//  way. The /clips/* behaviour also sees paths that are not titles (ad
+//  creatives under /clips/ads/): those pass unchanged, as the reference says.
 // ============================================================================
 import cf from 'cloudfront';
 
 const kvs = cf.kvs('${kvs_id}');
-const ID = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//;
+const GUARD = /^\/(clips\/vod|vod|clips\/[0-9a-fA-F-]{36})\//;
+const ID = /^\/(?:clips\/vod|vod|clips)\/([0-9a-fA-F-]{36})\//;
 
 function refuse() {
   return {
@@ -34,6 +40,7 @@ function refuse() {
 
 async function handler(event) {
   const req = event.request;
+  if (!GUARD.test(req.uri)) return req;
   const m = ID.exec(req.uri);
   if (!m || req.uri.indexOf('/../') >= 0) return refuse();
   let open = null;

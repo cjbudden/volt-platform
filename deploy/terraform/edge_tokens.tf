@@ -11,9 +11,11 @@
 #  plane's edge sync. Needs edge_rights_enabled (the store).
 #
 #  "issue" (default): tokens handed out and checked; plain paths still play.
-#  "enforce": as issue, and plain on-demand paths (/vod/* and /clips/vod/*)
-#  are refused by a second function (deploy/edge/vod-plain-refuse.js); the API
-#  refuses plain /clips/vod/ on its own address too. The console's previews
+#  "enforce": as issue, and plain on-demand paths (/vod/*, /clips/vod/* and
+#  clip output folders /clips/<asset id>/*, build queue P2-2d) are refused by a
+#  second function (deploy/edge/vod-plain-refuse.js); the API refuses them on
+#  its own address too. Paths under /clips/* that are not titles (ad
+#  creatives) are passed on by the function. The console's previews
 #  and share pages carry tokens, so they keep playing (build queue P2-2b).
 #  "off": the gate hands out plain URLs as before.
 # ============================================================================
@@ -34,7 +36,7 @@ locals {
   edge_tokens_mode = local.edge_tokens_on ? var.edge_tokens : "off"
   # Under enforce: the plain on-demand paths, refused. Listed after the /t/
   # behaviours and before *.m3u8 and *.mpd, which would otherwise take them.
-  edge_plain_vod_paths = local.edge_tokens_mode == "enforce" ? ["/vod/*", "/clips/vod/*"] : []
+  edge_plain_vod_paths = local.edge_tokens_mode == "enforce" ? ["/vod/*", "/clips/vod/*", "/clips/*"] : []
   # Manifests first (short cache), then everything else under /t/ (segments,
   # long cache). The function strips /t/<token>, so the cache key is the
   # plain path and every viewer shares one cached copy.

@@ -59,6 +59,18 @@
 //  (CloudFront's vod-plain-refuse.js, the staging njs, the API) let a plain
 //  /vod/<id>/ or /clips/vod/<id>/ request through when the key is there and
 //  not past. Everything else under enforce is refused as before.
+//
+//  CLIP OUTPUT FOLDERS (build queue P2-2d): a clip cut from a recording keeps
+//  its files in a folder of its own, /clips/<asset id>/ (hls/, clip.mp4,
+//  clip.mp3), not under /clips/vod/. Under enforce those are refused plain
+//  too, at all three checks, so a clip's copied address stops working the
+//  same way an encode's does. Everything of Volt's own that hands one to a
+//  person already carries a token: the play gate and the console's preview
+//  and share pages (tokenPrefix gives the clip's folder), and the recording
+//  export's download links (modules/recordings.ts). Server-side readers (FAST,
+//  the ad stitcher, the archive, skip markers, social) read the files on disk
+//  or in the bucket, never through the public path. Other folders under
+//  /clips/ (ad creatives in /clips/ads/) are not titles and pass as before.
 // ============================================================================
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { query } from '../db';
@@ -75,9 +87,9 @@ export const revocationKey = (assetId: string) => `r:${assetId}`;
 /** A token-free title's key in the edge store (P2-2c): value "<until epoch s>" or "0". */
 export const openKey = (assetId: string) => `f:${assetId}`;
 
-/** The asset id of a plain on-demand path (/vod/<id>/... or /clips/vod/<id>/...), or null. */
+/** The asset id of a plain on-demand path (/vod/<id>/..., /clips/vod/<id>/... or a clip's /clips/<id>/...), or null. */
 export function plainAssetId(uri: string): string | null {
-  const m = /^\/(?:clips\/vod|vod)\/([0-9a-fA-F-]{36})\//.exec(uri);
+  const m = /^\/(?:clips\/vod|vod|clips)\/([0-9a-fA-F-]{36})\//.exec(uri);
   return m && uri.indexOf('/../') < 0 ? m[1].toLowerCase() : null;
 }
 
@@ -98,8 +110,13 @@ export function edgeTokensMode(): 'off' | 'issue' | 'enforce' {
   return v === 'enforce' ? 'enforce' : v === 'issue' || v === 'on' ? 'issue' : 'off';
 }
 
-/** The plain on-demand paths enforce refuses: an encode's folder and an S3-served copy. */
-export const PLAIN_VOD_RE = /^\/(clips\/vod|vod)\//;
+/**
+ * The plain on-demand paths enforce refuses: an encode's folder, an S3-served
+ * copy, and a clip's own folder (/clips/<asset id>/, build queue P2-2d).
+ */
+export const PLAIN_VOD_RE = /^\/(clips\/vod|vod|clips\/[0-9a-fA-F-]{36})\//;
+/** The part of PLAIN_VOD_RE the API serves itself (it serves no /vod/ media). */
+export const PLAIN_CLIPS_RE = /^\/clips\/(vod|[0-9a-fA-F-]{36})\//;
 
 /**
  * TOKENISED PREVIEW URLS for people who are not a viewer of an app: the
@@ -381,17 +398,18 @@ const refuseText = (res: Response, code: number, text: string) => {
  * passes its checked /t/ requests on unchanged, and on AWS the ALB's /clips/*
  * route (the API's own address) answers the same as CloudFront.
  *
- * ENFORCE: a plain /clips/vod/ or /vod/ request is refused. Mounted before
- * every /clips route, so nothing under it can serve a plain path.
+ * ENFORCE: a plain /clips/vod/ or clip output (/clips/<asset id>/) request
+ * is refused. Mounted before every /clips route, so nothing under it can
+ * serve a plain path.
  */
 export function tokenPathMiddleware() {
   return async (req: Request, res: Response, next: NextFunction) => {
     let path = req.path;
     try { path = decodeURIComponent(req.path); } catch { /* the raw path is checked */ }
     if (!path.startsWith('/t/')) {
-      // /clips/vod/ only: the API serves no /vod/ media (that is S3 behind
-      // CloudFront), and /vod is the console's Media Library page.
-      if (edgeTokensMode() === 'enforce' && path.startsWith('/clips/vod/')) {
+      // /clips/vod/ and clip outputs only: the API serves no /vod/ media (that
+      // is S3 behind CloudFront), and /vod is the console's Media Library page.
+      if (edgeTokensMode() === 'enforce' && PLAIN_CLIPS_RE.test(path)) {
         // A token-free title (P2-2c) plays by its plain address: the same
         // answer the edges read from "f:<id>", here from the cached stamp.
         const id = plainAssetId(path);

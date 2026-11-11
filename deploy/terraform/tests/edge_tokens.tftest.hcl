@@ -32,7 +32,7 @@ run "issue_by_default" {
     error_message = "issue should have the token function and no refuse function"
   }
   assert {
-    condition     = length([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b if contains(["/vod/*", "/clips/vod/*"], b.path_pattern)]) == 0
+    condition     = length([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b if contains(["/vod/*", "/clips/vod/*", "/clips/*"], b.path_pattern)]) == 0
     error_message = "issue must not refuse plain on-demand paths"
   }
   assert {
@@ -64,6 +64,16 @@ run "enforce_refuses_plain_paths" {
   assert {
     condition     = index([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern], "/clips/vod/*") < index([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern], "*.m3u8")
     error_message = "the plain behaviours must come before *.m3u8"
+  }
+  # Clip output folders (build queue P2-2d): /clips/<asset id>/* refused too,
+  # after /clips/vod/* and before *.m3u8, with the same refuse function.
+  assert {
+    condition     = length([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b if b.path_pattern == "/clips/*"]) == 1
+    error_message = "enforce should add a /clips/* behaviour for clip output folders"
+  }
+  assert {
+    condition     = index([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern], "/clips/vod/*") < index([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern], "/clips/*") && index([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern], "/clips/*") < index([for b in aws_cloudfront_distribution.cdn.ordered_cache_behavior : b.path_pattern], "*.m3u8")
+    error_message = "/clips/* must come after /clips/vod/* and before *.m3u8"
   }
   assert {
     condition     = one([for e in local.control_plane_env : e.value if e.name == "VOLT_EDGE_TOKENS"]) == "enforce"

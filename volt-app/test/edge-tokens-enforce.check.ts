@@ -158,7 +158,7 @@ const check = (m: string, got: unknown, want: unknown) => {
       [njs.plainVerdict(`${PRE}master.m3u8`, 'enforce'), njs.plainVerdict(`/vod/${id}/master.m3u8`, 'enforce'), njs.plainVerdict(`${PRE}master.m3u8`, 'issue'), njs.plainVerdict(`${PRE}master.m3u8`, ''), njs.plainVerdict('/clips/other/index.m3u8', 'enforce'), njs.plainVerdict(`${PRE}x`, ' ENFORCE ')],
       ['403', '403', 'ok', 'ok', 'ok', '403']);
     const conf = readFileSync(join(__dirname, '../../deploy/staging/nginx.conf.template'), 'utf8');
-    const iT = conf.indexOf('location ~ ^/t/[^/]+/clips/ {'), iPlain = conf.indexOf('location ~ ^/clips/vod/ {'), iGeneric = conf.indexOf('location ~ ^/(api/public/|');
+    const iT = conf.indexOf('location ~ ^/t/[^/]+/clips/ {'), iPlain = conf.indexOf('location ~ "^/clips/(vod|[0-9a-fA-F-]{36})/" {'), iGeneric = conf.indexOf('location ~ ^/(api/public/|');
     const tBlock = conf.slice(iT, conf.indexOf('}', conf.indexOf('proxy_pass', iT)));
     check('staging nginx: the token location passes the token on (no rewrite), the plain location is checked first',
       [iT > 0 && iPlain > iT && iGeneric > iPlain, /rewrite/.test(tBlock), /env VOLT_EDGE_TOKENS;/.test(conf), /js_set \$edge_plain edgetoken\.plain;/.test(conf),

@@ -11,6 +11,7 @@ import { previewFill } from '../services/epgFill';
 import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
+import { tokenisedUrls } from '../services/edgeTokens';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
 import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly, recordingGaps, recordingFallbacks } from '../services/localRecordingIndex';
@@ -843,6 +844,23 @@ recordingsRouter.get(
 );
 
 /**
+ * THE EXPORT'S DOWNLOAD LINKS CARRY A PLAY TOKEN (build queue P2-2d). The
+ * files sit in the export's own clip folder (/clips/<asset id>/), which
+ * VOLT_EDGE_TOKENS=enforce refuses by plain address, so with tokens on the
+ * links are tokenised like the console's previews: no country, 4 hours, the
+ * same token for the file and its alternatives. Plain when tokens are off.
+ */
+function exportLinks(assetId: string, url: string, alternatives: { format: string; label: string; url: string }[]) {
+  const t = tokenisedUrls(Object.fromEntries([['url', url], ...alternatives.map((a, i) => [`a${i}`, a.url])]), { assetId, policyClass: 'rights' });
+  if (!t) return { url, alternatives };
+  return {
+    url: t.urls.url ?? url,
+    alternatives: alternatives.map((a, i) => ({ ...a, url: t.urls[`a${i}`] ?? a.url })),
+    expiresAt: new Date(t.expiresAt * 1000).toISOString(),
+  };
+}
+
+/**
  * Download a recording as MP4.
  *
  * This endpoint could never succeed before: it read `rec.export_mp4_key`, a
@@ -888,12 +906,12 @@ recordingsRouter.get(
     // files rather than served as it is.
     if (kind === 'audio' && existing?.export_mp3_key) {
       return res.json({
-        status: 'ready', kind, format: 'mp3', url: existing.export_mp3_key, assetId: existing.id,
-        alternatives: existing.export_m4a_key ? [{ format: 'm4a', label: 'AAC (.m4a)', url: existing.export_m4a_key }] : [],
+        status: 'ready', kind, format: 'mp3', assetId: existing.id,
+        ...exportLinks(existing.id, existing.export_mp3_key, existing.export_m4a_key ? [{ format: 'm4a', label: 'AAC (.m4a)', url: existing.export_m4a_key }] : []),
       });
     }
     if (kind === 'video' && existing?.export_mp4_key) {
-      return res.json({ status: 'ready', kind, format: 'mp4', url: existing.export_mp4_key, assetId: existing.id, alternatives: [] });
+      return res.json({ status: 'ready', kind, format: 'mp4', assetId: existing.id, ...exportLinks(existing.id, existing.export_mp4_key, []) });
     }
     const resolution = resolveRange(streamId, fromMs, toMs, kind);
     const verdict = assessRange(resolution, { maxGapMs: acceptGapsMs });
