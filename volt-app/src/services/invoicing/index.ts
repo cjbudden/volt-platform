@@ -21,8 +21,8 @@
 //  that month's rows into one numbered invoice per account. The draft is the
 //  open month itself: the same lines worked out live and not yet written.
 //
-//  Not in this file yet (queue B1-2): charging an `automated` invoice in
-//  Stripe and its paid or failed webhook, and the invoice PDF.
+//  Charging an `automated` invoice in Stripe and its paid or failed webhook
+//  are in stripe.ts (B1-2); the PDF in pdf.ts.
 // ============================================================================
 import type { PoolClient } from 'pg';
 import { query, one, tx } from '../../db';
@@ -265,17 +265,22 @@ export function invoiceView(r: any) {
   return {
     id: r.id, accountId: r.account_id, number: r.number, period: iso(r.period_month).slice(0, 7), status: r.status, handling: r.handling,
     currency: r.currency, subtotalUsd: Number(r.subtotal_usd), taxRate: Number(r.tax_rate), taxUsd: Number(r.tax_usd), totalUsd: Number(r.total_usd),
-    issuedAt: r.issued_at, paidAt: r.paid_at, paidReference: r.paid_reference,
+    issuedAt: r.issued_at, paidAt: r.paid_at, paidReference: r.paid_reference, failedAt: r.failed_at ?? null,
   };
 }
 
-export async function invoiceWithLines(id: string, accountId?: string) {
+/** The System Admin's view adds where the invoice stands with Stripe. */
+export function invoiceAdminView(r: any) {
+  return { ...invoiceView(r), stripeInvoiceId: r.stripe_invoice_id ?? null, stripeSentAt: r.stripe_sent_at ?? null, stripeError: r.stripe_error ?? null, stripeAttempts: Number(r.stripe_attempts ?? 0) };
+}
+
+export async function invoiceWithLines(id: string, accountId?: string, admin = false) {
   const r = await one<any>(`SELECT * FROM billing_invoices WHERE id = $1 ${accountId ? 'AND account_id = $2' : ''}`, accountId ? [id, accountId] : [id]);
   if (!r) return null;
   const lines = await query<any>(
     `SELECT source, item_key, description, quantity, unit, unit_usd, amount_usd, reference, created_by, created_at FROM billing_charges WHERE invoice_id = $1 ORDER BY id`, [id]);
   return {
-    ...invoiceView(r),
+    ...(admin ? invoiceAdminView(r) : invoiceView(r)),
     lines: lines.map((l) => ({ source: l.source, itemKey: l.item_key, description: l.description, quantity: Number(l.quantity), unit: l.unit, unitUsd: Number(l.unit_usd), amountUsd: Number(l.amount_usd), reference: l.reference })),
   };
 }
@@ -320,9 +325,12 @@ export const closeStats = { runs: 0, lastMonth: null as string | null, lastIssue
 export async function closeDue(): Promise<CloseResult | null> {
   if (billingMode() === 'off') return null;
   const due = previousMonth(monthOf());
-  if (closedThrough === due) return null;
+  // Automated invoices still to reach Stripe (a fresh close, or a send that failed last pass).
+  const pushPending = async () => { try { await (await import('./stripe')).sendPendingToStripe(); } catch (e) { console.error('[billing] sending to Stripe failed', (e as Error).message); } };
+  if (closedThrough === due) { await pushPending(); return null; }
   const r = await closeMonth(due);
   closedThrough = due;
+  await pushPending();
   closeStats.runs++; closeStats.lastMonth = due.slice(0, 7); closeStats.lastIssued = r.issued.length; closeStats.lastError = null;
   if (r.issued.length) console.log(`[billing] closed ${due.slice(0, 7)}: ${r.issued.length} invoice(s) issued`);
   return r;

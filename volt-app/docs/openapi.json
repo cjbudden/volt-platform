@@ -71,7 +71,7 @@
   {
    "name": "Billing",
    "x-displayName": "Billing",
-   "description": "What Volt charges your account: the plan fee, server time and any charges or credits, gathered into one invoice per calendar month.\n\n**Use it to:**\n- See this month so far and your latest invoices with `GET /api/billing`\n- List invoices with `GET /api/billing/invoices` and read one with its lines\n- Download an invoice as CSV for your accounts team with `GET /api/billing/invoices/{id}/csv`\n\n**Credential:** admin session (Bearer) or account secret key, with Account settings: View.\n\n**Good to know:** amounts are US dollars. Invoices are issued on the 1st for the month before and never change afterwards; a correction appears as a credit on a later invoice. When the deployment does not bill (`mode` is `off`) nothing is charged."
+   "description": "What Volt charges your account: the plan fee, server time and any charges or credits, gathered into one invoice per calendar month.\n\n**Use it to:**\n- See this month so far and your latest invoices with `GET /api/billing`\n- List invoices with `GET /api/billing/invoices` and read one with its lines\n- Download an invoice as PDF or CSV for your accounts team with `GET /api/billing/invoices/{id}/pdf` and `.../csv`\n\n**Credential:** admin session (Bearer) or account secret key, with Account settings: View.\n\n**Good to know:** amounts are US dollars. Invoices are issued on the 1st for the month before and never change afterwards; a correction appears as a credit on a later invoice. Where invoices are charged to the card on file (`handling` is `automated`), a failed payment is retried by the payment provider and your owners and administrators are told; the service carries on meanwhile. When the deployment does not bill (`mode` is `off`) nothing is charged."
   },
   {
    "name": "Channels",
@@ -6406,6 +6406,42 @@
      "Billing"
     ],
     "description": "The invoice's lines as CSV (`text/csv`), one row per line, then Subtotal, Tax and Total rows, for your accounts team or a spreadsheet.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/billing/invoices/{id}/pdf": {
+   "get": {
+    "operationId": "getBillingInvoicesByIDPdf",
+    "summary": "Download an invoice as PDF",
+    "tags": [
+     "Billing"
+    ],
+    "description": "The invoice as a PDF (`application/pdf`, A4): who it is billed to, the period, how it is settled, its status, every line, then subtotal, tax and total.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** settings: view",
     "security": [
      {
       "adminBearer": []

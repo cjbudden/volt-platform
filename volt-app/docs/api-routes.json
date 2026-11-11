@@ -964,6 +964,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/billing/invoices/:id/pdf",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "settings: view",
+  "viewerTier": false,
+  "group": "/api/billing"
+ },
+ {
+  "method": "GET",
   "path": "/api/caption-languages",
   "api": "discovery",
   "credential": "none",
@@ -4457,6 +4466,24 @@
  {
   "method": "POST",
   "path": "/api/platform/billing/invoices/:id/paid",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "GET",
+  "path": "/api/platform/billing/invoices/:id/pdf",
+  "api": "platform",
+  "credential": "platform session (aud volt:platform, after TOTP)",
+  "access": "platform_role (saas_admin / support as the route says)",
+  "viewerTier": false,
+  "group": "/api/platform/billing"
+ },
+ {
+  "method": "POST",
+  "path": "/api/platform/billing/invoices/:id/stripe",
   "api": "platform",
   "credential": "platform session (aud volt:platform, after TOTP)",
   "access": "platform_role (saas_admin / support as the route says)",

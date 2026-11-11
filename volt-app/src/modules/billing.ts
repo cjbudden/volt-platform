@@ -20,8 +20,18 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { writeAudit } from '../services/audit';
 import {
   billingMode, effectiveHandling, deploymentTaxRate, draftFor, invoiceView, invoiceWithLines, invoiceCsv,
-  addManualCharge, closeMonth, markPaid, parseMonth, previousMonth, monthOf,
+  addManualCharge, closeMonth, markPaid, parseMonth, previousMonth, monthOf, invoiceAdminView,
 } from '../services/invoicing';
+import { invoicePdf } from '../services/invoicing/pdf';
+import { sendInvoiceToStripe } from '../services/invoicing/stripe';
+
+/** Send an invoice as a PDF download, named by its number. */
+async function sendPdf(res: any, inv: any) {
+  const a = await one<any>(`SELECT name FROM accounts WHERE id = $1`, [inv.accountId]);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${inv.number}.pdf"`);
+  res.send(invoicePdf(inv, { accountName: a?.name ?? '' }));
+}
 
 export const billingRouter = Router();
 billingRouter.use(requireAuth);
@@ -76,7 +86,13 @@ billingRouter.get('/invoices', asyncHandler(async (req, res) => {
 billingRouter.get('/invoices/:id', asyncHandler(async (req, res) => {
   const inv = await invoiceWithLines(String(req.params.id), accountId(req)).catch(() => null);
   if (!inv) throw notFound('Invoice not found');
-  res.json({ ...inv, _links: { self: { href: `/api/billing/invoices/${inv.id}` }, csv: { href: `/api/billing/invoices/${inv.id}/csv` } } });
+  res.json({ ...inv, _links: { self: { href: `/api/billing/invoices/${inv.id}` }, csv: { href: `/api/billing/invoices/${inv.id}/csv` }, pdf: { href: `/api/billing/invoices/${inv.id}/pdf` } } });
+}));
+
+billingRouter.get('/invoices/:id/pdf', asyncHandler(async (req, res) => {
+  const inv = await invoiceWithLines(String(req.params.id), accountId(req)).catch(() => null);
+  if (!inv) throw notFound('Invoice not found');
+  await sendPdf(res, inv);
 }));
 
 billingRouter.get('/invoices/:id/csv', asyncHandler(async (req, res) => {
@@ -145,11 +161,11 @@ platformBillingRouter.get('/invoices', ...requirePlatform('read_only'), asyncHan
     `SELECT i.*, a.name AS account_name FROM billing_invoices i JOIN accounts a ON a.id = i.account_id
       WHERE ($1::text IS NULL OR i.status = $1) AND ($2::text IS NULL OR i.account_id::text = $2)
       ORDER BY i.period_month DESC, i.number DESC LIMIT 500`, [status, acc]);
-  res.json(rows.map((r) => ({ ...invoiceView(r), accountName: r.account_name })));
+  res.json(rows.map((r) => ({ ...invoiceAdminView(r), accountName: r.account_name })));
 }));
 
 platformBillingRouter.get('/invoices/:id', ...requirePlatform('read_only'), asyncHandler(async (req, res) => {
-  const inv = await invoiceWithLines(String(req.params.id)).catch(() => null);
+  const inv = await invoiceWithLines(String(req.params.id), undefined, true).catch(() => null);
   if (!inv) throw notFound('Invoice not found');
   res.json(inv);
 }));
@@ -160,6 +176,22 @@ platformBillingRouter.get('/invoices/:id/csv', ...requirePlatform('read_only'), 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${inv.number}.csv"`);
   res.send(invoiceCsv(inv));
+}));
+
+platformBillingRouter.get('/invoices/:id/pdf', ...requirePlatform('read_only'), asyncHandler(async (req, res) => {
+  const inv = await invoiceWithLines(String(req.params.id)).catch(() => null);
+  if (!inv) throw notFound('Invoice not found');
+  await sendPdf(res, inv);
+}));
+
+/** Send (or send again) an automated invoice to Stripe now, rather than on the next pass. */
+platformBillingRouter.post('/invoices/:id/stripe', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {
+  const r = await one<any>(`SELECT * FROM billing_invoices WHERE id = $1`, [req.params.id]).catch(() => null);
+  if (!r) throw notFound('Invoice not found');
+  if (r.handling !== 'automated') throw conflict('A contract invoice is settled outside Volt; it is not sent to Stripe.');
+  if (billingMode() !== 'automated') throw conflict('Invoices go to Stripe only when the deployment bills automatically (VOLT_BILLING=automated).');
+  await sendInvoiceToStripe(r.id);
+  res.json(invoiceAdminView(await one<any>(`SELECT * FROM billing_invoices WHERE id = $1`, [r.id])));
 }));
 
 platformBillingRouter.post('/invoices/:id/paid', ...requirePlatform('saas_admin'), asyncHandler(async (req, res) => {

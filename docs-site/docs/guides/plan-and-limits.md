@@ -89,12 +89,12 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PATCH /api/plan` | Changes the plan (`planTier`, `maxChannels`, `maxConcurrent`), where you may |
 | `GET /api/billing` | What your plan and use cost: this month so far and your latest invoices (Account settings: View) |
 | `GET /api/billing/invoices` | Every invoice, one per calendar month, issued on the 1st for the month before |
-| `GET /api/billing/invoices/{id}` and `.../csv` | One invoice with its lines, or the same as CSV for your accounts team |
+| `GET /api/billing/invoices/{id}`, `.../pdf` and `.../csv` | One invoice with its lines, or the same as a PDF or CSV for your accounts team |
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" "https://your-volt-host/api/plan"
 ```
 
-Billing is only shown where your Volt provider bills through Volt; otherwise `GET /api/billing` answers with `mode` set to `off`. Amounts are US dollars, and an issued invoice never changes: a correction appears as a credit on a later one.
+Billing is only shown where your Volt provider bills through Volt; otherwise `GET /api/billing` answers with `mode` set to `off`. Amounts are US dollars, and an issued invoice never changes: a correction appears as a credit on a later one. Where invoices are charged to the card on file, a failed payment is tried again by the payment provider and the account's owners and administrators are told in Notifications; nothing is suspended meanwhile.
 
 Every route is in the [API reference](/api-reference).

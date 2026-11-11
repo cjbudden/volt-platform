@@ -245,6 +245,8 @@ signupWebhookRouter.post('/stripe', rawBody({ type: '*/*', limit: '1mb' }), asyn
   let outcome = 'ignored';
   if (ev.type === 'checkout.session.completed' || ev.type === 'checkout.session.async_payment_succeeded') outcome = await activateFromCheckout(o);
   else if (ev.type === 'customer.subscription.deleted') outcome = await cancelSubscription(o);
+  // Volt's own monthly invoices (build queue B1-2) come back on the same webhook.
+  else if (ev.type === 'invoice.paid' || ev.type === 'invoice.payment_failed') outcome = await (await import('../services/invoicing/stripe')).handleStripeInvoiceEvent(ev.type, o);
   res.json({ received: true, outcome });
 }));
 
