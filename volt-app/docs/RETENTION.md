@@ -90,7 +90,9 @@ held at one of the account's storage targets. Only the original goes; the
 renditions play on. Until a sound copy exists it waits, and the reason is
 written on the asset and listed under Storage, Mirror and Archive, **Originals
 out of the cloud**. `include_uploads` lets an account rule reach uploads and
-watch folder files; rules made before it existed have it off. Details:
+watch folder files; rules made before it existed have it off. **Restore**
+brings a removed original back from its copy (a site server uploads it, the
+cloud checks it before the asset uses it), and its clock restarts. Details:
 `services/archive/originals.ts` and HYBRID_SITES.md, Phase 3j.
 
 ## API

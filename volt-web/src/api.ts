@@ -1277,6 +1277,8 @@ export const api = {
   },
   /** Originals removed from the cloud by a retention rule, or waiting for their archive copy, with why (H3-5). */
   archiveOriginals: (): Promise<{ items: ArchiveOriginal[] }> => req('/archive/originals?limit=500'),
+  /** Bring a removed original back to the cloud from its archive copy (H3-5b). */
+  restoreArchiveOriginal: (assetId: string): Promise<any> => req(`/archive/originals/${encodeURIComponent(assetId)}/restore`, { method: 'POST', body: '{}' }),
   verifyArchiveCopy: (id: string): Promise<ArchiveCopy> => req(`/archive/copies/${encodeURIComponent(id)}/verify`, { method: 'POST', body: '{}' }),
   /** Admin > Captions (modules/captionsSettings.ts). */
   captionsSettings: (): Promise<CaptionsSettings> => req('/account-settings/captions'),
@@ -2849,7 +2851,9 @@ export interface RetentionRuleRow {
 export interface ArchiveOriginal {
   vodAssetId: string; title: string | null; state: 'waiting' | 'removed'
   waitCode: string | null; why: string | null; removedAt: string | null; checkedAt: string | null
-  copy: { id: string; targetName: string | null; storedPath: string | null } | null
+  copy: { id: string; targetName: string | null; storedPath: string | null; state?: string | null } | null
+  /** H3-5b: a restore from the archive copy is in flight, or why the last one failed. */
+  restoring?: boolean; restoreError?: string | null
 }
 
 export interface SweepPreview {

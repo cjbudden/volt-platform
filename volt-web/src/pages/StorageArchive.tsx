@@ -34,6 +34,7 @@ const IC = {
   site: ic(<><path d="M3 21h18" /><path d="M5 21V8l7-5 7 5v13" /><path d="M9 21v-6h6v6" /></>),
   wait: ic(<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>),
   archived: ic(<><path d="M3 7h18v13H3z" /><path d="M1 3h22v4H1z" /><path d="M10 12h4" /></>),
+  restore: ic(<><path d="M12 19V7" /><path d="M7 11l5-5 5 5" /><path d="M5 21h14" /></>),
 }
 
 /** What to do about an original that waits (services/archive/originals.ts codes). */
@@ -52,9 +53,17 @@ const ORIGINAL_HINT: Record<string, string> = {
 
 /** Originals a retention rule removed from the cloud, and those waiting for their copy (H3-5). */
 function Originals() {
+  const notify = useNotify()
   const [items, setItems] = useState<ArchiveOriginal[] | null>(null)
   const [err, setErr] = useState('')
-  useEffect(() => { api.archiveOriginals().then(r => { setItems(r.items); setErr('') }).catch(e => setErr(e?.message || 'Could not load originals')) }, [])
+  const [busy, setBusy] = useState<string | null>(null)
+  const load = () => api.archiveOriginals().then(r => { setItems(r.items); setErr('') }).catch(e => setErr(e?.message || 'Could not load originals'))
+  useEffect(() => { load() }, [])
+  async function restore(o: ArchiveOriginal) {
+    setBusy(o.vodAssetId)
+    try { await api.restoreArchiveOriginal(o.vodAssetId); notify({ kind: 'ok', message: `Restoring ${o.title || 'the original'}: a server at the site uploads the archive copy and Volt checks it before the asset uses it.` }); load() }
+    catch (e: any) { notify({ kind: 'error', message: e?.message || 'Could not start the restore' }) } finally { setBusy(null) }
+  }
   if (err) return <FormStatus error={err} />
   if (!items) return null
   const waiting = items.filter(i => i.state === 'waiting').length
@@ -70,13 +79,17 @@ function Originals() {
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table>
-            <thead><tr><th>Asset</th><th>Original</th><th>Archive copy</th><th>Since</th></tr></thead>
+            <thead><tr><th>Asset</th><th>Original</th><th>Archive copy</th><th>Since</th><th /></tr></thead>
             <tbody>
               {items.map(o => (
                 <tr key={o.vodAssetId} data-original={o.state} style={{ cursor: 'default' }}>
                   <td><a href={`/vod?asset=${o.vodAssetId}`} onClick={e => { e.preventDefault(); navigate(`/vod?asset=${o.vodAssetId}`) }}>{o.title || 'Untitled'}</a></td>
                   <td>{o.state === 'removed'
-                    ? <span className="tag live" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{IC.archived} In the archive only</span>
+                    ? <>
+                        <span className="tag live" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{IC.archived} In the archive only</span>
+                        {o.restoring && <div className="hintxt" style={{ margin: '4px 0 0' }} data-original-restoring>Being restored: a server at the site is uploading the copy</div>}
+                        {o.restoreError && <div style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--down)', maxWidth: 420 }} data-original-restore-error>The last restore failed: {o.restoreError}</div>}
+                      </>
                     : <>
                         <span className="tag idle" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{IC.wait} Kept, waiting</span>
                         <div style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', maxWidth: 420 }} data-original-wait={o.waitCode ?? ''}>
@@ -86,6 +99,8 @@ function Originals() {
                       </>}</td>
                   <td>{o.copy ? <><div>{o.copy.targetName ?? '–'}</div><div className="mono hintxt" style={{ margin: 0, overflowWrap: 'anywhere' }}>{o.copy.storedPath}</div></> : '–'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{when(o.removedAt ?? o.checkedAt)}</td>
+                  <td style={{ width: 1 }}>{o.state === 'removed' && !o.restoring && o.copy?.state === 'verified' &&
+                    <button className="btn sm ghost" disabled={busy === o.vodAssetId} onClick={() => restore(o)} title="Bring the original back to the cloud from its archive copy, for a re-encode">{IC.restore} Restore</button>}</td>
                 </tr>
               ))}
             </tbody>

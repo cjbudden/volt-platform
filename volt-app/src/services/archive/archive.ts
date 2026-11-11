@@ -35,8 +35,10 @@ export const ARCHIVE_VERIFY = 'archive.verify';
 /** A whole folder (an asset's HLS/DASH package, H3-11, packages.ts): its own types, so an older agent never leases one. */
 export const ARCHIVE_COPY_FOLDER = 'archive.copy-folder';
 export const ARCHIVE_VERIFY_FOLDER = 'archive.verify-folder';
+/** An original back to the cloud from its archive copy (H3-5b, originals.ts): its own type, so an older agent never leases one. */
+export const ARCHIVE_RESTORE = 'archive.restore';
 /** The job types the Mirror and Archive licence covers at a site. */
-export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY, ARCHIVE_COPY_FOLDER, ARCHIVE_VERIFY_FOLDER];
+export const ARCHIVE_JOB_TYPES = [ARCHIVE_COPY, ARCHIVE_VERIFY, ARCHIVE_COPY_FOLDER, ARCHIVE_VERIFY_FOLDER, ARCHIVE_RESTORE];
 const isCopyJob = (type: string) => type === ARCHIVE_COPY || type === ARCHIVE_COPY_FOLDER;
 const isVerifyJob = (type: string) => type === ARCHIVE_VERIFY || type === ARCHIVE_VERIFY_FOLDER;
 export const isArchiveJob = (type: string) => ARCHIVE_JOB_TYPES.includes(type);
@@ -537,6 +539,7 @@ function cleanStoredPath(v: unknown): string | null {
  * wrote. Otherwise the attempt fails and is retried: never archived.
  */
 export async function judge(job: JobRow, result: any): Promise<Verdict> {
+  if (job.type === ARCHIVE_RESTORE) return (await import('./originals')).judgeRestore(job, result);
   const copyId = job.payload?.copyId;
   const c = UUID.test(String(copyId)) ? await one<any>(`SELECT * FROM archive_copies WHERE id = $1`, [copyId]) : null;
   if (!c) return { ok: true, apply: async () => {} };   // the copy was removed meanwhile: nothing to record
@@ -600,6 +603,9 @@ export async function judge(job: JobRow, result: any): Promise<Verdict> {
  * look is not the same as finding it changed.
  */
 export async function attemptFailed(job: JobRow, message: string, code: string | null, exhausted: boolean): Promise<void> {
+  // A restore that failed says so on the asset, never on the copy: the copy
+  // was not changed by a failed upload to the cloud.
+  if (job.type === ARCHIVE_RESTORE) return (await import('./originals')).restoreFailed(job, message, code, exhausted);
   const copyId = job.payload?.copyId;
   if (!UUID.test(String(copyId))) return;
   if (isCopyJob(job.type)) {

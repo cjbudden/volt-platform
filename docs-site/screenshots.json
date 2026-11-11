@@ -381,7 +381,7 @@
       "clip": "[data-mirror-archive]",
       "remove": [".topbar"],
       "settleMs": 1000,
-      "alt": "The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it, and below them the originals out of the cloud: one in the archive only, one kept and waiting with why"
+      "alt": "The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it, and below them the originals out of the cloud: one in the archive only with its Restore button, one kept and waiting with why"
     },
     {
       "name": "publishing-archive-copies",

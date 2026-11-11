@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**972 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 751 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**973 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 752 · Platform API: 44 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -335,6 +335,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | POST | `/api/archive/copies/:id/verify` | admin session (Bearer) or account secret key | operator tier or above |  |
 | GET | `/api/archive/originals` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | GET | `/api/archive/originals/:assetId` | admin session (Bearer) or account secret key | any signed-in admin user |  |
+| POST | `/api/archive/originals/:assetId/restore` | admin session (Bearer) or account secret key | operator tier or above |  |
 | GET | `/api/archive/targets` | admin session (Bearer) or account secret key | any signed-in admin user |  |
 | POST | `/api/archive/targets` | admin session (Bearer) or account secret key | operator tier or above |  |
 | GET | `/api/archive/targets/:id` | admin session (Bearer) or account secret key | any signed-in admin user |  |

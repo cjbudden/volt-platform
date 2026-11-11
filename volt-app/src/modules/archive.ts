@@ -18,6 +18,7 @@
  *   GET    /api/archive/originals            originals a retention rule removed from the cloud, or that wait
  *                                            for their archive copy, with why (H3-5), list standard
  *   GET    /api/archive/originals/:assetId   where one asset's original is and what retention will do with it
+ *   POST   /api/archive/originals/:assetId/restore  bring a removed original back from its archive copy (H3-5b)
  *
  * The copies themselves are jobs in the site's pool, leased by the site agent
  * through /api/site-agent/jobs (modules/sites.ts); the result is judged in
@@ -32,7 +33,7 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { writeAudit, actor } from '../services/audit';
 import { requireLicence } from '../services/sites/licences';
 import * as A from '../services/archive/archive';
-import { originalStatus } from '../services/archive/originals';
+import { originalStatus, requestRestore } from '../services/archive/originals';
 import { notFound } from '../util/http';
 
 export const archiveRouter = Router();
@@ -159,8 +160,10 @@ archiveRouter.get('/originals', asyncHandler(async (req, res) => {
   const pl = parseList(originalList, req.query, params);
   const rows = await query<any>(
     `SELECT v.id, v.title, v.original_removed_at, v.original_wait_code, v.original_wait, v.original_checked_at,
-            v.original_copy_id, t.name AS target_name, ac.stored_path
+            v.original_copy_id, t.name AS target_name, ac.stored_path, ac.state AS copy_state,
+            v.original_restore_error, rj.state AS restore_state
        FROM vod_assets v
+       LEFT JOIN jobs rj ON rj.id = v.original_restore_job_id
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events e ON e.id = v.event_id
        LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
@@ -171,7 +174,10 @@ archiveRouter.get('/originals', asyncHandler(async (req, res) => {
   res.json({ items: finishPage(req, res, pl, rows).map((r: any) => ({
     vodAssetId: r.id, title: r.title, state: r.original_removed_at ? 'removed' : 'waiting',
     waitCode: r.original_wait_code, why: r.original_wait, removedAt: r.original_removed_at, checkedAt: r.original_checked_at,
-    copy: r.original_copy_id ? { id: r.original_copy_id, targetName: r.target_name, storedPath: r.stored_path } : null,
+    copy: r.original_copy_id ? { id: r.original_copy_id, targetName: r.target_name, storedPath: r.stored_path, state: r.copy_state } : null,
+    // Restore (H3-5b): in flight, or the last attempt's reason.
+    restoring: r.restore_state === 'queued' || r.restore_state === 'running',
+    restoreError: r.restore_state === 'queued' || r.restore_state === 'running' ? null : (r.original_restore_error ?? null),
   })) });
 }));
 
@@ -179,4 +185,14 @@ archiveRouter.get('/originals/:assetId', asyncHandler(async (req, res) => {
   const s = /^[0-9a-f-]{36}$/i.test(req.params.assetId) ? await originalStatus(accountId(req), req.params.assetId) : null;
   if (!s) throw notFound('asset not found');
   res.json(s);
+}));
+
+archiveRouter.post('/originals/:assetId/restore', asyncHandler(async (req, res) => {
+  const who = actor(req);
+  const r = await requestRestore(accountId(req), who.userId, req.params.assetId);
+  if (r.created) {
+    await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label, action: 'update', entityType: 'vod_original', entityId: req.params.assetId,
+      snapshot: { restoreRequested: true, jobId: r.jobId } });
+  }
+  res.status(r.created ? 202 : 200).json({ ...(await originalStatus(accountId(req), req.params.assetId)), jobId: r.jobId });
 }));

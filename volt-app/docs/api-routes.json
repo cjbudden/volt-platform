@@ -549,6 +549,15 @@
   "group": "/api/archive"
  },
  {
+  "method": "POST",
+  "path": "/api/archive/originals/:assetId/restore",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "operator tier or above",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
   "method": "GET",
   "path": "/api/archive/targets",
   "api": "admin",

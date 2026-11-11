@@ -46,14 +46,15 @@
 //  OUTBOUND ONLY, like the rest of the agent.
 // ============================================================================
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { mkdir, rename, rm, stat, unlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, stat, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { freeName, nameValue, safeFileName } from '../../volt-app/src/services/archive/naming';
 import { cleanPackagePath, packageLayout, packageManifest, type PackageFile } from '../../volt-app/src/services/archive/packageManifest';
 import * as S3 from './s3Target';
 
-export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify', 'archive.copy-folder', 'archive.verify-folder'];
+export const ARCHIVE_JOB_TYPES = ['archive.copy', 'archive.verify', 'archive.copy-folder', 'archive.verify-folder', 'archive.restore'];
 
 export interface ArchiveCtx {
   server: string;
@@ -279,6 +280,62 @@ async function runVerify(ctx: ArchiveCtx, job: any): Promise<Record<string, unkn
   return { present: true, sha256: h.sha256, bytes: h.bytes };
 }
 
+// ---- restore: an original back to the cloud (H3-5b) -------------------------------
+
+/** Headers a presigned bucket URL was signed with (the file's SHA-256), sent as given. */
+const SIGNED_HEADER = /^(x-amz-[a-z0-9-]+|content-md5)$/;
+
+/**
+ * Read the archive copy, check it is still the file that was archived, and
+ * upload it through the job's `restore` transfer. A folder copy is sent from
+ * the target as it is; a copy in a store is read into a private scratch file
+ * first (a PUT needs its length), which is removed afterwards. The cloud reads
+ * back what arrived before the asset points at it.
+ */
+async function runRestore(ctx: ArchiveCtx, job: any): Promise<Record<string, unknown>> {
+  const want = String(job.payload?.sha256 ?? '').toLowerCase();
+  let file: string; let scratch: string | null = null;
+  if (job?.payload?.target?.kind === 's3') {
+    const c = storeFor(ctx, job);
+    const r = await S3.s3(c, 'GET', storeKey(c, job.payload?.storedPath));
+    if (r.status === 404) { await r.text().catch(() => {}); throw new Refused('The archive copy is no longer in the store', 'copy_missing', true); }
+    if (r.status !== 200 || !r.body) throw await S3.refusal(r, 'Reading the archive copy failed');
+    scratch = await mkdtemp(join(tmpdir(), 'volt-restore-'));
+    file = join(scratch, 'original');
+    const out = createWriteStream(file);
+    const reader = (r.body as any).getReader();
+    for (;;) { const { done, value } = await reader.read(); if (done) break; if (!out.write(value)) await new Promise<void>((res) => out.once('drain', () => res())); }
+    await new Promise<void>((res, rej) => out.end((e: any) => (e ? rej(e) : res())));
+  } else {
+    const root = await targetRoot(job);
+    file = insideTarget(root, String(job.payload?.storedPath ?? ''));
+    try { const s = await stat(file); if (!s.isFile()) throw new Error('not a file'); } catch { throw new Refused('The archive copy is no longer at the target', 'copy_missing', true); }
+  }
+  try {
+    const h = await hashFile(file);
+    if (want && h.sha256 !== want) throw new Refused('The archive copy no longer matches the checksum it was archived with, so it is not restored', 'copy_corrupt', true);
+    const u = await call(ctx, `/api/site-agent/jobs/${job.id}/transfer-url`, { leaseId: job.leaseId, name: 'restore', signedHeaders: true });
+    if (u.status === 409) throw new Refused('the lease was lost before the upload', 'lease_lost');
+    if (u.status !== 200 || !u.body?.url) throw new Refused(u.body?.error ?? `upload URL refused (HTTP ${u.status})`, u.body?.code ?? 'transfer_refused');
+    const url = /^https?:\/\//.test(u.body.url) ? u.body.url : ctx.server.replace(/\/+$/, '') + u.body.url;
+    const headers: Record<string, string> = { 'content-type': 'application/octet-stream', 'content-length': String(h.bytes) };
+    if (u.body.headers && typeof u.body.headers === 'object') {
+      for (const [k, v] of Object.entries(u.body.headers)) if (SIGNED_HEADER.test(k.toLowerCase()) && typeof v === 'string') headers[k.toLowerCase()] = v;
+    }
+    const f = ctx.fetch ?? fetch;
+    const put = await f(url, { method: 'PUT', body: createReadStream(file) as any, duplex: 'half', headers } as any);
+    const text = await put.text().catch(() => '');
+    if (put.status === 409) throw new Refused('the lease was lost while uploading', 'lease_lost');
+    if (!put.ok) {
+      let code = 'upload_failed'; try { code = JSON.parse(text)?.code ?? code; } catch { /* not JSON */ }
+      throw new Refused(`uploading the original failed (HTTP ${put.status})`, code);
+    }
+    return { sha256: h.sha256, bytes: h.bytes };
+  } finally {
+    if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // ---- folders: an asset's HLS/DASH package (H3-11) ---------------------------------
 
 /** The files a folder job lists, each with a path that stays inside the folder. */
@@ -481,7 +538,8 @@ export async function archivePass(ctx: ArchiveCtx): Promise<number> {
     const job = l.body; ran++;
     try {
       const result = job.type === 'archive.copy' ? await runCopy(ctx, job) : job.type === 'archive.verify' ? await runVerify(ctx, job)
-        : job.type === 'archive.copy-folder' ? await runCopyFolder(ctx, job) : job.type === 'archive.verify-folder' ? await runVerifyFolder(ctx, job) : null;
+        : job.type === 'archive.copy-folder' ? await runCopyFolder(ctx, job) : job.type === 'archive.verify-folder' ? await runVerifyFolder(ctx, job)
+        : job.type === 'archive.restore' ? await runRestore(ctx, job) : null;
       if (!result) throw new Refused(`this agent does not run ${job.type}`, 'unknown_type', true);
       const c = await call(ctx, `/api/site-agent/jobs/${job.id}/complete`, { leaseId: job.leaseId, result });
       if (c.status === 422 && job.type === 'archive.copy-folder' && typeof result.storedPath === 'string') {

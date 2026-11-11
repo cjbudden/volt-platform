@@ -125,7 +125,7 @@ Reports stay after the raw sessions they were made from are pruned.
 
 With the **Mirror and Archive** add-on, account administrators see a **Mirror and Archive** section on this page. Copies are written by a server at one of your [sites](hybrid-sites.md), so make a site and add a server first; the section links to **Sites** until there is one.
 
-![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it, and below them the originals out of the cloud: one in the archive only, one kept and waiting with why](/img/screens/storage-mirror-archive.png)
+![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it, and below them the originals out of the cloud: one in the archive only with its Restore button, one kept and waiting with why](/img/screens/storage-mirror-archive.png)
 
 **Add a storage target**
 
@@ -177,6 +177,8 @@ An original leaves the cloud only once a **Verified** copy of that very file is 
 | A job is using the original | Nothing: it goes after the job finishes |
 
 A rule on a channel or event decides for that stream's media before the account's rule does.
+
+**Bring an original back.** To re-encode a title whose original is in the archive only, choose **Restore** on its row under **Originals out of the cloud**. A server at the copy's site reads the copy, checks it is still the file that was archived and uploads it; Volt checks what arrived against the archived checksum before the asset uses it again. While it runs the row says **Being restored**; if it fails, the row says why (for example the copy no longer matches). A restored original stays in the cloud for the rule's number of days again, counted from the restore. **Restore** needs a verified copy: check a missing or corrupt one again first.
 
 ## How it connects
 
@@ -238,6 +240,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/storage/retention/effective?channelId={id}` | Which rule governs a channel (or `eventId`), and where it comes from |
 | `PUT /api/storage/retention` | Saves a rule; add `channelId` or `eventId` for a rule that applies to one stream only. `originalAfterDays` takes originals out of the cloud once archived (Mirror and Archive); `includeUploads` covers uploads and watch folder files |
 | `GET /api/archive/originals`, `GET /api/archive/originals/{assetId}` | Originals removed from the cloud or waiting for their copy, and where one asset's original is |
+| `POST /api/archive/originals/{assetId}/restore` | Brings a removed original back from its archive copy |
 | `POST /api/storage/retention/preview` | The dry run |
 | `GET /api/analytics/retention`, `PUT /api/analytics/retention` | Event data retention |
 | `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Mirror and Archive storage targets |

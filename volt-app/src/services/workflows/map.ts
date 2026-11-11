@@ -125,6 +125,7 @@ export const JOB_STAGES: Record<string, string> = {
   'archive.copy-folder': 'archive',
   'archive.verify': 'archive',
   'archive.verify-folder': 'archive',
+  'archive.restore': 'archive',
   'archive.recording': 'archive',
 };
 /** Job types the report never counts (see JOB_STAGES). */
