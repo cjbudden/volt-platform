@@ -162,6 +162,8 @@ A FAST channel's playlists are the same for every viewer, so they cannot carry a
 
 A stitched ad session (step 6) is this viewer's own, so its playlists carry this viewer's tokens: the title's segments, and each ad's and house spot's, have a token in front of their folder, bound to the viewer's country and lasting as long as the title's own token would. Nothing changes for your player: play `delivery.hls` or `delivery.dash` as they are. When the title stops being public, the session's playlists, its segment addresses and its timeline answer `403` *No longer available*, and so do the title's segments already in the player. Ask the gate again, as for any other `403`. With guided ads, each break's ads carry tokens the same way.
 
+The guided playlist itself (`delivery.hls` under `/vod-ads/g/...`) is the same for every viewer of the title and is cached at the CDN, so it cannot carry a viewer's token. It names the title's segments through a shared token instead, like a FAST channel's: it opens only that title's folder and carries no country (the gate has already decided this viewer may watch). The token changes every few hours, and the address the gate hands out changes with it, so a cached playlist never names an expired token. An address handed out before a change keeps answering, with the token it was given, until that token runs out, which is never before the end of the title plus an hour, so a viewer who started just before a change can watch to the end, pausing too. When the title stops being public, its segments answer `403` *No longer available* within about a minute and the guided playlist answers `404`; ask the gate again.
+
 ## Troubleshooting
 
 ```bash file=play-gate/wrong-site.sh

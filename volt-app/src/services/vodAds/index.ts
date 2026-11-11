@@ -39,7 +39,9 @@
 //  every request, and a withdrawn title's tokens (issued before the
 //  revocation) stop at the edge while the session's own routes refuse too.
 //  Guided sessions: the ads are tokenised the same way (fresh claims, the
-//  viewer's country); the shared content playlist is P2-2f.
+//  viewer's country). The guided content playlist is shared by every viewer
+//  and cached at the CDN, so it names the title's segments through a shared
+//  token for its version instead (P2-2f-3, guidedVersions below).
 // ============================================================================
 import { randomBytes, createHash } from 'node:crypto';
 import { query, one } from '../../db';
@@ -63,6 +65,7 @@ import {
 import { parseMpd, stitchMpd, contentEdges, sidecarText, cutVtt, type Mpd, type DashAd, type DashAdTrack } from './dash';
 import {
   edgeTokensMode, mintEdgeToken, signEdgeToken, tokenPrefix, tokenLifetimeSec, withToken, PLAIN_VOD_RE, type PolicyClass,
+  playlistEdgeTokens, sharedRotation, POLICY_MAX_TOKEN_LIFETIME_SEC,
 } from '../edgeTokens';
 
 // ---------------------------------------------------------------- rules
@@ -348,12 +351,13 @@ export function sessionEdgeOf(spec: EdgeSpec, nowSec?: number): SessionEdge {
   return { c: claims.c, k: claims.k, n: claims.n, e: claims.e };
 }
 
-type FolderToken = { prefix: string; token: string };
+export type FolderToken = { prefix: string; token: string };
 
 /**
  * The token for one asset's folder in this session, or null (tokens off, a
  * folder the edge does not guard such as /clips/ads/, or the session's own
- * content with no claims: a guided session's, which is P2-2f). The title's
+ * content with no claims: a guided session's, whose content is in the shared
+ * guided playlist with its shared token, P2-2f-3). The title's
  * folder gets the viewer's claims; an ad's folder the same times and country,
  * policy class open (an ad has no rights of its own to the viewer).
  */
@@ -722,7 +726,7 @@ export async function sessionText(row: any, k: number, repId: string): Promise<s
  * The guided playlists' version: changes when the rule, the asset's cues or
  * (catch-up) the stream's broadcast breaks change, so a CDN copy is never stale.
  */
-export async function guidedVersion(asset: AssetRow, rule: VodAdRuleRow, fetcher?: Fetcher): Promise<string> {
+async function guidedBaseVersion(asset: AssetRow, rule: VodAdRuleRow, fetcher?: Fetcher): Promise<string> {
   const resolved = resolveVodAdPolicy(rule.policy);
   const got = asset.master_key ? await breaksForRule(asset, { ...rule, resolved }, null, fetcher) : { cuts: [] as CutWindow[], vmap: null, breaks: [] };
   const cutKey = got.cuts.map((w) => `${w.fromSec}-${w.toSec}`).join(',');
@@ -730,22 +734,85 @@ export async function guidedVersion(asset: AssetRow, rule: VodAdRuleRow, fetcher
   const vmapKey = got.vmap ? `|vmap:${got.breaks.map((b) => `${b.position}${b.atSec}`).join(',')}` : '';
   return createHash('sha256').update(`${rule.id}|${new Date(rule.updated_at).getTime()}|${(asset.break_cues_ms ?? []).join(',')}|${titleRule(asset.metadata)}${cutKey ? `|${cutKey}` : ''}${vmapKey}`).digest('base64url').slice(0, 10);
 }
+
+/**
+ * THE GUIDED PLAYLIST'S SHARED TOKEN (build queue P2-2f-3). The guided
+ * playlists are one answer for every viewer, cached at the CDN, so under
+ * enforce they cannot carry a viewer's token: they name the title's segments
+ * through the shared token (edgeTokens.ts sharedEdgeToken) of the title's
+ * folder, scope "guided:<version>", no country (country rules stay at the play
+ * gate, which hands out this playlist only where the title may play).
+ *
+ * An on-demand playlist is read once and then played for as long as the title
+ * lasts (and paused), unlike a FAST window that is read again every few
+ * seconds. So its token outlives its period by the usual overlap PLUS the
+ * title's length: a viewer who starts just before a rotation still has a
+ * valid token at the last segment. Null when tokens are off, the folder is not
+ * one the edge guards, or the title is withdrawn (playlistEdgeTokens names
+ * none: its segments stay plain and the edge refuses them).
+ */
+async function guidedEdgeToken(asset: AssetRow, base: string, nowSec: number): Promise<FolderToken | null> {
+  if (edgeTokensMode() === 'off' || !asset.master_key) return null;
+  const prefix = tokenPrefix([keyUrl(asset.master_key)]);
+  if (!prefix || !PLAIN_VOD_RE.test(prefix)) return null;
+  const lengthSec = Math.ceil(Math.max(0, Number(asset.duration_ms ?? 0)) / 1000);
+  const overlapSec = Math.min(sharedRotation().overlapSec + lengthSec, POLICY_MAX_TOKEN_LIFETIME_SEC);
+  const t = await playlistEdgeTokens(`guided:${base}`, [asset.master_key], nowSec, { overlapSec });
+  const token = t ? Object.values(t.byAsset)[0] : null;
+  return token ? { prefix, token } : null;
+}
+const tokenExpiry = (token: string) => { try { return Number(JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8')).e) || 0; } catch { return 0; } };
+
+/**
+ * The guided playlists' versions that still play, newest first, each with the
+ * shared token its playlists name (null with tokens off). With tokens on, the
+ * token is part of the version, so the version changes when the token rotates
+ * and a CDN copy never names an expired token. A player that read the master
+ * before a rotation keeps asking for its version (another rendition, later);
+ * that version still answers, with the token it was first given, for as long
+ * as that token is valid, so a rotation never cuts a playback short.
+ * `want`: stop once that version is found (the playlist routes).
+ */
+export async function guidedVersions(asset: AssetRow, rule: VodAdRuleRow, o: { fetcher?: Fetcher; nowSec?: number; want?: string } = {}):
+  Promise<{ ver: string; edge: FolderToken | null }[]> {
+  const base = await guidedBaseVersion(asset, rule, o.fetcher);
+  if (edgeTokensMode() === 'off') return [{ ver: base, edge: null }];
+  const now = o.nowSec ?? Math.floor(Date.now() / 1000);
+  const { periodSec } = sharedRotation();
+  const out: { ver: string; edge: FolderToken | null }[] = [];
+  // At most a day of periods back: no token lives longer (POLICY_MAX_TOKEN_LIFETIME_SEC).
+  for (let k = 0; k <= Math.ceil(POLICY_MAX_TOKEN_LIFETIME_SEC / periodSec); k++) {
+    // An earlier period's token as it stood at that period's last second.
+    const at = k === 0 ? now : (Math.floor(now / periodSec) - k + 1) * periodSec - 1;
+    const edge = await guidedEdgeToken(asset, base, at);
+    if (k > 0 && (!edge || tokenExpiry(edge.token) <= now)) break;
+    const ver = edge ? createHash('sha256').update(`${base}|${edge.token}`).digest('base64url').slice(0, 10) : base;
+    out.push({ ver, edge });
+    if (!edge || (o.want && ver === o.want)) break;
+  }
+  return out;
+}
+/** The guided playlists' current version (what the play gate hands out). */
+export async function guidedVersion(asset: AssetRow, rule: VodAdRuleRow, fetcher?: Fetcher): Promise<string> {
+  return (await guidedVersions(asset, rule, { fetcher }))[0].ver;
+}
 export const guidedBase = (assetId: string, ver: string) => `/vod-ads/g/${assetId}/${ver}`;
 
-export async function guidedMaster(asset: AssetRow, ver: string): Promise<string> {
+export async function guidedMaster(asset: AssetRow, ver: string, edge: FolderToken | null = null): Promise<string> {
   const h = await assetHls(asset.master_key!);
-  return rewriteMaster(h.masterText, h.masterUrl, (e) => `${guidedBase(asset.id, ver)}/${e.track}.m3u8`);
+  // Renditions the guided playlists do not rewrite (subtitles) stay in the title's folder: the same token.
+  return tokeniseHls(rewriteMaster(h.masterText, h.masterUrl, (e) => `${guidedBase(asset.id, ver)}/${e.track}.m3u8`), edge ? [edge] : []);
 }
 
-export async function guidedPlaylist(asset: AssetRow, rule: VodAdRuleRow & { resolved: VodAdPolicy }, ver: string, track: string): Promise<string | null> {
+export async function guidedPlaylist(asset: AssetRow, rule: VodAdRuleRow & { resolved: VodAdPolicy }, ver: string, track: string, edge: FolderToken | null = null): Promise<string | null> {
   const h = await assetHls(asset.master_key!);
   const recorded = h.media.get(track);
   if (!recorded) return null;
   // Shared by every viewer and cached by the CDN: under VMAP, the title's schedule (no viewer macros).
   const { breaks, cuts } = await breaksForRule(asset, rule);
   const content = cuts.length ? cutMedia(recorded, cuts) : recorded;
-  return guidedMedia(content, breaks.map((b) => ({ index: b.index, atSec: b.atSec, durationSec: b.durationSec, position: b.position })),
-    (b) => `${guidedBase(asset.id, ver)}/list/${b.index}.json`);
+  return tokeniseHls(guidedMedia(content, breaks.map((b) => ({ index: b.index, atSec: b.atSec, durationSec: b.durationSec, position: b.position })),
+    (b) => `${guidedBase(asset.id, ver)}/list/${b.index}.json`), edge ? [edge] : []);
 }
 
 /**

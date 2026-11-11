@@ -380,11 +380,16 @@ export function sharedAssetOf(uri: string): string | null {
  * revocation and are named. Folders that are not a title's (ad creatives,
  * prepared loops under the origin) need no token and are not named.
  */
-export async function playlistEdgeTokens(scope: string, masterKeys: (string | null | undefined)[], nowSec = Math.floor(Date.now() / 1000)):
+export async function playlistEdgeTokens(scope: string, masterKeys: (string | null | undefined)[], nowSec = Math.floor(Date.now() / 1000),
+  opts: { overlapSec?: number } = {}):
   Promise<{ byAsset: Record<string, string>; nextAt: number; periodSec: number; overlapSec: number } | null> {
   if (edgeTokensMode() === 'off') return null;
   const ids = [...new Set(masterKeys.map((k) => k ? sharedAssetOf('/' + k.replace(/^\/+/, '')) : null).filter((x): x is string => !!x))];
-  const rot = sharedRotation();
+  // A longer overlap where a playlist is read once and played for a long time
+  // (a guided on-demand playlist: the title's length on top, P2-2f-3), never
+  // past the longest lifetime a play token may have.
+  const rot0 = sharedRotation();
+  const rot = { periodSec: rot0.periodSec, overlapSec: Math.min(Math.max(opts.overlapSec ?? rot0.overlapSec, rot0.overlapSec), POLICY_MAX_TOKEN_LIFETIME_SEC) };
   const empty = { byAsset: {}, nextAt: (Math.floor(nowSec / rot.periodSec) + 1) * rot.periodSec, ...rot };
   if (!ids.length) return empty;
   const rows = await query<any>(
@@ -396,7 +401,7 @@ export async function playlistEdgeTokens(scope: string, masterKeys: (string | nu
   for (const r of rows) { if (r.public) revokedAt[r.id] = Number(r.at); else out.add(r.id); }
   const named = ids.filter((id) => !out.has(id));
   if (!named.length) return empty;
-  const t = sharedEdgeTokens({ scope, assetIds: named, nowSec, revokedAt });
+  const t = sharedEdgeTokens({ scope, assetIds: named, nowSec, revokedAt, overlapSec: rot.overlapSec });
   return { byAsset: Object.fromEntries(t.byAsset), nextAt: t.nextAt, ...rot };
 }
 

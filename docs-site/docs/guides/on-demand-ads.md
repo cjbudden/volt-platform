@@ -94,7 +94,7 @@ When a viewer pauses, resumes, mutes or unmutes during an ad, Volt tells the ad 
 
 Captions carry on across a break: they go quiet during the ads and come back in step with the title. Titles protected with DRM play their ads in the clear, and the title's protection applies again as soon as it resumes.
 
-Where play tokens are enforced at the CDN, ads keep playing: the viewer's stream with the ads carries the viewer's own tokens for the title and for each ad, so a copied address does not play in another country, and the stream stops when the title is withdrawn, like the title's own address (see [The play gate](../api/play-gate.md#ad-sessions)).
+Where play tokens are enforced at the CDN, ads keep playing: the viewer's stream with the ads carries the viewer's own tokens for the title and for each ad, so a copied address does not play in another country, and the stream stops when the title is withdrawn, like the title's own address (see [The play gate](../api/play-gate.md#ad-sessions)). With guided ads, the title's own playlist is shared by every viewer and cached at the CDN, so it carries a shared token for that title instead, which lasts at least as long as the title plus an hour: a viewer who starts just before the token changes can still watch to the end.
 
 ## How it connects
 
@@ -129,6 +129,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A replay still shows the broadcast's ads | The rule has no mid-rolls, the title is marked `no_mid` or `none`, the viewer plays without ads, the break was not recorded as a break on the channel or event, or the item is highlights joined from several parts | Check `replaced` in `GET /api/vod/ads/assets/{id}/plan` |
 | No **Learn more** on an ad | The ad has no click-through page in the ad server | Add one in the ad server |
 | A DASH player gets no stream with ads, HLS plays | One of the ads chosen for that viewer exists only as an older TS file, which cannot be part of a DASH stream | Play the HLS address the play gate gives; ads prepared by Volt are always ready for both |
+| A guided player gets `404` on a playlist after watching for a long time | The title's playlist address changed (its shared play token, its ad rule or its breaks changed) and the token in the old address has run out | Ask the play gate again; the player then gets the current address |
 | **Couldn't load on-demand ads.** | The page could not reach Volt | Choose **Retry** |
 
 ## Through the API

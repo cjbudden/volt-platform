@@ -922,20 +922,61 @@ function nearestTrack(tracks: Record<string, any>, name: string) {
   return vs.length ? tracks[vs[0]] : null;
 }
 
-/** A decided pod for one track: each item's segments, the slate cut to its share. */
-async function podSegments(plan: any, track: string, slateMaster: string | null): Promise<PodRendition | null> {
+/** The masters a pod's items play from (the slate's for a slate item). */
+async function podMasters(plan: any, slateMaster: string | null): Promise<(string | null)[]> {
+  const out: (string | null)[] = [];
+  for (const it of plan?.items ?? []) out.push(it.kind === 'slate' ? slateMaster : (await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [it.assetId]))?.master_key ?? null);
+  return out;
+}
+
+/**
+ * SHARED TOKENS FOR A VIEWER'S STITCHED PODS (build queue P2-2f-3). The
+ * channel playlist the stitcher starts from already carries the playout's
+ * shared tokens on the channel's own titles, but the pods it puts into a
+ * viewer's breaks (paid ads' conditioned creatives, house spots, the slate)
+ * are titles of their own under /clips/vod/ or /vod/, which enforce refuses
+ * by plain address. They get a shared token too, the same kind and from the
+ * same source as the playout's (playlistEdgeTokens, scope "fast:<channel>"):
+ * one for every title in the breaks the request stitches, no viewer country
+ * (an ad has no rights of its own to the viewer), rotating on the same clock,
+ * and asked for on every refresh, so a live window moves to each new token
+ * well inside the overlap. A withdrawn title is left out: its segments stay
+ * plain and stop. Returns the token-prefixed address for a segment or init
+ * address, or the address as it was.
+ */
+export async function podTokeniser(channelId: string, masters: (string | null | undefined)[]): Promise<(uri: string) => string> {
+  const { playlistEdgeTokens, sharedAssetOf, withToken } = await import('../services/edgeTokens');
+  const edge = await playlistEdgeTokens(`fast:${channelId}`, masters);
+  if (!edge || !Object.keys(edge.byAsset).length) return (u) => u;
+  return (u) => {
+    if (!u) return u;
+    let path: string;
+    try { path = new URL(u, 'http://x').pathname; } catch { return u; }
+    if (path.startsWith('/t/')) return u;
+    const id = sharedAssetOf(path);
+    const tok = id ? edge.byAsset[id] : null;
+    return tok ? (withToken(u, tok) ?? u) : u;
+  };
+}
+
+/** A decided pod for one track: each item's segments, the slate cut to its share, each address through `tok` (podTokeniser). */
+export async function podSegments(plan: any, track: string, slateMaster: string | null, tok: (uri: string) => string = (u) => u): Promise<PodRendition | null> {
   const out: PodRendition = [];
-  for (const it of plan.items) {
-    const master = it.kind === 'slate' ? slateMaster : (await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [it.assetId]))?.master_key;
+  const masters = await podMasters(plan, slateMaster);
+  for (let i = 0; i < plan.items.length; i++) {
+    const it = plan.items[i];
+    const master = masters[i];
     if (!master) return null;
     const t = nearestTrack(await tracksOf(master), track);
     if (!t) return null;
+    // The token goes in front of the path before the slate's "#loopN" marker, which is stripped on output.
+    const init = t.init ? tok(t.init) : t.init;
     let left = it.durationSec;
     let guard = 0;
     while (left > 0.25 && guard++ < 200) {
       for (const s of t.segs) {
         if (left <= 0.25) break;
-        out.push({ uri: s.uri, dur: s.dur, init: t.init + (it.kind === 'slate' ? `#loop${guard}` : '') });
+        out.push({ uri: tok(s.uri), dur: s.dur, init: init + (it.kind === 'slate' ? `#loop${guard}` : '') });
         left -= s.dur;
       }
       if (it.kind !== 'slate') break;
@@ -1043,8 +1084,13 @@ fastPublicRouter.get('/:id/s/:sid/:file', asyncHandler(async (req, res) => {
   const plans = new Map<string, any>();
   for (const b of recent) {
     const plan = await sessionStore.pod<any>(decisionSid, b.id);
-    if (plan) { plans.set(b.id, plan); podCache.set(`brk:${b.id}`, await podSegments(plan, track, slate).catch(() => null)); }
+    if (plan) plans.set(b.id, plan);
   }
+  // Under play tokens, the pods' own titles carry a shared token (P2-2f-3).
+  const podMastersAll: (string | null)[] = [];
+  for (const plan of plans.values()) podMastersAll.push(...await podMasters(plan, slate).catch(() => []));
+  const tok = await podTokeniser(id, podMastersAll).catch(() => (u: string) => u);
+  for (const [bid, plan] of plans) podCache.set(`brk:${bid}`, await podSegments(plan, track, slate, tok).catch(() => null));
   const st = (await sessionStore.track<SessionState>(sid, track)) ?? { startedMs: Number((ctx as any).started ?? Date.now()), breaks: {} };
   // the channel playlist names a break brk:<id>; the pod is looked up by that
   const out = stitchHls(text, st, (breakId) => podCache.get(breakId) ?? null).replace(/#loop\d+/g, '');

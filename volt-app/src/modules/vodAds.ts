@@ -34,7 +34,7 @@ import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
   invalidateRuleCache,
   ruleForAsset, assetFor, breaksForRule, replacedView, sessionRow, readySession, sessionMaster, sessionMedia, sessionMpd, sessionText, segmentRedirect, adMaster, adMedia,
-  timelineOf, playerEvents, clickThrough, guidedVersion, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, PLAYER_EVENT_REPEATS, validSid,
+  timelineOf, playerEvents, clickThrough, guidedVersions, guidedMaster, guidedPlaylist, guidedAssetList, vodAdReport, PLAYER_EVENTS, PLAYER_EVENT_REPEATS, validSid,
   type SessionCtx,
 } from '../services/vodAds';
 
@@ -283,9 +283,12 @@ async function guidedAsset(req: Request) {
   if (ps?.status !== 'available') throw notFound();
   const rule = await ruleForAsset(asset.account_id, asset.schema_id);
   if (!rule) throw notFound();
-  const ver = await guidedVersion(asset, rule);
-  if (ver !== req.params.ver) throw notFound('This playlist has changed: ask the play gate again');
-  return { asset, rule, ver };
+  // Under play tokens the version carries the shared token: an earlier version
+  // still answers while its token is valid (P2-2f-3, guidedVersions).
+  const want = String(req.params.ver);
+  const hit = (await guidedVersions(asset, rule, { want })).find((v) => v.ver === want);
+  if (!hit) throw notFound('This playlist has changed: ask the play gate again');
+  return { asset, rule, ver: hit.ver, edge: hit.edge };
 }
 
 vodAdsPublicRouter.get('/g/:assetId/:ver/list/:b', asyncHandler(async (req, res) => {
@@ -304,8 +307,8 @@ vodAdsPublicRouter.get('/g/:assetId/:ver/list/:b', asyncHandler(async (req, res)
 vodAdsPublicRouter.get('/g/:assetId/:ver/:file', asyncHandler(async (req, res) => {
   const file = String(req.params.file);
   if (!/^[a-z0-9-]{1,24}\.m3u8$/i.test(file)) throw notFound();
-  const { asset, rule, ver } = await guidedAsset(req);
-  const text = file === 'master.m3u8' ? await guidedMaster(asset, ver) : await guidedPlaylist(asset, rule, ver, file.slice(0, -5));
+  const { asset, rule, ver, edge } = await guidedAsset(req);
+  const text = file === 'master.m3u8' ? await guidedMaster(asset, ver, edge) : await guidedPlaylist(asset, rule, ver, file.slice(0, -5), edge);
   if (!text) throw notFound();
   res.setHeader('Access-Control-Allow-Origin', '*');
   // Shared by every viewer of this asset under this rule version.
