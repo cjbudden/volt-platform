@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.94.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- improved · On-demand ads: Stitched ads now play where play tokens are enforced at the CDN. A viewer's stream with ads carries that viewer's own tokens for the title and for each ad, so a copied address does not play in another country, and the stream stops when the title is withdrawn.
+- added · FAST: FAST channels report who saw what, and replace for DASH too: Build > Brand & filler > Rights delivery lists every scheduled programme with the viewers who saw it, saw the geo replacement, or were refused, in total and per country, for today, the last 7 or the last 31 days (also GET /api/fast/channels/{id}/rights-report). Viewers are counted in memory as they play and written once a minute without slowing playback or locking the database. DASH viewers outside a title's rights now get the geo replacement as HLS viewers do.
+
+### Internal
+
+- added · Tests: New check suite vod-ads-enforce: stitched HLS and DASH sessions under enforce end to end, tokens per folder and country, the withdrawn refusal, guided ads, issue and off.
+
 ## 0.93.0 (2026-11-11)
 
 ### Product (in customer release notes)
