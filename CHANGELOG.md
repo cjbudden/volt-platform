@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.100.0 (2026-11-11)
+
+### Product (in customer release notes)
+
+- added · Media Library: Find details has a Search the web button: it opens a web search for the title in a new tab of your browser, so you can find the title's own page and paste its link back into Find details to read it.
+
+### Internal
+
+- added · Tests: New find-details-web check suite pins the web search address and that no search service, setting or key is added on the server.
+
 ## 0.99.0 (2026-11-11)
 
 ### Product (in customer release notes)
