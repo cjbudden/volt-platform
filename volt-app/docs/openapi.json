@@ -51,7 +51,7 @@
   {
    "name": "Archive",
    "x-displayName": "Mirror and Archive",
-   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, or an S3-compatible object store such as MinIO, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules in the publishing rules (`archive`) copy originals on ingest or publish and recordings as each programme or hour ends (copies with `what` `recording` and `recording-sidecar`, naming `streamId`, `rangeStart`, `rangeEnd` and the programme `title`), optionally in an off-peak window, and every target re-checks its verified copies on its own cadence (`recheckDays`). An object-store target names its keys with `credentialRef`; the keys themselves stay on the site's agent host and are never sent to Volt. Restore to the cloud and a delete that waits for a confirmed copy come next."
+   "description": "Mirror and Archive keeps extra copies of your media on storage you own at one of your sites, written by the Volt site agent, each one checked against the original before it counts.\n\n**Use it to:**\n- Name where copies go with `POST /api/archive/targets` (a folder on the site's server or a mounted NAS share, or an S3-compatible object store such as MinIO, with an optional bandwidth cap)\n- Copy an asset's original there with `POST /api/archive/copies`\n- See every copy, where it is and when it was last confirmed with `GET /api/archive/copies`\n- Check a copy again with `POST /api/archive/copies/{id}/verify`\n\n**Credential:** admin session (Bearer) or account secret key, account administrators only, and the Mirror and Archive add-on on the account.\n\n**Good to know:** a copy is `verified` only once the checksum read back from the target matches the original's; a copy that changes later is found `corrupt` and one that disappears `missing` by a re-check. Copy rules in the publishing rules (`archive`) copy originals on ingest or publish and recordings as each programme or hour ends (copies with `what` `recording` and `recording-sidecar`, naming `streamId`, `rangeStart`, `rangeEnd` and the programme `title`), optionally in an off-peak window, and every target re-checks its verified copies on its own cadence (`recheckDays`). An object-store target names its keys with `credentialRef`; the keys themselves stay on the site's agent host and are never sent to Volt. A retention rule can remove an asset's original from the cloud once a verified copy of it is held (`originalAfterDays` on `PUT /api/storage/retention`); `GET /api/archive/originals` lists what it removed and what waits, with why. Restore to the cloud comes next."
   },
   {
    "name": "Audit",
@@ -3609,6 +3609,171 @@
     "parameters": [
      {
       "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/archive/originals": {
+   "get": {
+    "operationId": "getArchiveOriginals",
+    "summary": "List originals out of the cloud, or waiting",
+    "tags": [
+     "Archive"
+    ],
+    "description": "Assets whose original a retention rule removed from the cloud (`state` `removed`: the archive copy named in `copy` is verified, and the renditions still play) or whose rule is due while the original waits for its archive copy (`state` `waiting`, with `waitCode` and `why`). `waitCode` is `no_copy`, `copy_pending`, `copy_failed`, `copy_corrupt`, `copy_missing`, `copy_stale` (the copy is of an earlier original), `copy_unchecked` (the copy could not be compared with the original's checksum), `in_use` (a job is reading the original), `no_licence` or `not_removable`. Filter by `state` or `wait_code`. Set the rule with `originalAfterDays` on `PUT /api/storage/retention`. Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user\n\n**List:** searchable, filterable, sortable and paged the standard way (see Using the API). Filter on `id`, `title`, `state`, `wait_code`, `removed_at`, `checked_at`.",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "the Media Library asset. Filter: `id=value` (comma list = any of), or `id[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "title",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "Filter: `title=value` (comma list = any of), or `title[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "enum": [
+        "waiting",
+        "removed"
+       ]
+      },
+      "description": "removed: the original left the cloud and its archive copy is verified; waiting: a rule is due and the copy is not there yet (see waitCode). Filter: `state=value` (comma list = any of), or `state[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "wait_code",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "why it waits: no_licence, no_copy, copy_pending, copy_failed, copy_corrupt, copy_missing, copy_stale, copy_unchecked, in_use, not_removable. Filter: `wait_code=value` (comma list = any of), or `wait_code[op]=value` with op: `eq` (equals), `ne` (not equal), `in` (any of, comma list), `nin` (none of, comma list), `contains` (contains), `starts` (starts with), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "removed_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `removed_at=value`, or `removed_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "checked_at",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "description": "Filter: `checked_at=value`, or `checked_at[op]=value` with op: `eq` (equals), `gt` (>), `gte` (>=), `lt` (<), `lte` (<=), `exists` (has a value, true or false)."
+     },
+     {
+      "name": "sort",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "-checked_at"
+      },
+      "description": "Comma list of: id, title, state, wait_code, removed_at, checked_at. Prefix `-` for descending. Default `-checked_at`; ties by id."
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 500,
+       "default": 100
+      }
+     },
+     {
+      "name": "cursor",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      },
+      "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "count",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean"
+      },
+      "description": "Also return the total that match, in `X-Total-Count`."
+     }
+    ],
+    "x-volt-list": true
+   }
+  },
+  "/api/archive/originals/{assetId}": {
+   "get": {
+    "operationId": "getArchiveOriginalsByAssetId",
+    "summary": "Where an asset's original is",
+    "tags": [
+     "Archive"
+    ],
+    "description": "What retention will do with one asset's original: `state` `none` (no original kept), `kept` (no rule removes it), `scheduled` (with `dueAt` and the `rule` that decides, at channel, event or account scope), `waiting` (due, with `code` and `message` saying why it stays) or `removed` (with `removedAt` and the archive `copy` it can come back from). Needs the Mirror and Archive add-on.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** any signed-in admin user",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "assetId",
       "in": "path",
       "required": true,
       "schema": {
@@ -13633,6 +13798,42 @@
     }
    }
   },
+  "/api/fast/channels/{id}/rights-report": {
+   "get": {
+    "operationId": "getFastChannelsByIDRightsReport",
+    "summary": "Get a channel's rights report",
+    "tags": [
+     "Fast"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** fast: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/fast/channels/{id}/rundown": {
    "get": {
     "operationId": "getFastChannelsByIDRundown",
@@ -15621,6 +15822,17 @@
        "type": "string"
       },
       "description": "The next page: copy it from the previous response (`Link: rel=\"next\"` or `X-Next-Cursor`). Only valid with the same q, filters and sort."
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 100000
+      },
+      "description": "Skip this many rows (page jumps). Prefer cursor."
      },
      {
       "name": "count",
@@ -33522,11 +33734,11 @@
    },
    "put": {
     "operationId": "putStorageRetention",
-    "summary": "Set storage retention",
+    "summary": "Create or change a retention rule",
     "tags": [
      "Storage"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "description": "`name` and `stages` (each `afterDays` and `action`: `keep`, `to_cold`, `to_archive` or `delete`, with an optional `targetTier`), scoped to the account, a `channelId` or an `eventId`; `ruleId` changes an existing rule. `appliesTo` (`recording`, `asset` or `both`) and `enabled` are kept when not sent. `originalAfterDays` removes an asset's original file from the cloud that many days after it landed, and only once a verified archive copy of it is held at one of the account's storage targets (the renditions stay, so the title keeps playing); `null` keeps originals, not sending it keeps the rule's setting, and it needs the Mirror and Archive add-on (403 `licence_required`). `includeUploads` makes an account rule reach uploads and watch folder files too: on for a rule created now, off for rules made before it existed until it is turned on. A ladder this storage cannot carry out is refused with 400 and the reason.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
     "security": [
      {
       "adminBearer": []

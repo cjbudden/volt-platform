@@ -19,7 +19,7 @@
 //  name only and says why.
 // ============================================================================
 import { useEffect, useState } from 'react'
-import { api, type ArchiveTarget, type ArchiveCopy, type ArchiveCopyState, type SiteRow } from '../api'
+import { api, type ArchiveTarget, type ArchiveCopy, type ArchiveCopyState, type ArchiveOriginal, type SiteRow } from '../api'
 import { FormStatus, useNotify } from '../notices'
 import { navigate } from '../router'
 
@@ -32,6 +32,68 @@ const IC = {
   check: ic(<path d="M5 12l5 5 9-10" />),
   shield: ic(<><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M9 12l2 2 4-4" /></>),
   site: ic(<><path d="M3 21h18" /><path d="M5 21V8l7-5 7 5v13" /><path d="M9 21v-6h6v6" /></>),
+  wait: ic(<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>),
+  archived: ic(<><path d="M3 7h18v13H3z" /><path d="M1 3h22v4H1z" /><path d="M10 12h4" /></>),
+}
+
+/** What to do about an original that waits (services/archive/originals.ts codes). */
+const ORIGINAL_HINT: Record<string, string> = {
+  no_copy: 'Add a copy rule for originals in Publishing Rules, or copy this asset to a storage target.',
+  copy_pending: 'Nothing: it goes once the copy is verified.',
+  copy_failed: 'See the copy above for the reason, fix it at the site and copy again.',
+  copy_corrupt: 'Copy the original again; the old copy no longer matches.',
+  copy_missing: 'Copy the original again; the old copy is gone from the target.',
+  copy_stale: 'The original was replaced: copy the new one.',
+  copy_unchecked: 'Copy it again so the copy can be compared with the original.',
+  in_use: 'Nothing: it goes after the job finishes.',
+  no_licence: 'Turn on Mirror and Archive for the account.',
+  not_removable: 'Ask whoever runs Volt: the file is not where Volt keeps originals.',
+}
+
+/** Originals a retention rule removed from the cloud, and those waiting for their copy (H3-5). */
+function Originals() {
+  const [items, setItems] = useState<ArchiveOriginal[] | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => { api.archiveOriginals().then(r => { setItems(r.items); setErr('') }).catch(e => setErr(e?.message || 'Could not load originals')) }, [])
+  if (err) return <FormStatus error={err} />
+  if (!items) return null
+  const waiting = items.filter(i => i.state === 'waiting').length
+  return (
+    <div data-originals>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+        <div className="sec-label" style={{ margin: 0 }}>Originals out of the cloud</div>
+        <span style={{ flex: 1 }} />
+        <span className="hintxt" style={{ margin: 0 }}>{items.length - waiting} removed · {waiting} waiting</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="hintxt">None yet. A retention rule on this page can remove originals from the cloud once a verified archive copy is held; the renditions stay.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead><tr><th>Asset</th><th>Original</th><th>Archive copy</th><th>Since</th></tr></thead>
+            <tbody>
+              {items.map(o => (
+                <tr key={o.vodAssetId} data-original={o.state} style={{ cursor: 'default' }}>
+                  <td><a href={`/vod?asset=${o.vodAssetId}`} onClick={e => { e.preventDefault(); navigate(`/vod?asset=${o.vodAssetId}`) }}>{o.title || 'Untitled'}</a></td>
+                  <td>{o.state === 'removed'
+                    ? <span className="tag live" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{IC.archived} In the archive only</span>
+                    : <>
+                        <span className="tag idle" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{IC.wait} Kept, waiting</span>
+                        <div style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', maxWidth: 420 }} data-original-wait={o.waitCode ?? ''}>
+                          <div style={{ color: 'var(--warn)' }}>{o.why}</div>
+                          {o.waitCode && ORIGINAL_HINT[o.waitCode] && <div className="hintxt" style={{ margin: '2px 0 0' }}><b>What to do:</b> {ORIGINAL_HINT[o.waitCode]}</div>}
+                        </div>
+                      </>}</td>
+                  <td>{o.copy ? <><div>{o.copy.targetName ?? '–'}</div><div className="mono hintxt" style={{ margin: 0, overflowWrap: 'anywhere' }}>{o.copy.storedPath}</div></> : '–'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{when(o.removedAt ?? o.checkedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export const COPY_STATE: Record<ArchiveCopyState, { label: string; cls: string; about: string }> = {
@@ -319,6 +381,7 @@ export function MirrorArchive() {
               </table>
             </div>
           )}
+          <Originals />
         </>
       )}
     </div>

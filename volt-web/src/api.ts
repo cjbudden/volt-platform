@@ -1275,6 +1275,8 @@ export const api = {
     if (q.q) p.set('q', q.q)
     return req(`/archive/copies?${p}`)
   },
+  /** Originals removed from the cloud by a retention rule, or waiting for their archive copy, with why (H3-5). */
+  archiveOriginals: (): Promise<{ items: ArchiveOriginal[] }> => req('/archive/originals?limit=500'),
   verifyArchiveCopy: (id: string): Promise<ArchiveCopy> => req(`/archive/copies/${encodeURIComponent(id)}/verify`, { method: 'POST', body: '{}' }),
   /** Admin > Captions (modules/captionsSettings.ts). */
   captionsSettings: (): Promise<CaptionsSettings> => req('/account-settings/captions'),
@@ -1833,6 +1835,7 @@ export const api = {
     ruleId?: string; name: string; channelId?: string; eventId?: string
     accountScope?: boolean; appliesTo?: 'recording' | 'asset' | 'both'
     stages: RetentionStageInput[]
+    originalAfterDays?: number | null; includeUploads?: boolean
   }): Promise<RetentionRuleRow> => req('/storage/retention', { method: 'PUT', body: JSON.stringify(b) }),
   previewSweep: (): Promise<SweepPreview> => req('/storage/retention/preview', { method: 'POST' }),
 
@@ -2836,11 +2839,24 @@ export interface RetentionRuleRow {
   account_id: string | null; channel_id: string | null; event_id: string | null
   name: string; applies_to: 'recording' | 'asset' | 'both'; enabled: boolean
   stages: { id?: string; afterDays: number; action: RetentionActionId; targetTier: StorageTierId | null }[]
+  /** H3-5: originals leave the cloud this many days after they land, once archived. */
+  original_after_days?: number | null
+  /** An account rule also reaches uploads and watch folder files. */
+  include_uploads?: boolean
+}
+
+/** One asset's original that a retention rule removed, or that waits for its archive copy (H3-5). */
+export interface ArchiveOriginal {
+  vodAssetId: string; title: string | null; state: 'waiting' | 'removed'
+  waitCode: string | null; why: string | null; removedAt: string | null; checkedAt: string | null
+  copy: { id: string; targetName: string | null; storedPath: string | null } | null
 }
 
 export interface SweepPreview {
   dryRun: boolean; considered: number; cooled: number; archived: number
   deleted: number; skippedOnHold: number; failed: number; unavailable: number
+  /** Originals the next pass would remove from the cloud, and those waiting for their archive copy. */
+  originals?: { considered: number; removed: number; waiting: number; failed: number }
 }
 
 /** One frame of the video media lane's filmstrip. */

@@ -53,6 +53,15 @@ export interface RetentionRule {
   applies_to: 'recording' | 'asset' | 'both';
   enabled: boolean;
   stages: RetentionStage[];
+  /** Remove an asset's ORIGINAL from the cloud this many days after it landed,
+   *  once a verified archive copy of it is held (services/archive/originals.ts,
+   *  H3-5). Null: originals are kept. Independent of `stages`: the renditions
+   *  and the rest of the asset are not touched by it. */
+  original_after_days?: number | null;
+  /** An account-level rule also reaches uploads and watch folder files (assets
+   *  with no channel or event) by the asset's own account. False on rules made
+   *  before H3-5, true on new ones (Christian, 11 Nov 2026). */
+  include_uploads?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +162,11 @@ async function withStages(rows: any[]): Promise<RetentionRule[]> {
  * from a UI and impossible to explain when it deletes something.
  */
 export async function ruleFor(
-  opts: { channelId?: string | null; eventId?: string | null; accountId?: string | null; appliesTo?: 'recording' | 'asset' }
+  opts: { channelId?: string | null; eventId?: string | null; accountId?: string | null; appliesTo?: 'recording' | 'asset';
+    /** The account was reached through the asset itself (an upload or a watch
+     *  folder file, no channel or event): only a rule that includes uploads
+     *  governs it, so rules made before H3-5 keep exactly their old reach. */
+    viaOwnAccount?: boolean }
 ): Promise<RetentionRule | null> {
   const kind = opts.appliesTo ?? 'recording';
   const scopes: [string, string | null][] = [
@@ -163,9 +176,10 @@ export async function ruleFor(
   ];
   for (const [col, id] of scopes) {
     if (!id) continue;
+    const uploads = col === 'account_id' && opts.viaOwnAccount ? ' AND include_uploads' : '';
     const row = await one<any>(
       `SELECT * FROM retention_rules
-        WHERE ${col} = $1 AND enabled AND (applies_to = $2 OR applies_to = 'both')
+        WHERE ${col} = $1 AND enabled AND (applies_to = $2 OR applies_to = 'both')${uploads}
         ORDER BY created_at LIMIT 1`,
       [id, kind]
     );
@@ -193,16 +207,29 @@ export async function saveRule(opts: {
   appliesTo?: 'recording' | 'asset' | 'both';
   enabled?: boolean;
   stages: RetentionStage[];
+  /** Undefined leaves it as it is on an update; null switches it off. */
+  originalAfterDays?: number | null;
+  /** Undefined: as it is on an update, and ON for a new account-level rule. */
+  includeUploads?: boolean;
 }): Promise<RetentionRule> {
   const v = validateStages(opts.stages);
   if (!v.ok) throw Object.assign(new Error(v.message), { code: v.code, status: 400 });
+  const oad = opts.originalAfterDays;
+  if (oad !== undefined && oad !== null && (!Number.isInteger(oad) || oad < 0)) {
+    throw Object.assign(new Error(`"${oad}" is not a number of days.`), { code: 'bad_age', status: 400 });
+  }
 
   const rule = opts.ruleId
     ? await one<any>(
         // Reachable two ways, matching listRules: the rule is account-scoped
         // to the caller, or it hangs off a channel/event the caller owns.
+        // applies_to and enabled are kept when the caller does not say: the
+        // console's ladder editor sends neither, and every save of it used to
+        // turn an asset or both rule back into a recording rule.
         `UPDATE retention_rules r
-            SET name = $3, applies_to = $4, enabled = $5, updated_at = now()
+            SET name = $3, applies_to = COALESCE($4, r.applies_to), enabled = COALESCE($5, r.enabled),
+                original_after_days = CASE WHEN $6 THEN $7::int ELSE r.original_after_days END,
+                include_uploads = COALESCE($8, r.include_uploads), updated_at = now()
            FROM (SELECT r2.id FROM retention_rules r2
                    LEFT JOIN channels c ON c.id = r2.channel_id
                    LEFT JOIN events   e ON e.id = r2.event_id
@@ -211,13 +238,17 @@ export async function saveRule(opts: {
           WHERE r.id = owned.id
         RETURNING r.*`,
         [opts.ruleId, opts.actingAccountId, opts.name,
-         opts.appliesTo ?? 'recording', opts.enabled ?? true]
+         opts.appliesTo ?? null, opts.enabled ?? null,
+         oad !== undefined, oad ?? null, opts.includeUploads ?? null]
       )
     : await one<any>(
-        `INSERT INTO retention_rules (account_id, channel_id, event_id, name, applies_to, enabled)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        `INSERT INTO retention_rules (account_id, channel_id, event_id, name, applies_to, enabled, original_after_days, include_uploads)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
         [opts.accountId ?? null, opts.channelId ?? null, opts.eventId ?? null,
-         opts.name, opts.appliesTo ?? 'recording', opts.enabled ?? true]
+         opts.name, opts.appliesTo ?? 'recording', opts.enabled ?? true, oad ?? null,
+         // A NEW account-level rule reaches uploads and watch folder files
+         // (decided 11 Nov 2026); a channel or event rule has no use for it.
+         opts.includeUploads ?? !!opts.accountId]
       );
   // An update that matched nothing means the rule is not the caller's. Same
   // answer as a rule that does not exist: ownership is not disclosed.
@@ -402,7 +433,8 @@ export async function sweep(opts: {
   const objects = await query<any>(
     `SELECT o.*, o.updated_at, r.end_epoch_ms, r.channel_id AS rec_channel, r.event_id AS rec_event, r.delete_after,
             v.channel_id AS asset_channel, v.event_id AS asset_event,
-            COALESCE(gc.account_id, ge.account_id) AS account_id,
+            COALESCE(gc.account_id, ge.account_id, CASE WHEN c.id IS NULL AND e.id IS NULL THEN v.account_id END) AS account_id,
+            (c.id IS NULL AND e.id IS NULL AND v.account_id IS NOT NULL) AS via_own_account,
             to_timestamp(COALESCE(r.end_epoch_ms, 0)/1000.0) AS closed_at
        FROM media_objects o
        LEFT JOIN recordings r ON r.id = o.recording_id
@@ -419,6 +451,8 @@ export async function sweep(opts: {
       WHERE o.state NOT IN ('deleted', 'pending', 'writing')
         AND ($2::uuid IS NULL
              OR gc.account_id = $2 OR ge.account_id = $2
+             -- An upload or watch folder file, reached by its own account (H3-5).
+             OR (c.id IS NULL AND e.id IS NULL AND v.account_id = $2)
              -- An ownerless object belongs to nobody, so a tenant-scoped pass
              -- must not see it. The platform-wide pass still reclaims it.
             )
@@ -514,6 +548,7 @@ export async function sweep(opts: {
       eventId: obj.event_id ?? obj.rec_event ?? obj.asset_event,
       accountId: obj.account_id,
       appliesTo: obj.vod_asset_id ? 'asset' : 'recording',
+      viaOwnAccount: !!obj.via_own_account,
     });
     // AN EXPIRY SET BY HAND (recordings.delete_after) wins over the rule's delete rung,
     // earlier or later, and applies to a recording no rule governs too.

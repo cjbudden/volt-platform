@@ -1392,6 +1392,13 @@ export class Orchestrator {
    */
   async sweepRetention(): Promise<number> {
     const result = await sweep({ actor: 'retention:sweep' });
+    // Originals a rule removes from the cloud once their archive copy is
+    // verified (H3-5). Its own pass: it acts on assets, not media objects.
+    try {
+      const { sweepOriginals } = await import('../archive/originals');
+      const o = await sweepOriginals({ actor: 'retention:sweep' });
+      if (o.removed || o.failed) console.log(`[retention] originals: ${o.removed} removed from the cloud, ${o.waiting} waiting, ${o.failed} failed`);
+    } catch (e) { console.error('[retention] originals pass failed', e); }
     if (result.cooled || result.archived || result.deleted || result.failed
         || result.unavailable || result.orphaned) {
       console.log(

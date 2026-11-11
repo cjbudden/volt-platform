@@ -82,6 +82,17 @@ S3 tiers are removed directly, not binned. Bulk remove and management confirmati
 A recording already pruned to what clips use shows **Kept for clips** with no date. Per row: **Change date**,
 **Use the rule** (clear the date set by hand), **Keep** / **Release** (a hold on all its media).
 
+## Originals out of the cloud (Mirror and Archive, H3-5)
+
+A rule's `original_after_days` removes an asset's original file from the cloud
+that many days after it landed, once a verified archive copy of that file is
+held at one of the account's storage targets. Only the original goes; the
+renditions play on. Until a sound copy exists it waits, and the reason is
+written on the asset and listed under Storage, Mirror and Archive, **Originals
+out of the cloud**. `include_uploads` lets an account rule reach uploads and
+watch folder files; rules made before it existed have it off. Details:
+`services/archive/originals.ts` and HYBRID_SITES.md, Phase 3j.
+
 ## API
 
 | Method | Path | |

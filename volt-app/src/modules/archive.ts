@@ -15,6 +15,9 @@
  *   POST   /api/archive/copies               { targetId, vodAssetId } copy an asset's original to a target
  *   GET    /api/archive/copies/:id
  *   POST   /api/archive/copies/:id/verify    read the copy back from the target now
+ *   GET    /api/archive/originals            originals a retention rule removed from the cloud, or that wait
+ *                                            for their archive copy, with why (H3-5), list standard
+ *   GET    /api/archive/originals/:assetId   where one asset's original is and what retention will do with it
  *
  * The copies themselves are jobs in the site's pool, leased by the site agent
  * through /api/site-agent/jobs (modules/sites.ts); the result is judged in
@@ -29,6 +32,8 @@ import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/li
 import { writeAudit, actor } from '../services/audit';
 import { requireLicence } from '../services/sites/licences';
 import * as A from '../services/archive/archive';
+import { originalStatus } from '../services/archive/originals';
+import { notFound } from '../util/http';
 
 export const archiveRouter = Router();
 archiveRouter.use(requireAuth, requireMinRole('admin'), asyncHandler(async (req, _res, next) => {
@@ -126,4 +131,52 @@ archiveRouter.post('/copies/:id/verify', asyncHandler(async (req, res) => {
   const who = actor(req);
   const { copy, created } = await A.requestVerify(accountId(req), who.userId, req.params.id);
   res.status(created ? 202 : 200).json(A.copyView(copy));
+}));
+
+// ---------------------------------------------------------------- originals
+// Copy-before-delete (H3-5): a retention rule removes an asset's original from
+// the cloud only once a verified archive copy of it is held. This list is what
+// it removed and what is waiting, with the reason the pass wrote.
+const originalList = defineList({
+  path: '/api/archive/originals',
+  fields: {
+    id: { sql: 'v.id', type: 'uuid', notNull: true, doc: 'the Media Library asset' },
+    title: { sql: 'v.title', type: 'string' },
+    state: { sql: "(CASE WHEN v.original_removed_at IS NOT NULL THEN 'removed' ELSE 'waiting' END)", type: 'enum', values: ['waiting', 'removed'], notNull: true,
+      doc: 'removed: the original left the cloud and its archive copy is verified; waiting: a rule is due and the copy is not there yet (see waitCode)' },
+    wait_code: { sql: 'v.original_wait_code', type: 'string', doc: 'why it waits: no_licence, no_copy, copy_pending, copy_failed, copy_corrupt, copy_missing, copy_stale, copy_unchecked, in_use, not_removable' },
+    removed_at: { sql: 'v.original_removed_at', type: 'timestamp' },
+    checked_at: { sql: 'v.original_checked_at', type: 'timestamp' },
+  },
+  search: ['v.title'],
+  defaultSort: '-checked_at',
+  defaultLimit: 100,
+  maxLimit: 500,
+});
+
+archiveRouter.get('/originals', asyncHandler(async (req, res) => {
+  const params: unknown[] = [accountId(req)];
+  const pl = parseList(originalList, req.query, params);
+  const rows = await query<any>(
+    `SELECT v.id, v.title, v.original_removed_at, v.original_wait_code, v.original_wait, v.original_checked_at,
+            v.original_copy_id, t.name AS target_name, ac.stored_path
+       FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id
+       LEFT JOIN events e ON e.id = v.event_id
+       LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+       LEFT JOIN archive_copies ac ON ac.id = v.original_copy_id
+       LEFT JOIN archive_targets t ON t.id = ac.target_id
+      WHERE COALESCE(g.account_id, v.account_id) = $1
+        AND (v.original_removed_at IS NOT NULL OR v.original_wait_code IS NOT NULL)${whereSql(pl)} ${pageSql(pl)}`, params);
+  res.json({ items: finishPage(req, res, pl, rows).map((r: any) => ({
+    vodAssetId: r.id, title: r.title, state: r.original_removed_at ? 'removed' : 'waiting',
+    waitCode: r.original_wait_code, why: r.original_wait, removedAt: r.original_removed_at, checkedAt: r.original_checked_at,
+    copy: r.original_copy_id ? { id: r.original_copy_id, targetName: r.target_name, storedPath: r.stored_path } : null,
+  })) });
+}));
+
+archiveRouter.get('/originals/:assetId', asyncHandler(async (req, res) => {
+  const s = /^[0-9a-f-]{36}$/i.test(req.params.assetId) ? await originalStatus(accountId(req), req.params.assetId) : null;
+  if (!s) throw notFound('asset not found');
+  res.json(s);
 }));

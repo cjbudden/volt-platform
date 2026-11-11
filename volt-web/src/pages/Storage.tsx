@@ -106,11 +106,19 @@ function StateChip({ state }: { state: string }) {
 // ---------------------------------------------------------------------------
 //  The ladder editor
 // ---------------------------------------------------------------------------
-function LadderEditor({ caps, rule, onSaved }: {
+function LadderEditor({ caps, rule, onSaved, mirrorArchive }: {
   caps: StorageCapabilities
   rule: RetentionRuleRow | null
   onSaved: () => void
+  /** The account has Mirror and Archive, so originals can leave the cloud once archived (H3-5). */
+  mirrorArchive: boolean
 }) {
+  const accountRule = !rule?.channel_id && !rule?.event_id
+  const [origOn, setOrigOn] = useState(rule?.original_after_days != null)
+  const [origDays, setOrigDays] = useState<number>(rule?.original_after_days ?? 90)
+  // A new account rule reaches uploads and watch folder files; one made before
+  // that option existed keeps its reach until an administrator turns it on.
+  const [uploads, setUploads] = useState<boolean>(rule ? !!rule.include_uploads : true)
   const [name, setName] = useState(rule?.name ?? 'Default retention')
   const [stages, setStages] = useState<RetentionStageInput[]>(
     rule?.stages?.map(s => ({ afterDays: s.afterDays, action: s.action, targetTier: s.targetTier ?? undefined }))
@@ -133,6 +141,8 @@ function LadderEditor({ caps, rule, onSaved }: {
           afterDays: Number(s.afterDays), action: s.action,
           targetTier: s.targetTier || undefined,
         })),
+        ...(accountRule ? { includeUploads: uploads } : {}),
+        ...(mirrorArchive ? { originalAfterDays: origOn ? Number(origDays) : null } : {}),
       })
       notify({ kind: 'ok', message: 'Saved.' })
       onSaved()
@@ -203,6 +213,36 @@ function LadderEditor({ caps, rule, onSaved }: {
           ))}
         </tbody>
       </table>
+
+      {accountRule && (
+        <label className="flex items-center gap-2" style={{ marginTop: 12, fontSize: 'var(--fs-sm)' }} data-include-uploads>
+          <input type="checkbox" checked={uploads} onChange={e => setUploads(e.target.checked)} />
+          <span>Include uploads and watch folder files <span style={{ color: 'var(--faint)' }}>(media with no channel or event)</span></span>
+        </label>
+      )}
+
+      {mirrorArchive && (
+        <div style={{ marginTop: 12 }} data-originals-rung>
+          <div className="sec-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 7h18v13H3z" /><path d="M1 3h22v4H1z" /><path d="M10 12h4" /></svg>
+            Originals
+          </div>
+          <div className="flex flex-wrap items-center gap-2" style={{ fontSize: 'var(--fs-sm)' }}>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={origOn} onChange={e => setOrigOn(e.target.checked)} />
+              <span>Remove the original from the cloud</span>
+            </label>
+            <input type="number" min={0} value={origDays} disabled={!origOn} aria-label="Days after the original lands"
+              onChange={e => setOrigDays(Number(e.target.value))} style={{ width: 80 }} />
+            <span style={{ color: 'var(--faint)' }}>days after it lands, once it is archived</span>
+          </div>
+          <p style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', margin: '6px 0 0' }}>
+            Only the original file goes, and only once a verified archive copy of it is held at one of your storage
+            targets. The renditions stay, so the title keeps playing. While the copy is missing, failed or not yet
+            made, the original stays and Mirror and Archive below says why.
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-2" style={{ marginTop: 12 }}>
         <button className="btn ghost" onClick={() => setStages(s => [
@@ -480,7 +520,7 @@ export default function StoragePage() {
       </div>
 
       <div style={{ marginBottom: 16 }}>
-        <LadderEditor caps={caps} rule={rules[0] ?? null} onSaved={load} />
+        <LadderEditor caps={caps} rule={rules[0] ?? null} onSaved={load} mirrorArchive={mirrorArchive} />
       </div>
 
       <EventRetention />
@@ -512,6 +552,12 @@ export default function StoragePage() {
               {preview.unavailable > 0 && (
                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--warn,#fbbf24)' }}>
                   {preview.unavailable} this deployment cannot do
+                </span>
+              )}
+              {preview.originals && (preview.originals.removed > 0 || preview.originals.waiting > 0) && (
+                <span style={{ fontSize: 'var(--fs-sm)' }} data-preview-originals>
+                  {preview.originals.removed} original{preview.originals.removed === 1 ? '' : 's'} out of the cloud
+                  {preview.originals.waiting > 0 && <span style={{ color: 'var(--warn,#fbbf24)' }}>, {preview.originals.waiting} waiting for an archive copy</span>}
                 </span>
               )}
             </>

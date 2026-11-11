@@ -134,7 +134,13 @@ Under **Copies** on the **Storage** page, every copy is listed with its target, 
 
 Every storage target reads its verified copies back on a cadence: every **30 days** unless you choose another (1 to 3650 days), or never on a schedule. A copy that still matches is confirmed again with today's date; one that changed shows **Corrupt** and one that is gone **Missing**, and neither is re-checked again until it is copied afresh. Disabling the target, or the site, pauses its re-checks.
 
-### 5. See how the archive is doing over time
+### 5. Take originals out of the cloud
+
+Once your originals are archived, the retention rule on the **Storage** page can remove each one from the cloud a number of days after it landed: under **Retention ladder**, in **Originals**, tick **Remove the original from the cloud** and set the days ([Storage](../guides/storage.md#take-originals-out-of-the-cloud-once-they-are-archived)). Only the original goes; the title keeps playing from its renditions.
+
+An original is removed only once a **Verified** copy of that very file is at one of your targets, and never while another copy is still being made from it or a job is using it. Until then it stays, and **Originals out of the cloud** in this section says why and what to do. Bringing an original back for a re-encode comes in a later release.
+
+### 6. See how the archive is doing over time
 
 In **Workflows**, the **Your sites** lane has an **Archive copies** stage: how many copies and checks ran, how many failed, how long they took, retries and the most common error, on the map and in the report ([Workflows](../guides/workflows.md)).
 
@@ -154,6 +160,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | An archive copy stays **Queued** with *the target folder is not there* | The folder is not on the server, or the NAS share is not mounted | Mount the share at the target's path; the copy is retried by itself |
 | An archive copy shows **Failed** with a checksum mismatch | What arrived at the folder did not match the original, on every attempt | Check the storage at the site, then copy it again |
 | An archive copy shows **Corrupt** or **Missing** | A check found the file changed or gone from the folder | Copy it again; look at what changes files on that storage |
+| An original is **Kept, waiting** under **Originals out of the cloud** | Its retention rule is due but no verified copy of that file is held yet | Follow **What to do** on its row; it goes at the next sweep once the copy is verified |
 | A copy to an object store stays **Queued** with *No keys named ...* | The server running the agent has no keys under the target's key name | Add them to `archive-keys.json` on every server of the site, or set the environment variables the message names |
 | A copy to an object store stays **Queued** with *can be read by others* | The key file is readable by other users of the server | `chmod 600` the key file |
 | A copy to an object store stays **Queued** with *the store answered* and an error such as *AccessDenied* | The keys are wrong, or not allowed to write to that bucket | Check the keys and their permissions in the store |
@@ -172,6 +179,8 @@ The same flow from code. Every request needs an account administrator's session 
 | `POST /api/archive/copies` | Copies an asset's original to a target (`targetId`, `vodAssetId`) |
 | `GET /api/archive/copies`, `GET /api/archive/copies/{id}` | Every copy with its state, where it is and when it was last confirmed |
 | `POST /api/archive/copies/{id}/verify` | Checks a copy again now |
+| `PUT /api/storage/retention` with `originalAfterDays` | Removes originals from the cloud that many days after they land, once a verified copy is held |
+| `GET /api/archive/originals`, `GET /api/archive/originals/{assetId}` | What was removed and what waits, with why; where one asset's original is |
 
 1. Make a storage target on a site (a folder or NAS share):
 

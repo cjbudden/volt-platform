@@ -9,7 +9,7 @@ guide: section
 
 Storage shows what recorded media your account holds, where it is kept, and what the retention ladder will do to it next. Most people come here to set the ladder: after how many days recordings move to cheaper storage, are archived or are deleted.
 
-![The Storage page: what this service can do at the top, the retention ladder, event data retention, the dry run, and the list of media with its state, tier and size](/img/screens/storage.png)
+![The Storage page: what this service can do at the top, the retention ladder with its uploads option and the originals rung, event data retention, the dry run, and the list of media with its state, tier and size](/img/screens/storage.png)
 
 ## What it is for
 
@@ -39,9 +39,13 @@ Account administrators and whoever looks after storage costs or legal holds use 
 1. Under **Retention ladder**, give the rule a name (it starts as **Default retention**).
 2. For each rung, set **After** (a number of days) and an **Action**: **Keep**, **Move to cheaper storage**, **Archive** or **Delete**. For the two moving actions you can choose a **Tier**, or leave **deployment default**.
 3. Choose **Add a rung** for another stage, or **×** to remove one (a ladder always has at least one).
-4. Choose **Save ladder**. **Saved.** confirms it.
+4. Leave **Include uploads and watch folder files** ticked for the rule to cover media that has no channel or event too (see below).
+5. With the Mirror and Archive add-on, tick **Remove the original from the cloud** under **Originals** and set the days if you want originals to leave the cloud once they are archived (see [Take originals out of the cloud](#take-originals-out-of-the-cloud-once-they-are-archived)).
+6. Choose **Save ladder**. **Saved.** confirms it.
 
 Each rung fires once, at the age you set, counted from when the recording closed. Media that is already older than a rung goes straight to the last rung that applies. A ladder only moves one way: keep, then cheaper storage, then archive, then delete.
+
+**Include uploads and watch folder files.** The account's rule also covers files that were uploaded or picked up from a watch folder, which belong to no channel or event. A rule made before this option existed has it off, so it keeps covering exactly what it did; tick it to include them.
 
 Recordings also have their own keep period, set on each channel, station or event (**Keep recordings for**). Both apply, so a recording goes when the first of them says so.
 
@@ -50,7 +54,7 @@ Exact-frame stills, the single frames Volt makes when someone asks for one frame
 ### See what the next sweep would do
 
 1. Under **What the next sweep would do**, choose **Run a dry run**.
-2. Volt counts what it looked at (**considered**) and how many would go **to cheaper storage**, be **archived** or be **deleted**. It also counts any **skipped on hold**, and any the ladder asks for that your service **cannot do**.
+2. Volt counts what it looked at (**considered**) and how many would go **to cheaper storage**, be **archived** or be **deleted**. It also counts any **skipped on hold**, and any the ladder asks for that your service **cannot do**. With an originals rung it also says how many **originals out of the cloud** the sweep would remove, and how many are **waiting for an archive copy**.
 
 Nothing is changed by a dry run.
 
@@ -121,7 +125,7 @@ Reports stay after the raw sessions they were made from are pruned.
 
 With the **Mirror and Archive** add-on, account administrators see a **Mirror and Archive** section on this page. Copies are written by a server at one of your [sites](hybrid-sites.md), so make a site and add a server first; the section links to **Sites** until there is one.
 
-![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it](/img/screens/storage-mirror-archive.png)
+![The Mirror and Archive section of the Storage page: a NAS folder and an S3-compatible store as storage targets with their speed caps and read-back cadence, and the copies (originals, and a programme's recording with its metadata file) with their state, the reason a copy waits and what to do about it, and below them the originals out of the cloud: one in the archive only, one kept and waiting with why](/img/screens/storage-mirror-archive.png)
 
 **Add a storage target**
 
@@ -150,7 +154,29 @@ Under **Copies**, every copy is listed with its target, its **State**, its size 
 
 A copy of a recording says which channel and which programme or hour it is (**Recording of** the channel, from when to when) with **Open the recording**, and its metadata file says **Metadata of the recording of** the channel. A copy that waits or failed shows the reason the site's server gave, and under it **What to do**. Choose **Check now** to have a verified, corrupt or missing copy read back again at once.
 
+**Originals out of the cloud** lists the originals a retention rule has removed from the cloud (**In the archive only**, with the target and file of the copy) and those whose rule is due but which are **Kept, waiting**, with the reason and **What to do** (see below).
+
 What is copied, and when, is set by copy rules in [Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage): originals and their sidecars (metadata, captions, poster), clips cut from recordings and each item's HLS/DASH package as a folder (in an S3-compatible store, a folder of objects), when they land, when they are published or nightly, and recordings as each programme or hour ends.
+
+### Take originals out of the cloud once they are archived
+
+With the Mirror and Archive add-on, the retention rule can remove each asset's **original file** from the cloud a number of days after it landed, so you stop paying to keep it in two places. Only the original goes: the renditions, images and metadata stay, so the title keeps playing.
+
+1. Under **Retention ladder**, in **Originals**, tick **Remove the original from the cloud** and set how many **days after it lands**.
+2. Make sure a copy rule copies originals to one of your storage targets ([Publishing Rules](publishing-rules.md#copy-originals-to-your-own-storage)).
+3. Choose **Save ladder**.
+
+An original leaves the cloud only once a **Verified** copy of that very file is held at one of your storage targets. Until then it stays, and **Originals out of the cloud** in the Mirror and Archive section says why:
+
+| Reason | What to do |
+|---|---|
+| No archive copy of the original has been made | Add a copy rule for originals, or copy the asset |
+| The archive copy is not finished yet | Nothing: it goes once the copy is verified |
+| The copy failed, no longer matches, or is no longer there | Fix the cause at the site and copy it again |
+| The copy is of an earlier original | The file was replaced: copy the new one |
+| A job is using the original | Nothing: it goes after the job finishes |
+
+A rule on a channel or event decides for that stream's media before the account's rule does.
 
 ## How it connects
 
@@ -210,7 +236,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `POST /api/storage/objects/{id}/restore` | Asks for an archived piece to be restored |
 | `GET /api/storage/retention` | The retention rules |
 | `GET /api/storage/retention/effective?channelId={id}` | Which rule governs a channel (or `eventId`), and where it comes from |
-| `PUT /api/storage/retention` | Saves a rule; add `channelId` or `eventId` for a rule that applies to one stream only |
+| `PUT /api/storage/retention` | Saves a rule; add `channelId` or `eventId` for a rule that applies to one stream only. `originalAfterDays` takes originals out of the cloud once archived (Mirror and Archive); `includeUploads` covers uploads and watch folder files |
+| `GET /api/archive/originals`, `GET /api/archive/originals/{assetId}` | Originals removed from the cloud or waiting for their copy, and where one asset's original is |
 | `POST /api/storage/retention/preview` | The dry run |
 | `GET /api/analytics/retention`, `PUT /api/analytics/retention` | Event data retention |
 | `GET /api/archive/targets`, `POST /api/archive/targets`, `PATCH /api/archive/targets/{id}` | Mirror and Archive storage targets |

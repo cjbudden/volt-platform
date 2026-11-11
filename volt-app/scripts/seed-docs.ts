@@ -714,6 +714,30 @@ async function seedG8Sections() {
       [ACCOUNT, target, a.id, a.source_key ?? `s3://volt-media/originals/${a.id}.mp4`, file, done ? file : null,
        180_000_000 + i * 37_000_000, done ? 'a3f1'.repeat(16) : null, state, error, code, done, vAgo, cAgo, ADMIN]);
   }
+  // Copy-before-delete (H3-5): the account's retention rule takes originals
+  // out of the cloud 60 days after they land, once archived. The first
+  // original (verified on the NAS) has gone; the second waits, its copy
+  // having failed, so the guide shows both rows of Originals out of the cloud.
+  const RET = '8a1f2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c71';
+  await query(
+    `INSERT INTO retention_rules(id, account_id, name, applies_to, enabled, original_after_days, include_uploads)
+     VALUES ($1,$2,'Default retention','recording',true,60,true) ON CONFLICT (id) DO NOTHING`, [RET, ACCOUNT]);
+  await query(`INSERT INTO retention_stages(rule_id, after_days, action) SELECT $1, 365, 'delete'::retention_action
+                WHERE NOT EXISTS (SELECT 1 FROM retention_stages WHERE rule_id = $1)`, [RET]);
+  if (originals[0]) {
+    await query(
+      `UPDATE vod_assets v SET original_removed_key = COALESCE(v.source_key, c.source_uri), source_key = NULL,
+              original_removed_at = now() - interval '2 days', original_copy_id = c.id, original_checked_at = now() - interval '2 days'
+         FROM archive_copies c WHERE v.id = $1 AND c.vod_asset_id = v.id AND c.target_id = $2 AND c.what = 'source' AND v.original_removed_at IS NULL`,
+      [originals[0].id, NAS]);
+  }
+  if (originals[1]) {
+    await query(
+      // Landed 70 days ago, so its 60-day rung is due and the wait is real.
+      `UPDATE vod_assets SET original_wait_code = 'copy_failed', original_checked_at = now() - interval '3 hours', created_at = now() - interval '70 days',
+              original_wait = 'The archive copy to Machine room NAS failed: The copy read back from the target does not match what was downloaded. The original stays in the cloud until a copy is verified.'
+        WHERE id = $1 AND original_removed_at IS NULL`, [originals[1].id]);
+  }
   // A recording archived by the rule (H3-7): yesterday's evening news on the
   // NAS, the file and its metadata sidecar, both verified.
   const tv = await one<{ id: string; name: string }>(

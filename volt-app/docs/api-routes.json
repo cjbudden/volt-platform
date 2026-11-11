@@ -532,6 +532,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/archive/originals",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "GET",
+  "path": "/api/archive/originals/:assetId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "any signed-in admin user",
+  "viewerTier": false,
+  "group": "/api/archive"
+ },
+ {
+  "method": "GET",
   "path": "/api/archive/targets",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -2297,6 +2315,15 @@
  {
   "method": "GET",
   "path": "/api/fast/channels/:id/rights",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "fast: view",
+  "viewerTier": false,
+  "group": "/api/fast"
+ },
+ {
+  "method": "GET",
+  "path": "/api/fast/channels/:id/rights-report",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "fast: view",

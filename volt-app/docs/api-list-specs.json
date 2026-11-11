@@ -368,6 +368,104 @@
  },
  {
   "method": "GET",
+  "path": "/api/archive/originals",
+  "search": [],
+  "defaultSort": "-checked_at",
+  "defaultLimit": 100,
+  "maxLimit": 500,
+  "allowOffset": false,
+  "unpagedLimit": null,
+  "aliases": {},
+  "fields": {
+   "id": {
+    "type": "uuid",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "the Media Library asset"
+   },
+   "title": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ]
+   },
+   "state": {
+    "type": "enum",
+    "values": [
+     "waiting",
+     "removed"
+    ],
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "exists"
+    ],
+    "doc": "removed: the original left the cloud and its archive copy is verified; waiting: a rule is due and the copy is not there yet (see waitCode)"
+   },
+   "wait_code": {
+    "type": "string",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "ne",
+     "in",
+     "nin",
+     "contains",
+     "starts",
+     "exists"
+    ],
+    "doc": "why it waits: no_licence, no_copy, copy_pending, copy_failed, copy_corrupt, copy_missing, copy_stale, copy_unchecked, in_use, not_removable"
+   },
+   "removed_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   },
+   "checked_at": {
+    "type": "timestamp",
+    "sort": true,
+    "filter": true,
+    "ops": [
+     "eq",
+     "gt",
+     "gte",
+     "lt",
+     "lte",
+     "exists"
+    ]
+   }
+  }
+ },
+ {
+  "method": "GET",
   "path": "/api/archive/targets",
   "search": [
    "name"

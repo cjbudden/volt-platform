@@ -214,7 +214,18 @@ storageRouter.put('/retention', asyncHandler(async (req, res) => {
     appliesTo: z.enum(['recording', 'asset', 'both']).optional(),
     enabled: z.boolean().optional(),
     stages: z.array(stageSchema).min(1),
+    // H3-5: remove an asset's original from the cloud this many days after it
+    // landed, once a verified archive copy is held (null: keep originals).
+    originalAfterDays: z.number().int().min(0).max(36500).nullable().optional(),
+    // An account rule also reaches uploads and watch folder files.
+    includeUploads: z.boolean().optional(),
   }).parse(req.body);
+  // A rung that needs an archive copy is refused where no copy can be made:
+  // accepted and never firing would read like a policy (retention.ts rule 2).
+  if (body.originalAfterDays !== undefined && body.originalAfterDays !== null) {
+    const { requireLicence } = await import('../services/sites/licences');
+    await requireLicence(accountId(req), 'mirror_archive');
+  }
 
   const stages: RetentionStage[] = body.stages.map((s) => ({
     afterDays: s.afterDays, action: s.action,
@@ -250,6 +261,8 @@ storageRouter.put('/retention', asyncHandler(async (req, res) => {
     appliesTo: body.appliesTo,
     enabled: body.enabled,
     stages,
+    originalAfterDays: body.originalAfterDays,
+    includeUploads: body.includeUploads,
   });
   res.json(rule);
 }));
@@ -264,7 +277,9 @@ storageRouter.put('/retention', asyncHandler(async (req, res) => {
 storageRouter.post('/retention/preview', asyncHandler(async (req, res) => {
   // Scoped to the caller. Unscoped, this reported how much media every OTHER
   // customer on the platform was about to lose.
-  res.json({ dryRun: true, ...(await sweep({ dryRun: true, limit: 1000, accountId: accountId(req) })) });
+  const { sweepOriginals } = await import('../services/archive/originals');
+  res.json({ dryRun: true, ...(await sweep({ dryRun: true, limit: 1000, accountId: accountId(req) })),
+    originals: await sweepOriginals({ dryRun: true, limit: 1000, accountId: accountId(req) }) });
 }));
 
 /** Re-read what is on disk for a stream and bring the lifecycle rows in line. */
