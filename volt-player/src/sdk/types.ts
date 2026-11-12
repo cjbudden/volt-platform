@@ -155,7 +155,8 @@ export interface Product {
 
 /** Why the viewer cannot watch yet, and what would let them. */
 export interface AccessState {
-  mode: 'paywall' | 'sign_in' | 'blocked' | null;
+  /** `stopped`: this play was stopped because the account is playing on too many devices (concurrent streams). */
+  mode: 'paywall' | 'sign_in' | 'blocked' | 'stopped' | null;
   message: string | null;
   products: Product[];
 }
@@ -442,7 +443,9 @@ export type SkinFactory = () => Skin;
 export type PlayerEventName =
   | 'state' | 'ready' | 'play' | 'pause' | 'ended' | 'error'
   | 'itemchange' | 'programmechange' | 'upnext' | 'qualitychange' | 'castchange'
-  | 'presentationchange' | 'purchase' | 'signin' | 'locked' | 'graphic' | 'statschange';
+  | 'presentationchange' | 'purchase' | 'signin' | 'locked' | 'graphic' | 'statschange'
+  /** The server stopped this play (concurrent streams): `{ code, message }`. Playing again starts a new play attempt. */
+  | 'stopped';
 
 export interface VoltPlayerSdkOptions {
   el: string | HTMLElement;

@@ -10,6 +10,13 @@
 //  same sid. Read from the title's stamp (or a channel's cached rules), so a
 //  rule change reaches a published title with the restamp, and the warm gate
 //  still makes no database read.
+//
+//  AT THE EDGE (P3-4d-2): the stopped play's sid goes on the edge stop list,
+//  the sync writes it to the edge store as "x:<sid>" (and removes it once
+//  every token from before the stop has expired), and the API's own token
+//  check refuses the stopped play's on-demand addresses while the others'
+//  still pass. The CloudFront and staging edge files are run on the same
+//  cases in edge-tokens.check.ts.
 //    DATABASE_URL=... npx tsx test/publishing-concurrent-streams.check.ts
 // ============================================================================
 let pass = 0, fail = 0;
@@ -94,6 +101,10 @@ const check = (m: string, got: unknown, want: unknown) => {
     check('two plays within the limit both start, counted', [p1.s, p1.j.streams, p2.s, p2.j.streams], [200, { limit: 2, open: 1, stopped: 0 }, 200, { limit: 2, open: 2, stopped: 0 }]);
     const claims = JSON.parse(Buffer.from(p1.j.playbackToken.split('.')[1], 'base64url').toString());
     check('the counted play\'s token carries its sid and the viewer', [claims.sid, claims.v], ['play-0001', vid]);
+    const media = async (url: string) => { const r = await fetch(base + url); return { s: r.status, t: (await r.text()).trim() }; };
+    check('the play gate hands out tokenised addresses carrying the play\'s sid', [/^\/t\//.test(p1.j.delivery.hls),
+      JSON.parse(Buffer.from(p1.j.delivery.hls.split('/')[2].split('.')[0], 'base64url').toString()).s], [true, 'play-0001']);
+    check('before the stop, the first play\'s address passes the token check', (await media(p1.j.delivery.hls)).s !== 403, true);
     check('a heartbeat of an open play is answered as before (no stop)', [(await beacon(p1.j.playbackToken, 'play-0001')).s, (await beacon(p1.j.playbackToken, 'play-0001')).j.stop ?? null], [202, null]);
     await new Promise((r) => setTimeout(r, 5));
     const p3 = await gate(film, 'play-0003');
@@ -106,6 +117,26 @@ const check = (m: string, got: unknown, want: unknown) => {
     check('the stopped play asking again with its sid is refused (409 concurrent_streams), and stops nobody',
       [again.s, again.j.code, again.j.mode, again.j.message, (await C.openPlays(acct, vid)).map((p) => p.sid)],
       [409, 'concurrent_streams', 'stopped', 'Playing on too many devices', ['play-0002', 'play-0003']]);
+    // ---- the edge (P3-4d-2)
+    const ET = await import('../src/services/edgeTokens');
+    const stops = await C.edgeStops();
+    check('the stopped play is on the edge stop list, with when it stopped', stops.live.filter((x) => x.sid === 'play-0001').length === 1
+      && Math.abs(stops.live.find((x) => x.sid === 'play-0001')!.at - Math.floor(Date.now() / 1000)) < 30, true);
+    check('...and no play that still runs', stops.live.some((x) => x.sid === 'play-0002' || x.sid === 'play-0003'), false);
+    const { mkdtempSync } = await import('node:fs'); const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+    const store = await ET.fileEdgeStore(join(mkdtempSync(join(tmpdir(), 'cs-edge-')), 'store.json'));
+    const memo = new Map<string, string | null>();
+    const sy = await ET.syncEdgeStops(store, memo);
+    check('the edge sync writes "x:<sid>" with the stop time', [sy.put >= 1, (await store.get('x:play-0001')) === String(stops.live.find((x) => x.sid === 'play-0001')!.at)], [true, true]);
+    check('...and only what changed on the next pass', (await ET.syncEdgeStops(store, memo)).put, 0);
+    const refused = await media(p1.j.delivery.hls);
+    check('the stopped play\'s old address is refused by the token check (403, the words)', [refused.s, refused.t], [403, 'Playing on too many devices']);
+    check('...a segment below it too', (await media(p1.j.delivery.hls.replace('master.m3u8', '720p/seg_1.m4s'))).s, 403);
+    check('the other plays\' addresses still pass', [(await media(p2.j.delivery.hls)).s !== 403, (await media(p3.j.delivery.hls)).s !== 403], [true, true]);
+    const later = Math.floor(Date.now() / 1000) + ET.maxTokenLifetimeSec() + 1;
+    check('kept as long as a token can live: gone after that', [(await C.edgeStops(later)).gone.includes('play-0001'), await C.edgeStoppedAt('play-0001', later)], [true, null]);
+    const sy2 = await ET.syncEdgeStops(store, memo, later);
+    check('...and the sync then removes it from the edge store and the list', [sy2.deleted >= 1, await store.get('x:play-0001'), (await C.edgeStops(later)).gone.includes('play-0001')], [true, null, false]);
     check('its end beacon is answered "stopped" too, and changes nothing', [(await beacon(p1.j.playbackToken, 'play-0001', 'end')).j.stop?.code, (await C.openPlays(acct, vid)).length], ['concurrent_streams', 2]);
     check('an end beacon of an open play closes it', [(await beacon(p3.j.playbackToken, 'play-0003', 'end')).s, (await C.openPlays(acct, vid)).map((p) => p.sid)], [202, ['play-0002']]);
     const p4 = await gate(film, 'play-0004');

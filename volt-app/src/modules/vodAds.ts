@@ -29,6 +29,7 @@ import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest, forbidden } from '../util/http';
 import { revokedAtFor, EDGE_REFUSAL_TEXT } from '../services/edgeTokens';
+import { edgeStoppedAt } from '../services/concurrentStreams';
 import { actor, writeAudit } from '../services/audit';
 import { resolveVodAdPolicy } from '../services/vodAds/plan';
 import {
@@ -193,6 +194,9 @@ async function session(req: Request, wait = false) {
   if (edge) {
     const at = await revokedAtFor(String(row.vod_asset_id));
     if (at != null && edge.n <= at) throw forbidden(EDGE_REFUSAL_TEXT.revoked);
+    // ...and once its play is stopped by the concurrent streams limit (P3-4d-2).
+    const stopped = row.play_sid ? await edgeStoppedAt(String(row.play_sid)) : null;
+    if (stopped != null && edge.n <= stopped) throw forbidden(EDGE_REFUSAL_TEXT.stopped);
   }
   return row;
 }

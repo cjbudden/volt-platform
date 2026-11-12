@@ -92,6 +92,10 @@ Or register it by name, so `options.skin = "acme"` uses it: `VoltSkins.register(
 
 `purchaseUrl` and `signInUrl` are opened in the browser with `{productKey}`, `{assetId}`, `{price}` and `{currency}` filled in. Without them, the player emits `.purchase` / `.signin` through `onEvent` for the app's own checkout (for example StoreKit). After a purchase or sign in, call `player.setViewerToken(token)` and the play gate is asked again.
 
+## Concurrent streams
+
+A title or channel whose publishing rule sets **Concurrent streams** limits how many plays one signed-in viewer may have open at once; over the limit the viewer's oldest play is stopped (see the play gate guide). The web player stops and shows the message itself. This SDK does not yet act on the server's `stop` answer to its viewer reports: for an on-demand title the CDN refuses the stopped play's addresses within about a minute, so the play ends as an `error`; a live channel plays on until the app asks the play gate again. Ask the gate again with a new play (a new `sid`) when the viewer wants to watch here.
+
 ## Events
 
 `onEvent` receives the same events as the web SDK: `ready`, `play`, `pause`, `ended`, `error`, `itemchange`, `programmechange`, `upnext`, `qualitychange`, `presentationchange`, `purchase`, `signin`, `locked`, `statschange`. The whole state is also `player.state` (`@Published`).

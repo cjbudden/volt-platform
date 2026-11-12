@@ -78,7 +78,9 @@ const check = (m: string, got: unknown, want: unknown) => {
   const three = async (uri: string, cc: string, at = NOW) => {
     Date.now = () => at * 1000;
     const m = /^\/t\/([^/]+)(\/.*)$/.exec(uri);
-    const ts = m ? T.verifyEdgeToken(m[1], m[2], { country: cc, nowSec: at, revokedAt: store['r:' + A] ? Number(store['r:' + A]) : null, key: store['k:pt'] ?? 'no-key' }).verdict : 'malformed';
+    const sidC = m ? (() => { try { return JSON.parse(Buffer.from(m[1].split('.')[0], 'base64url').toString()).s; } catch { return undefined; } })() : undefined;
+    const ts = m ? T.verifyEdgeToken(m[1], m[2], { country: cc, nowSec: at, revokedAt: store['r:' + A] ? Number(store['r:' + A]) : null,
+      stoppedAt: sidC && store['x:' + sidC] ? Number(store['x:' + sidC]) : null, key: store['k:pt'] ?? 'no-key' }).verdict : 'malformed';
     const out = await cfHandler({ request: { uri, headers: cc ? { 'cloudfront-viewer-country': { value: cc } } : {} } });
     const cfv = out.statusCode ? String(out.statusCode) : out.uri;
     const nv = njs.check(uri, cc, store, at);
@@ -117,7 +119,9 @@ const check = (m: string, got: unknown, want: unknown) => {
   const say = async (uri: string, cc: string, at = NOW) => {
     Date.now = () => at * 1000;
     const m = /^\/t\/([^/]+)(\/.*)$/.exec(uri);
-    const v = m ? T.verifyEdgeToken(m[1], m[2], { country: cc, nowSec: at, revokedAt: store['r:' + A] ? Number(store['r:' + A]) : null, key: store['k:pt'] }).verdict : 'malformed';
+    const sidC = m ? (() => { try { return JSON.parse(Buffer.from(m[1].split('.')[0], 'base64url').toString()).s; } catch { return undefined; } })() : undefined;
+    const v = m ? T.verifyEdgeToken(m[1], m[2], { country: cc, nowSec: at, revokedAt: store['r:' + A] ? Number(store['r:' + A]) : null,
+      stoppedAt: sidC && store['x:' + sidC] ? Number(store['x:' + sidC]) : null, key: store['k:pt'] }).verdict : 'malformed';
     const out = await cfHandler({ request: { uri, headers: cc ? { 'cloudfront-viewer-country': { value: cc } } : {} } });
     const nw = njs.words(uri, cc, store, at);
     Date.now = realNow;
@@ -131,6 +135,18 @@ const check = (m: string, got: unknown, want: unknown) => {
   store['r:' + A] = String(NOW + 10);
   check('words: revoked', await say(`/t/${good}${PRE}master.m3u8`, 'AU', NOW + 20), ['No longer available', 'No longer available', 'No longer available']);
   delete store['r:' + A];
+  // ---- a play stopped by the concurrent streams limit (P3-4d-2): "x:<sid>" in the store
+  const stoppedTok = tok({ sid: 'play-stopped-1' }), otherTok = tok({ sid: 'play-other-1' });
+  check('before the stop, the play\'s token plays at all three', await three(`/t/${stoppedTok}${PRE}master.m3u8`, 'AU', NOW + 20), ['ok', `${PRE}master.m3u8`, 'ok']);
+  store['x:play-stopped-1'] = String(NOW + 10);
+  check('stopped: the play\'s token issued before the stop is refused (manifest)', await three(`/t/${stoppedTok}${PRE}master.m3u8`, 'AU', NOW + 20), ['stopped', '403', '403']);
+  check('...and its segments', await three(`/t/${stoppedTok}${PRE}720p/seg_3.m4s`, 'AU', NOW + 20), ['stopped', '403', '403']);
+  check('another play\'s token (another sid) still plays', await three(`/t/${otherTok}${PRE}master.m3u8`, 'AU', NOW + 20), ['ok', `${PRE}master.m3u8`, 'ok']);
+  check('a token with no sid still plays', await three(`/t/${good}${PRE}master.m3u8`, 'AU', NOW + 20), ['ok', `${PRE}master.m3u8`, 'ok']);
+  check('a token for the same sid issued after the stop plays', await three(`/t/${tok({ sid: 'play-stopped-1', nowSec: NOW + 30 })}${PRE}master.m3u8`, 'AU', NOW + 40), ['ok', `${PRE}master.m3u8`, 'ok']);
+  check('words: stopped, the same at both edges', await say(`/t/${stoppedTok}${PRE}master.m3u8`, 'AU', NOW + 20),
+    ['Playing on too many devices', 'Playing on too many devices', 'Playing on too many devices']);
+  delete store['x:play-stopped-1'];
   const { DEFAULT_BLOCK_MESSAGE } = await import('../src/services/blockMessage');
   check('the edge\'s region words are the play gate\'s default block message', T.EDGE_REFUSAL_TEXT.country, DEFAULT_BLOCK_MESSAGE);
   check('refusals are never cached', (await cfHandler({ request: { uri: `/t/${body}.${flip}${PRE}m.m3u8`, headers: {} } })).headers['cache-control'].value, 'no-store');

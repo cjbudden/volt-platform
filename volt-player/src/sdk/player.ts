@@ -15,6 +15,8 @@ import type {
 } from './types';
 import { Engine, isApple, readableError } from './engine';
 import { Beacons } from './beacons';
+/** An item whose source came from the play gate (not from the host page). */
+const GATE_SOURCE = '__voltGateSource';
 import { Caster, contentTypeFor, showAirPlayPicker, watchAirPlay } from './cast';
 import { applyTheme, resolveTheme } from './theme';
 import { canStartOver, cleanSchedule, hasSource, normalizePlaylist, programmeAfter, programmeAt, startOverTarget, upNextFor } from './schedule';
@@ -418,6 +420,34 @@ export class VoltPlayer {
     try { this.o.onEvent?.(name, d); } catch { /* */ }
   }
 
+  /**
+   * CONCURRENT STREAMS (build queue P3-4d-2): the server stopped this play
+   * because the viewer's account started more than its limit, this one the
+   * oldest. Stop fetching and playing, say why, and offer to play here: Play
+   * (the skin's button) loads the item again, a new play attempt with a new
+   * sid, which the gate starts by stopping the oldest of the others.
+   */
+  private stopPlay(message: string, code: string) {
+    this.loadSeq++;
+    this.wantPlay = false;
+    this.beacons?.destroy(); this.beacons = null;
+    this.vodAds?.dispose(); this.vodAds = null;
+    this.attempt?.close(); this.attempt = null; this.engine.attempt = null;
+    try { this.media.pause(); } catch { /* */ }
+    void this.engine.unload().catch(() => {});
+    // The addresses the gate gave carry this play's sid (its edge token is now
+    // refused): forget them, so Play here asks the gate again with a new sid.
+    const it: any = this.s.items[this.s.index];
+    if (it && it[GATE_SOURCE]) {
+      const fresh = { ...it, source: null, playbackToken: null, [GATE_SOURCE]: false } as PlaylistItem;
+      const items = this.s.items.slice(); items[this.s.index] = fresh;
+      this.set({ items, item: fresh });
+    }
+    this.set({ status: 'error', error: message, errorCode: code, playing: false, buffering: false,
+      access: { mode: 'stopped', message, products: [] } });
+    this.emit('stopped', { code, message });
+  }
+
   private fail(msg: string, code: string | number | null) {
     this.set({ status: 'error', error: msg, errorCode: code, playing: false, buffering: false });
     this.emit('error', { message: msg, code });
@@ -696,7 +726,8 @@ export class VoltPlayer {
         const r = await resolveAsset(this.api, this.o.appKey, item.assetId, this.o.viewerToken, attempt?.sid, { delivery: 'auto', caps });
         attempt?.spanEnd('entitlement');
         if (seq !== this.loadSeq) return;
-        item = mergeResolved(item, r);
+        // Marked as the gate's addresses, so a stopped play (stopPlay) forgets them and asks again.
+        item = { ...mergeResolved(item, r), [GATE_SOURCE]: true } as PlaylistItem;
         if (attempt && item.live != null) attempt.live = item.live;
         const items = this.s.items.slice(); items[index] = item;
         this.set({ items, item });
@@ -737,6 +768,8 @@ export class VoltPlayer {
       if (seq !== this.loadSeq) return;
       // The attempt ends here either way: a refusal at the gate (its status)
       // or a failure on the way to a first frame (the step it failed at).
+      // A play the concurrent streams limit stopped, asking again with its own sid (P3-4d-2).
+      if (e instanceof GateError && e.mode === 'stopped') { attempt?.close(); this.attempt = null; this.engine.attempt = null; this.stopPlay(e.message, 'concurrent_streams'); return; }
       if (e instanceof GateError) attempt?.error(`gate-${e.status}`, 'entitlement', true);
       else attempt?.error(errorCode(e), e?.category != null ? errorStep(e) : 'playback', true);
       // PAYWALL / SIGN IN / REGION: not a failure. The viewer is shown what it
@@ -766,7 +799,9 @@ export class VoltPlayer {
       token: item.playbackToken,
       prefix: cfg.prefix ?? 'web',
       kbps: () => { const q = this.s.activeQuality; return q ? Math.round(q.bitrate / 1000) : undefined; },
+      onStop: (st) => { if (this.beacons === beacons) this.stopPlay(st.message, st.code); },
     });
+    const beacons = this.beacons;
   }
 
   /**

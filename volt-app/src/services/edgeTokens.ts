@@ -121,6 +121,12 @@ export const TOKEN_KEY = 'k:pt';
 export const revocationKey = (assetId: string) => `r:${assetId}`;
 /** A token-free title's key in the edge store (P2-2c): value "<until epoch s>" or "0". */
 export const openKey = (assetId: string) => `f:${assetId}`;
+/**
+ * A play stopped by the concurrent streams limit (P3-4d-2): value "<stopped at
+ * epoch s>". The edges refuse a viewer's token whose `s` claim is that sid and
+ * that was issued at or before the stop (services/concurrentStreams.ts).
+ */
+export const stopKey = (sid: string) => `x:${sid}`;
 
 /** The asset id of a plain on-demand path (/vod/<id>/..., /clips/vod/<id>/... or a clip's /clips/<id>/...), or null. */
 export function plainAssetId(uri: string): string | null {
@@ -243,7 +249,7 @@ export function mintEdgeToken(o: {
   return { token: signEdgeToken(claims, o.key), claims };
 }
 
-export type EdgeVerdict = 'ok' | 'malformed' | 'signature' | 'early' | 'expired' | 'path' | 'country' | 'revoked';
+export type EdgeVerdict = 'ok' | 'malformed' | 'signature' | 'early' | 'expired' | 'path' | 'country' | 'revoked' | 'stopped';
 
 // ---------------------------------------------------------------------------
 //  Shared tokens (P2-2f)
@@ -318,6 +324,8 @@ export const EDGE_REFUSAL_TEXT: Record<Exclude<EdgeVerdict, 'ok'>, string> = {
   malformed: 'Not available', signature: 'Not available', path: 'Not available',
   early: 'This link has expired', expired: 'This link has expired',
   country: 'Not available in your region', revoked: 'No longer available',
+  // A play stopped because the account is playing on too many devices (P3-4d-2).
+  stopped: 'Playing on too many devices',
 };
 
 /**
@@ -329,6 +337,8 @@ export function verifyEdgeToken(token: string, uri: string, o: {
   country?: string | null; nowSec: number; key?: string;
   /** The revocation time of the title the path is in (for a shared token, the path's title, see sharedAssetOf). */
   revokedAt?: number | null;
+  /** When the play named by the token's `s` claim was stopped ("x:<sid>"), if it was (P3-4d-2). Shared tokens carry no sid. */
+  stoppedAt?: number | null;
 }): { verdict: EdgeVerdict; claims?: EdgeClaims; shared?: SharedClaims; asset?: string } {
   const m = /^([A-Za-z0-9_-]{8,2048})\.([0-9a-f]{32})$/.exec(token);
   if (!m) return { verdict: 'malformed' };
@@ -354,6 +364,7 @@ export function verifyEdgeToken(token: string, uri: string, o: {
   const cc = (o.country ?? '').toUpperCase();
   if (c.c && cc && c.c !== cc) return { verdict: 'country', claims: c };
   if (o.revokedAt != null && c.n <= o.revokedAt) return { verdict: 'revoked', claims: c, asset: c.a };
+  if (c.s && o.stoppedAt != null && c.n <= o.stoppedAt) return { verdict: 'stopped', claims: c, asset: c.a };
   return { verdict: 'ok', claims: c, asset: c.a };
 }
 
@@ -478,6 +489,32 @@ export async function syncEdgeTokens(store: EdgeStore, memo?: Map<string, string
 }
 
 /**
+ * THE STOPPED PLAYS at the edge (P3-4d-2): "x:<sid>" for every play the
+ * concurrent streams limit stopped, while a token handed out before the stop
+ * can still be alive, removed once its time runs out. The list is kept beside
+ * the plays (Valkey or this process, services/concurrentStreams.ts), never in
+ * the database, so the play gate stays free of database reads.
+ */
+export async function syncEdgeStops(store: EdgeStore, memo?: Map<string, string | null>, nowSec = Math.floor(Date.now() / 1000)):
+  Promise<{ put: number; deleted: number }> {
+  const res = { put: 0, deleted: 0 };
+  const { edgeStops, forgetEdgeStops } = await import('./concurrentStreams');
+  const { live, gone } = await edgeStops(nowSec);
+  for (const sid of gone) {
+    const k = stopKey(sid);
+    if (memo?.get(k) === null) continue;
+    await store.delete(k); memo?.set(k, null); res.deleted++;
+  }
+  for (const { sid, at } of live) {
+    const k = stopKey(sid), v = String(at);
+    if (memo?.get(k) === v) continue;
+    await store.put(k, v); memo?.set(k, v); res.put++;
+  }
+  await forgetEdgeStops(nowSec);
+  return res;
+}
+
+/**
  * THE TOKEN-FREE SET at the edge (P2-2c): "f:<id>" for every title that plays
  * by its plain address now, removed when it stops (rule changed, a condition
  * added, window ended, withdrawn). The keys written are kept in
@@ -585,7 +622,13 @@ export function tokenPathMiddleware() {
     if (!m || !m[2].startsWith('/clips/')) return refuseText(res, 403, EDGE_REFUSAL_TEXT.malformed);
     const { viewerGeo } = await import('../scale/edge');
     const nowSec = Math.floor(Date.now() / 1000);
-    const v = verifyEdgeToken(m[1], m[2], { country: viewerGeo(req) ?? null, nowSec });
+    // A play stopped by the concurrent streams limit (P3-4d-2): its sid's stop, from the plays' own record (no database read).
+    const sidOf = /^([A-Za-z0-9_-]{8,2048})\./.exec(m[1]);
+    let sidClaim: string | null = null;
+    try { sidClaim = sidOf ? JSON.parse(Buffer.from(sidOf[1], 'base64url').toString('utf8'))?.s ?? null : null; } catch { /* the check below refuses it */ }
+    const { edgeStoppedAt } = await import('./concurrentStreams');
+    const stoppedAt = typeof sidClaim === 'string' ? await edgeStoppedAt(sidClaim, nowSec) : null;
+    const v = verifyEdgeToken(m[1], m[2], { country: viewerGeo(req) ?? null, nowSec, stoppedAt });
     if (v.verdict !== 'ok') return refuseText(res, 403, EDGE_REFUSAL_TEXT[v.verdict]);
     // The title the request is in: the token's own, or for a shared token
     // (P2-2f) the one in the path, so each title's revocation applies.

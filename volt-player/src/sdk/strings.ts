@@ -17,7 +17,7 @@ export const STRINGS: Record<string, string> = {
   nowPlaying: 'Now playing', recentlyPlayed: 'Recently played', comingUp: 'Coming up',
   comingUpIn: 'Coming up in {time}', startsAt: 'Starts at {time}', dismiss: 'Dismiss', onAir: 'On air',
   timeLeft: '{time} left', nextAt: 'Next at {time}', laterToday: 'Later',
-  offline: 'This is not on air right now.', stopped: 'The stream stopped unexpectedly.', retry: 'Try again',
+  offline: 'This is not on air right now.', stopped: 'The stream stopped unexpectedly.', retry: 'Try again', playHere: 'Play here',
   loading: 'Loading', previous: 'Previous', nextItem: 'Next',
   startsIn2: 'Starts in', days: 'days', hours: 'hrs', mins: 'min', secs: 'sec',
   addToCalendar: 'Add to calendar', postponed: 'Postponed', cancelled: 'Cancelled', newDateTba: 'A new date will be announced.',

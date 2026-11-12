@@ -233,6 +233,9 @@ export function startScheduler(): () => void {
       if (r.put || r.deleted || r.failed) console.log(`[edge-rights] ${r.put} written, ${r.deleted} removed, ${r.failed} failed`);
       const t = await et.syncEdgeTokens(store, edgeMemo);
       if (t.put || t.deleted) console.log(`[edge-tokens] ${t.put} written, ${t.deleted} removed`);
+      // plays stopped by the concurrent streams limit (build queue P3-4d-2): their old tokens are refused
+      const x = await et.syncEdgeStops(store, edgeMemo);
+      if (x.put || x.deleted) console.log(`[edge-tokens] stopped plays: ${x.put} written, ${x.deleted} removed`);
       // token-free titles (build queue P2-2c): the plain addresses the edge lets through under enforce
       const o = await et.syncEdgeOpen(store, edgeMemo);
       if (o.put || o.deleted) console.log(`[edge-tokens] token-free: ${o.put} written, ${o.deleted} removed`);

@@ -247,7 +247,8 @@ export function videoSkin(): Skin {
     const casting = st.cast.state === 'connected';
     show(parts.spin, busy && !err);
     show(parts.msg, err || casting);
-    if (err) { text(parts.msgText, st.error ?? t('offline')); show(parts.retry, true); }
+    // A play stopped by the concurrent streams limit offers to play here (a new play attempt), not to try again.
+    if (err) { text(parts.msgText, st.error ?? t('offline')); text(parts.retry, st.access?.mode === 'stopped' ? t('playHere') : t('retry')); show(parts.retry, true); }
     else if (casting) { text(parts.msgText, t('castingTo', { device: st.cast.device ?? 'TV' })); show(parts.retry, false); }
     const showBig = !st.playing && !busy && !err && !casting;
     show(parts.big, showBig);

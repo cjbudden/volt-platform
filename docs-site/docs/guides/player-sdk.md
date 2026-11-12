@@ -69,7 +69,9 @@ To translate the player, pass the words you want to change in `strings`; anythin
 
 ### Events
 
-`state`, `ready`, `play`, `pause`, `ended`, `error`, `itemchange`, `programmechange`, `upnext`, `qualitychange`, `castchange`, `presentationchange`, `locked`, `purchase`, `signin`.
+`state`, `ready`, `play`, `pause`, `ended`, `error`, `itemchange`, `programmechange`, `upnext`, `qualitychange`, `castchange`, `presentationchange`, `locked`, `purchase`, `signin`, `stopped`.
+
+`stopped` (with `code` and `message`) means the server stopped this play because the viewer's account is playing on more devices than the title's **Concurrent streams** allows (see [the play gate](../api/play-gate.md#concurrent-streams)). The player has already stopped and shows the message with a **Play here** button; pressing it starts a new play here, which stops the account's oldest play elsewhere. Rename the button with `strings: { playHere: '...' }`.
 
 A tag embed dispatches `volt-player-ready` on the page, with the player in `event.detail`, so you can listen without creating the player yourself.
 
@@ -206,4 +208,5 @@ A player without steering plays the first path listed, which works as before.
 | An `error` with `stage: 'autoplay-blocked'` | The browser blocked sound starting by itself | Start muted (`muted: true`) and let the viewer unmute |
 | A protected stream fails at the licence | No licence server for the device's key system, or the server refused | Add the key system to `drm.servers`; check the licence server's own logs |
 | **Journey to play** stays empty | The journey was made with `consent: false` and `setConsent(true)` was never called, or the app key is not a publishable key | Call `setConsent(true)` once the viewer agrees; use the app's `pk_live_...` key |
+| "Playback stopped because this account is playing on too many devices." | The viewer started more plays than the title's **Concurrent streams** allows, and this was the oldest | Nothing to fix: **Play here** moves the play to this device. Players send their `end` report when a page is hidden or closed, so closing a tab frees its stream at once |
 | `registerSkin` throws | The name is a built-in skin, or not 2 to 41 lowercase letters, digits, `-` or `_` | Pick another name |

@@ -128,6 +128,10 @@ Not on a TV: picture in picture, full screen (a TV player is always full screen)
 - **Audio focus:** the player pauses for a call, ducks for a navigation prompt and stops when another app starts playing.
 - **Picture in picture:** on Android 12 and later, going Home while a video plays enters picture in picture by itself. Turn this off with `autoPictureInPicture = false`. The picture in picture button works on Android 8 and later.
 
+## Concurrent streams
+
+A title or channel whose publishing rule sets **Concurrent streams** limits how many plays one signed-in viewer may have open at once; over the limit the viewer's oldest play is stopped (see the play gate guide). The web player stops and shows the message itself. This SDK does not yet act on the server's `stop` answer to its viewer reports: for an on-demand title the CDN refuses the stopped play's addresses within about a minute, so the play ends as an `error`; a live channel plays on until the app asks the play gate again. Ask the gate again with a new play (a new `sid`) when the viewer wants to watch here.
+
 ## Events
 
 `onEvent` receives the same events as the web SDK: `ready`, `play`, `pause`, `ended`, `error`, `itemchange`, `programmechange`, `upnext`, `qualitychange`, `presentationchange`, `purchase`, `signin`, `locked`, `statschange`, `skinchange`. The whole state is also `player.state` (a `StateFlow`).

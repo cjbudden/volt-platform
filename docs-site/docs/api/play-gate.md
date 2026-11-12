@@ -108,7 +108,10 @@ A title or channel whose publishing rule sets **Concurrent streams** limits how 
 
 - The `200` answer of a counted play has `streams` (`limit`, `open`, and `stopped`, how many other plays it stopped) and `sid`, the play attempt's id (the gate makes one when the request sent none).
 - The stopped player learns it on its next viewer report (`POST /api/analytics/beacon`, every 30 seconds): the `202` answer has `stop` with `code: "concurrent_streams"` and `message`, the words to show. Stop playback and show them.
-- If the stopped player asks the gate again with the same `sid`, the answer is `409` with `mode: "stopped"`. Starting again with a new `sid` is the viewer's choice to move the play to this device.
+- If the stopped player asks the gate again with the same `sid`, the answer is `409` with `mode: "stopped"` (`reason` has the full words to show). Starting again with a new `sid` is the viewer's choice to move the play to this device.
+- A player that ignores the stop cannot carry on: within about a minute the CDN refuses the stopped play's on-demand addresses (its manifests and segments) with `403` *Playing on too many devices*. Addresses handed out to the viewer's other plays, and to a new play started afterwards, are not affected.
+
+The Volt web player does all of this itself: it stops, shows the words with a **Play here** button that starts a new play attempt, and sends its `end` report when the page is hidden or closed, so a viewer who closes a tab frees the stream at once. Its `stopped` event (`code`, `message`) tells your page. The iOS and Android SDKs do not yet act on `stop` themselves: for an on-demand title the CDN's refusal ends the play as an `error`; see their guides.
 
 A play the player has not reported on for 90 seconds, or that sent its `end` report, no longer counts.
 
@@ -163,7 +166,7 @@ Where the operator enforces tokens, a plain on-demand address with no token (`/v
 
 A title whose publishing rule turns on **Token-free playback** (`protection.tokenFree`, see [Publishing rules](../guides/publishing-rules.md#play-without-tokens-token-free-playback)) is answered with its plain addresses, with no `/t/` token, and they play at the CDN even where tokens are enforced, for as long as the title is available. Only titles nothing about the viewer decides qualify: no country limit, rights territories, paywall, sign-in, DRM, referrer domains or streams limit. A title that gains one of these goes back to tokenised addresses within about a minute, and its plain address is refused again, as it is once the title stops being available. Treat both kinds the same way: play the address the gate gave you.
 
-The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available* or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not.
+The body of the CDN's `403` says why in plain words: *This link has expired*, *Not available in your region*, *No longer available*, *Playing on too many devices* (the play was stopped by [Concurrent streams](#concurrent-streams): start a new play instead) or *Not available*. After a `403` from the CDN, ask the gate again: it hands out a new address if the viewer may still watch, or says why not.
 
 #### FAST channels
 

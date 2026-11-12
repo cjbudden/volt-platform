@@ -20,7 +20,11 @@
 //  A shared token (build queue P2-2f, `k: "shared"`) opens the folders
 //  (/vod/, /clips/vod/, a clip's /clips/<id>/) of the titles it names, for any viewer, each title's revocation applying.
 //
-//  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked),
+//  A viewer's token whose sid (`s`) is at "x:<sid>" in the store, issued at
+//  or before that time, is refused: the play was stopped by the concurrent
+//  streams limit (build queue P3-4d-2).
+//
+//  Verdicts: "ok", "403" (bad, expired, wrong folder, wrong country, revoked, stopped),
 //  "503" (no key yet: the scheduler has not synced). `refusal` gives the
 //  words for the refusal's body, the same as the CloudFront Function's
 //  (build queue P2-2): `return 403 $edge_refusal;` in nginx.conf.template.
@@ -82,6 +86,9 @@ function decide(uri, cc, store, now) {
   }
   var rv = store['r:' + title];
   if (rv && c.n <= Number(rv)) return ['403', GONE];
+  // A play stopped by the concurrent streams limit (build queue P3-4d-2).
+  var xs = !shared && typeof c.s === 'string' && c.s ? store['x:' + c.s] : null;
+  if (xs && c.n <= Number(xs)) return ['403', 'Playing on too many devices'];
   return ['ok', ''];
 }
 

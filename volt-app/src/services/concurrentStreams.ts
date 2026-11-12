@@ -24,8 +24,18 @@
 //  Nothing here reads the database, so the warm play gate still makes no
 //  database read. A Valkey that fails is not the viewer's problem: the play
 //  starts, uncounted.
+//
+//  AT THE EDGE (build queue P3-4d-2). A player that ignores the stop could
+//  carry on with the addresses it already has, so a stopped play is also kept
+//  in an edge stop list (sid -> stopped at, epoch seconds) for as long as a
+//  play token can live. The control plane's edge sync writes each one to the
+//  edge store as "x:<sid>" (services/edgeTokens.ts syncEdgeStops) and removes
+//  it when it runs out; the edges refuse a token carrying that sid (its `s`
+//  claim) issued at or before the stop. A token issued later (the gate let
+//  the same sid in again once its hour as stopped had passed) plays.
 // ============================================================================
 import { redis, redisHealthy } from '../scale/redis';
+import { maxTokenLifetimeSec } from './edgeTokens';
 
 /** A play not heard from for this long is closed (three missed heartbeats). */
 export const PLAY_TTL_SEC = 90;
@@ -39,10 +49,16 @@ export interface OpenPlay { sid: string; assetId: string; startedAt: number; las
 
 const viewerKey = (accountId: string, viewerId: string) => `cs:p:${accountId}:${viewerId}`;
 const stoppedKey = (sid: string) => `cs:s:${sid}`;
+/** The edge stop list in Valkey: a sorted set, member "<sid> <stopped at>", score = keep until (epoch seconds). */
+const EDGE_STOPS_KEY = 'cs:edge';
+const edgeStopKey = (sid: string) => `cs:x:${sid}`;
+/** A sid the edge store can hold as a key (it is a path segment's claim, so already plain). */
+export const EDGE_SID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 // ---- per-process store (no Valkey) -------------------------------------------
 const memPlays = new Map<string, Map<string, OpenPlay>>();
 const memStopped = new Map<string, number>();   // sid -> expires at (ms)
+const memEdgeStops = new Map<string, { at: number; until: number }>();   // sid -> stopped at, keep until (epoch seconds)
 
 /** Valkey when it is configured and connected; null means this process holds the record. */
 function client(): any | null {
@@ -73,9 +89,57 @@ async function dropPlays(key: string, sids: string[]): Promise<void> {
 }
 
 async function markStopped(sid: string, now: number): Promise<void> {
+  const at = Math.floor(now / 1000);
+  // Kept at the edge as long as a token handed out before the stop can live.
+  const until = at + maxTokenLifetimeSec();
   const r = client();
-  if (!r) { memStopped.set(sid, now + STOPPED_TTL_SEC * 1000); return; }
+  if (!r) {
+    memStopped.set(sid, now + STOPPED_TTL_SEC * 1000);
+    if (EDGE_SID_RE.test(sid)) memEdgeStops.set(sid, { at, until });
+    return;
+  }
   await r.set(stoppedKey(sid), '1', 'EX', STOPPED_TTL_SEC);
+  if (EDGE_SID_RE.test(sid)) {
+    await r.zadd(EDGE_STOPS_KEY, until, `${sid} ${at}`);
+    // One key per sid too, so the API's own token check (every segment on a single server) is one read.
+    await r.set(edgeStopKey(sid), String(at), 'EX', until - at);
+  }
+}
+
+/**
+ * The edge stop list: `live` the stopped plays whose tokens the edge must
+ * refuse (sid, stopped at), `gone` the sids whose time has run out (every
+ * token issued before their stop has expired). No database read.
+ */
+export async function edgeStops(nowSec = Math.floor(Date.now() / 1000)): Promise<{ live: Array<{ sid: string; at: number }>; gone: string[] }> {
+  const r = client();
+  if (!r) {
+    const live: Array<{ sid: string; at: number }> = [], gone: string[] = [];
+    for (const [sid, v] of memEdgeStops) (v.until > nowSec ? live.push({ sid, at: v.at }) : gone.push(sid));
+    return { live, gone };
+  }
+  const parse = (m: string) => { const i = m.lastIndexOf(' '); return { sid: m.slice(0, i), at: Number(m.slice(i + 1)) }; };
+  const live = ((await r.zrangebyscore(EDGE_STOPS_KEY, `(${nowSec}`, '+inf')) as string[]).map(parse);
+  const gone = ((await r.zrangebyscore(EDGE_STOPS_KEY, '-inf', nowSec)) as string[]).map((m) => parse(m).sid);
+  return { live, gone };
+}
+
+/** The edge store no longer holds these: drop them from the list. */
+export async function forgetEdgeStops(nowSec = Math.floor(Date.now() / 1000)): Promise<void> {
+  const r = client();
+  if (!r) { for (const [sid, v] of memEdgeStops) if (v.until <= nowSec) memEdgeStops.delete(sid); return; }
+  await r.zremrangebyscore(EDGE_STOPS_KEY, '-inf', nowSec);
+}
+
+/** When this play was stopped (epoch seconds), while the edge must still refuse its old tokens; null otherwise. */
+export async function edgeStoppedAt(sid: string | null | undefined, nowSec = Math.floor(Date.now() / 1000)): Promise<number | null> {
+  if (!sid || !EDGE_SID_RE.test(sid)) return null;
+  try {
+    const r = client();
+    if (!r) { const v = memEdgeStops.get(sid); return v && v.until > nowSec ? v.at : null; }
+    const v = await r.get(edgeStopKey(sid));
+    return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
+  } catch { return null; }
 }
 
 /** Was this play stopped for being over the limit? */
@@ -164,4 +228,4 @@ export async function openPlays(accountId: string, viewerId: string, now = Date.
 }
 
 /** Tests: forget everything held in this process. */
-export function _resetForTests(): void { memPlays.clear(); memStopped.clear(); }
+export function _resetForTests(): void { memPlays.clear(); memStopped.clear(); memEdgeStops.clear(); }

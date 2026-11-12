@@ -10,6 +10,12 @@
 //  Seconds watched are counted from the playhead moving while not paused, so
 //  a paused tab, a seek, or a stalled stream does not inflate watch time.
 //  Reporting never breaks playback: every send is wrapped.
+//
+//  CONCURRENT STREAMS (build queue P3-4d-2). The heartbeats are what keep a
+//  counted play open, and their answer is how a play stopped by the limit
+//  learns it: `stop: { code, message }`. Then `onStop` is called once, the
+//  beacons halt (no `end`: the server already closed the play) and the player
+//  stops and shows the message.
 // ============================================================================
 
 export interface BeaconOptions {
@@ -20,6 +26,8 @@ export interface BeaconOptions {
   prefix: string;
   /** Current bitrate in kbps, if known. */
   kbps: () => number | undefined;
+  /** The server stopped this play (the concurrent streams limit): what it said. */
+  onStop?: (stop: { code: string; message: string }) => void;
 }
 
 const HEARTBEAT_MS = 30_000;
@@ -30,6 +38,7 @@ export class Beacons {
   private id: string;
   private started = false;
   private ended = false;
+  private halted = false;
   private watched = 0;
   private lastT: number | null = null;
   private t0 = performance.now();
@@ -74,7 +83,7 @@ export class Beacons {
 
   /** Close the session (item change, page hidden, destroy). */
   end(last = false): void {
-    if (!this.started || this.ended) return;
+    if (!this.started || this.ended || this.halted) return;
     this.ended = true;
     this.send('end', { seconds: Math.round(this.watched) }, last);
     this.watched = 0;
@@ -82,16 +91,34 @@ export class Beacons {
 
   destroy(): void {
     this.end(true);
+    this.halt();
+  }
+
+  /** Stop reporting without an `end` (the server stopped this play). */
+  private halt(): void {
+    this.halted = true;
     clearInterval(this.timer);
     for (const f of this.off) { try { f(); } catch { /* */ } }
     this.off = [];
   }
 
+  private heard(j: any): void {
+    const st = j?.stop;
+    if (this.halted || !st || typeof st !== 'object') return;
+    this.halt();
+    const message = typeof st.message === 'string' && st.message.trim() ? st.message.trim().slice(0, 300) : 'Playback stopped.';
+    try { this.o.onStop?.({ code: typeof st.code === 'string' ? st.code : 'stopped', message }); } catch { /* a listener never breaks playback */ }
+  }
+
   private send(event: string, extra: Record<string, unknown>, last = false) {
+    if (this.halted) return;
     try {
       const body = JSON.stringify({ playbackToken: this.o.token, sessionId: this.id, event, ...extra });
       if (last && navigator.sendBeacon) { navigator.sendBeacon(this.o.url, new Blob([body], { type: 'application/json' })); return; }
-      void fetch(this.o.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: last, credentials: 'omit' }).catch(() => {});
+      void fetch(this.o.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: last, credentials: 'omit' })
+        .then((r) => (last || !r.ok ? null : r.json().catch(() => null)))
+        .then((j) => { if (j) this.heard(j); })
+        .catch(() => {});
     } catch { /* reporting never breaks playback */ }
   }
 }

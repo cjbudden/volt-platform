@@ -18,6 +18,10 @@
 //    pass    strip /t/<token> and go on to S3 with the plain path, so the
 //            cache key is the plain path and viewers share every segment
 //
+//  STOPPED PLAYS (build queue P3-4d-2): a viewer's token whose sid (s) is at
+//  "x:<sid>" in the store, issued at or before that time, is refused: the
+//  play was stopped by the concurrent streams limit.
+//
 //  SHARED TOKENS (build queue P2-2f): claims {k:"shared", A:[32 hex ids], n, e}
 //  open /vod/<id>/, /clips/vod/<id>/ and /clips/<id>/ of each title named, for any viewer
 //  (no country); the revocation checked is the path's title's.
@@ -84,6 +88,11 @@ async function handler(event) {
   var rv = null;
   try { rv = await kvs.get('r:' + title); } catch (e) { rv = null; }
   if (rv && c.n <= Number(rv)) return refuse(403, 'No longer available');
+  if (c.k !== 'shared' && typeof c.s === 'string' && c.s) {
+    var xs = null;
+    try { xs = await kvs.get('x:' + c.s); } catch (e) { xs = null; }
+    if (xs && c.n <= Number(xs)) return refuse(403, 'Playing on too many devices');
+  }
   req.uri = uri;
   return req;
 }
