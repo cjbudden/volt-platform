@@ -217,7 +217,7 @@ With **Retention** set to **Keep for a number of days**, a title is deleted that
    - it is in the active lineup of a FAST channel;
    - its rule copies originals to your own storage (Mirror and Archive) and the copy of this title's original is not verified yet: the same check that keeps an original in the cloud until its copy is safe.
 
-The list and the hold come to the console in a later release; until then use the API.
+**Storage > Titles deleted by their publishing policy** lists what is due and why a due title is kept, and is where a legal hold is placed and released (see [Storage](storage.md#titles-deleted-by-their-publishing-policy)).
 
 ### See every override
 

@@ -165,11 +165,20 @@ export async function sweepVodRetention(opts: { accountId?: string; now?: number
   const res: VodRetentionResult = { considered: 0, scheduled: 0, warned: 0, removed: 0, waiting: 0, held: 0, failed: 0 };
   const now = new Date(opts.now ?? Date.now());
   const limit = opts.limit ?? 200;
-  // Only accounts with a rule that keeps for a number of days can delete
-  // anything; the rest are skipped without reading their titles.
+  // Only accounts where some rung keeps for a number of days can delete
+  // anything; the rest are skipped without reading their titles. Every rung
+  // counts: a rule, a metadata rule and a title's own setting (the asset
+  // rung), which the first build missed (found by P5-2's docs seed).
+  const days = `->'retention'->>'keep' = 'days'`;
   const accounts = await query<{ account_id: string }>(
-    `SELECT DISTINCT account_id FROM publishing_rules
-      WHERE settings->'retention'->>'keep' = 'days' ${opts.accountId ? 'AND account_id = $1' : ''}`,
+    `SELECT account_id FROM (
+       SELECT account_id FROM publishing_rules WHERE settings${days}
+       UNION SELECT account_id FROM publishing_metadata_rules WHERE settings${days}
+       UNION SELECT COALESCE(g.account_id, v.account_id) FROM vod_assets v
+               LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN events e ON e.id = v.event_id
+               LEFT JOIN groups g ON g.id = COALESCE(c.group_id, e.group_id)
+              WHERE v.availability_override${days}) a
+      WHERE account_id IS NOT NULL ${opts.accountId ? 'AND account_id = $1' : ''}`,
     opts.accountId ? [opts.accountId] : []);
   for (const { account_id } of accounts) {
     const resolve = await resolver(account_id);

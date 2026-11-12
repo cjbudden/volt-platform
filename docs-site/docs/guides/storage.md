@@ -187,7 +187,13 @@ You do not have to restore by hand before a re-encode. When an encode, or a FAST
 
 ### Titles deleted by their publishing policy
 
-Recordings follow the retention ladder above; titles in the Media Library follow the **Retention** section of their publishing policy instead (see [When retention deletes a title](publishing-rules.md#when-retention-deletes-a-title)). The same hourly sweep warns seven days ahead, moves a due title to **Recently removed**, and keeps one on legal hold, still published, in a FAST lineup or waiting for its archive copy. For now the list (`GET /api/storage/vod-retention`) and the legal hold (`POST /api/storage/vod/{id}/hold`) are in the API.
+Recordings follow the retention ladder above; titles in the Media Library follow the **Retention** section of their publishing policy instead (see [When retention deletes a title](publishing-rules.md#when-retention-deletes-a-title)). The same hourly sweep warns seven days ahead, moves a due title to **Recently removed**, and keeps one on legal hold, still published, in a FAST lineup or waiting for its archive copy.
+
+![Titles deleted by their publishing policy on the Storage page: a title due in four days and listed, one due and kept by a legal hold with its reason and Release hold, and one due and waiting for its archive copy with why, each with the date retention deletes it](/img/screens/storage-title-retention.png)
+
+1. Under **Titles deleted by their publishing policy**, choose **Next 7 days**, **Next 30 days** or **Next 90 days**. Each title shows the day it is deleted, and **Kept because** says what keeps a due one: **On legal hold**, **Still published** (its Available until has not passed), **In a FAST lineup**, or **Waiting for its archive copy** with the copy's state. Titles on legal hold are always listed.
+2. To keep a title whatever its policy says, choose **Legal hold**, type the reason (a case number, say) and choose **Hold**. A hold can be placed only where the title's policy has **Legal hold allowed** on.
+3. To let it go, choose **Release hold**. If it is due and nothing else keeps it, the next sweep moves it to **Recently removed**, from where it can still be restored for a few days.
 
 ## How it connects
 
@@ -209,6 +215,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 |---|---|
 | See the page, the ladder and the media list | Files, uploads & storage: View |
 | Save the ladder, run a dry run, hold, release or restore media | Files, uploads & storage: Manage |
+| Place or release a legal hold on a title | Files, uploads & storage: Manage |
 | See event data retention | Analytics & reports: View |
 | Change event data retention, **Seal and prune now** | Analytics & reports: Manage |
 | See and change Mirror and Archive storage targets, check copies | Account administrator (owner or admin), with the Mirror and Archive add-on |
@@ -222,6 +229,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **No media is tracked yet. It is registered as recordings are written.** | Nothing has been recorded yet | Turn on recording for a channel, station or event and run it |
 | Only **Keep** and **Delete** in **Action** | Your service has one tier of storage, so there is nothing cheaper to move to | Use a keep-then-delete ladder; the first card says why |
 | **Waiting for its archive copy** on a recording in the **Retention list** | Its stream's copy rule archives recordings and the archive file covering it is not verified yet | Read the reason beside it: wait for the file to be made and copied, or copy a failed or missing file again under Mirror and Archive |
+| **Its publishing policy does not allow legal holds** when you choose **Hold** | The title's publishing policy has **Legal hold allowed** off | Turn it on in the rule the message names (Publishing Rules), or ask whoever owns that rule |
+| **Still published** on a due title | Its policy's days are up, but it can still be watched, so it is not deleted | Set **Available until**, or archive it; retention takes it at the next sweep after that |
 | **Two stages both fire at** a number of **days** | Two rungs have the same age | Give each rung its own age |
 | **A ladder cannot go backwards** | A later rung undoes an earlier one, for example cheaper storage after archive | Order the actions keep, cheaper storage, archive, delete |
 | A message that an action is already the stage at an earlier age | The same action appears twice | Remove the repeated rung |

@@ -423,6 +423,19 @@
       "alt": "The Storage page: what this service can do at the top, the retention ladder with its uploads option and the originals rung, event data retention, the dry run, and the list of media with its state, tier and size"
     },
     {
+      "name": "storage-title-retention",
+      "guide": "guides/storage.md",
+      "path": "/storage",
+      "customerView": true,
+      "waitFor": "[data-title-retention] [data-title-due]",
+      "clip": "[data-title-retention]",
+      "remove": [
+        ".topbar"
+      ],
+      "settleMs": 800,
+      "alt": "Titles deleted by their publishing policy on the Storage page: a title due in four days and listed, one due and kept by a legal hold with its reason and Release hold, and one due and waiting for its archive copy with why, each with the date retention deletes it"
+    },
+    {
       "name": "storage-mirror-archive",
       "guide": "guides/storage.md",
       "path": "/storage",

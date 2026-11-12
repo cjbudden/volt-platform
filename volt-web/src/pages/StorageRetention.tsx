@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiRequest as req } from '../api'
 import { Notice } from '../notices'
+import { navigate } from '../router'
 
 /* ============================================================================
    Storage > Retention list and Recently removed. docs/RETENTION.md.
@@ -143,6 +144,102 @@ export function RetentionList() {
               )
             })}
             {shown.length === 0 && <tr><td colSpan={6} style={{ color: 'var(--faint)' }}>Nothing is due to be deleted {within ? `in the next ${within} days` : ''}.</td></tr>}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/* TITLES RETENTION DELETES (build queue P5-2, docs/RETENTION.md "Retention for VOD
+   titles"). Titles in the Media Library follow the Retention section of their
+   publishing policy, not the recording ladder above, so they get their own list:
+   what is due within the chosen days, due titles something keeps (with why), and
+   titles on legal hold. A legal hold needs a reason, so whoever releases it later
+   knows what it was for. Server: GET /api/storage/vod-retention and
+   POST /api/storage/vod/:id/hold. */
+interface TitleDue {
+  id: string; title: string | null; dueAt: string | null; warnedAt: string | null; due: boolean
+  legalHold: { at: string; by: string | null; reason: string | null } | null
+  waiting: { code: string; message: string } | null
+}
+const WAIT_LABEL: Record<string, string> = {
+  legal_hold: 'On legal hold', still_available: 'Still published', in_fast_lineup: 'In a FAST lineup', in_use: 'A job is using it',
+}
+const lockIcon = <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 4 }}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+
+export function TitleRetention() {
+  const [items, setItems] = useState<TitleDue[] | null>(null)
+  const [within, setWithin] = useState(7)
+  const [hold, setHold] = useState<{ id: string; reason: string } | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+  const load = (w = within) => req(`/storage/vod-retention?within=${w}`).then((r: any) => { setItems(r.items); setErr('') }).catch((e: any) => setErr(e.message))
+  useEffect(() => { load(within) }, [within])
+  const run = async (id: string, body: unknown) => {
+    setBusy(id); setErr('')
+    try { await req(`/storage/vod/${id}/hold`, { method: 'POST', ...J(body) }); setHold(null); await load() } catch (e: any) { setErr(e.message) } finally { setBusy(null) }
+  }
+  return (
+    <div className="card" style={{ marginBottom: 16 }} data-title-retention>
+      <div style={{ padding: '14px 14px 0' }}>
+        <div className="sec-label" style={{ marginTop: 0 }}>Titles deleted by their publishing policy</div>
+        <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginBottom: 10 }}>
+          Media Library titles whose policy keeps them for a number of days. Each is listed a week before it is due, then moved to
+          Recently removed, unless a legal hold or one of the reasons shown keeps it.
+        </div>
+        <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 10 }}>
+          <div className="chipset">
+            {[7, 30, 90].map((d) => <button key={d} className={`selchip ${within === d ? 'sel' : ''}`} onClick={() => setWithin(d)}>Next {d} days</button>)}
+          </div>
+          <div className="flex-1" />
+          {items && <span style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }} data-title-counts>{items.filter((x) => x.due).length} due now, {items.filter((x) => x.dueAt && !x.due).length} in the next {within} days, {items.filter((x) => x.legalHold).length} on legal hold</span>}
+        </div>
+        {err && <div style={{ marginBottom: 10 }}><Notice kind="error" variant="compact" message={err} /></div>}
+      </div>
+      {!items ? <div className="loading">Loading…</div> : (
+        <table>
+          <thead><tr><th>Deleted</th><th>Title</th><th>Kept because</th><th /></tr></thead>
+          <tbody>
+            {items.map((x) => {
+              const r = rel(x.dueAt)
+              return (
+                <tr key={x.id} data-title-due={x.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {x.dueAt ? <>
+                      <div>{dayOnly(x.dueAt)}</div>
+                      <div style={{ fontSize: 'var(--fs-sm)', color: r.tone === 'over' ? 'var(--danger,#f87171)' : r.tone === 'soon' ? 'var(--warn,#fbbf24)' : 'var(--faint)' }}>
+                        {x.due && x.waiting ? 'due, kept' : r.text}</div>
+                    </> : <span style={{ color: 'var(--faint)' }}>Never</span>}
+                  </td>
+                  <td>
+                    <a href={`/vod?asset=${x.id}`} style={{ fontWeight: 600, display: 'inline-block', minWidth: 110 }} onClick={(e) => { e.preventDefault(); navigate(`/vod?asset=${x.id}`) }}>{x.title || 'Untitled'}</a>
+                    {x.warnedAt && !x.due && <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>Listed {dayOnly(x.warnedAt)}</div>}
+                  </td>
+                  <td style={{ fontSize: 'var(--fs-sm)', color: 'var(--muted)', maxWidth: 420, minWidth: 220 }}>
+                    {x.legalHold ? <div style={{ color: 'var(--warn,#fbbf24)' }} data-legal-hold>{lockIcon}Legal hold{x.legalHold.reason ? `: ${x.legalHold.reason}` : ''}</div> : null}
+                    {x.waiting && x.waiting.code !== 'legal_hold' && <>
+                      <div style={{ color: 'var(--warn,#fbbf24)' }} data-wait={x.waiting.code}>{WAIT_LABEL[x.waiting.code] ?? 'Waiting for its archive copy'}</div>
+                      <div style={{ color: 'var(--faint)' }}>{x.waiting.message}</div>
+                    </>}
+                    {!x.legalHold && !x.waiting && <span style={{ color: 'var(--faint)' }}>{x.due ? 'Nothing: it goes at the next sweep' : 'Nothing yet'}</span>}
+                  </td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {hold?.id === x.id ? (
+                      <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <input className="inp" style={{ width: 200 }} placeholder="Reason, such as a case number" value={hold.reason}
+                          onChange={(e) => setHold({ ...hold, reason: e.target.value })} aria-label="Reason for the legal hold" autoFocus />
+                        <button className="btn primary sm" disabled={busy === x.id || !hold.reason.trim()} onClick={() => run(x.id, { hold: true, reason: hold.reason.trim() })}>Hold</button>
+                        <button className="btn ghost sm" onClick={() => setHold(null)}>Cancel</button>
+                      </div>
+                    ) : x.legalHold
+                      ? <button className="btn ghost sm" disabled={busy === x.id} onClick={() => run(x.id, { hold: false })}>Release hold</button>
+                      : <button className="btn ghost sm" onClick={() => setHold({ id: x.id, reason: '' })}>{lockIcon}Legal hold</button>}
+                  </td>
+                </tr>
+              )
+            })}
+            {items.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--faint)' }}>No title is due to be deleted in the next {within} days.</td></tr>}
           </tbody>
         </table>
       )}

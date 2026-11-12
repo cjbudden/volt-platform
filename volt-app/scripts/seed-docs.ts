@@ -179,6 +179,7 @@ async function main() {
   await seedMetadataRules();
   await seedLifecycle();
   await seedBilling();
+  await seedTitleRetention();
 
   console.log(`\ndocs demo ready. Sign in as ${DOCS_LOGIN.email} (password as in seed-demo.ts)`);
   await pool.end();
@@ -971,6 +972,28 @@ async function seedMetadataRules() {
                                       settings = EXCLUDED.settings, locked_fields = EXCLUDED.locked_fields`,
       [id, ACCOUNT, position, name, JSON.stringify(conditions), JSON.stringify(settings), locked, ADMIN]);
   }
+}
+
+// TITLE RETENTION (build queue P5-2): three of the FAST titles keep their own
+// Retention setting (the asset rung), so Storage's "Titles deleted by their
+// publishing policy" shows each case the guide explains: one due in four days
+// and listed, one due and kept by a legal hold, one due and waiting for the
+// archive copy the account's copy rule asks for. The sweep runs with limit 0,
+// so it stores dates, warnings and reasons but never removes a title here.
+async function seedTitleRetention() {
+  const [, smoke, bakery, valley] = DOCS_FAST.assets.map((a) => a.id);
+  const has = await query<{ id: string }>(`SELECT id FROM vod_assets WHERE id = ANY($1::uuid[])`, [[smoke, bakery, valley]]);
+  if (has.length < 3) { console.warn('[seed-docs] no FAST titles: the title retention list stays empty'); return; }
+  const keep = (days: number) => JSON.stringify({ retention: { keep: 'days', days, anchor: 'ingest' } });
+  // Made 3 days before the seed: 7 days is due in 4, 2 and 1 days are due now.
+  for (const [id, days] of [[bakery, 7], [smoke, 2], [valley, 1]] as const) {
+    await query(`UPDATE vod_assets SET availability_override = COALESCE(availability_override, '{}'::jsonb) || $2::jsonb,
+                   created_at = now() - interval '3 days', retention_warned_at = NULL WHERE id = $1`, [id, keep(days)]);
+  }
+  await query(`UPDATE vod_assets SET legal_hold_at = now() - interval '1 day', legal_hold_by = $2, legal_hold_reason = 'Music rights dispute, case 2026-114'
+                WHERE id = $1 AND legal_hold_at IS NULL`, [valley, 'admin@example.com']);
+  const { sweepVodRetention } = await import('../src/services/media/vodRetention');
+  await sweepVodRetention({ accountId: ACCOUNT, limit: 0, actor: 'seed-docs' });
 }
 
 // THE LIFECYCLE (build queue P1-2): one published title with a window, so the

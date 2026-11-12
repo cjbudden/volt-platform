@@ -206,6 +206,23 @@ const DAY = 86_400_000;
   s = await V.sweepVodRetention({ accountId: arch });
   ok(s.removed === 0 && (await row(noLic))!.retention_wait_code === 'no_licence', 'with the add-on off a copy rule cannot be met: it waits (no_licence)');
 
+  console.log('== every rung counts (P5-2) ==');
+  // An account whose rules keep forever, with one title that keeps itself 1
+  // day (the asset rung) and one a metadata rule keeps 1 day.
+  const own = await mkAcct('vr-own');
+  const selfKept = await mk(own, 'Kept by its own setting', 10);
+  await query(`UPDATE vod_assets SET availability_override = '{"retention":{"keep":"days","days":1,"anchor":"ingest"}}'::jsonb WHERE id = $1`, [selfKept]);
+  const plain = await mk(own, 'Plain', 10);
+  s = await V.sweepVodRetention({ accountId: own });
+  ok(s.removed === 1 && !(await row(selfKept)) && !!(await row(plain)), 'a title whose own setting keeps it 1 day is removed, the rest of the account is not', s);
+  const meta = await mkAcct('vr-meta');
+  const tagged = await mk(meta, 'Tagged', 10);
+  await query(`UPDATE vod_assets SET tags = ARRAY['short-life'] WHERE id = $1`, [tagged]).catch(() => {});
+  await query(`INSERT INTO publishing_metadata_rules(account_id, position, name, conditions, settings) VALUES ($1,0,'Short life',$2::jsonb,$3::jsonb)`,
+    [meta, JSON.stringify({ match: 'all', conditions: [{ field: 'tags', op: 'has_any', value: ['short-life'] }] }), JSON.stringify({ retention: { keep: 'days', days: 1, anchor: 'ingest' } })]);
+  s = await V.sweepVodRetention({ accountId: meta, dryRun: true });
+  ok(s.considered === 1, 'an account whose only retention is a metadata rule is read', s);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   srv.close(); await pool.end();
   process.exit(fail ? 1 : 0);

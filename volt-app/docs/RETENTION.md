@@ -127,8 +127,14 @@ A legal hold (`legal_hold_at`, `_by`, `_reason`) needs a reason and is refused w
 `legalHoldAllowed` off. A hold that exists always keeps the title, even after the policy turns holds off: the
 setting stops new holds and never deletes held material. Up to 200 titles are removed per pass.
 
-Not built yet (P5-2): the storage tier move for archived titles (`archiveTier`) and the console (the list on the
-Storage page, the hold on the asset drawer).
+Every rung counts: an account is read when a rule, a metadata rule or a title's own setting (the asset rung) keeps
+for days (the first build read rules only; fixed in P5-2).
+
+The console (P5-2): **Storage > Titles deleted by their publishing policy** (`TitleRetention` in
+`volt-web/src/pages/StorageRetention.tsx`) lists the next 7, 30 or 90 days with why a due title is kept, and places
+and releases legal holds (a reason is required).
+
+Not built yet (P5-3): the storage tier move for archived titles (`archiveTier`), and the hold on the asset drawer.
 
 ## API
 
