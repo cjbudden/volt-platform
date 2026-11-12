@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.112.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · API: POST /api/vod/bulk/availability applies a preset or a set of fields as many assets' own publishing rule, or clears it, checking each asset as PATCH /api/vod/{id}/availability does; refused assets are listed with why, and ?dryRun=1 shows the result without saving.
+- added · Media Library: Set the publishing policy of many assets at once: tick them, choose Publishing policy, and apply a preset or clear their own settings. Before you save shows how many can take it and names any a locked rule keeps as they are; the rest are saved, and published ones take the change up within a minute.
+
+### Internal
+
+- added · Tests: publishing-asset-bulk suite (25 checks) and the publishing-bulk browser check (27 at 1440 and 390 px); the screenshot script can choose from a list (select).
+
 ## 0.111.0 (2026-11-12)
 
 ### Product (in customer release notes)
