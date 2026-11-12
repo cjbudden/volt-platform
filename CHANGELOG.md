@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.124.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- improved · Publishing Rules: Turning DRM on or off for published titles now works on cloud deployments too: the titles are packaged again under new addresses, so a CDN never mixes old and new files, and viewers already watching finish on the files they started with.
+
 ## 0.123.0 (2026-11-12)
 
 ### Product (in customer release notes)
