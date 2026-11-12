@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.125.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Media Library: A Repackage pending filter lists the titles whose files do not yet carry what their publishing policy asks for (DRM on or off).
+- fixed · Media Library: QC and frame stills of a DRM-protected title now read its original, so they no longer report a working title as unplayable; with no original on hand QC skips those checks and says why.
+
 ## 0.124.0 (2026-11-12)
 
 ### Product (in customer release notes)
