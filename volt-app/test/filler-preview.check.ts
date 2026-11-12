@@ -18,7 +18,11 @@
 //       events, FAST), while one a stream already has stays;
 //    6. archive, tags, and removing the preview with the asset;
 //    7. the loop sprite sheets claim only frames that exist (the black frame
-//       the list's hover showed where it wrapped).
+//       the list's hover showed where it wrapped);
+//    8. each finding carries stills at its moment (a join: the last frame and
+//       the first), and a person accepts findings one by one: acceptances
+//       outlive QC running again, and accepted errors need no approval note
+//       (migration 0175; Christian, 12 Nov).
 //
 //  Needs Postgres (DATABASE_URL, migrations applied), ffmpeg and Shaka
 //  Packager (PACKAGER_BIN). Usage: npx tsx test/filler-preview.check.ts
@@ -109,6 +113,11 @@ async function main() {
   check('a slate: no frame rate or scan checks', P.sourceFindings(src(1920, 1080, 29.97, 'interlaced'), S, 'slate'), []);
   check('state: an error fails', P.qcState([{ check: 'media', severity: 'error', message: '' }]), 'failed');
   check('state: information alone passes', P.qcState([{ check: 'silence', severity: 'info', message: '' }]), 'pass');
+  check('a join shows its last frame and its first', P.framesFor({ check: 'loop_point', severity: 'warning', message: '', fromMs: 11000 }, 12000, 25).map((f) => f.atMs), [11960, 0]);
+  check('a finding with a place shows that frame', P.framesFor({ check: 'black', severity: 'warning', message: '', fromMs: 3000 }, 12000, 25).map((f) => f.atMs), [3000]);
+  check('a place past the end shows the last frame', P.framesFor({ check: 'loop_length', severity: 'warning', message: '', fromMs: 13400 }, 12000, 25).map((f) => f.atMs), [11960]);
+  check('no place: no frames', P.framesFor({ check: 'resolution', severity: 'warning', message: '' }, 12000, 25), []);
+  check('a finding\'s key is its check and place', P.findingKey({ check: 'black', fromMs: 3000 }), 'black:3000');
 
   // ------------------------------------------------------------ 4. real builds
   console.log('== real builds ==');
@@ -224,6 +233,42 @@ async function main() {
   truthy('the migration approves existing rows, then waits for new ones', /review_state\s+TEXT NOT NULL DEFAULT 'approved'/.test(mig) && /SET DEFAULT 'pending'/.test(mig));
   await throwsWith('review states are checked', () => query(`UPDATE filler_assets SET review_state = 'maybe' WHERE id = $1`, [L134]), /check/i);
   await throwsWith('availability is checked', () => query(`UPDATE filler_assets SET availability = 'gone' WHERE id = $1`, [L134]), /check/i);
+
+  // ------------------------------------------------------------ 8. stills and accepting findings
+  console.log('== stills and accepting findings ==');
+  fa = await row(JUMP);
+  const jfind = (fa.qc_findings as any[]).find((f) => f.check === 'loop_point');
+  check('the jump carries the last frame and the first', jfind?.frames?.map((x: any) => x.label), ['Last frame', 'First frame (after the join)']);
+  const fileOf = (u: string) => join(P.previewDir(JUMP), 'qc-frames', u.split('/').pop()!);
+  truthy('the stills are on disk, served under /origin', jfind?.frames?.every((x: any) => x.url.startsWith(`/origin/filler-preview/${JUMP}/qc-frames/`) && existsSync(fileOf(x.url))));
+  const sz = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width', '-of', 'csv=p=0', fileOf(jfind.frames[0].url)]).stdout.toString().trim();
+  check('a still is 480 pixels wide', sz, '480');
+  // the still's average colour, as one RGB pixel
+  const rgb = (u: string) => [...spawnSync('ffmpeg', ['-v', 'error', '-i', fileOf(u), '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout];
+  const [lastPx, firstPx] = [rgb(jfind.frames[0].url), rgb(jfind.frames[1].url)];
+  truthy('the last frame is blue and the first red', lastPx[2] > 150 && lastPx[0] < 80 && firstPx[0] > 150 && firstPx[2] < 80, JSON.stringify([lastPx, firstPx]));
+  check('every finding has a key', (fa.qc_findings as any[]).every((f) => f.key === P.findingKey(f)), true);
+  await throwsWith('a finding that is not there cannot be accepted', () => P.acceptFinding({ id: JUMP, accountId: ACC, key: 'black:1', accepted: true, label: 'x' }), /not on this/);
+  await throwsWith('nor another account\'s', () => P.acceptFinding({ id: JUMP, accountId: OTHER, key: jfind.key, accepted: true, label: 'x' }), /not in this account/);
+  await P.acceptFinding({ id: JUMP, accountId: ACC, key: jfind.key, accepted: true, note: 'Intended: a sting, not a loop', label: 'Test Reviewer' });
+  let acc = (await row(JUMP)).qc_accepted[jfind.key];
+  check('accepted, with who and why', [acc?.by, acc?.note, !!acc?.at], ['Test Reviewer', 'Intended: a sting, not a loop', true]);
+  const framesBefore = jfind.frames.map((x: any) => x.url);
+  await P.runFillerQc(JUMP);
+  fa = await row(JUMP);
+  truthy('QC again: still accepted', !!fa.qc_accepted[jfind.key]);
+  truthy('QC again: new stills under new names', (fa.qc_findings as any[]).find((f) => f.key === jfind.key).frames.every((x: any) => !framesBefore.includes(x.url)));
+  await P.acceptFinding({ id: JUMP, accountId: ACC, key: jfind.key, accepted: false, label: 'Test Reviewer' });
+  check('taken back', (await row(JUMP)).qc_accepted[jfind.key], undefined);
+
+  const BLACK = await addFiller(ACC, 'loop', '.mp4', (p) => ffmpeg(['-f', 'lavfi', '-i', 'color=c=black:size=1920x1080:rate=25:duration=8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', p]));
+  await P.buildFillerPreview(BLACK);
+  fa = await row(BLACK);
+  const bf = (fa.qc_findings as any[]).find((f) => f.check === 'black');
+  check('an all-black loop: an error, with its still', [bf?.severity, bf?.frames?.length], ['error', 1]);
+  await throwsWith('its error not accepted: approving needs a note', () => P.reviewFiller({ id: BLACK, accountId: ACC, decision: 'approve', ...who }), /nobody has accepted/);
+  await P.acceptFinding({ id: BLACK, accountId: ACC, key: bf.key, accepted: true, label: 'Test Reviewer' });
+  check('its error accepted: approved without a note', (await P.reviewFiller({ id: BLACK, accountId: ACC, decision: 'approve', ...who })).asset.review_state, 'approved');
 
   // ------------------------------------------------------------ 6. tags and removal
   console.log('== tags and removal ==');

@@ -134,19 +134,63 @@ function LoopPlayer({ house, kind, seekTo }: { house: NonNullable<FillerHouse['p
   )
 }
 
-function Finding({ f, onShow }: { f: FillerFinding; onShow: (ms: number) => void }) {
+/**
+ * ONE QC FINDING, with the moment it is about (Christian, 12 Nov): the
+ * stills QC took there (a join shows the loop's last frame beside its first),
+ * each a click away from playing that moment, and an Accept for a person who
+ * has looked and is content with it. Accepted findings stay accepted when QC
+ * runs again, while the same fault is at the same place.
+ */
+function Finding({ f, acc, loopMs, busy, onShow, onAccept }: {
+  f: FillerFinding; acc?: { by: string | null; at: string; note: string | null }; loopMs: number; busy: boolean
+  onShow: (ms: number) => void; onAccept: (accepted: boolean, note: string) => void
+}) {
+  const [asking, setAsking] = useState(false)
+  const [note, setNote] = useState('')
+  const join = f.check === 'loop_point' || f.check === 'audio_loop_point'
+  // a join is watched across it; anything else from just before its moment
+  const playAt = join ? loopMs : f.fromMs ?? null
+  const canAccept = f.severity !== 'info' && !!f.key
   return (
-    <li style={{ display: 'flex', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
-      <span style={{ color: SEV_COLOUR[f.severity], flex: 'none', marginTop: 1 }} title={f.severity}>{IC[f.severity]}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
+    <li style={{ display: 'flex', gap: 10, padding: '12px 0', borderTop: '1px solid var(--border)', opacity: acc ? 0.8 : 1 }}>
+      <span style={{ color: acc ? 'var(--ok, #4ade80)' : SEV_COLOUR[f.severity], flex: 'none', marginTop: 1 }} title={acc ? 'accepted' : f.severity}>{acc ? IC.ok : IC[f.severity]}</span>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div>{f.message}</div>
         {(f.measured || f.expected) && (
-          <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', marginTop: 2 }}>
+          <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)' }}>
             {f.measured && <>Measured {f.measured}</>}{f.measured && f.expected && ' · '}{f.expected && <>expected {f.expected}</>}
           </div>
         )}
+        {(f.frames?.length ?? 0) > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {f.frames!.map((fr) => (
+              <button key={fr.url} type="button" onClick={() => onShow(join ? loopMs : fr.atMs)}
+                title={join ? 'Play across the join' : `Play from ${s1(fr.atMs)}`}
+                style={{ padding: 0, border: '1px solid var(--border)', borderRadius: 4, background: '#000', cursor: 'pointer', textAlign: 'left', overflow: 'hidden' }}>
+                <img src={fr.url} alt={`${fr.label}`} loading="lazy" style={{ display: 'block', width: 168, aspectRatio: '16 / 9', objectFit: 'contain' }} />
+                <span style={{ display: 'block', padding: '3px 6px', fontSize: 'var(--fs-micro)', color: 'var(--muted)', background: 'var(--panel-2)' }}>{fr.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          {playAt != null && <button type="button" className="btn ghost sm" onClick={() => onShow(playAt)}>{IC.join}{join ? 'Play across the join' : `Play from ${s1(playAt)}`}</button>}
+          {acc
+            ? <>
+                <span style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)' }}>Accepted{acc.by ? ` by ${acc.by}` : ''}{acc.at ? `, ${when(acc.at)}` : ''}{acc.note ? `: ${acc.note}` : ''}</span>
+                <button type="button" className="btn ghost sm" disabled={busy} onClick={() => onAccept(false, '')}>{IC.back}Undo</button>
+              </>
+            : canAccept && (asking
+              ? <>
+                  <input className="inp" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why it is fine (optional)" autoFocus
+                    style={{ width: 220, padding: '3px 8px', fontSize: 'var(--fs-sm)' }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { onAccept(true, note); setAsking(false); setNote('') } if (e.key === 'Escape') setAsking(false) }} />
+                  <button type="button" className="btn primary sm" disabled={busy} onClick={() => { onAccept(true, note); setAsking(false); setNote('') }}>{IC.ok}Accept</button>
+                  <button type="button" className="btn ghost sm" onClick={() => setAsking(false)}>Cancel</button>
+                </>
+              : <button type="button" className="btn ghost sm" disabled={busy} onClick={() => setAsking(true)}>{IC.ok}Accept this finding</button>)}
+        </div>
       </div>
-      {f.fromMs != null && <button className="btn ghost sm" style={{ flex: 'none', alignSelf: 'flex-start' }} onClick={() => onShow(f.fromMs!)}>Show at {s1(f.fromMs)}</button>}
     </li>
   )
 }
@@ -161,7 +205,11 @@ export default function LoopHouse({ id, kind, house, inUse, onChanged }: {
   useEffect(() => { setNote(house.review.note ?? '') }, [house.review.note, house.review.state])
   const pv = house.preview
   const building = house.status === 'queued' || house.status === 'building'
-  const needsNote = house.status !== 'ready' || house.qc.state === 'failed'
+  const accepted = house.qc.accepted ?? {}
+  const openErrors = house.qc.findings.filter((f) => f.severity === 'error' && !(f.key && accepted[f.key]))
+  const toAccept = house.qc.findings.filter((f) => f.severity !== 'info')
+  const acceptedCount = toAccept.filter((f) => f.key && accepted[f.key]).length
+  const needsNote = house.status !== 'ready' || openErrors.length > 0
   const archived = house.availability.state === 'archived'
 
   async function act(what: string, fn: () => Promise<any>, ok: string) {
@@ -214,9 +262,18 @@ export default function LoopHouse({ id, kind, house, inUse, onChanged }: {
             <div className="sec-label">QC</div>
             {building && <div style={{ color: 'var(--faint)' }}>Runs once the preview is built.</div>}
             {!building && house.qc.findings.length === 0 && house.qc.state && <div style={{ color: 'var(--muted)' }}>{IC.ok} Nothing found: it plays cleanly, at the right length, with a clean join.</div>}
+            {!building && toAccept.length > 0 && (
+              <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginBottom: 4 }}>
+                {acceptedCount} of {toAccept.length} finding{toAccept.length === 1 ? '' : 's'} accepted. Look at each one, then accept it or fix the file.
+              </div>
+            )}
             {!building && house.qc.findings.length > 0 && (
               <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                {house.qc.findings.map((f, i) => <Finding key={i} f={f} onShow={(ms) => setSeek((s) => ({ ms, n: (s?.n ?? 0) + 1 }))} />)}
+                {house.qc.findings.map((f, i) => (
+                  <Finding key={f.key ?? i} f={f} acc={f.key ? accepted[f.key] : undefined} loopMs={(pv?.loopSeconds ?? 0) * 1000} busy={!!busy}
+                    onShow={(ms) => setSeek((s) => ({ ms, n: (s?.n ?? 0) + 1 }))}
+                    onAccept={(yes, n) => act('accept', () => api.acceptFillerFinding(id, { key: f.key!, accepted: yes, note: n || null }), yes ? 'Finding accepted.' : 'Acceptance taken back.')} />
+                ))}
               </ul>
             )}
             {house.qc.skipped.length > 0 && (
@@ -232,7 +289,7 @@ export default function LoopHouse({ id, kind, house, inUse, onChanged }: {
                 : 'Waiting for a person to watch the preview and approve it. Until then it cannot be chosen for anything.'}
             </div>
             <textarea className="inp" rows={2} value={note} onChange={(e) => setNote(e.target.value)} style={{ width: '100%', resize: 'vertical' }}
-              placeholder={needsNote ? 'Note (needed to approve: QC found errors or there is no preview)' : 'Note (optional): why it was approved or rejected'} />
+              placeholder={needsNote ? (house.status !== 'ready' ? 'Note (needed to approve: there is no preview)' : 'Note (needed to approve: accept the QC errors above, or say why it is fine)') : 'Note (optional): why it was approved or rejected'} />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
               {house.review.state !== 'approved' && (
                 <button className="btn primary sm" disabled={!!busy || building || (needsNote && !note.trim())} onClick={() => review('approve')}

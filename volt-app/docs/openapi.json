@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "Volt API",
-  "version": "0.119.0",
+  "version": "0.0.0",
   "description": "The Volt API: the **Public API** for apps, players and their audience, and the **Admin API** for your own staff and servers.\n\nEvery route Volt serves to customers is listed here. Routes with a captured example show a real request and response from a test account.\n\nGuides: Using the API, Authentication and Errors in the docs sidebar."
  },
  "servers": [
@@ -16762,6 +16762,42 @@
      "Filler Assets"
     ],
     "description": "Measures the existing house preview again and answers as `GET /api/filler-assets/{id}/house`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/filler-assets/{id}/qc/accept": {
+   "post": {
+    "operationId": "postFillerAssetsByIDQcAccept",
+    "summary": "Accept one QC finding on a slate or loop",
+    "tags": [
+     "Filler Assets"
+    ],
+    "description": "`{ \"key\": <a finding's key>, \"accepted\": true | false, \"note\": \"...\" }`. A person who has looked at a finding (its `frames` are stills from the house preview at that moment; a join shows the loop's last frame and its first) accepts it, or takes the acceptance back with `accepted: false`. Acceptances are kept by key, so they survive QC running again while the same fault is at the same place. Once every error is accepted the slate or loop can be approved without a note. 404 for a key that is not among its findings. Answers as `GET /api/filler-assets/{id}/house`, with `qc.accepted`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** media: manage",
     "security": [
      {
       "adminBearer": []

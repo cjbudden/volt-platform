@@ -2809,6 +2809,15 @@
  },
  {
   "method": "POST",
+  "path": "/api/filler-assets/:id/qc/accept",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/filler-assets"
+ },
+ {
+  "method": "POST",
   "path": "/api/filler-assets/:id/rebuild",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

@@ -279,7 +279,7 @@ fillerAssetsRouter.post(
     // approval would leave them pointing at something marked "waiting".
     if (relinked.length) {
       await query(`UPDATE filler_assets SET review_state = 'approved', reviewed_at = now(), reviewed_by = $2, reviewed_by_label = $3, review_note = $4 WHERE id = $1`,
-        [row.id, who.userId ?? null, who.label ?? null, `Copied in from the Image Library while it was the fallback of ${relinked.length} stream${relinked.length === 1 ? '' : 's'}`]);
+        [row.id, who.userId ?? null, await personLabel(req), `Copied in from the Image Library while it was the fallback of ${relinked.length} stream${relinked.length === 1 ? '' : 's'}`]);
       ready.review_state = 'approved';
     }
     await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label,
@@ -530,6 +530,18 @@ fillerAssetsRouter.put(
 //  as viewers will, read what QC found, approve it before anything can use it,
 //  and archive what is no longer wanted without deleting it.
 // ---------------------------------------------------------------------------
+/**
+ * The person's name as the page shows it (who approved, accepted or archived):
+ * their display name or email. actor() gives the user id, which is right for
+ * the audit log but means nothing to someone reading the page (12 Nov 2026).
+ */
+async function personLabel(req: any): Promise<string | null> {
+  const who = actor(req);
+  if (!who.userId) return who.label ?? null;
+  const u = await one<any>(`SELECT COALESCE(NULLIF(display_name, ''), email::text) AS label FROM users WHERE id = $1`, [who.userId]).catch(() => null);
+  return u?.label ?? who.label ?? null;
+}
+
 async function ownFiller(req: any): Promise<any> {
   const row = await one<any>(`SELECT * FROM filler_assets WHERE id = $1 AND account_id = $2`, [req.params.id, accountId(req)]);
   if (!row) throw notFound('Filler asset not found');
@@ -540,7 +552,9 @@ async function ownFiller(req: any): Promise<any> {
 export function houseOf(row: any) {
   return {
     status: row.preview_status ?? null, error: row.preview_error ?? null, preview: row.preview ?? null, at: row.preview_at ?? null,
-    qc: { state: row.qc_state ?? null, findings: row.qc_findings ?? [], skipped: row.qc_skipped ?? [], at: row.qc_at ?? null },
+    qc: { state: row.qc_state ?? null, findings: row.qc_findings ?? [], skipped: row.qc_skipped ?? [], at: row.qc_at ?? null,
+      // which findings a person has accepted, by key (migration 0175)
+      accepted: row.qc_accepted ?? {} },
     review: { state: row.review_state, note: row.review_note ?? null, by: row.reviewed_by_label ?? null, at: row.reviewed_at ?? null },
     availability: { state: row.availability, at: row.archived_at ?? null, by: row.archived_by_label ?? null },
   };
@@ -574,6 +588,27 @@ fillerAssetsRouter.post(
   })
 );
 
+/** Accept one QC finding, having looked at it (or take that back). */
+fillerAssetsRouter.post(
+  '/:id/qc/accept',
+  asyncHandler(async (req, res) => {
+    const b = z.object({ key: z.string().min(1).max(200), accepted: z.boolean().default(true), note: z.string().max(2000).optional().nullable() }).parse(req.body ?? {});
+    const acc = accountId(req);
+    const who = actor(req);
+    const { acceptFinding, ReviewError } = await import('../services/media/fillerPreview');
+    let row: any;
+    try {
+      row = await acceptFinding({ id: String(req.params.id), accountId: acc, key: b.key, accepted: b.accepted, note: b.note ?? null, label: await personLabel(req) });
+    } catch (e: any) {
+      if (e instanceof ReviewError) return res.status(e.status).json({ error: e.message, message: e.message });
+      throw e;
+    }
+    await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
+      entityId: String(req.params.id), changes: { qc_accepted: { from: b.accepted ? null : b.key, to: b.accepted ? b.key : null }, ...(b.note ? { qc_note: { from: null, to: b.note } } : {}) } }).catch(() => {});
+    res.json(houseOf(row));
+  })
+);
+
 /** Approve, reject, or send back to waiting. */
 fillerAssetsRouter.post(
   '/:id/review',
@@ -584,7 +619,7 @@ fillerAssetsRouter.post(
     const { reviewFiller, ReviewError } = await import('../services/media/fillerPreview');
     let r: any;
     try {
-      r = await reviewFiller({ id: String(req.params.id), accountId: acc, decision: b.decision, note: b.note ?? null, userId: who.userId ?? null, label: who.label ?? null });
+      r = await reviewFiller({ id: String(req.params.id), accountId: acc, decision: b.decision, note: b.note ?? null, userId: who.userId ?? null, label: await personLabel(req) });
     } catch (e: any) {
       if (e instanceof ReviewError) return res.status(e.status).json({ error: e.message, message: e.message });
       throw e;
@@ -621,7 +656,7 @@ fillerAssetsRouter.post(
       `UPDATE filler_assets SET availability = $2,
               archived_at = CASE WHEN $2 = 'archived' THEN now() ELSE NULL END,
               archived_by_label = CASE WHEN $2 = 'archived' THEN $3 ELSE NULL END, updated_at = now()
-        WHERE id = $1 RETURNING *`, [row.id, b.state, who.label ?? null]);
+        WHERE id = $1 RETURNING *`, [row.id, b.state, await personLabel(req)]);
     if (row.availability !== b.state) {
       await writeAudit(null, { accountId: acc, userId: who.userId, label: who.label, action: 'update', entityType: 'filler_asset',
         entityId: row.id, changes: { availability: { from: row.availability, to: b.state } } }).catch(() => {});

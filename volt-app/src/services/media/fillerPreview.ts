@@ -149,6 +149,29 @@ export type FillerCheck = 'media' | 'playback' | 'loop_length' | 'loop_point' | 
 export interface FillerFinding {
   check: FillerCheck; severity: QcSeverity; message: string;
   fromMs?: number | null; toMs?: number | null; measured?: string | null; expected?: string | null;
+  /** Stable across QC runs for the same fault at the same place: what an acceptance is kept against. */
+  key?: string;
+  /** Stills from the preview at the finding's moment (a join gets the last frame and the first). */
+  frames?: { label: string; atMs: number; url: string }[];
+}
+
+/** The key a finding's acceptance is kept against (migration 0175). Pure. */
+export const findingKey = (f: Pick<FillerFinding, 'check' | 'fromMs'>) => `${f.check}:${f.fromMs ?? ''}`;
+
+/**
+ * THE MOMENTS TO SHOW for a finding (Christian, 12 Nov: see the content at
+ * the time QC points to). A jump or click at the join shows both sides of
+ * it, the loop's last frame and its first, side by side; anything else with
+ * a place shows the frame there. Pure: times in ms, inside the loop.
+ */
+export function framesFor(f: FillerFinding, loopMs: number, fps: number): { label: string; atMs: number }[] {
+  const frameMs = Math.round(1000 / (fps || 25));
+  if (f.check === 'loop_point' || f.check === 'audio_loop_point') {
+    return [{ label: 'Last frame', atMs: Math.max(0, loopMs - frameMs) }, { label: 'First frame (after the join)', atMs: 0 }];
+  }
+  if (f.fromMs == null || !loopMs) return [];
+  const at = Math.min(Math.max(0, f.fromMs), Math.max(0, loopMs - frameMs));
+  return [{ label: `At ${(at / 1000).toFixed(1)} s`, atMs: at }];
 }
 export interface FillerQc { state: 'pass' | 'warnings' | 'failed'; findings: FillerFinding[]; skipped: { check: string; reason: string }[] }
 
@@ -400,12 +423,57 @@ export async function runFillerQc(id: string): Promise<FillerQc> {
     skipped.push({ check: 'loop_point', reason: 'a slate is a still: there is no join to see' });
   }
   findings.push(...sourceFindings(fa.probe, house, kind, { width: fa.width, height: fa.height }));
+  await addFrames(id, findings, video, loopMs, Number(pv.renditions?.[0]?.fps) || 25);
   return store(id, { state: qcState(findings), findings, skipped });
+}
+
+/**
+ * Stills for each finding, from the top rendition of the preview, written
+ * beside it (ORIGIN_DIR/filler-preview/<id>/qc-frames/) and served by
+ * /origin like the preview. Remade on every QC run under a new name, so a
+ * browser never shows an old still for a new finding.
+ */
+async function addFrames(id: string, findings: FillerFinding[], video: string, loopMs: number, fps: number): Promise<void> {
+  const dir = join(previewDir(id), 'qc-frames');
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
+  const run_ = Date.now().toString(36);
+  const frameMs = Math.round(1000 / (fps || 25));
+  const total = Math.max(1, Math.round(loopMs / frameMs));
+  const nOf = (ms: number) => Math.min(total - 1, Math.max(0, Math.round(ms / frameMs)));
+  const wanted = findings.map((f) => framesFor(f, loopMs, fps));
+  // WHY NO SEEK: ffmpeg cannot seek inside these fMP4 HLS playlists (it lands
+  // mid-sample and decodes garbage), so the stills are picked by frame number
+  // in one decode from the start, which is short: a loop is 60 s at most.
+  const last = total - 1;
+  const inner = [...new Set(wanted.flat().map((w) => nOf(w.atMs)).filter((n) => n < last))].sort((a, b) => a - b);
+  const names = new Map<number, string>();
+  if (inner.length) {
+    const sel = inner.map((n) => `eq(n\\,${n})`).join('+');
+    const r = await run(FFMPEG(), ['-hide_banner', '-nostdin', '-y', '-i', video, '-vf', `select='${sel}',scale=480:-2`,
+      '-fps_mode', 'passthrough', '-q:v', '3', join(dir, `${run_}-in-%03d.jpg`)], 120_000);
+    if (r.code === 0) inner.forEach((n, k) => { const f = `${run_}-in-${String(k + 1).padStart(3, '0')}.jpg`; if (existsSync(join(dir, f))) names.set(n, f); });
+  }
+  if (wanted.flat().some((w) => nOf(w.atMs) >= last)) {
+    // the last frame: keep overwriting one still from near the end, so the last decoded stays
+    const f = `${run_}-last.jpg`;
+    const r = await run(FFMPEG(), ['-hide_banner', '-nostdin', '-y', '-i', video, '-vf', `select='gte(n\\,${Math.max(0, last - 3)})',scale=480:-2`,
+      '-fps_mode', 'passthrough', '-q:v', '3', '-update', '1', join(dir, f)], 120_000);
+    if (r.code === 0 && existsSync(join(dir, f))) names.set(last, f);
+  }
+  findings.forEach((f, k) => {
+    const frames = wanted[k].flatMap((w) => {
+      const name = names.get(nOf(w.atMs));
+      return name ? [{ label: w.label, atMs: w.atMs, url: `/origin/filler-preview/${id}/qc-frames/${name}` }] : [];
+    });
+    if (frames.length) f.frames = frames;
+  });
 }
 
 async function store(id: string, qc: FillerQc): Promise<FillerQc> {
   const order: Record<string, number> = { error: 0, warning: 1, info: 2 };
   qc.findings.sort((a, b) => order[a.severity] - order[b.severity]);
+  for (const f of qc.findings) f.key = findingKey(f);
   await query(`UPDATE filler_assets SET qc_state = $2, qc_findings = $3::jsonb, qc_skipped = $4::jsonb, qc_at = now() WHERE id = $1`,
     [id, qc.state, JSON.stringify(qc.findings), JSON.stringify(qc.skipped)]);
   return qc;
@@ -477,10 +545,14 @@ export async function reviewFiller(o: { id: string; accountId: string; decision:
   const fa = await one<any>(`SELECT * FROM filler_assets WHERE id = $1 AND account_id = $2`, [o.id, o.accountId]);
   if (!fa) throw new ReviewError('That slate or loop is not in this account', 404);
   const note = (o.note ?? '').trim() || null;
-  if (o.decision === 'approve' && (fa.preview_status !== 'ready' || fa.qc_state === 'failed') && !note) {
+  // An error a person has accepted (with its frames in front of them) is a
+  // decision already made: only errors nobody has accepted need the note.
+  const accepted = fa.qc_accepted ?? {};
+  const openErrors = ((fa.qc_findings ?? []) as FillerFinding[]).filter((f) => f.severity === 'error' && !accepted[f.key ?? findingKey(f)]);
+  if (o.decision === 'approve' && (fa.preview_status !== 'ready' || openErrors.length) && !note) {
     throw new ReviewError(fa.preview_status !== 'ready'
       ? 'There is no house preview to approve from. Add a note saying why it is approved without one.'
-      : 'QC found errors. Add a note saying why it is approved anyway.', 400);
+      : 'QC found errors that nobody has accepted. Accept them, or add a note saying why it is approved anyway.', 400);
   }
   const state = o.decision === 'approve' ? 'approved' : o.decision === 'reject' ? 'rejected' : 'pending';
   const row = await one<any>(
@@ -489,4 +561,21 @@ export async function reviewFiller(o: { id: string; accountId: string; decision:
       WHERE id = $1 RETURNING *`,
     [o.id, state, o.decision === 'reset' ? null : note, o.decision === 'reset' ? null : o.userId, o.decision === 'reset' ? null : o.label]);
   return { asset: row, from: fa.review_state, to: state };
+}
+
+/**
+ * A person accepts one QC finding (or takes the acceptance back). Kept by
+ * the finding's key, so it survives QC running again while the same fault is
+ * at the same place (migration 0175).
+ */
+export async function acceptFinding(o: { id: string; accountId: string; key: string; accepted: boolean; note?: string | null; label: string | null }): Promise<any> {
+  const fa = await one<any>(`SELECT qc_findings FROM filler_assets WHERE id = $1 AND account_id = $2`, [o.id, o.accountId]);
+  if (!fa) throw new ReviewError('That slate or loop is not in this account', 404);
+  const known = ((fa.qc_findings ?? []) as FillerFinding[]).some((f) => (f.key ?? findingKey(f)) === o.key);
+  if (!known) throw new ReviewError('That finding is not on this slate or loop (QC may have run again)', 404);
+  const row = o.accepted
+    ? await one<any>(`UPDATE filler_assets SET qc_accepted = qc_accepted || jsonb_build_object($2::text, jsonb_build_object('by', $3::text, 'at', now(), 'note', $4::text)), updated_at = now() WHERE id = $1 RETURNING *`,
+      [o.id, o.key, o.label, (o.note ?? '').trim() || null])
+    : await one<any>(`UPDATE filler_assets SET qc_accepted = qc_accepted - $2::text, updated_at = now() WHERE id = $1 RETURNING *`, [o.id, o.key]);
+  return row;
 }

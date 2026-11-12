@@ -803,6 +803,10 @@
     "summary": "Run QC again over a house preview",
     "description": "Measures the existing house preview again and answers as `GET /api/filler-assets/{id}/house`."
   },
+  "POST /api/filler-assets/:id/qc/accept": {
+    "summary": "Accept one QC finding on a slate or loop",
+    "description": "`{ \"key\": <a finding's key>, \"accepted\": true | false, \"note\": \"...\" }`. A person who has looked at a finding (its `frames` are stills from the house preview at that moment; a join shows the loop's last frame and its first) accepts it, or takes the acceptance back with `accepted: false`. Acceptances are kept by key, so they survive QC running again while the same fault is at the same place. Once every error is accepted the slate or loop can be approved without a note. 404 for a key that is not among its findings. Answers as `GET /api/filler-assets/{id}/house`, with `qc.accepted`."
+  },
   "POST /api/filler-assets/:id/review": {
     "summary": "Approve or reject a slate or loop",
     "description": "`{ \"decision\": \"approve\" | \"reject\" | \"reset\", \"note\": \"...\" }`. Only an approved slate or loop can be newly given to a channel, station, event or FAST channel. Approving over a QC error, or with no house preview, needs a `note` (400 without). Rejecting does not take it off streams that already use it: the answer's `usedBy` names them. `reset` sends it back to waiting."

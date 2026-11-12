@@ -12,6 +12,15 @@ import { PageError, useNotify, usePageNotice } from '../notices'
 import { ReviewTag, QcTag } from './LoopHouse'
 import { TagChips } from './FillerTags'
 
+/** Row actions as icons (Christian, 12 Nov), each with its name as a tooltip and for screen readers. */
+const ROW_IC = {
+  details: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>,
+  review: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>,
+  archive: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="5" rx="1" /><path d="M4 9v10a2 2 0 002 2h12a2 2 0 002-2V9M10 13h4" /></svg>,
+  restore: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="5" rx="1" /><path d="M4 9v10a2 2 0 002 2h12a2 2 0 002-2V9" /><path d="M12 18v-6M9 15l3-3 3 3" /></svg>,
+  trash: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6" /></svg>,
+}
+
 /** Rows per page of the list (Christian, 11 Nov: search and pages). */
 const PAGE = 25
 
@@ -537,15 +546,21 @@ function LoopsList() {
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleString()}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <a className="btn ghost" href={`/loops/${a.id}`}
-                    onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>{a.review_state === 'pending' && a.status === 'ready' ? 'Review' : 'Details'}</a>
+                  <div style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                  {(() => { const review = a.review_state === 'pending' && a.status === 'ready'; const t = review ? `Review ${a.name}` : `Details of ${a.name}`; return (
+                  <a className="icon-btn" href={`/loops/${a.id}`} title={review ? 'Review' : 'Details'} aria-label={t}
+                    style={review ? { color: 'var(--warn)' } : undefined}
+                    onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>{review ? ROW_IC.review : ROW_IC.details}</a>
+                  ) })()}
                   {/* IN USE CANNOT BE ARCHIVED (Christian, 11 Nov): the server refuses and names the streams. */}
                   {a.availability === 'archived'
-                    ? <button className="btn ghost" style={{ marginLeft: 6 }} onClick={() => setAvailability(a, 'available')}>Make available</button>
-                    : <button className="btn ghost" style={{ marginLeft: 6 }} disabled={(a.used_by?.length ?? 0) > 0}
-                        title={(a.used_by?.length ?? 0) > 0 ? 'In use: choose another slate or loop for those streams first' : 'Keep it, but take it off every picker'}
-                        onClick={() => setAvailability(a, 'archived')}>Archive</button>}
-                  <button className="btn ghost" style={{ marginLeft: 6 }}
+                    ? <button type="button" className="icon-btn" title="Make available" aria-label={`Make ${a.name} available`} onClick={() => setAvailability(a, 'available')}>{ROW_IC.restore}</button>
+                    : <button type="button" className="icon-btn" disabled={(a.used_by?.length ?? 0) > 0} aria-label={`Archive ${a.name}`}
+                        style={(a.used_by?.length ?? 0) > 0 ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+                        title={(a.used_by?.length ?? 0) > 0 ? 'Archive: in use, so choose another slate or loop for those streams first' : 'Archive: keep it, but take it off every picker'}
+                        onClick={() => setAvailability(a, 'archived')}>{ROW_IC.archive}</button>}
+                  <button type="button" className="icon-btn" title="Delete" aria-label={`Delete ${a.name}`}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--down)' }} onMouseLeave={e => { e.currentTarget.style.color = '' }}
                     onClick={async () => {
                       // A FAST channel plays its own copy, so deleting this does not take its loop away.
                       const users = (a.used_by ?? []).filter(u => u.kind !== 'fast')
@@ -558,7 +573,8 @@ function LoopsList() {
                       if (!confirm(`"${a.name}" is the fallback for ${users.map(u => u.name).join(', ')}. Deleting it leaves ${users.length === 1 ? 'that stream' : 'those streams'} with no fallback. Delete anyway?`)) return
                       try { await api.deleteFillerAsset(a.id, true); load() }
                       catch (ex: any) { fail(ex instanceof ApiError && ex.body?.message ? ex.body.message : ex.message) }
-                    }}>Delete</button>
+                    }}>{ROW_IC.trash}</button>
+                  </div>
                 </td>
               </tr>
             ))}

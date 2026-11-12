@@ -1993,6 +1993,8 @@ export const api = {
   fillerHouse: (id: string): Promise<FillerHouse> => req(`/filler-assets/${id}/house`),
   rebuildFillerHouse: (id: string): Promise<{ queued: boolean }> => req(`/filler-assets/${id}/house`, { method: 'POST' }),
   rerunFillerQc: (id: string): Promise<FillerHouse> => req(`/filler-assets/${id}/qc`, { method: 'POST' }),
+  acceptFillerFinding: (id: string, b: { key: string; accepted: boolean; note?: string | null }): Promise<FillerHouse> =>
+    req(`/filler-assets/${id}/qc/accept`, { method: 'POST', body: JSON.stringify(b) }),
   reviewFiller: (id: string, b: { decision: 'approve' | 'reject' | 'reset'; note?: string | null }): Promise<FillerHouse & { usedBy: FillerUser[] }> =>
     req(`/filler-assets/${id}/review`, { method: 'POST', body: JSON.stringify(b) }),
   fillerTags: (): Promise<{ tag: string; count: number }[]> => req('/filler-assets/tags'),
@@ -3203,6 +3205,10 @@ export const fillerUsable = (a: FillerAsset) =>
 export interface FillerFinding {
   check: string; severity: 'info' | 'warning' | 'error'; message: string
   fromMs?: number | null; toMs?: number | null; measured?: string | null; expected?: string | null
+  /** What a person's acceptance is kept against. */
+  key?: string
+  /** Stills from the preview at that moment (a join: the last frame and the first). */
+  frames?: { label: string; atMs: number; url: string }[]
 }
 /** The house preview, QC, review and availability of one slate or loop. */
 export interface FillerHouse {
@@ -3216,7 +3222,9 @@ export interface FillerHouse {
     audio: { sample_rate: number; channels: number; bitrate_kbps: number } | null
     buildSeconds: number | null; builtAt: string
   }
-  qc: { state: 'pass' | 'warnings' | 'failed' | null; findings: FillerFinding[]; skipped: { check: string; reason: string }[]; at: string | null }
+  qc: { state: 'pass' | 'warnings' | 'failed' | null; findings: FillerFinding[]; skipped: { check: string; reason: string }[]; at: string | null
+    /** Findings a person has accepted, by key. */
+    accepted?: Record<string, { by: string | null; at: string; note: string | null }> }
   review: { state: 'pending' | 'approved' | 'rejected'; note: string | null; by: string | null; at: string | null }
   availability: { state: 'available' | 'archived'; at: string | null; by: string | null }
 }

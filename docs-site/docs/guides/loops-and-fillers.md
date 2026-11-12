@@ -52,8 +52,9 @@ Large files are sent in pieces. If an upload is interrupted (the tab closed, the
 Choose **Review** (or **Details**) to open one slate or loop. **House preview** is at the top.
 
 - **The player** plays the slate or loop as it airs: built by the same encoder and packager the streams use, in your **house format** (the output profile most of your channels use, or 1080p and 720p H.264 when you have none). A loop plays continuously, three times over and then round again, exactly as it repeats on air, so a join that is not seamless shows itself. The bar under the player marks each join; **Watch the loop point** jumps to three seconds before the next one. Choose a rendition to see each quality.
-- **QC** lists what Volt measured in that preview. Each finding says what was measured and what was expected, and **Show at** jumps the player to the place. QC looks for: a preview that will not play; black; silence (a loop with no sound is noted, not a fault); loudness far from -23 LUFS or peaks above -1 dBFS; the loop cut to whole segments (a 13.4 s file with 4 s segments plays 12 s, so its end is never seen and the picture jumps); a jump in the picture or a click in the sound where the loop restarts; a file smaller than the house format (upscaled); not 16:9 (shown with bars); a frame rate that is converted; and an interlaced file.
-- **Approval.** Watch it, then choose **Approve** or **Reject**, with a note if you like. Approving over a QC error, or with no preview, needs a note that says why. **Back to waiting** undoes a decision.
+- **QC** lists what Volt measured in that preview. Each finding says what was measured and what was expected, and shows stills from the preview at that moment: for a jump or click where the loop restarts, the loop's **Last frame** beside its **First frame (after the join)**, so you see both sides of the join at once. Choose a still, or **Play from** (**Play across the join** for a join), to play that moment in the player above.
+- **Accept a finding.** When you have looked at a finding and are content with it (a sting that is meant to cut, a quiet ambient loop), choose **Accept this finding**, add why if you like, and confirm. The list says how many are accepted, and who accepted each and when; **Undo** takes it back. Acceptances stay when QC runs again, as long as the same finding is at the same place. QC looks for: a preview that will not play; black; silence (a loop with no sound is noted, not a fault); loudness far from -23 LUFS or peaks above -1 dBFS; the loop cut to whole segments (a 13.4 s file with 4 s segments plays 12 s, so its end is never seen and the picture jumps); a jump in the picture or a click in the sound where the loop restarts; a file smaller than the house format (upscaled); not 16:9 (shown with bars); a frame rate that is converted; and an interlaced file.
+- **Approval.** Watch it, then choose **Approve** or **Reject**, with a note if you like. Approving while a QC error is not accepted, or with no preview, needs a note that says why; accept the errors first and no note is needed. **Back to waiting** undoes a decision.
 - **Availability.** **Archive** keeps it but takes it off every picker. A slate or loop that a stream uses cannot be archived: choose another one for those streams first. **Make available** brings it back.
 - **Tags** sit under the name: type one and press Enter to add it, choose ✕ to remove it.
 - **Build the preview again** rebuilds it, for example after you change your output profiles; **Run QC again** measures it again.
@@ -91,7 +92,7 @@ Choose **Archive** on its row to keep it but stop it being offered anywhere; **M
 To remove it for good:
 
 1. Choose **Delete** on its row.
-2. If no stream uses it, confirm and it is gone. If it is in use, Volt names the streams and warns that they will be left with no fallback; confirm only if that is what you want, then choose another fallback on those streams.
+2. If no stream uses it, confirm and it is gone. (The row's buttons are icons: the eye opens **Details**, a tick opens **Review** for one awaiting approval, the box **Archive**s it, the box with an arrow makes it available again, and the bin deletes it. Hover over one for its name.) If it is in use, Volt names the streams and warns that they will be left with no fallback; confirm only if that is what you want, then choose another fallback on those streams.
 
 ### Bring in older fallbacks
 
@@ -145,7 +146,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/filler-assets/{id}/house` | Its house preview (`preview.url` plays it), QC findings, approval and availability |
 | `POST /api/filler-assets/{id}/house` | Builds the house preview again (and QC) |
 | `POST /api/filler-assets/{id}/qc` | Runs QC again over the preview |
-| `POST /api/filler-assets/{id}/review` | `{"decision": "approve" \| "reject" \| "reset", "note": "..."}`; approving over a QC error or without a preview needs a note (400) |
+| `POST /api/filler-assets/{id}/qc/accept` | Accepts one finding: `{"key": "<the finding's key>", "accepted": true, "note": "..."}`; `"accepted": false` takes it back |
+| `POST /api/filler-assets/{id}/review` | `{"decision": "approve" \| "reject" \| "reset", "note": "..."}`; approving with an error nobody has accepted, or without a preview, needs a note (400) |
 | `POST /api/filler-assets/{id}/availability` | `{"state": "archived" \| "available"}`; archiving one that streams use is refused (409) with `inUseBy` |
 | `GET /api/filler-assets/{id}` | One slate or loop |
 | `PATCH /api/filler-assets/{id}` | Renames it (`{"name": "Half-time loop"}`) |
