@@ -222,13 +222,14 @@ export default function EventDetail({ id, onBack }: { id: string; onBack: () => 
 
       <PanelLayout pageKey="event" panels={[
         { id: 'schedule', label: 'Schedule', node: <ScheduleCard d={d} now={now} /> },
-        // The event's programme guide, the same strip and flags as a channel.
-        { id: 'epg', label: 'Programme guide', node: (
-          <EpgStrip d={cd} broadcast={broadcastOf(ov, !!d.onAir)} ownerPath={`/epg/event/${encodeURIComponent(d.id)}`}
-            onChanged={load} onAddEpg={() => navigate(`/epg/event/${encodeURIComponent(d.id)}`)} />) },
         { id: 'players', label: 'Source and output players', node: (
           <DualPlayers d={cd} captionLangs={captionLangs} sourceUp={sourceUp} onAir={!!d.onAir}
             onSendSource={() => startStop('start')} onGoLive={() => startStop('start')} busy={busy} />) },
+        // The event's programme guide, the same strip and flags as a channel,
+        // under the players by default as on a channel (Christian, 12 Nov).
+        { id: 'epg', label: 'Programme guide', node: (
+          <EpgStrip d={cd} broadcast={broadcastOf(ov, !!d.onAir)} ownerPath={`/epg/event/${encodeURIComponent(d.id)}`}
+            onChanged={load} onAddEpg={() => navigate(`/epg/event/${encodeURIComponent(d.id)}`)} />) },
         { id: 'outputs', label: 'Output URLs', node: (
           <OutputUrls id={d.id} packaging={d.profile?.packaging} captions={!!d.captions?.enabled} publicOpen={!!d.onAir} kindLabel="event" />) },
         { id: 'rights', label: 'Rights preview', node: <RightsPreview kind="event" id={d.id} /> },

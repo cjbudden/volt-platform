@@ -546,20 +546,21 @@ function LoopsList() {
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{new Date(a.created_at).toLocaleString()}</td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <div style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                  <div className="row-actions">
+                  {/* Each action in an outlined, rounded box, the way the row buttons on
+                      every other list look (row-actions, btn ghost btn-more; Christian 12 Nov). */}
                   {(() => { const review = a.review_state === 'pending' && a.status === 'ready'; const t = review ? `Review ${a.name}` : `Details of ${a.name}`; return (
-                  <a className="icon-btn" href={`/loops/${a.id}`} title={review ? 'Review' : 'Details'} aria-label={t}
+                  <a className="btn ghost btn-more" href={`/loops/${a.id}`} title={review ? 'Review' : 'Details'} aria-label={t}
                     style={review ? { color: 'var(--warn)' } : undefined}
                     onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); navigate(`/loops/${a.id}`) }}>{review ? ROW_IC.review : ROW_IC.details}</a>
                   ) })()}
                   {/* IN USE CANNOT BE ARCHIVED (Christian, 11 Nov): the server refuses and names the streams. */}
                   {a.availability === 'archived'
-                    ? <button type="button" className="icon-btn" title="Make available" aria-label={`Make ${a.name} available`} onClick={() => setAvailability(a, 'available')}>{ROW_IC.restore}</button>
-                    : <button type="button" className="icon-btn" disabled={(a.used_by?.length ?? 0) > 0} aria-label={`Archive ${a.name}`}
-                        style={(a.used_by?.length ?? 0) > 0 ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+                    ? <button type="button" className="btn ghost btn-more" title="Make available" aria-label={`Make ${a.name} available`} onClick={() => setAvailability(a, 'available')}>{ROW_IC.restore}</button>
+                    : <button type="button" className="btn ghost btn-more" disabled={(a.used_by?.length ?? 0) > 0} aria-label={`Archive ${a.name}`}
                         title={(a.used_by?.length ?? 0) > 0 ? 'Archive: in use, so choose another slate or loop for those streams first' : 'Archive: keep it, but take it off every picker'}
                         onClick={() => setAvailability(a, 'archived')}>{ROW_IC.archive}</button>}
-                  <button type="button" className="icon-btn" title="Delete" aria-label={`Delete ${a.name}`}
+                  <button type="button" className="btn ghost btn-more" title="Delete" aria-label={`Delete ${a.name}`}
                     onMouseEnter={e => { e.currentTarget.style.color = 'var(--down)' }} onMouseLeave={e => { e.currentTarget.style.color = '' }}
                     onClick={async () => {
                       // A FAST channel plays its own copy, so deleting this does not take its loop away.

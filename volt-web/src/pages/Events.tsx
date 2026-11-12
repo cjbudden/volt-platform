@@ -255,12 +255,12 @@ export default function Events() {
                       <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                         <div className="row-actions">
                         {!canRun
-                          ? <button className="btn act ghost" onClick={(e) => { e.stopPropagation(); navigate(`/events/${ev.id}`) }}>Open</button>
+                          ? <button className="btn act primary" onClick={(e) => { e.stopPropagation(); navigate(`/events/${ev.id}`) }}>Open</button>
                           : ev.status === 'live'
                           ? <button className="btn act ghost" disabled={busy === ev.id} onClick={() => startStop(ev, 'stop')}>{busy === ev.id ? '…' : 'Stop'}</button>
                           : ev.status !== 'ended'
                           ? <button className="btn act primary" disabled={busy === ev.id || !!bulkBusy} onClick={() => startStop(ev, 'start')} title="Start now (ahead of the scheduled window)">{busy === ev.id ? '…' : 'Start'}</button>
-                          : <button className="btn act ghost" onClick={(e) => { e.stopPropagation(); navigate(`/events/${ev.id}`) }}>Open</button>}
+                          : <button className="btn act primary" onClick={(e) => { e.stopPropagation(); navigate(`/events/${ev.id}`) }}>Open</button>}
                           <RowMenu label={`More actions for ${ev.name}`} items={menuFor(ev)} />
                         </div>
                       </td>
