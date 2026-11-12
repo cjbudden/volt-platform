@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.128.1 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Watchfolders: On a phone or a tablet the Watchfolders page no longer runs off the side of the screen: rules, the add-rule fields, the queue and the folder list stack into cards, and long folder paths wrap.
+
+### Internal
+
+- added · Tests: watchfolders-phone browser check at 390, 768 and 1440 px.
+
 ## 0.128.0 (2026-11-12)
 
 ### Product (in customer release notes)
