@@ -62,6 +62,7 @@ const Ico = {
   dup: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></svg>,
   film: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>,
   series: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><rect x="3" y="6" width="14" height="12" rx="2" /><path d="M7 3h12a2 2 0 0 1 2 2v10" /></svg>,
+  collection: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>,
   audio: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>,
 }
 const MEDIA: Record<FastMedia, { label: string; title: string; icon: ReactNode; hint: string }> = {
@@ -344,6 +345,10 @@ function FastBuilder({ id }: { id: string }) {
     edit(s => [...s, { id: `t-${sid()}`, kind: 'title', pool: [{ assetId: a.id }] }])
   }
   const addSeries = (se: LibSeries) => edit(s => [...s, { id: `s-${sid()}`, kind: 'series', series: se.name, count: 1, order: 'sequential', atEnd: 'loop' }])
+  // A COLLECTION AS THE POOL (build queue C3): the slot follows the collection
+  const addCollection = (collectionId: string) => edit(s => [...s, { id: `c-${sid()}`, kind: 'collection', collectionId, order: 'sequential' }])
+  const colsAll = useCollections()
+  const colNames = useMemo(() => new Map(flatten(colsAll.tree).map(n => [n.id, n.name])), [colsAll.tree])
 
   const passWeek = preview?.rotation.passesPerWeek ?? 0
   // Plays a week: counted from the planned week when there is one (exact, and
@@ -357,6 +362,7 @@ function FastBuilder({ id }: { id: string }) {
   const playsPerWeek = (sl: Slot) => {
     if (preview && !dirty) { const n = planned.get(sl.id) ?? 0; return sl.kind === 'title' ? n / Math.max(1, sl.pool.filter(p => 'assetId' in p).length) : n }
     const every = Math.max(1, sl.every ?? 1)
+    if (sl.kind === 'collection') return passWeek / every
     if (sl.kind === 'title') {
       const titles = sl.pool.filter(p => 'assetId' in p).length || 1
       return passWeek / every / sl.pool.length * (titles ? 1 : 0)
@@ -470,7 +476,7 @@ function FastBuilder({ id }: { id: string }) {
 
       {view === 'build' && tab === 'order' && (
         <div className="fast-cols">
-          <Library lib={lib} picking={picking ? slots.find(s => s.id === picking) : null} onTitle={addTitle} onSeries={addSeries} onDonePicking={() => setPicking(null)} assetById={assetById}
+          <Library lib={lib} picking={picking ? slots.find(s => s.id === picking) : null} onTitle={addTitle} onSeries={addSeries} onCollection={addCollection} onDonePicking={() => setPicking(null)} assetById={assetById}
             showAll={libAll} onShowAll={setLibAll} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             {preview && <RepeatHelper p={preview} firstSlot={slots[0]?.id ?? null} anchor={settings.anchor ?? null} />}
@@ -486,6 +492,8 @@ function FastBuilder({ id }: { id: string }) {
                 <div className="card-b" style={{ color: 'var(--muted)' }}>Add films or series from the library on the left. Each one becomes a slot in the run order.</div>
               ) : slots.map((s, i) => (
                 <SlotRow key={s.id} slot={s} i={i} n={slots.length} all={slots} assetById={assetById} picking={picking === s.id}
+                  colName={s.kind === 'collection' ? colNames.get(s.collectionId) ?? null : null}
+                  colPool={s.kind === 'collection' ? preview?.collections?.find(c => c.id === s.collectionId) ?? null : null}
                   plays={playsPerWeek(s)} passWeek={passWeek}
                   onPick={() => setPicking(picking === s.id ? null : s.id)}
                   onChange={(ns) => edit(list => list.map(x => x.id === s.id ? ns : x))}
@@ -509,8 +517,8 @@ function FastBuilder({ id }: { id: string }) {
 
 // ---------------------------------------------------------------- library panel
 
-function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById, showAll, onShowAll }: {
-  lib: ChannelLibrary; picking: Slot | null | undefined; onTitle: (a: LibAsset) => void; onSeries: (s: LibSeries) => void
+function Library({ lib, picking, onTitle, onSeries, onCollection, onDonePicking, assetById, showAll, onShowAll }: {
+  lib: ChannelLibrary; picking: Slot | null | undefined; onTitle: (a: LibAsset) => void; onSeries: (s: LibSeries) => void; onCollection: (id: string) => void
   onDonePicking: () => void; assetById: Map<string, LibAsset>; showAll?: boolean; onShowAll?: (all: boolean) => void
 }) {
   const [q, setQ] = useState('')
@@ -558,9 +566,10 @@ function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById, sh
           </select>
           <button className="btn ghost sm" onClick={() => setFinding(true)} title="The Media Library's full search: every filter and every collection">Find media…</button>
         </div>
-        {colItems && <div className="hintxt" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ flex: 1 }}>{pool.length} of {colItems.total} can air here, in the collection's order.</span>
-          {pool.length > 0 && <button className="btn ghost sm" onClick={() => pool.forEach(onTitle)}>{picking ? 'Add all as alternates' : 'Add all'}</button>}
+        {colItems && <div className="hintxt" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ flex: '1 1 100%' }}>{pool.length} of {colItems.total} can air here, in the collection's order.</span>
+          {pool.length > 0 && <button className="btn ghost sm" onClick={() => pool.forEach(onTitle)} title="Each title becomes its own slot (or an alternate), fixed as it is now">{picking ? 'Add all as alternates' : 'Add all'}</button>}
+          {!picking && <button className="btn ghost sm" onClick={() => onCollection(col)} title="One slot that airs the next title of the collection each time it comes round, and follows the collection as titles are added or taken out">{Ico.collection}Add as one slot</button>}
         </div>}
         {finding && <FindMediaDialog media={lib.media ?? 'video'} airable={airable} below={lib.belowLadder} onShowAll={onShowAll && !showAll ? () => onShowAll(true) : undefined} onClose={() => setFinding(false)} onAdd={(list) => list.forEach(onTitle)}
           picking={picking && picking.kind === 'title' ? assetById.get((picking.pool.find(p => 'assetId' in p) as any)?.assetId)?.title ?? 'the slot' : null} />}
@@ -601,15 +610,16 @@ function Library({ lib, picking, onTitle, onSeries, onDonePicking, assetById, sh
 
 // ---------------------------------------------------------------- one slot
 
-function SlotRow({ slot, i, n, all, assetById, picking, plays, passWeek, onPick, onChange, onMove, onDuplicate, onRemove }: {
+function SlotRow({ slot, i, n, all, assetById, picking, plays, passWeek, colName, colPool, onPick, onChange, onMove, onDuplicate, onRemove }: {
   slot: Slot; i: number; n: number; all: Slot[]; assetById: Map<string, LibAsset>; picking: boolean; plays: number; passWeek: number
+  colName?: string | null; colPool?: NonNullable<Preview['collections']>[number] | null
   onPick: () => void; onChange: (s: Slot) => void; onMove: (d: number) => void; onDuplicate: () => void; onRemove: () => void
 }) {
   const every = slot.every ?? 1
   const [target, setTarget] = useState('')
   const applyTarget = () => {
     const t = Number(target); if (!t || !passWeek) return
-    const per = slot.kind === 'title' ? passWeek / slot.pool.length : passWeek * slot.count
+    const per = slot.kind === 'title' ? passWeek / slot.pool.length : slot.kind === 'collection' ? passWeek : passWeek * slot.count
     onChange({ ...slot, every: Math.max(1, Math.min(14, Math.round(per / t))) }); setTarget('')
   }
   return (
@@ -630,6 +640,18 @@ function SlotRow({ slot, i, n, all, assetById, picking, plays, passWeek, onPick,
             <button className="btn ghost sm" onClick={onPick}>{picking ? 'Done adding' : slot.pool.length > 1 ? '+ Alternate' : '+ Alternates (take turns)'}</button>
             {!slot.pool.some(p => 'skip' in p) && <button className="btn ghost sm" onClick={() => onChange({ ...slot, pool: [...slot.pool, { skip: true }] })} title="Add a turn where the slot drops out of the pass">+ Drop a turn</button>}
           </div>
+        ) : slot.kind === 'collection' ? (
+          <>
+            <div className="line"><span className="fast-pill first" title="Each time the slot plays it airs the next title of the collection. Titles added to the collection join at the next Apply.">{Ico.collection}<span className="t">{colName ?? 'Collection not found'}</span></span>
+              {colPool && <span className="hintxt" title={[colPool.left.region ? `${colPool.left.region} not cleared anywhere this channel is shown` : '', colPool.left.media ? `${colPool.left.media} of the other media` : '', colPool.left.notInLibrary ? `${colPool.left.notInLibrary} not ready or not allowed on FAST` : ''].filter(Boolean).join(', ') || undefined}>
+                {colPool.airs} of {colPool.total} can air here</span>}</div>
+            <div className="line">
+              <label className="fast-mini">Order
+                <select value={slot.order} onChange={e => onChange({ ...slot, order: e.target.value as 'sequential' | 'shuffle' })}>
+                  <option value="sequential">In the collection's order</option><option value="shuffle">Shuffled, no repeats</option>
+                </select></label>
+            </div>
+          </>
         ) : (
           <>
             <div className="line"><span className="fast-pill first">{Ico.series}<span className="t">{slot.series}</span></span>

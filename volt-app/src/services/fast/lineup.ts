@@ -19,6 +19,11 @@
 //    series  the next N episodes of a series, in order (or shuffled without
 //            repeats for non-serial shows), each pass continuing where the
 //            last left off. `encoreOf` replays what another slot just aired.
+//    collection  a collection IS the pool (build queue C3): one of its titles
+//            each time the slot plays, in the collection's order or shuffled
+//            without repeats, taking whatever is in the collection when the
+//            guide is written. Add a film to the collection and the channel
+//            picks it up at the next Apply; nobody edits the run order.
 //
 //  Plus three lineup-wide controls:
 //    cycleShift  rotate the run order by k slots each pass, so the same title
@@ -91,7 +96,26 @@ export interface SeriesSlot {
   adRule?: AdRule;
 }
 
-export type Slot = TitleSlot | SeriesSlot;
+/**
+ * A COLLECTION AS THE POOL (build queue C3). The titles come from
+ * `Lineup.collections[collectionId]`, which the caller fills from the
+ * collection's members that can air on this channel (fast/collectionPools.ts:
+ * the channel's media, the rights and the channel's region already applied),
+ * so the planner stays pure. One title per play, like a title slot.
+ */
+export interface CollectionSlot {
+  id: string;
+  kind: 'collection';
+  collectionId: string;
+  /** In the collection's own order, or shuffled without repeats each time round. */
+  order: 'sequential' | 'shuffle';
+  every?: number;
+  phase?: number;
+  label?: string;
+  adRule?: AdRule;
+}
+
+export type Slot = TitleSlot | SeriesSlot | CollectionSlot;
 
 export interface Lineup {
   /** When pass `epochCycle` starts. */
@@ -111,6 +135,13 @@ export interface Lineup {
   ads?: AdPolicy;
   /** Used when a slot's title is out of its rights window: best duration fit first. */
   backfill?: string[];
+  /**
+   * The titles of each collection a slot takes as its pool, in order, by
+   * collection id (fast/collectionPools.ts). A collection missing here no
+   * longer exists (or is another account's); an empty list has nothing that
+   * can air on this channel.
+   */
+  collections?: Record<string, string[]>;
   seed?: string;
   /**
    * CHANNEL IDENT BETWEEN PROGRAMMES (brand mode 'between'): seconds reserved
@@ -305,7 +336,7 @@ export function planLineup(lineup: Lineup, assets: Map<string, AssetInfo>, from:
       const slotIndex = (((k + shift * cycle) % n) + n) % n;
       const slot = lineup.slots[slotIndex];
       if (!plays(slot, cycle)) continue;
-      const picks = pickFor(slot, cycle, t, assets, ptr, lastPlay, backfill, lineup.seed ?? 'volt', notice);
+      const picks = pickFor(slot, cycle, t, assets, ptr, lastPlay, backfill, lineup.seed ?? 'volt', notice, lineup.collections);
       if (!picks.length) continue;
       lastPlay[slot.id] = picks;
       for (const p of picks) {
@@ -409,8 +440,30 @@ function pickFor(
   slot: Slot, cycle: number, atMs: number, assets: Map<string, AssetInfo>, ptr: Record<string, number>,
   lastPlay: Record<string, Pick[]>, backfill: AssetInfo[], seed: string,
   notice: (at: Date, m: string, slotId?: string) => void,
+  collections?: Record<string, string[]>,
 ): Pick[] {
   const at = new Date(atMs);
+  if (slot.kind === 'collection') {
+    const ids = collections?.[slot.collectionId];
+    const name = slot.label ?? slot.id;
+    if (!ids) { notice(at, `The collection in slot ${name} no longer exists.`, slot.id); return backfillPick(backfill, [], assets, atMs, slot, notice); }
+    const pool = ids.filter((id) => assets.has(id));
+    if (!pool.length) { notice(at, `The collection in slot ${name} has nothing that can air on this channel.`, slot.id); return backfillPick(backfill, [], assets, atMs, slot, notice); }
+    // Each play takes the next title. Shuffled: a new order each time round
+    // the collection (as a shuffled series), so nothing repeats until every
+    // title has played. The position comes from the pass count, so a re-plan
+    // gives the same answer while the collection stays the same.
+    const n = pool.length;
+    const idx = playIndex(slot, cycle) + Math.round(slot.phase ?? 0);
+    const round = Math.floor(idx / n), within = ((idx % n) + n) % n;
+    const order = slot.order === 'shuffle' ? shuffleOrder(n, `${seed}:${slot.id}`, round) : Array.from({ length: n }, (_, i) => i);
+    for (let i = 0; i < n; i++) {
+      const a = assets.get(pool[order[(within + i) % n]])!;
+      if (!inRights(a, at, new Date(atMs + a.durationSec * 1000))) { notice(at, `"${a.title}" is outside its rights window.`, slot.id); continue; }
+      return [{ asset: a, note: n > 1 ? 'rotation' : undefined }];
+    }
+    return backfillPick(backfill, pool.map((assetId) => ({ assetId })), assets, atMs, slot, notice);
+  }
   if (slot.kind === 'title') {
     const pool = slot.pool.length ? slot.pool : [{ skip: true as const }];
     const rot = playIndex(slot, cycle) + Math.round(slot.phase ?? 0);
@@ -457,6 +510,14 @@ function pickFor(
     t = end.getTime();
   }
   return out;
+}
+
+function backfillPick(backfill: AssetInfo[], pool: PoolRef[], assets: Map<string, AssetInfo>, atMs: number, slot: Slot,
+  notice: (at: Date, m: string, slotId?: string) => void): Pick[] {
+  const fit = bestBackfill(backfill, pool, assets, atMs);
+  if (fit) return [{ asset: fit, note: 'backfill' }];
+  notice(new Date(atMs), `Slot ${slot.label ?? slot.id} has nothing it can air, so it is skipped.`, slot.id);
+  return [];
 }
 
 function bestBackfill(backfill: AssetInfo[], pool: PoolRef[], assets: Map<string, AssetInfo>, atMs: number): AssetInfo | null {
@@ -564,6 +625,10 @@ export function nominalLength(lineup: Lineup, assets: Map<string, AssetInfo>): n
     if (slot.kind === 'title') {
       const r = slot.pool.find((x) => 'assetId' in x) as { assetId: string } | undefined;
       s += r ? onGrid(assets.get(r.assetId)?.durationSec ?? 0) : 0;
+    } else if (slot.kind === 'collection') {
+      // a typical play: the mean of what the collection can air here
+      const ds = (lineup.collections?.[slot.collectionId] ?? []).map((id) => assets.get(id)?.durationSec).filter((d): d is number => d != null);
+      s += ds.length ? ds.reduce((x, d) => x + onGrid(d), 0) / ds.length : 0;
     } else if (!slot.encoreOf) {
       s += seriesPass(slot.series, slot.count);
     } else {

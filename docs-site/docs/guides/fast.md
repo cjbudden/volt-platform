@@ -68,7 +68,7 @@ The buttons across the top are **QC** (a check of everything the channel needs),
 
 The run order is a list of **slots** that loops. One time through the list is a **pass**, and each pass starts where the last one ended.
 
-**Add slots from the library.** On the left, **Titles** and **Series** list what can air on this channel. Search, or pick a collection to list its titles in the collection's order (**Add all** adds each as its own slot). **Find media…** opens the Media Library's full search. Choose a title to add a **title slot**, or a series to add a **series slot**. When titles were left out for being smaller than the ladder, **Show anyway** lists them too, marked **below ladder** (they are scaled up to the top rung).
+**Add slots from the library.** On the left, **Titles** and **Series** list what can air on this channel. Search, or pick a collection to list its titles in the collection's order: **Add all** adds each as its own slot, fixed as the collection is now, and **Add as one slot** adds a **collection slot** that follows the collection. **Find media…** opens the Media Library's full search. Choose a title to add a **title slot**, or a series to add a **series slot**. When titles were left out for being smaller than the ladder, **Show anyway** lists them too, marked **below ladder** (they are scaled up to the top rung).
 
 **A title slot**
 
@@ -89,6 +89,16 @@ If a title in the slot is outside its rights window when its turn comes, the nex
 | **Repeat of** | **No (new episodes)**, **Slot N (encore)** | Replays exactly what another slot of the same series last aired, marked "encore" | Slot 4 as an encore of slot 1: the morning episodes again at night |
 
 The position in a series is kept per series, not per slot: two slots of the same series continue each other's episodes.
+
+**A collection slot**
+
+Each time the slot comes round it airs the next title of the collection (and of its sub-collections, after it). The run order never has to be edited as the collection changes: **Rewrite guide** (or activating a new version) plans the guide ahead again from the collection as it is then, so a title added joins and a title taken out leaves. Without that, the days the guide is extended with as it is kept written ahead come from the collection as it is at the time.
+
+| Option | Choices | What it does | Example |
+|---|---|---|---|
+| **Order** | **In the collection's order**, **Shuffled, no repeats** | In order follows the collection's own order. Shuffled plays every title once in a new order each time round the collection | "Ocean films" shuffled: twelve films, each once before any repeats |
+
+Next to the collection's name the slot says how many of its titles can air here, for example **9 of 12 can air here**; point at it to see why the rest cannot. A title is left out when it cannot go on this channel: its rights do not allow FAST, its publishing rule turns FAST eligible off, it is not ready, it is the other media (audio on a video channel), or it is cleared only for countries this channel is not shown in (Settings > Geo). A title cleared for part of the channel's countries stays in: viewers elsewhere get the channel's geo replacement for that programme, as for a title named by hand. A title outside its rights window when its turn comes is passed over for the next one; with nothing left, the backfill airs.
 
 **Both kinds of slot**
 

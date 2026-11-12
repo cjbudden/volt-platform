@@ -54,12 +54,23 @@ export async function assetsInUse(channelId: string): Promise<Map<string, Role>>
   const ls = await query<any>(`SELECT slots, settings, l.channel_id, g.account_id FROM fast_lineups l JOIN channels c ON c.id = l.channel_id JOIN groups g ON g.id = c.group_id
     WHERE l.channel_id = $1 AND l.status IN ('active', 'draft')`, [channelId]);
   const series = new Set<string>();
+  const collections = new Set<string>();
   for (const l of ls) {
     for (const s of (l.slots ?? []) as Slot[]) {
-      if (s.kind === 'title') for (const p of s.pool) { if ('assetId' in p) out.set(p.assetId, 'content'); }
+      if (s.kind === 'title') { for (const p of s.pool) { if ('assetId' in p) out.set(p.assetId, 'content'); } }
+      else if (s.kind === 'collection') collections.add(s.collectionId);
       else if (!s.encoreOf) series.add(s.series);
     }
     for (const b of l.settings?.backfill ?? []) out.set(b, 'content');
+  }
+  // A COLLECTION AS THE POOL (build queue C3): every title of it that can air
+  // here is packaged ahead, like a title named in the run order.
+  if (collections.size && ls.length) {
+    const { libraryFor } = await import('./store');
+    const { collectionPoolsFor } = await import('./collectionPools');
+    const pools = await collectionPoolsFor(String(ls[0].account_id), channelId,
+      [...collections].map((c, i) => ({ id: `c${i}`, kind: 'collection' as const, collectionId: c, order: 'sequential' as const })), await libraryFor(String(ls[0].account_id)));
+    for (const p of Object.values(pools)) for (const id of p.ids) if (!out.has(id)) out.set(id, 'content');
   }
   if (series.size && ls.length) {
     const rows = await query<any>(`SELECT id, title, duration_ms, metadata, master_key, available_from, available_until, availability_state, break_cues_ms

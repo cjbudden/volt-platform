@@ -34,7 +34,9 @@ export type PoolRef = { assetId: string } | { skip: true }
 export type AdRule = 'default' | 'none' | 'no_mid'
 export interface TitleSlot { id: string; kind: 'title'; pool: PoolRef[]; every?: number; phase?: number; label?: string; adRule?: AdRule }
 export interface SeriesSlot { id: string; kind: 'series'; series: string; count: number; order: 'sequential' | 'shuffle'; atEnd?: 'loop' | 'stop'; every?: number; phase?: number; encoreOf?: string | null; label?: string; adRule?: AdRule }
-export type Slot = TitleSlot | SeriesSlot
+/** A collection as the pool (build queue C3): one of its titles each time the slot plays. */
+export interface CollectionSlot { id: string; kind: 'collection'; collectionId: string; order: 'sequential' | 'shuffle'; every?: number; phase?: number; label?: string; adRule?: AdRule }
+export type Slot = TitleSlot | SeriesSlot | CollectionSlot
 export interface LineupSettings { cycleShift?: number; anchor?: string | null; gridMin?: 0 | 1 | 2 | 5 | 15 | 30 | 60; backfill?: string[]; horizonDays?: number }
 export interface Lineup {
   id: string; channel_id: string; name: string; version: number; status: 'draft' | 'active' | 'archived'
@@ -56,6 +58,8 @@ export interface Preview {
   rotation: { lengthSec: number; passesPerWeek: number; dailyShiftMin: number; distinctClockTimes: string[]; warnings: string[]; everyFor4: number }
   ads: { minutesPerHour: number; breaks: number; adSec: number }
   series: { name: string; episodes: number }[]
+  /** Each collection a slot takes as its pool: how many of its titles can air on this channel, and why the rest cannot. */
+  collections?: { id: string; name: string; total: number; airs: number; left: { media: number; notInLibrary: number; region: number } }[]
 }
 export interface AdPolicy {
   enabled?: boolean; loadMinPerHour: number; breakSec: number; firstAfterMin: number; minGapMin: number; endGuardMin: number

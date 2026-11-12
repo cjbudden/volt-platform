@@ -343,6 +343,11 @@ export async function applyLineup(lineupId: string, opts: { from?: Date; days?: 
   const lineup = lineupFromRow(row, ads.policy);
   const acct = await one<any>(`SELECT g.account_id FROM channels c JOIN groups g ON g.id = c.group_id WHERE c.id = $1`, [row.channel_id]);
   const lib = airable(await libraryFor(acct.account_id));
+  // A slot that takes a collection as its pool airs what is in the collection
+  // now (build queue C3): read at every Apply and top-up, so a title added to
+  // the collection reaches the guide without editing the run order.
+  const { collectionPoolsFor, poolIds } = await import('./collectionPools');
+  lineup.collections = poolIds(await collectionPoolsFor(acct.account_id, row.channel_id, lineup.slots, lib));
   const days = Math.max(1, Math.min(14, opts.days ?? row.settings?.horizonDays ?? DEFAULT_HORIZON_DAYS));
   const now = new Date();
   let from = opts.from ?? (opts.topUpOnly && row.applied_until ? new Date(row.applied_until) : await protectPoint(row.channel_id, now));
@@ -441,7 +446,10 @@ export async function activateLineup(lineupId: string): Promise<{ epoch: string;
     // the new run order starts from its top when the programme on air ends,
     // with the pass count and every series where the old version had them
     const at = await protectPoint(row.channel_id, new Date());
-    const rb = rebase(lineupFromRow(prev, ads.policy), lib, at, false);
+    const old = lineupFromRow(prev, ads.policy);
+    const { collectionPoolsFor, poolIds } = await import('./collectionPools');
+    old.collections = poolIds(await collectionPoolsFor(acct.account_id, row.channel_id, old.slots, lib));
+    const rb = rebase(old, lib, at, false);
     epoch = rb.epoch; epochCycle = rb.epochCycle; epochSlot = rb.epochSlot; seriesStart = rb.seriesStart;
   } else if (epoch.getTime() < Date.now()) {
     // THE FIRST LINEUP ON A CHANNEL STARTS NOW (after anything already on air),

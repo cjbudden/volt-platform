@@ -344,6 +344,8 @@ fastRouter.get('/library', asyncHandler(async (req, res) => {
 const poolRef = z.union([z.object({ assetId: uuid }), z.object({ skip: z.literal(true) })]);
 const slotSchema = z.discriminatedUnion('kind', [
   z.object({ id: z.string().min(1).max(40), kind: z.literal('title'), pool: z.array(poolRef).min(1).max(20), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), label: z.string().max(80).optional(), adRule: z.enum(['default', 'none', 'no_mid']).optional() }),
+  // a collection as the pool (build queue C3, services/fast/collectionPools.ts)
+  z.object({ id: z.string().min(1).max(40), kind: z.literal('collection'), collectionId: uuid, order: z.enum(['sequential', 'shuffle']).default('sequential'), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), label: z.string().max(80).optional(), adRule: z.enum(['default', 'none', 'no_mid']).optional() }),
   z.object({ id: z.string().min(1).max(40), kind: z.literal('series'), series: z.string().min(1).max(200), count: z.number().int().min(1).max(24), order: z.enum(['sequential', 'shuffle']), atEnd: z.enum(['loop', 'stop']).optional(), every: z.number().int().min(1).max(52).optional(), phase: z.number().int().min(0).max(51).optional(), encoreOf: z.string().max(40).nullable().optional(), label: z.string().max(80).optional(), adRule: z.enum(['default', 'none', 'no_mid']).optional() }),
 ]);
 const settingsSchema = z.object({
@@ -368,6 +370,14 @@ const lineupBody = z.object({
  */
 async function checkMedia(req: Request, channelId: string, slots: Slot[] | undefined, backfill: string[] | undefined) {
   if (!slots?.length && !backfill?.length) return;
+  // A collection slot names one of the account's collections. Another
+  // account's id is answered as one that does not exist: no oracle.
+  const { collectionIdsOf } = await import('../services/fast/collectionPools');
+  const cols = collectionIdsOf(slots);
+  if (cols.length) {
+    const found = new Set((await query<any>(`SELECT id FROM collections WHERE id = ANY($1::uuid[]) AND account_id = $2`, [cols, accountId(req)])).map((r) => String(r.id)));
+    if (cols.some((c) => !found.has(c))) throw badRequest('A slot names a collection that does not exist.');
+  }
   const ch = await ownChannel(req, channelId);
   const media: FastMedia = ch.fast_media ?? 'video';
   const lib = await libraryFor(accountId(req));
@@ -477,6 +487,10 @@ fastRouter.post('/lineups/:lid/preview', asyncHandler(async (req, res) => {
   // a draft previews from when it would start: now (or its own epoch if later)
   if (l.status !== 'active' && lineup.epoch.getTime() < Date.now()) lineup.epoch = new Date(Math.floor(Date.now() / 60_000) * 60_000);
   const lib = airable(await libraryFor(accountId(req)));
+  // collection slots: what each collection can air on this channel, and why the rest cannot
+  const { collectionPoolsFor, poolIds } = await import('../services/fast/collectionPools');
+  const pools = await collectionPoolsFor(accountId(req), l.channel_id, lineup.slots, lib);
+  lineup.collections = poolIds(pools);
   const from = b.from ? new Date(b.from) : lineup.epoch;
   const to = new Date(from.getTime() + b.days * 86400_000);
   const plan = planLineup(lineup, lib, from, to);
@@ -493,6 +507,7 @@ fastRouter.post('/lineups/:lid/preview', asyncHandler(async (req, res) => {
     series: [...new Set((row.slots as Slot[]).filter((s) => s.kind === 'series').map((s: any) => s.series))].map((name) => ({
       name, episodes: episodesOf(name, lib).length,
     })),
+    collections: Object.entries(pools).map(([id, p]) => ({ id, name: p.name, total: p.total, airs: p.ids.length, left: p.left })),
   });
 }));
 
