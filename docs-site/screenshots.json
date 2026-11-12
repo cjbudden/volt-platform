@@ -210,6 +210,23 @@
       "alt": "The Availability tab: the public status and its reason, the lifecycle with today marked, the dates, Listing, Archive and Who can watch"
     },
     {
+      "name": "media-library-retention",
+      "guide": "guides/media-library.md",
+      "path": "/vod?asset=5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e35",
+      "fresh": true,
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1500,
+      "click": [
+        "button:text-is(\"Availability\")",
+        "button:has-text(\"Restore as draft…\")"
+      ],
+      "waitAfter": "[data-restore-wait]",
+      "clip": ".lc",
+      "hide": [".topbar"],
+      "alt": "The Availability tab of an archived title: Retention shows the date its publishing policy deletes it, the legal hold with its reason and that its media is in Archive storage, with Release legal hold, and Restore saying the wait (about 5 hours) and when, with Start restore and Cancel"
+    },
+    {
       "name": "media-library-collection-access",
       "guide": "guides/media-library.md",
       "path": "/vod?asset=5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e41",

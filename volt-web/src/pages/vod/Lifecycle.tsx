@@ -10,6 +10,8 @@
 //    Listing: [Listed from ....] [x] Unlisted  [Save]
 //    Archive / Restore as draft / Restore and publish
 //    Who can watch: [country] [viewer] [when] [Test]  -> the play gate's answer
+//    Retention: when its policy deletes it, what keeps it, the legal hold, and
+//    where an archived title's media is (build queue P5-3)
 //
 //  The status, reason and window come from GET /api/vod/:id, computed at the
 //  moment of the request, so what is shown here is what a viewer gets now.
@@ -101,6 +103,9 @@ export function Lifecycle({ d, onChanged }: { d: any; onChanged: () => void }) {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState('')
   const [confirmArchive, setConfirmArchive] = useState(false)
+  // Restoring from Archive storage takes hours: the wait is said and accepted first.
+  const [confirmRestore, setConfirmRestore] = useState<'draft' | 'published' | null>(null)
+  const [holdReason, setHoldReason] = useState<string | null>(null)
   const [listedFrom, setListedFrom] = useState(toLocalInput(d.listed_from))
   const [unlisted, setUnlisted] = useState(!!d.unlisted)
   const listingDirty = listedFrom !== toLocalInput(d.listed_from) || unlisted !== !!d.unlisted
@@ -108,8 +113,17 @@ export function Lifecycle({ d, onChanged }: { d: any; onChanged: () => void }) {
 
   async function act(key: string, fn: () => Promise<any>, ok: string) {
     setBusy(key); setErr('')
-    try { await fn(); notify({ kind: 'ok', message: ok }); onChanged() } catch (e: any) { setErr(e.message); notify({ kind: 'error', message: e.message }) } finally { setBusy(''); setConfirmArchive(false) }
+    try { await fn(); notify({ kind: 'ok', message: ok }); onChanged() } catch (e: any) { setErr(e.message); notify({ kind: 'error', message: e.message }) } finally { setBusy(''); setConfirmArchive(false); setConfirmRestore(null) }
   }
+  const tier = d.archive_storage as null | { tier: 'infrequent' | 'glacier'; state: string; since: string | null; error: string | null; restoreWaitMs: number; restoreWait: string | null; restoreExpectedBy: string | null; restoreTo: string | null }
+  const restoring = tier?.state === 'restoring'
+  // From Archive storage a restore is asked for and waited on; otherwise it is at once.
+  const restore = (to: 'draft' | 'published') => {
+    if (tier && tier.restoreWaitMs > 0) { setConfirmRestore(to); return }
+    act(to === 'draft' ? 'draft' : 'pub', () => apiRequest(`/vod/${d.id}/unarchive`, { method: 'POST', ...J({ to }) }), to === 'draft' ? 'Restored as a draft.' : 'Restored and published.')
+  }
+  const hold = (on: boolean) => act('hold', () => apiRequest(`/storage/vod/${d.id}/hold`, { method: 'POST', ...J(on ? { hold: true, reason: (holdReason ?? '').trim() } : { hold: false }) })
+    .then(() => setHoldReason(null)), on ? 'Legal hold set.' : 'Legal hold released.')
   const saveListing = () => act('listing', () => apiRequest(`/vod/${d.id}/availability`, { method: 'PUT',
     ...J({ listedFrom: listedFrom ? new Date(listedFrom).toISOString() : null, unlisted }) }), 'Listing saved.')
   const until = d.status_until ? when(d.status_until) : null
@@ -129,6 +143,23 @@ export function Lifecycle({ d, onChanged }: { d: any; onChanged: () => void }) {
         <div><dt>In browse and search</dt><dd>{d.publicly_listed ? 'Yes' : d.publicly_visible ? 'No, by link only' : 'No'}</dd></div>
         {archived && <div><dt>Archived</dt><dd>{when(d.archived_at)}{d.archived_by ? ` by ${d.archived_by}` : ''}</dd></div>}
       </dl>
+
+      <Retention d={d} tier={tier} />
+      {can('media', 'manage') && (
+        <div className="lc-row" data-legal-hold-actions>
+          {d.legal_hold_at
+            ? <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => hold(false)}>{lockIcon}{busy === 'hold' ? 'Releasing…' : 'Release legal hold'}</button>
+            : holdReason === null
+              ? <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => setHoldReason('')}>{lockIcon}Legal hold…</button>
+              : (<>
+                <label>Reason for the legal hold
+                  <input type="text" value={holdReason} maxLength={500} placeholder="Such as a case number" onChange={(e) => setHoldReason(e.target.value)} autoFocus />
+                </label>
+                <button type="button" className="btn primary sm" disabled={!!busy || !holdReason.trim()} onClick={() => hold(true)}>{busy === 'hold' ? 'Holding…' : 'Hold'}</button>
+                <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => setHoldReason(null)}>Cancel</button>
+              </>)}
+        </div>
+      )}
 
       {can('vod', 'manage') && !archived && (
         <div>
@@ -158,17 +189,56 @@ export function Lifecycle({ d, onChanged }: { d: any; onChanged: () => void }) {
               {busy === 'archive' ? 'Archiving…' : 'Archive'}</button>
             <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => setConfirmArchive(false)}>Cancel</button>
           </>)}
-          {archived && (<>
-            <button type="button" className="btn sm" disabled={!!busy} onClick={() => act('draft', () => apiRequest(`/vod/${d.id}/unarchive`, { method: 'POST', ...J({ to: 'draft' }) }), 'Restored as a draft.')}>
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" /></svg>{busy === 'draft' ? 'Restoring…' : 'Restore as draft'}</button>
-            <button type="button" className="btn primary sm" disabled={!!busy} onClick={() => act('pub', () => apiRequest(`/vod/${d.id}/unarchive`, { method: 'POST', ...J({ to: 'published' }) }), 'Restored and published.')}>
-              {busy === 'pub' ? 'Publishing…' : 'Restore and publish'}</button>
+          {archived && !restoring && !confirmRestore && (<>
+            <button type="button" className="btn sm" disabled={!!busy} onClick={() => restore('draft')}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" /></svg>{busy === 'draft' ? 'Restoring…' : tier?.restoreWaitMs ? 'Restore as draft…' : 'Restore as draft'}</button>
+            <button type="button" className="btn primary sm" disabled={!!busy} onClick={() => restore('published')}>
+              {busy === 'pub' ? 'Publishing…' : tier?.restoreWaitMs ? 'Restore and publish…' : 'Restore and publish'}</button>
+          </>)}
+          {archived && confirmRestore && tier && (<>
+            <span style={{ fontSize: 'var(--fs-sm)', flex: '1 1 260px' }} data-restore-wait>
+              Its media is in Archive storage. Bringing it back takes {tier.restoreWait}, expected by {when(new Date(Date.now() + tier.restoreWaitMs).toISOString())}.
+              It stays archived until then and becomes {confirmRestore === 'published' ? 'published' : 'a draft'} when the media is back.
+            </span>
+            <button type="button" className="btn primary sm" disabled={!!busy} onClick={() => act('wait', () => apiRequest(`/vod/${d.id}/unarchive`, { method: 'POST', ...J({ to: confirmRestore, acceptWait: true }) }),
+              `Restore started. It becomes ${confirmRestore === 'published' ? 'published' : 'a draft'} when the media is back.`)}>{busy === 'wait' ? 'Starting…' : 'Start restore'}</button>
+            <button type="button" className="btn ghost sm" disabled={!!busy} onClick={() => setConfirmRestore(null)}>Cancel</button>
           </>)}
         </div>
       )}
       {err && <Notice kind="error" variant="compact" message={err} />}
       <WhoCanWatch id={d.id} />
     </section>
+  )
+}
+
+const lockIcon = <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+const TIER_LABEL: Record<string, string> = { infrequent: 'Infrequent access', glacier: 'Archive storage' }
+
+/**
+ * RETENTION ON THE DRAWER (build queue P5-3 (b)): when its publishing policy
+ * deletes it (the date the hourly sweep last worked out), what keeps it when
+ * it is due, its legal hold, and, once archived, which storage its media is in.
+ * The full list is on the Storage page (Titles deleted by their publishing policy).
+ */
+function Retention({ d, tier }: { d: any; tier: any }) {
+  const due = d.retention_due_at ? new Date(d.retention_due_at) : null
+  const isDue = !!due && due.getTime() <= Date.now()
+  return (
+    <div data-retention>
+      <div className="sec-label">Retention</div>
+      <dl className="lc-dates">
+        <div><dt>Deleted by its publishing policy</dt><dd data-retention-due>{due ? (isDue ? `Due since ${when(d.retention_due_at)}` : when(d.retention_due_at)) : 'Not set: its policy keeps it'}</dd></div>
+        <div><dt>Legal hold</dt><dd data-legal-hold>{d.legal_hold_at
+          ? <span style={{ color: 'var(--warn)' }}>{lockIcon} On hold since {when(d.legal_hold_at)}{d.legal_hold_reason ? `: ${d.legal_hold_reason}` : ''}</span>
+          : 'None'}</dd></div>
+        {tier && <div><dt>Media storage</dt><dd data-archive-storage>{TIER_LABEL[tier.tier] ?? tier.tier}{tier.since ? ` since ${when(tier.since)}` : ''}</dd></div>}
+      </dl>
+      {isDue && d.retention_wait && d.retention_wait_code !== 'legal_hold' && <div className="lc-hint" data-retention-wait>Due, but kept: {d.retention_wait}</div>}
+      {tier && tier.state !== 'restoring' && tier.restoreWaitMs > 0 && <div className="lc-hint">A restore from Archive storage takes {tier.restoreWait}; the title stays archived until its media is back.</div>}
+      {tier?.state === 'restoring' && <Notice kind="info" variant="compact" message={`Restoring from Archive storage, expected by ${when(tier.restoreExpectedBy)}. It becomes ${tier.restoreTo === 'published' ? 'published' : 'a draft'} when the media is back.`} />}
+      {tier?.error && <div className="lc-hint" style={{ color: 'var(--warn)' }}>The last storage move did not finish and is tried again within the hour: {tier.error}</div>}
+    </div>
   )
 }
 

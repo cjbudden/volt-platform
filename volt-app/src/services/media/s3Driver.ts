@@ -101,28 +101,26 @@ export class S3Driver implements StorageDriver {
    * media has to. An object already in the class is left alone, so a retry
    * after a part-failure only redoes what is left.
    */
-  async transition(uri: string, to: StorageTier): Promise<StoredObject> {
+  async transition(uri: string, to: StorageTier, opts: { restored?: boolean } = {}): Promise<StoredObject> {
     if (to === 'local') throw new Error('S3 media cannot transition to local disk; restore it instead.');
     const loc = parseS3Uri(uri)!;
     const cls = STORAGE_CLASS[to];
     const s3 = await this.api();
-    const { CopyObjectCommand } = await this.sdk();
     const objs = await this.objects(uri);
     if (!objs.length) throw new Error(`Nothing at ${uri} to move to ${to}`);
     let bytes = 0;
     for (const o of objs) {
       bytes += o.bytes;
       if (o.storageClass === cls) continue;
-      if (needsRestore(o.storageClass)) {
+      if (needsRestore(o.storageClass) && !opts.restored) {
         // S3 refuses to copy an archived object that has not been restored.
-        // Say so rather than surface the SDK's InvalidObjectState.
+        // Say so rather than surface the SDK's InvalidObjectState. With
+        // `restored` the caller has seen the restore land (restoreStatus), and
+        // a restored copy can be copied, which is how it leaves Glacier for good
+        // (build queue P5-3, a title restored from the archive tier).
         throw new Error(`${o.key} is in ${o.storageClass}; restore it before moving it to ${to}`);
       }
-      await s3.send(new CopyObjectCommand({
-        Bucket: loc.bucket, Key: o.key,
-        CopySource: `${loc.bucket}/${o.key.split('/').map(encodeURIComponent).join('/')}`,
-        StorageClass: cls as any, MetadataDirective: 'COPY',
-      }));
+      await copyInPlace(s3, loc.bucket, o.key, o.bytes, cls);
     }
     return { uri, bytes, tier: to };
   }
@@ -180,6 +178,47 @@ export class S3Driver implements StorageDriver {
         throw new Error(`S3 refused to delete ${r.Errors.length} object(s) under ${uri}, first ${e.Key}: ${e.Code} ${e.Message ?? ''}`.trim());
       }
     }
+  }
+}
+
+/** CopyObject takes at most 5 GiB; a bigger object is copied in parts. */
+export const COPY_LIMIT = Number(process.env.S3_COPY_LIMIT_BYTES ?? 5 * 1024 ** 3);
+const PART = Number(process.env.S3_COPY_PART_BYTES ?? 512 * 1024 ** 2);
+
+/**
+ * Change one object's storage class by copying it onto itself. A single
+ * CopyObject is refused by S3 above 5 GiB, which a VOD original (a mezzanine
+ * file) easily is, so the class change failed on exactly the biggest, most
+ * expensive files (found by P5-3). Above the limit the copy is a multipart
+ * upload whose parts are server-side range copies: no byte passes through the
+ * task, and the object keeps its content type, cache header and metadata.
+ */
+async function copyInPlace(s3: S3Api, bucket: string, key: string, bytes: number, cls: string): Promise<void> {
+  const sdk = await import('@aws-sdk/client-s3');
+  const source = `${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`;
+  if (bytes <= COPY_LIMIT) {
+    await s3.send(new sdk.CopyObjectCommand({ Bucket: bucket, Key: key, CopySource: source, StorageClass: cls as any, MetadataDirective: 'COPY' }));
+    return;
+  }
+  const h = await s3.send(new sdk.HeadObjectCommand({ Bucket: bucket, Key: key }));
+  const up = await s3.send(new sdk.CreateMultipartUploadCommand({
+    Bucket: bucket, Key: key, StorageClass: cls as any,
+    ContentType: h.ContentType, CacheControl: h.CacheControl, ContentDisposition: h.ContentDisposition, Metadata: h.Metadata,
+  }));
+  try {
+    const parts: { ETag: string; PartNumber: number }[] = [];
+    for (let start = 0, n = 1; start < bytes; start += PART, n++) {
+      const end = Math.min(bytes, start + PART) - 1;
+      const r = await s3.send(new sdk.UploadPartCopyCommand({
+        Bucket: bucket, Key: key, UploadId: up.UploadId, PartNumber: n, CopySource: source, CopySourceRange: `bytes=${start}-${end}`,
+      }));
+      parts.push({ ETag: r.CopyPartResult?.ETag, PartNumber: n });
+    }
+    await s3.send(new sdk.CompleteMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: up.UploadId, MultipartUpload: { Parts: parts } }));
+  } catch (e) {
+    // An abandoned upload is billed until it is aborted.
+    await s3.send(new sdk.AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: up.UploadId })).catch(() => {});
+    throw e;
   }
 }
 

@@ -41,7 +41,8 @@ export interface TrashImage { from: string; to: string }
 export interface TrashRow { table: string; row: Record<string, any> }
 export interface TrashRelink { table: string; column: string; ids: string[]; value: string }
 /** A prefix of the S3 origin bucket moved into the bin. */
-export interface TrashObjects { from: string; to: string; files: number }
+/** inPlace: left at its own keys (Archive storage cannot be copied); to === from. */
+export interface TrashObjects { from: string; to: string; files: number; inPlace?: boolean }
 
 /** Move a file or directory, across volumes if it must. */
 function move(from: string, to: string): void {
@@ -116,7 +117,18 @@ export class BinItem {
   }
   /** Move a prefix of the S3 origin bucket into the bin (vod/<id>/ for a library asset). */
   async objects(prefix: string): Promise<void> {
-    const { movePrefix } = await import('../fast/vodStore');
+    const { movePrefix, listPrefix } = await import('../fast/vodStore');
+    // An archived title whose policy put its media in Archive storage (P5-3)
+    // cannot be moved: S3 refuses to copy a Glacier object that has not been
+    // restored. It is not servable there either, so it stays where it is and
+    // the bin records it in place: a restore from the bin has nothing to move
+    // back, and the purge deletes it at its own keys.
+    const keys = await listPrefix(prefix);
+    if (keys.some((k) => k.storageClass === 'GLACIER' || k.storageClass === 'DEEP_ARCHIVE')) {
+      const bytes = keys.reduce((n, k) => n + k.size, 0);
+      this.objectsOut.push({ from: prefix, to: prefix, files: keys.length, inPlace: true }); this.bytes += bytes; this.count += keys.length;
+      return;
+    }
     const to = `trash/${this.id}/${prefix}`;
     const m = await movePrefix(prefix, to);
     if (!m.files) return;
@@ -233,6 +245,9 @@ export async function restoreItem(id: string, opts: { accountId?: string | null;
     try { await imageStore().move(im.to, im.from); res.images++; } catch { /* gone or already back */ }
   }
   for (const ob of (it.objects ?? []) as TrashObjects[]) {
+    // Left in place (Archive storage): already where it belongs. Never move a
+    // prefix onto itself: the copy is refused and the delete would then take it.
+    if (ob.inPlace || ob.to === ob.from) { res.files += ob.files; continue; }
     const { movePrefix } = await import('../fast/vodStore');
     try { res.files += (await movePrefix(ob.to, ob.from)).files; } catch (e) { console.error('[bin] origin objects not restored', ob.from, e); res.skipped += ob.files; }
   }

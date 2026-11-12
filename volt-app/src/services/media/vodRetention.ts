@@ -30,8 +30,8 @@
 //  `legalHoldAllowed` off: the setting stops new holds, it never deletes held
 //  material. Removing a hold is logged; the next sweep then decides.
 //
-//  The storage tier move for archived titles (`archiveTier`) is build queue
-//  P5-2, with the console.
+//  The storage tier move for archived titles (`archiveTier`) is
+//  services/media/vodArchiveTier.ts (build queue P5-3).
 // ============================================================================
 import { one, query } from '../../db';
 import { writeAudit } from '../audit';
@@ -115,7 +115,7 @@ const SELECT = `
     LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)`;
 
 /** Resolve the policy of many titles of one account with one read of its rules. */
-async function resolver(accountId: string) {
+export async function resolver(accountId: string) {
   const rows = await query<any>(`SELECT id, scope_kind, scope_id, settings, locked_fields, name, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
   const { loadRules, firstMatches, rungOf } = await import('../publishingMetadataRules');
   const { resolveFromRows } = await import('../publishingRules');
@@ -147,7 +147,7 @@ async function copyVerdict(t: any): Promise<{ ok: boolean; code?: string; messag
   return judgeOriginal(t, copies, busy?.n ?? 0);
 }
 
-async function log(t: any, event: string, o: { dueAt?: Date | null; rule?: string | null; code?: string | null; message?: string | null; bin?: string | null } = {}) {
+export async function log(t: any, event: string, o: { dueAt?: Date | null; rule?: string | null; code?: string | null; message?: string | null; bin?: string | null } = {}) {
   await query(
     `INSERT INTO vod_retention_log (account_id, vod_asset_id, title, event, due_at, rule, code, message, bin_item_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,

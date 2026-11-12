@@ -109,14 +109,14 @@ export async function uploadVodDir(dir: string, assetId: string, opts: { concurr
 // ---------------------------------------------------------------------------
 
 /** Every key under a prefix. */
-export async function listPrefix(prefix: string): Promise<{ key: string; size: number }[]> {
+export async function listPrefix(prefix: string): Promise<{ key: string; size: number; storageClass?: string }[]> {
   const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
   const c = await client();
-  const out: { key: string; size: number }[] = [];
+  const out: { key: string; size: number; storageClass?: string }[] = [];
   let token: string | undefined;
   do {
     const r: any = await c.send(new ListObjectsV2Command({ Bucket: config.aws.s3Bucket, Prefix: prefix, ContinuationToken: token }));
-    for (const o of r.Contents ?? []) out.push({ key: o.Key, size: Number(o.Size ?? 0) });
+    for (const o of r.Contents ?? []) out.push({ key: o.Key, size: Number(o.Size ?? 0), storageClass: o.StorageClass ?? 'STANDARD' });
     token = r.IsTruncated ? r.NextContinuationToken : undefined;
   } while (token);
   return out;

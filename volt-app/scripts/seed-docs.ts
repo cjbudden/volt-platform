@@ -992,6 +992,13 @@ async function seedTitleRetention() {
   }
   await query(`UPDATE vod_assets SET legal_hold_at = now() - interval '1 day', legal_hold_by = $2, legal_hold_reason = 'Music rights dispute, case 2026-114'
                 WHERE id = $1 AND legal_hold_at IS NULL`, [valley, 'admin@example.com']);
+  // The held title is also archived with its media in Archive storage (P5-3),
+  // so the Availability tab shows the retention date, the hold and the storage,
+  // and Restore says the wait first. Set on the row: the docs server keeps
+  // media on its disk, where there is no storage class to move it to.
+  await query(`UPDATE vod_assets SET archived_at = now() - interval '2 days', archived_by = 'admin@example.com',
+                 archive_tier = 'glacier', archive_tier_state = 'moved', archive_tier_at = now() - interval '2 days'
+                WHERE id = $1 AND archived_at IS NULL`, [valley]);
   const { sweepVodRetention } = await import('../src/services/media/vodRetention');
   await sweepVodRetention({ accountId: ACCOUNT, limit: 0, actor: 'seed-docs' });
 }

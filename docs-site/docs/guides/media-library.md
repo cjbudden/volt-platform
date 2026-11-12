@@ -197,6 +197,15 @@ The top of the **Availability** tab says what a viewer gets right now and why.
 
 1. Choose **Archive…**, then **Archive**. The title leaves the catalogue and stops playing at once, including for viewers who already started it; its publishing points are withdrawn. The media is kept.
 2. To bring it back, open the archived asset's **Availability** tab and choose **Restore as draft** (its dates are kept, nothing is published) or **Restore and publish** (it is published again through its rules, with every check). If publishing is refused, it is restored as a draft and the message says why.
+3. If its publishing policy sets **Archive storage tier**, its media moved to cheaper storage when it was archived, and **Media storage** under **Retention** says which. From **Infrequent access** it is restored at once. From **Archive storage** a restore takes about 5 hours: the buttons read **Restore as draft…** and **Restore and publish…**, and the line that opens says how long and by when. Choose **Start restore** to begin. The title stays archived until its media is back, **Restoring from Archive storage, expected by** shows meanwhile, and then it becomes a draft or is published as you chose.
+
+### See when it is deleted, and hold it
+
+![The Availability tab of an archived title: Retention shows the date its publishing policy deletes it, the legal hold with its reason and that its media is in Archive storage, with Release legal hold, and Restore saying the wait (about 5 hours) and when, with Start restore and Cancel](/img/screens/media-library-retention.png)
+
+1. On **Availability**, **Retention** shows **Deleted by its publishing policy**: the date the title's publishing policy deletes it, or **Not set: its policy keeps it**. A due title that something keeps says what (see [When retention deletes a title](publishing-rules.md#when-retention-deletes-a-title)).
+2. **Legal hold** shows whether a hold keeps it, since when and why. To place one, choose **Legal hold…**, type the reason (a case number, say) and choose **Hold**; **Hold** stays off until there is a reason. **Release legal hold** takes it off. A hold can be placed only where the title's policy has **Legal hold allowed** on.
+3. The same list for the whole library is on **Storage > Titles deleted by their publishing policy** ([Storage](storage.md#titles-deleted-by-their-publishing-policy)).
 
 ### Check who can watch
 
@@ -286,6 +295,7 @@ See [How Volt fits together](../getting-started/how-volt-fits-together.md) for t
 | See the library, open assets and read every tab | Media library & publishing: View |
 | Test who can watch | Media library & publishing: View |
 | Publish, publish again, remove access, archive and restore, publish to social, retry a social post | Media library & publishing: Operate |
+| Place or release a legal hold | Files, uploads & storage: Manage |
 | Set Listed from and Unlisted, save metadata, fill from the guide, change the image, set skip markers, send for review, re-run QC, change the asset's publishing rule, work its formats | Media library & publishing: Manage |
 | See which files can be downloaded | Downloads: View |
 | Download a file | Downloads: Operate |
@@ -323,6 +333,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **copy is old** in the Public status column | The asset changed after it was published | Publish it again so the published copy matches |
 | **Restricted** although it is published | Its rights do not allow on-demand use now: the use, the territories or the rights window | Open the **Rights** tab; the reason on **Availability** names the profile |
 | **Restored as a draft. It could not be published: …** | **Restore and publish** brought it out of the archive, but its rules or rights refuse publishing | Fix what the message names, then choose **Publish** |
+| **Restoring from Archive storage, expected by …** and no Restore buttons | Its media is being brought back from Archive storage, which takes hours | Nothing: it becomes a draft or is published, as you chose, when the media is back |
+| **The last storage move did not finish and is tried again within the hour** | Moving its media to or from cheaper storage stopped part way (the storage service could not be reached, say) | Nothing: the hourly retention sweep tries again; if the message stays, tell your Volt provider what it says |
 | **Not found** in **Who can watch** for a title you can see | It is not public for that moment (draft, processing, scheduled without a teaser, restricted, expired or archived) | Read the status line under the answer |
 | **Couldn't load this asset.** | The asset could not be read | Choose **Retry** |
 
@@ -348,7 +360,8 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | Its publishing rule for this item: `{"override": {...}}`, `{}` to follow the rules again. Refused with `422 policy_conflict` for a field locked beneath it or a conflict it brings; `409 confirm_repackage` until sent with `"confirm": true` when it changes DRM on a published item; `?dryRun=1` checks without saving |
 | `POST /api/vod/{id}/publish`, `POST /api/vod/{id}/withdraw` | Publish, and remove access |
 | `PUT /api/vod/{id}/availability` | **Listed from** and **Unlisted**: `{"listedFrom": "2026-12-01T09:00:00Z", "unlisted": false}` (`null` for the default) |
-| `POST /api/vod/{id}/archive`, `POST /api/vod/{id}/unarchive` | Archive (optional `reason`), and restore with `{"to": "draft"}` or `{"to": "published"}` |
+| `POST /api/vod/{id}/archive`, `POST /api/vod/{id}/unarchive` | Archive (optional `reason`), and restore with `{"to": "draft"}` or `{"to": "published"}`. From Archive storage the answer is `409` with `code: "restore_wait"`, `expectedBy` and `waitMs` until the request adds `"acceptWait": true`; then `202` with `restoring: true` and the title stays archived until its media is back (`409` `restoring` while it is) |
+| `GET /api/vod/{id}` | Also `retention_due_at`, `legal_hold_at`, `legal_hold_reason` and `archive_storage` (`tier`, `state`, `since`, `restoreWait`, `restoreExpectedBy`, `restoreTo`; `null` while its media is in normal storage) |
 | `POST /api/vod/{id}/evaluate` | **Who can watch**: `{"country": "GB", "viewer": "anonymous", "at": "2026-12-01T12:00:00Z"}` in, the play gate's answer (`outcome`, `http`, `message`, `decidedBy`, `status`) out |
 | `GET /api/vod/{id}/markers`, `PUT /api/vod/{id}/markers/{kind}` | Skip markers (`intro`, `recap`, `credits`) |
 | `GET /api/vod/{id}/frame-index`, `GET /api/vod/{id}/frame` | The asset's frame rate and frame count, and one exact frame as an image (by `n`, `tc` or `ms`) |

@@ -217,6 +217,8 @@ With **Retention** set to **Keep for a number of days**, a title is deleted that
    - it is in the active lineup of a FAST channel;
    - its rule copies originals to your own storage (Mirror and Archive) and the copy of this title's original is not verified yet: the same check that keeps an original in the cloud until its copy is safe.
 
+**Archive storage tier** decides where an archived title's media waits. Left empty, it stays where it is. **Infrequent access** costs about half as much to keep and plays again as soon as the title is restored. **Archive storage** costs a fraction, but a restore takes about 5 hours, and the title says so before it starts ([Media Library](media-library.md#archive-it-and-restore-it)). The move happens when the title is archived (or at the hourly sweep), takes its packaged files and its original, and applies only to media in your Volt service's cloud storage. Changing the setting to a colder tier moves titles already archived; changing it to a warmer one or to none applies the next time a title is archived. A title deleted while its media is in Archive storage can still be restored from **Recently removed** while the bin keeps it.
+
 **Storage > Titles deleted by their publishing policy** lists what is due and why a due title is kept, and is where a legal hold is placed and released (see [Storage](storage.md#titles-deleted-by-their-publishing-policy)).
 
 ### See every override

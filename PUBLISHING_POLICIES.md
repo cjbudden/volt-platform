@@ -336,4 +336,4 @@ Collections are the one editorial grouping, replacing playlists: manual, rule-ba
 - [x] Decided 3 Nov: viewers in a blocked region see the asset locked with a block message, and blocked requests are counted for the Rights demand report.
 - [x] Decided 11 Nov: a metadata rule is more specific than the owner rung, so the order is account < content type < owner < metadata rule < asset. A metadata rule beats the channel or event a title came from; a title override still beats both.
 - [ ] Where do rights windows come from: typed per asset, inherited from the owner or series, or an import from a rights system?
-- [ ] Should archive move media to a colder S3 tier automatically, and is restore time acceptable?
+- [x] Decided 12 Nov (build queue P5-3): archive moves media to a colder tier only when the policy sets **Archive storage tier** (opt-in); a restore from Archive storage says its wait (about 5 hours) before it starts and the title stays archived until its media is back.

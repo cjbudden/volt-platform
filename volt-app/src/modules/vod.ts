@@ -598,7 +598,8 @@ vodRouter.get(
     const jsonld = exposure.listed
       ? videoObjectFromAsset(row, pubs as any, { media: await schemaOrgMediaAllowed(row.id, { accountId: accountId(req) }).catch(() => false), mp4: exposure.mp4 })
       : null;
-    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld, encode_place: encodePlaceOf(row.ingest, siteName),
+    const { archiveStorageOf } = await import('../services/media/vodArchiveTier');
+    res.json({ ...row, archive_storage: archiveStorageOf(row), audioOnly, schema, publications: pubs, jsonld, encode_place: encodePlaceOf(row.ingest, siteName),
       original_return: originalReturn, ...(await statusFields(row)), preview: previewUrls(row), ...extra });
   })
 );
@@ -1216,6 +1217,15 @@ vodRouter.post('/:id/archive', asyncHandler(async (req, res) => {
     action: 'update', entityType: 'vod_asset', entityId: asset.id,
     changes: { editorial_state: { from: computeEditorial(asset), to: 'archived' }, public_status: { from: asset.public_status ?? null, to: s?.status ?? 'archived' } },
     snapshot: { reason } }).catch(() => {});
+  // Its policy's Archive storage tier (P5-3): move the media now rather than
+  // at the next hourly sweep, without holding up the answer. A failure is kept
+  // on the title and the sweep tries again.
+  void (async () => {
+    const { applyArchiveTier } = await import('../services/media/vodArchiveTier');
+    const { resolver } = await import('../services/media/vodRetention');
+    const t = await one<any>(`SELECT v.*, ${OWNER_ACCOUNT} AS account_id ${OWNED} WHERE v.id = $1`, [asset.id]);
+    if (t) await applyArchiveTier(t, (await resolver(accountId(req)))(t).settings?.retention?.archiveTier ?? null, `user:${who.label}`);
+  })().catch((e) => console.error('[vod] archive tier move', asset.id, e));
   const fresh = await fetchOwned(asset.id, accountId(req));
   res.json({ archivedAt: fresh?.archived_at ?? null, archivedBy: fresh?.archived_by ?? null, ...(await statusFields(fresh ?? asset)) });
 }));
@@ -1223,9 +1233,22 @@ vodRouter.post('/:id/archive', asyncHandler(async (req, res) => {
 vodRouter.post('/:id/unarchive', asyncHandler(async (req, res) => {
   const asset = await fetchOwned(req.params.id, accountId(req));
   if (!asset) throw notFound('VOD asset not found');
-  const b = z.object({ to: z.enum(['draft', 'published']).default('draft') }).parse(req.body ?? {});
+  const b = z.object({ to: z.enum(['draft', 'published']).default('draft'), acceptWait: z.boolean().optional() }).parse(req.body ?? {});
   if (!asset.archived_at) return res.status(409).json({ error: 'This title is not archived.', code: 'not_archived' });
   const who = actor(req);
+  // MEDIA IN A COLDER TIER (P5-3). From Archive storage the restore takes
+  // hours, so the wait is said first (409 restore_wait) and started only when
+  // the request accepts it; the title stays archived until the media is back.
+  const tier = await import('../services/media/vodArchiveTier');
+  try {
+    if (await tier.beforeUnarchive(asset.id, b.to, await actorLabel(req), !!b.acceptWait) === 'started') {
+      const fresh = await fetchOwned(asset.id, accountId(req));
+      return res.status(202).json({ restoring: true, archiveStorage: tier.archiveStorageOf(fresh), ...(await statusFields(fresh ?? asset)) });
+    }
+  } catch (e: any) {
+    if (!(e instanceof tier.RestoreWait)) throw e;
+    return res.status(409).json({ error: e.message, code: e.code, expectedBy: e.expectedBy.toISOString(), waitMs: e.waitMs });
+  }
   let refused: string | null = null;
   try { await unarchiveAsset(asset.id, await actorLabel(req), b.to); }
   catch (e: any) {
@@ -1240,6 +1263,8 @@ vodRouter.post('/:id/unarchive', asyncHandler(async (req, res) => {
     action: 'update', entityType: 'vod_asset', entityId: asset.id,
     changes: { editorial_state: { from: 'archived', to: after.editorial_state }, public_status: { from: asset.public_status ?? 'archived', to: after.public_status } },
     snapshot: { restoredTo: b.to, refused } }).catch(() => {});
+  // Out of Infrequent access: its media goes back to the normal class.
+  void tier.afterUnarchive(asset.id).catch((e) => console.error('[vod] archive tier return', asset.id, e));
   if (refused) return res.status(409).json({ error: `Restored as a draft. It could not be published: ${refused}`, code: 'not_publishable', ...after });
   res.json(after);
 }));

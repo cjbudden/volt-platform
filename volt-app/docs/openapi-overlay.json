@@ -1088,11 +1088,11 @@
   },
   "POST /api/vod/:id/archive": {
     "summary": "Archive an asset",
-    "description": "Takes the title off the catalogue and stops it playing; the media is kept and it can be restored at any time until retention removes it. Its publications are withdrawn and play tokens already handed out stop at the edge. Optional body `reason`. Audited. 409 when it is already archived. Needs `vod: operate`."
+    "description": "Takes the title off the catalogue and stops it playing; the media is kept and it can be restored at any time until retention removes it. Its publications are withdrawn and play tokens already handed out stop at the edge. Optional body `reason`. Audited. 409 when it is already archived. When its publishing policy sets an Archive storage tier, its media in the cloud bucket (the package and the original) moves to that storage class straight after. Needs `vod: operate`."
   },
   "POST /api/vod/:id/unarchive": {
     "summary": "Restore an archived asset",
-    "description": "Body `to`: `draft` (the default; its dates are kept) or `published` (publishes it again through its rules, with every gate and the rights checked). If publishing refuses, the title is out of the archive as a draft and the answer is 409 with the reason. Audited. 409 `not_archived` when it is not archived. Needs `vod: operate`."
+    "description": "Body `to`: `draft` (the default; its dates are kept) or `published` (publishes it again through its rules, with every gate and the rights checked). If publishing refuses, the title is out of the archive as a draft and the answer is 409 with the reason. Audited. 409 `not_archived` when it is not archived. When its publishing policy moved its media to Archive storage (`retention.archiveTier: glacier`), a restore takes hours, so the answer is 409 `restore_wait` with `expectedBy`, `waitMs` and the wait in words until the body adds `acceptWait: true`; then 202 with `restoring: true` and `archiveStorage`, and the title stays archived until its media is back, when it becomes what `to` asked for (409 `restoring` while it is). From Infrequent access it is restored at once and its media moved back afterwards. Needs `vod: operate`."
   },
   "POST /api/vod/:id/evaluate": {
     "summary": "Who can watch: test an asset",

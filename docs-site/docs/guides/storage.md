@@ -194,6 +194,7 @@ Recordings follow the retention ladder above; titles in the Media Library follow
 1. Under **Titles deleted by their publishing policy**, choose **Next 7 days**, **Next 30 days** or **Next 90 days**. Each title shows the day it is deleted, and **Kept because** says what keeps a due one: **On legal hold**, **Still published** (its Available until has not passed), **In a FAST lineup**, or **Waiting for its archive copy** with the copy's state. Titles on legal hold are always listed.
 2. To keep a title whatever its policy says, choose **Legal hold**, type the reason (a case number, say) and choose **Hold**. A hold can be placed only where the title's policy has **Legal hold allowed** on.
 3. To let it go, choose **Release hold**. If it is due and nothing else keeps it, the next sweep moves it to **Recently removed**, from where it can still be restored for a few days.
+4. The same date and hold are on each title's **Availability** tab in the Media Library, with where an archived title's media is kept ([Media Library](media-library.md#see-when-it-is-deleted-and-hold-it)).
 
 ## How it connects
 

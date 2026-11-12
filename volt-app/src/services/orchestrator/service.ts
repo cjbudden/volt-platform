@@ -1408,6 +1408,13 @@ export class Orchestrator {
       const v = await sweepVodRetention({ actor: 'retention:sweep' });
       if (v.removed || v.failed || v.warned) console.log(`[retention] titles: ${v.removed} removed, ${v.warned} warned, ${v.waiting} waiting, ${v.held} on legal hold, ${v.failed} failed`);
     } catch (e) { console.error('[retention] titles pass failed', e); }
+    // Archived titles to their policy's Archive storage tier, Glacier restores
+    // that have landed, and media moved back after a restore (P5-3).
+    try {
+      const { sweepArchiveTiers } = await import('../media/vodArchiveTier');
+      const a = await sweepArchiveTiers();
+      if (a.moved || a.restored || a.returned || a.failed) console.log(`[retention] archive tier: ${a.moved} moved, ${a.restored} restored, ${a.returned} moved back, ${a.restoring} restoring, ${a.failed} failed`);
+    } catch (e) { console.error('[retention] archive tier pass failed', e); }
     if (result.cooled || result.archived || result.deleted || result.failed
         || result.unavailable || result.orphaned) {
       console.log(
