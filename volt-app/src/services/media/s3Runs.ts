@@ -57,6 +57,8 @@ let apiOverride: S3Api | null = null;
 /** Tests hand in a stand-in S3 client (the same seam setStorageDriver gives the driver). */
 export function setS3RunsApi(api: S3Api | null): void { apiOverride = api; }
 async function s3(): Promise<S3Api> { return apiOverride ?? mediaS3Client(config.aws.region); }
+/** The client this file uses (the stand-in in tests), for the readers of runs (s3RecordingSource.ts). */
+export const runsApi = s3;
 const sdk = () => import('@aws-sdk/client-s3');
 
 /** True when this deployment's recordings live in the bucket. */
@@ -85,7 +87,7 @@ export function tierOfClass(cls: string | undefined): StorageTier {
 interface Listed { key: string; bytes: number; lastModified: number; storageClass: string }
 
 /** One level under a prefix: the files there and the folders below it. */
-async function listLevel(api: S3Api, bucket: string, prefix: string): Promise<{ files: Listed[]; folders: string[] }> {
+export async function listLevel(api: S3Api, bucket: string, prefix: string): Promise<{ files: Listed[]; folders: string[] }> {
   const { ListObjectsV2Command } = await sdk();
   const files: Listed[] = []; const folders: string[] = [];
   let token: string | undefined;
@@ -99,7 +101,7 @@ async function listLevel(api: S3Api, bucket: string, prefix: string): Promise<{ 
 }
 
 /** Every key under a prefix. Used once per closed run, and by the clip-aware prune. */
-async function listAll(api: S3Api, bucket: string, prefix: string): Promise<Listed[]> {
+export async function listAll(api: S3Api, bucket: string, prefix: string): Promise<Listed[]> {
   const { ListObjectsV2Command } = await sdk();
   const out: Listed[] = [];
   let token: string | undefined;

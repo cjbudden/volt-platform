@@ -17,6 +17,8 @@ import { sweep, ruleFor } from '../media/retention';
 import { transition, locationsOf, pollRestores } from '../media/objects';
 import { storageDriver } from '../media/storage';
 import { reconcileAll } from '../media/reconcile';
+import { bucketRecordings } from '../media/s3Runs';
+import { writeRecordingSource } from '../media/s3RecordingSource';
 import { sweepAnalytics } from '../analyticsRetention';
 import { sweepUploads } from '../uploads';
 import { fireHook } from '../workflows/hooks';
@@ -777,17 +779,37 @@ export class Orchestrator {
     // WORKFLOW HOOK: the usual place to send a finished recording to an AI agent.
     fireHook('recording.completed', 'recording', rec.id, { durationMs: Number(dur) || 0, kind: rec.kind });
     // fire the CPU thumbnailer against the recorded hi-res source
-    const job = buildThumbnailerJobConfig({
-      id: rec.id,
-      kind: 'recording',
-      source_master: `s3://${config.aws.s3Bucket}/${rec.master_key}/${rec.hi_res_rendition}/index.m3u8`,
-      duration_sec: Math.max(1, Math.round(dur / 1000)),
-      stream_id: rec.channel_id ?? rec.event_id,
-    });
-    try {
-      await this.launcher.launchThumbnailer(job);
-    } catch (e) {
-      console.error('thumbnailer launch failed for recording', rec.id, e);
+    let source: string | null = `s3://${config.aws.s3Bucket}/${rec.master_key}/${rec.hi_res_rendition}/index.m3u8`;
+    if (config.orchestrator.launcher === 'ecs' && bucketRecordings()) {
+      // ON AWS THE RECORDING IS IN THE RUN FOLDERS (build queue 2.3c). The
+      // master_key path above is the old layout, which nothing writes, so the
+      // task read a key that does not exist and every recording ended without
+      // thumbnails. The local launchers ignore `source` (they read the disk).
+      source = null;
+      try {
+        const built = await writeRecordingSource(rec);
+        if (built) source = built.uri;
+        else console.warn('thumbnailer not started: no segments in the bucket for recording', rec.id);
+      } catch (e) {
+        console.error('recording source playlist failed for recording', rec.id, e);
+      }
+      // No task, so nothing will ever report back: say so instead of leaving
+      // the recording "processing" for ever.
+      if (!source) await query(`UPDATE recordings SET thumb_status = 'error' WHERE id = $1`, [rec.id]).catch(() => { /* best effort */ });
+    }
+    if (source) {
+      const job = buildThumbnailerJobConfig({
+        id: rec.id,
+        kind: 'recording',
+        source_master: source,
+        duration_sec: Math.max(1, Math.round(dur / 1000)),
+        stream_id: rec.channel_id ?? rec.event_id,
+      });
+      try {
+        await this.launcher.launchThumbnailer(job);
+      } catch (e) {
+        console.error('thumbnailer launch failed for recording', rec.id, e);
+      }
     }
     // Event recording → derive a full-event VOD, harvesting the event's metadata.
     // auto_vod is the event's explicit switch (settings form); default on.

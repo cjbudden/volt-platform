@@ -61,6 +61,53 @@ def test_ts_format():
     check("ts 0", t._ts(0) == "00:00:00.000")
     check("ts 3661.5", t._ts(3661.5) == "01:01:01.500")
 
+# ---- a recording in the bucket (build queue 2.3c) ---------------------------
+SIGN = lambda b, k: f"https://{b}.s3.test/{k}?sig=1"
+REC_PL = """#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:4
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXT-X-MAP:URI="s3://bk/channel/c1/runs/R1/720p/init.mp4"
+#EXTINF:4.000,
+s3://bk/channel/c1/runs/R1/720p/seg_1.m4s
+#EXT-X-DISCONTINUITY
+#EXT-X-MAP:URI="s3://bk/channel/c1/runs/R2/720p/init.mp4"
+#EXTINF:4.000,
+s3://bk/channel/c1/runs/R2/720p/seg_1.m4s
+#EXT-X-ENDLIST
+"""
+
+def test_presign_playlist():
+    out = t.presign_playlist(REC_PL, "s3://bk/thumbs/r1/source.m3u8", SIGN)
+    check("segments signed", "https://bk.s3.test/channel/c1/runs/R2/720p/seg_1.m4s?sig=1" in out)
+    check("init maps signed", 'URI="https://bk.s3.test/channel/c1/runs/R1/720p/init.mp4?sig=1"' in out)
+    check("no s3:// left", "s3://" not in out)
+    check("tags kept (ENDLIST, DISCONTINUITY, EXTINF)", "#EXT-X-ENDLIST" in out and "#EXT-X-DISCONTINUITY" in out and out.count("#EXTINF:4.000,") == 2)
+    rel = t.presign_playlist("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\nseg_1.m4s\n../other/seg_2.m4s\nhttps://cdn/x.m4s\n", "s3://bk/vod/a/720p/index.m3u8", SIGN)
+    check("relative segment taken from the playlist's folder", "https://bk.s3.test/vod/a/720p/seg_1.m4s?sig=1" in rel)
+    check("relative init taken from the playlist's folder", 'URI="https://bk.s3.test/vod/a/720p/init.mp4?sig=1"' in rel)
+    check("dot-dot resolved", "https://bk.s3.test/vod/a/other/seg_2.m4s?sig=1" in rel)
+    check("https left alone", "\nhttps://cdn/x.m4s\n" in rel)
+
+def test_resolve_source():
+    import tempfile, os
+    d = tempfile.mkdtemp()
+    fetched = []
+    def fetch(u, p):
+        fetched.append(u)
+        open(p, "w").write(REC_PL)
+    src, proto = t.resolve_source("s3://bk/thumbs/r1/source.m3u8", d, presign=SIGN, fetch=fetch)
+    check("bucket playlist fetched", fetched == ["s3://bk/thumbs/r1/source.m3u8"])
+    check("ffmpeg reads the local signed copy", src == os.path.join(d, "source.m3u8") and "s3://" not in open(src).read())
+    check("https allowed for its segments", proto and "https" in proto.split(","))
+    same, none = t.resolve_source("/o/vod.m3u8", d, presign=SIGN, fetch=fetch)
+    check("a local source is used as given", same == "/o/vod.m3u8" and none is None and len(fetched) == 1)
+    p = t.build_poster_cmd(src, "/w/p.jpg", 320, [16, 9], at_sec=5, protocols=proto)
+    check("whitelist goes before -i", p.index("-protocol_whitelist") + 2 == p.index("-i"))
+    sb = t.build_storyboard_cmd(src, "/w/sb_%03d.jpg", 320, [16, 9], 10, 5, 5, protocols=proto)
+    check("storyboard whitelist before -i", sb.index("-protocol_whitelist") + 2 == sb.index("-i"))
+    check("no whitelist unless asked", "-protocol_whitelist" not in t.build_poster_cmd("/x.m3u8", "/p.jpg", 320, [16, 9]))
+
 for fn in list(globals().values()):
     if callable(fn) and getattr(fn, "__name__", "").startswith("test_"):
         fn()
