@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.110.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Billing: AI Find details is a new add-on: 500 lookups a month for $15, with packs of 1,000, 5,000 and 20,000 more. When the month's lookups are used up, nothing more is sent to the AI model until a bigger pack is chosen or the month starts again.
+- added · Media Library: Find details can read a page with an AI model: with the new AI Find details add-on on, Read with AI suggests values for a page that publishes no details for search engines, each with the sentence of the page it came from, for you to check and apply.
+
+### Internal
+
+- added · Tests: find-details-ai suite with a stand-in site and a stand-in Claude API; the add-on catalogue test looks its add-on up by key now that the catalogue ships with AI Find details.
+
 ## 0.109.0 (2026-11-11)
 
 ### Product (in customer release notes)
