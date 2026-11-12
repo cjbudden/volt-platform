@@ -140,7 +140,8 @@ Its sub-collections go with it. The titles in them stay in the Media Library and
 | Section | How it relates |
 |---|---|
 | [Media Library](media-library.md) | Where titles are added to collections, and where the **Collections** rail filters the library |
-| [FAST](fast.md) | A run order takes a whole collection with **Add the whole collection in its order**: every title that can air, in the collection's order |
+| [FAST](fast.md) | A run order takes a collection two ways: **Add all** makes a slot of each title that can air, and **Add as one slot** makes a collection slot that airs the collection's next title each time and follows the collection as it changes |
+| [Apps and keys, for developers](../api/apps-and-keys.md) | Your apps show a collection as a row or rail with `GET /api/public/collections/{id}` (below) |
 | [Rights](rights.md) | Rules can pick titles by rights profile or provider |
 | [Content Types](content-types.md) | A content type's own fields can be used in rules |
 | [API keys and apps](api-keys-and-apps.md) | A collection's access names the apps it applies to and each app's own products |
@@ -205,6 +206,25 @@ Rules are a tree: `{ "match": "all", "conditions": [ { "field": "genre", "op": "
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"rules": {"match": "all", "conditions": [{"field": "genre", "op": "is", "value": "Sport"}, {"field": "first_aired_at", "op": "within_last", "value": {"count": 14, "unit": "day"}}]}, "orderBy": "-first_aired_at"}' \
   "https://your-volt-host/api/collections/$COLLECTION_ID"
+```
+
+### A collection as a row in your app
+
+Your apps read a collection with the app's publishable key, no sign-in: `GET /api/public/collections/{id}?appKey=pk_...`. The answer has the collection's name, description and sub-collections, and its titles in its order (the sub-collections' after it; `deep=false` for its own only). Only titles that are public and listed are in it, and a title whose publishing rule turns **Sitemap and schema.org** off is left out. Each title says what a viewer who is not signed in gets in that app and country: `access` is `free`, `members` (sign in to watch) or `premium` (a purchase). A title the rights or a geo rule keep from that app or country is not in the answer at all.
+
+| Field | What it is |
+|---|---|
+| `items[].id`, `title`, `description`, `artworkUrl`, `durationMs` | The title, as the player shows it |
+| `items[].series`, `season`, `episode` | For rows that group episodes |
+| `items[].access` | `free`, `members` or `premium`, for a viewer not signed in |
+| `items[].status`, `availableFrom` | `scheduled` for a title listed before it can be played, with when it can |
+| `territoryGroup` | The same for every country with this exact answer; it is also the ETag |
+| `nextChangeAt` | When a title in it opens or closes on its own: ask again then |
+
+The country is the viewer's, from the CDN. Countries with the same answer share it, so a row polled with `If-None-Match` answers 304 until it changes. Adding or taking out a title, or changing one, reaches the answer at once.
+
+```bash
+curl "https://your-volt-host/api/public/collections/$COLLECTION_ID?appKey=$PUBLISHABLE_KEY"
 ```
 
 ### Access by app and region

@@ -649,6 +649,11 @@
     "summary": "List guide channels",
     "description": "Every channel with the guide turned on in the account the key belongs to: id, XMLTV id, name, number, icon, time zone and whether it plays a FAST lineup."
   },
+  "GET /api/public/collections/:id": {
+    "tag": "Collections",
+    "summary": "A collection as an app's row or rail",
+    "description": "The collection's titles in its own order, its sub-collections' after it (`deep=false`: only its own), for the app whose publishable key is given (`appKey` or `X-Volt-App-Key`) and the viewer's country. Only titles that are public, listed and allowed in the sitemap by their publishing rule; each with `access` (`free`, `members` or `premium`) for a viewer who is not signed in, and a title the rights or a geo rule keep from this app or country left out. Countries with the same answer share a `territoryGroup`, which is also the ETag, so a poll answers 304 until the row changes; `nextChangeAt` says when a title in it opens or closes on its own. Cached at the edge per app and country."
+  },
   "GET /api/public/epg/now": {
     "tag": "Guide",
     "summary": "On now across channels",

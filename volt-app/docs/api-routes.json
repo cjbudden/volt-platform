@@ -5185,6 +5185,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/public/collections/:id",
+  "api": "public",
+  "credential": "publishable key",
+  "access": "public API",
+  "viewerTier": true,
+  "group": "/api/public/collections"
+ },
+ {
+  "method": "GET",
   "path": "/api/public/epg",
   "api": "public",
   "credential": "publishable key",

@@ -653,8 +653,8 @@ async function fastBrandMark(r: any): Promise<AssetMeta['brandMark']> {
     opacity: Number(r.watermark_opacity ?? 100), scale: Number(r.watermark_scale ?? 12) };
 }
 
-/** The public part of the meta, for the gate's answer. */
-async function metaFor(acct: string, kind: string, id: string) {
+/** The public part of the meta, for the gate's answer (and the public collection rows, modules/publicCollections.ts). */
+export async function metaFor(acct: string, kind: string, id: string) {
   const m = await assetMeta(acct, kind, id).catch(() => null);
   if (!m) return undefined;
   return { title: m.title, description: m.description, artworkUrl: m.artworkUrl, durationMs: m.durationMs, live: m.live, kind: m.kind,

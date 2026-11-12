@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**1010 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 767 · Platform API: 66 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**1011 routes.** Public API: 92 · Sign-in (no session yet): 7 · Admin API: 767 · Platform API: 66 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -129,6 +129,12 @@ For apps and players. A publishable key (`pk_…`) names the client account. Vie
 |---|---|---|---|---|
 | POST | `/api/public/cmcd` | publishable key | public API | ✓ |
 | POST | `/api/public/cmcd/_peer` | publishable key | public API | ✓ |
+
+### `/api/public/collections`
+
+| Method | Path | Credential | Access | Viewer tier |
+|---|---|---|---|---|
+| GET | `/api/public/collections/:id` | publishable key | public API | ✓ |
 
 ### `/api/public/epg`
 

@@ -101,6 +101,7 @@ import { isBootReconciled } from './services/orchestrator';
 import { mountHealth, publicOnlyGuard } from './scale/health';
 import { publicAuthRouter, publicMeRouter } from './modules/publicApi';
 import { epgPublicRouter } from './modules/epgPublic';
+import { publicCollectionsRouter } from './modules/publicCollections';
 import { collectionsRouter } from './modules/collections';
 import { rightsRouter } from './modules/rights';
 import { viewersAdminRouter } from './modules/viewersAdmin';
@@ -631,7 +632,8 @@ export function createServer() {
   app.use('/api/public/cmcd', cmcdRouter);                 // CMCD v2 event mode (modules/cmcd.ts)
   app.use('/api/public/journey', journeyRouter);           // journey to play: the app's events (modules/journey.ts)
   app.use('/api/public/payments', paymentsAppRouter);
-  app.use('/api/public/epg', epgPublicRouter);           // read-only guide for viewer apps: now / next / schedule / grid (EPG_PUBLIC_API.md)
+  app.use('/api/public/epg', epgPublicRouter);
+  app.use('/api/public/collections', publicCollectionsRouter); // a collection as an app's row or rail, per app and territory group (build queue C3-2)           // read-only guide for viewer apps: now / next / schedule / grid (EPG_PUBLIC_API.md)
   // Admin view of public users (feature `viewers`).
   app.use('/api/viewers', viewersAdminRouter);
   app.use('/api/availability', availabilityRouter);      // public play-gate → mints playback token (publishable key)
