@@ -438,9 +438,14 @@ vodRouter.get(
         console.error(`[vod.encode] ${a.id}: media facts not read:`, e);
       }
     }
-    res.json(encodeDetails(a, { ladderGroup, outputProfile, radioConfig: ch?.radio_config ?? null,
+    // The encode-time policy (build queue P4): what the title's publishing
+    // policy asks of its files now, what it asked at the encode, what the
+    // files carry, and whether it waits for repackaging.
+    const { encodePolicyView } = await import('../services/encodePolicy');
+    const policy = encodePolicyView(await resolveForAsset(accountId(req), a), a);
+    res.json({ ...encodeDetails(a, { ladderGroup, outputProfile, radioConfig: ch?.radio_config ?? null,
       audioOnly: ch?.kind === 'radio' || (streamId ? await Promise.resolve(isAudioOnly(streamId)).catch(() => false) : false),
-      extract: job ? { formats: Array.isArray(job.formats) ? job.formats : [], state: String(job.state) } : null }));
+      extract: job ? { formats: Array.isArray(job.formats) ? job.formats : [], state: String(job.state) } : null }), policy });
   })
 );
 

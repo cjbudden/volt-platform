@@ -151,6 +151,8 @@ Turning DRM on or off changes the files, so published titles must be packaged ag
 
 Titles keep their current protection until they have been packaged again.
 
+Each title keeps what its policy asked for when it was encoded, and its **Encode** tab in the [Media Library](media-library.md) shows **Repackage pending** while its files and its policy disagree. Packaging uploaded files with DRM, and packaging them again after a change, are not available yet: until they are, such titles stay in the clear and show **Repackage pending**.
+
 ### Play without tokens (token-free playback)
 
 Volt hands viewers on-demand addresses with a play token in them, and where your operator enforces tokens an address without one is refused. For content anyone may watch, such as free trailers or public service clips, a token adds nothing: **Token-free playback** in **Protection** lets those titles play by their plain address, so it can be shared, embedded or cached anywhere.

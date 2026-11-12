@@ -57,8 +57,13 @@ In the grid, an asset with no image yet is shown in its kind's colour: the key b
 2. To fetch a file from an address instead, choose **Link**, paste the address and choose **Import**. Volt's servers fetch it, so nothing passes through your computer. Cloud drive buttons beside it work when your Volt service has them set up; hover over a greyed one to see why.
 3. Each file is listed with its size and what your [ingest rules](ingest-rules.md) decided before anything moves: the name it will be filed under, **looks like a duplicate** with what the rule says to do, or **refused** with the reason.
 4. To give the files a content type and metadata, choose **Set type and metadata for all** beside **What are you adding?**, before you add them: with **Start as soon as added** on, a file starts uploading the moment it is added. Pick the **Content type**, fill in its fields, then **Done**. **Details** on one file sets them for that file only. Anything left empty is decided by the rules.
-5. With **Start as soon as added** on (the usual setting), uploading starts at once. With it off, choose **Ingest 1 file** (or the number of files) when you are ready. **Clear** empties the list without uploading.
-6. Progress shows under the band. A finished file appears in the library and starts encoding: its row shows **Queued to encode**, then **Encoding** with a percentage, then the renditions it made.
+5. Once the files have a content type (or **Let the rules decide**), **Publishing policy** shows what the [publishing rules](publishing-rules.md) will do with them: **DRM on** or **DRM off**, the access (**Free**, **Members and entitled viewers** or **Paid**) and whether they are **Published when ready** or **Kept as a draft**, with the rule each comes from. DRM is decided when a file is packaged, so this is the moment to check it: to change it, choose another content type or change the rule first. A [metadata rule](publishing-rules.md) can still apply once a title's details are saved.
+
+   ![Publishing policy in the upload band for a content type: DRM, access and publishing, and the rules they come from](/img/screens/media-library-upload-policy.png)
+
+   DRM packaging of uploaded files is not available yet: a file whose policy asks for DRM is packaged in the clear and its **Encode** tab says **Repackage pending**.
+6. With **Start as soon as added** on (the usual setting), uploading starts at once. With it off, choose **Ingest 1 file** (or the number of files) when you are ready. **Clear** empties the list without uploading.
+7. Progress shows under the band. A finished file appears in the library and starts encoding: its row shows **Queued to encode**, then **Encoding** with a percentage, then the renditions it made.
 
 Uploads are resumable. While anything is uploading or waiting, a button in the top bar, beside the bell, follows you around the console (for example **40%** while files upload, or **1 waiting**). Choose it to open the **Ingest Queue**, where you can pause, resume or cancel a file, **Cancel all**, **Retry** failed files or **Clear** finished ones. Under **Needs you** it lists files the rules held back:
 
@@ -139,6 +144,8 @@ A description counts one of the month's **AI descriptions** ([Billing](billing.m
 ### See how it was encoded (Encode)
 
 The **Encode** tab shows the **Workflow** and **Ladder profile**, the **Source / mezzanine** it was made from, every rendition with its resolution, bitrate, codec, profile and frame rate, the audio tracks and the captions. For audio it shows the audio encode instead.
+
+**DRM** says what protects the files. **Policy asks** says what the title's publishing policy asks of them now, and which rule says so (or **its own setting**). When the two disagree it shows **Repackage pending** with why: a title whose policy asks for DRM but whose files are in the clear plays in the clear until it is packaged again; one whose policy no longer asks for DRM keeps its DRM until then, never a weaker protection. Below it, **At encode** says what the policy asked when the file was encoded, which a later rule change does not alter.
 
 An uploaded or dropped file with no picture, such as an MP3, WAV, M4A, AAC or FLAC file, becomes an **audio asset**: Volt encodes its sound alone to one AAC track (128 kb/s stereo, 48 kHz), packaged as HLS and DASH, and the asset plays with the audio player. Cover art inside an MP3 is not a picture, so it does not make the file a video. An audio asset has no stills, previews or social formats; give it a **Cover** image on its page. A file with neither picture nor sound is refused, with the reason on the asset.
 

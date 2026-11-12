@@ -1,0 +1,121 @@
+// ============================================================================
+//  ENCODE-TIME POLICY FIELDS (build queue P4, PUBLISHING_POLICIES.md
+//  "Encode-time vs delivery-time fields").
+//
+//  Most of a publishing policy is read at delivery and takes effect within a
+//  minute. DRM is different: it changes the files, so it is decided when the
+//  title is packaged. Two things follow:
+//
+//    - The policy a new title will get is shown before it uploads (the upload
+//      panel reads GET /api/publishing-rules/resolve with the content type).
+//    - When the encode finishes, the policy as it then stands is resolved and
+//      kept on the title (`vod_assets.policy_snapshot`): what it asked for,
+//      which rung and rule said so, and what the files were packaged with.
+//
+//  A title whose policy now asks for something its files do not carry is
+//  "repackage pending". File encodes are packaged in the clear today
+//  (vodEncode records drm 'clear'), so a title under a DRM rule is pending
+//  until DRM packaging and the repackage jobs are built (P4-2). Saying so is
+//  the point: the Encode tab shows what protects the files, not what a rule
+//  hoped for.
+// ============================================================================
+import { one, query } from '../db';
+import { resolveForAsset, type Resolved, type Rung } from './publishingRules';
+import { rungLabel } from './publishingPolicies';
+
+/** The encode-time fields a policy holds today. The ladder, captions and trick play join later. */
+export const ENCODE_FIELDS = ['drm'] as const;
+export type EncodeField = typeof ENCODE_FIELDS[number];
+
+export interface EncodeSnapshot {
+  /** When the policy was resolved for the encode. */
+  at: string;
+  /** What the policy asked for at that moment. */
+  wanted: Record<EncodeField, boolean>;
+  /** Which rung each field came from. */
+  sources: Record<EncodeField, Rung>;
+  /** The rule that decided DRM, by name, when it has one. */
+  rule: string | null;
+  /** What the files were actually packaged with. */
+  packaged: Record<EncodeField, boolean>;
+}
+
+/** The rule row behind a field: the most specific rung that took part and set it. */
+function ruleName(r: Resolved, rung: Rung): string | null {
+  const row = [...r.rungs].reverse().find((x) => x.rung === rung);
+  return row?.name ?? null;
+}
+
+/** PURE. The snapshot an encode leaves, from the policy as resolved and what the encode did. */
+export function encodeSnapshot(r: Resolved, packaged: Record<EncodeField, boolean>, at = new Date()): EncodeSnapshot {
+  const source = (r.fieldSources['protection.drm'] ?? 'baseline') as Rung;
+  return {
+    at: at.toISOString(),
+    wanted: { drm: !!r.settings.protection?.drm },
+    sources: { drm: source },
+    rule: ruleName(r, source),
+    packaged: { drm: !!packaged.drm },
+  };
+}
+
+/** PURE. What the files carry: the snapshot when there is one, else the encode's own record. */
+export function packagedOf(a: { policy_snapshot?: any; encode_result?: any }): { drm: boolean; recorded: boolean } {
+  const s = a.policy_snapshot;
+  if (s && s.packaged && typeof s.packaged.drm === 'boolean') return { drm: s.packaged.drm, recorded: true };
+  // Every file encode and clip so far is packaged in the clear; an encode
+  // that ever records a DRM system says so in encode_result.drm.
+  const d = a.encode_result?.drm;
+  return { drm: typeof d === 'string' ? d !== 'clear' : false, recorded: typeof d === 'string' };
+}
+
+/** PURE. The encode-time fields where the policy now asks for something the files do not carry. */
+export function pendingFields(wanted: Record<EncodeField, boolean>, packaged: Record<EncodeField, boolean>): EncodeField[] {
+  return ENCODE_FIELDS.filter((f) => !!wanted[f] !== !!packaged[f]);
+}
+
+export interface EncodePolicyView {
+  /** What the policy asks for now, and where from. */
+  now: { drm: boolean; source: Rung; sourceLabel: string; rule: string | null };
+  /** What it asked for when the title was encoded (null: encoded before snapshots were kept). */
+  atEncode: EncodeSnapshot | null;
+  /** What the files carry. */
+  packaged: { drm: boolean; recorded: boolean };
+  /** Fields where the files and the policy disagree: the title waits for repackaging. */
+  pending: EncodeField[];
+  /** In words, for the Encode tab and the API reader. */
+  note: string | null;
+}
+
+/** PURE. The view from a resolved policy and the title's row. */
+export function encodePolicyView(r: Resolved, a: { policy_snapshot?: any; encode_result?: any }): EncodePolicyView {
+  const source = (r.fieldSources['protection.drm'] ?? 'baseline') as Rung;
+  const now = { drm: !!r.settings.protection?.drm, source, sourceLabel: rungLabel(source), rule: ruleName(r, source) };
+  const packaged = packagedOf(a);
+  const pending = pendingFields({ drm: now.drm }, { drm: packaged.drm });
+  const from = source === 'asset' ? 'its own setting' : now.rule ? `the ${now.sourceLabel} "${now.rule}"` : `the ${now.sourceLabel}`;
+  const note = !pending.length ? null
+    : now.drm
+      ? `Its publishing policy asks for DRM (${from}), but its files are packaged in the clear: repackage pending. It plays in the clear until it is packaged again; DRM packaging of files is not available yet.`
+      : `Its publishing policy no longer asks for DRM (${from}), but its files are encrypted: repackage pending. It keeps its DRM until it is packaged again, never a weaker protection.`;
+  return { now, atEncode: a.policy_snapshot ?? null, packaged, pending, note };
+}
+
+/**
+ * Resolve the title's policy as it stands and keep it with what the encode
+ * did. Called by the encode when its files are written. Returns the snapshot,
+ * or null when the title is gone.
+ */
+export async function snapshotEncodePolicy(assetId: string, packaged: Record<EncodeField, boolean>): Promise<EncodeSnapshot | null> {
+  const a = await one<any>(
+    `SELECT v.id, v.schema_id, v.channel_id, v.event_id, v.availability_override, COALESCE(g.account_id, v.account_id) AS account_id
+       FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id
+       LEFT JOIN events   e ON e.id = v.event_id
+       LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE v.id = $1`, [assetId]);
+  if (!a?.account_id) return null;
+  const r = await resolveForAsset(a.account_id, a);
+  const snap = encodeSnapshot(r, packaged);
+  await query(`UPDATE vod_assets SET policy_snapshot = $2::jsonb WHERE id = $1`, [assetId, JSON.stringify(snap)]);
+  return snap;
+}

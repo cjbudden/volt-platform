@@ -177,6 +177,21 @@
       "alt": "The Media Library page: the upload band at the top, the search, sort and filter chips, then the list of assets with their review, QC and availability"
     },
     {
+      "name": "media-library-upload-policy",
+      "guide": "guides/media-library.md",
+      "path": "/vod",
+      "fresh": true,
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1200,
+      "click": [
+        ".ig-type-chip >> nth=0"
+      ],
+      "waitAfter": "[data-testid=\"upload-policy\"]",
+      "clip": "[data-testid=\"upload-policy\"]",
+      "alt": "Publishing policy in the upload band for a content type: DRM, access and publishing, and the rules they come from"
+    },
+    {
       "name": "media-library-availability",
       "guide": "guides/media-library.md",
       "path": "/vod?asset=6b1f0d2e-7a3c-4e5f-9a1b-2c3d4e5f6a01",

@@ -650,6 +650,15 @@ export function EncodePanel({ id, place }: { id: string; place?: React.ReactNode
             <Row k="Packaging">{e.packaging.value.length ? e.packaging.value.map((x) => <span key={x} className="tag proto lib-proto">{x}</span>) : <NR />}<Mark s={e.packaging.source} /></Row>
             <Row k="Container">{e.container.value ?? <NR />}<Mark s={e.container.source} /></Row>
             <Row k="DRM">{e.drm.source === 'unknown' ? <NR /> : e.drm.value.length ? e.drm.value.join(', ') : 'None (in the clear)'}<Mark s={e.drm.source} /></Row>
+            {/* What the publishing policy asks of the files (build queue P4). */}
+            {e.policy && <Row k="Policy asks">
+              <span data-testid="encode-policy">{e.policy.now.drm ? 'DRM' : 'No DRM'}
+                <span style={{ color: 'var(--muted)' }}> · {e.policy.now.source === 'asset' ? 'its own setting' : `${e.policy.now.sourceLabel}${e.policy.now.rule ? ` "${e.policy.now.rule}"` : ''}`}</span>
+                {e.policy.pending.length > 0 && <span className="tag warn" style={{ marginLeft: 6 }}>Repackage pending</span>}
+              </span>
+              {e.policy.note && <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 4, maxWidth: 420 }}>{e.policy.note}</div>}
+              {e.policy.atEncode && <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 2 }}>At encode ({new Date(e.policy.atEncode.at).toLocaleDateString()}): {e.policy.atEncode.wanted.drm ? 'DRM' : 'no DRM'} asked, {e.policy.atEncode.packaged.drm ? 'encrypted' : 'packaged in the clear'}</div>}
+            </Row>}
           </tbody></table>
         </div>
         <div>

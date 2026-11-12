@@ -137,3 +137,11 @@
 .ig-type-meta svg{width:14px;height:14px;flex:none}
 .ig-type-chip{font:inherit;font-size:var(--fs-sm);padding:4px 10px;border:1px solid var(--border);color:var(--muted);background:none;cursor:pointer}
 .ig-type-chip.active{color:var(--text,#e9ecf4);border-color:var(--brand);background:var(--brand-dim)}
+
+/* The publishing policy line (build queue P4) */
+.ig-policy{align-items:flex-start}
+.ig-policy-body{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}
+.ig-policy-facts{display:flex;flex-wrap:wrap;gap:6px}
+.ig-policy-facts .tag{display:inline-flex;align-items:center;gap:4px}
+.ig-policy-why{font-size:var(--fs-sm);color:var(--muted);line-height:1.45}
+@media (max-width:640px){.ig-policy{flex-direction:column;align-items:stretch;gap:6px}.ig-policy .ig-type-l{min-width:0}}

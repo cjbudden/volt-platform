@@ -486,6 +486,17 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
      mp4File ? (storedMaster ? storedMaster.replace(/[^/]*$/, mp4File) : `${publicBase(p.vodAssetId)}/${mp4File}`) : null]
   );
 
+  // THE ENCODE-TIME POLICY, KEPT WITH WHAT THE FILES CARRY (build queue P4).
+  // DRM is decided at packaging, so the policy as it stands now is resolved
+  // and kept on the title beside what this encode did (in the clear today).
+  // A failure here must not fail an encode whose files are written.
+  try {
+    const { snapshotEncodePolicy } = await import('../../encodePolicy');
+    await snapshotEncodePolicy(p.vodAssetId, { drm: encodeResult.drm !== 'clear' });
+  } catch (e: any) {
+    log.warn(`encode-time policy not recorded: ${e?.message ?? e}`);
+  }
+
   // A NEW ENCODE MAKES ITS FAST PACKAGINGS STALE (services/fast/ladder.ts): they were
   // made from the previous encode or source. Forgotten, so each channel's prepare
   // packages it again (its own encode plays meanwhile).

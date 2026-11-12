@@ -22,6 +22,7 @@ import { TypePicker, MetadataForm } from './ContentTypeFields'
 import { openDropboxChooser, openOneDrivePicker, openGooglePicker, pickerConfigured } from './cloudPickers'
 import { FailedRetryDialog, type RetryAction, type RetryAsk } from './FailedRetryDialog'
 import { useAccess } from './access'
+import { UploadPolicy } from './publishing/UploadPolicy'
 import './ingest.css'
 
 const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 900)
@@ -360,6 +361,10 @@ export function IngestPanel({ onDone, source = 'panel' }: { onDone: () => void; 
             {sheet === 'all' ? 'Close metadata for all' : typeId ? 'Type and metadata for all' : 'Set type and metadata for all'}
           </button>
         </div>
+
+        {/* THE POLICY THESE FILES WILL GET (build queue P4): DRM is decided when
+            they are packaged, so it is shown before they upload. */}
+        {typeChoice !== 'unset' && <UploadPolicy typeId={typeChoice === 'type' ? typeId : null} byRules={typeChoice === 'rules'} />}
 
         {rightsList.length > 0 && (
           <div className="ig-type" role="group" aria-label="Rights for the files you add">

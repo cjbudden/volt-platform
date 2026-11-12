@@ -88,6 +88,14 @@ export interface EncodeDetails {
   kind?: 'video' | 'audio'
   audioEncode?: { codec: string; bitrateKbps: number | null; sampleRate: number | null; channels: number | null; source: Prov; note: string | null } | null
   deliveries?: { format: string; label: string; state: 'ready' | 'making' | 'failed' | 'not_requested'; detail: string | null; key: string | null }[]
+  /** The encode-time policy (build queue P4): what the publishing policy asks of the files, and whether they carry it. */
+  policy?: {
+    now: { drm: boolean; source: string; sourceLabel: string; rule: string | null }
+    atEncode: { at: string; wanted: { drm: boolean }; sources: { drm: string }; rule: string | null; packaged: { drm: boolean } } | null
+    packaged: { drm: boolean; recorded: boolean }
+    pending: string[]
+    note: string | null
+  }
 }
 
 export interface EpgCandidate { programmeId: string; title: string; startsAt: string; endsAt: string; overlapMs: number; assetCoverage: number; programmeCoverage: number; linked: boolean }
