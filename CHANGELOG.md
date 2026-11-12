@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.113.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · FAST: A publishing rule's FAST eligible now applies: a title it turns off is not offered in the FAST library, a run order naming it is refused, and it leaves the guide of the channels it is in from the programme after the one on air.
+- added · Media Library: Files can get subtitles made from their audio, by Whisper on the server or by an external add-on, and a short AI description when they have none. Turn them on for every file, for one watch folder or content type in Ingest Rules, or for one asset on its Files tab; AI descriptions is a new add-on with 500 a month.
+
 ## 0.112.0 (2026-11-12)
 
 ### Product (in customer release notes)
