@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.136.0 (2026-11-12)
+
+### Internal
+
+- changed · Encoder: On AWS each encoder run now uploads under its own prefix (<kind>/<id>/runs/<runId>/), with the stable playlists and current_run.txt at the stream's root, so a restart or a second encoder never writes over another run's segments. The play URL is unchanged.
+
 ## 0.135.0 (2026-11-12)
 
 ### SaaS platform
