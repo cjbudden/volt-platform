@@ -44,7 +44,20 @@ export interface ReconcileResult {
  * independent of where the bytes live, which is what makes it still meaningful
  * on a tombstone after every location has gone.
  */
-export async function reconcileStream(streamId: string, opts: { actor?: string } = {}): Promise<ReconcileResult> {
+export async function reconcileStream(streamId: string, opts: { actor?: string; throttle?: boolean } = {}): Promise<ReconcileResult> {
+  const res = await reconcileStreamLocal(streamId, opts);
+  // ON AWS the runs are in the bucket, not on this disk (build queue 2.3,
+  // services/media/s3Runs.ts). The tick throttles the bucket pass per stream;
+  // a person asking (Storage > Reconcile) gets it at once.
+  const { bucketRecordings, reconcileStreamS3 } = await import('./s3Runs');
+  if (bucketRecordings()) {
+    const b = await reconcileStreamS3(streamId, { actor: opts.actor, throttle: opts.throttle });
+    res.registered += b.registered; res.updated += b.updated; res.missing += b.missing; res.recordingsTouched += b.recordingsTouched;
+  }
+  return res;
+}
+
+async function reconcileStreamLocal(streamId: string, opts: { actor?: string } = {}): Promise<ReconcileResult> {
   const res: ReconcileResult = { registered: 0, updated: 0, missing: 0, recordingsTouched: 0 };
   const base = originBaseFor(streamId);
   if (!existsSync(join(base, 'runs'))) return res;
@@ -174,7 +187,7 @@ export async function reconcileAll(opts: { actor?: string } = {}): Promise<Recon
   );
   for (const s of streams) {
     try {
-      const r = await reconcileStream(s.id, opts);
+      const r = await reconcileStream(s.id, { ...opts, throttle: true });
       total.registered += r.registered;
       total.updated += r.updated;
       total.missing += r.missing;

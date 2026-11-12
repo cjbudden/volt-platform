@@ -34,6 +34,8 @@ import { capabilities, isImmediate, storageDriver, tierWords, actionWords, type 
 import { locationsOf, transition, type MediaObject } from './objects';
 import { reclaimRunSidecars } from './sidecars';
 import { logRecordingRemoval, summarisePrune } from './removalLog';
+import { pruneS3Run, reclaimS3RunLeftovers, runFolderOf } from './s3Runs';
+import type { PruneResult } from './prune';
 
 export type RetentionAction = 'keep' | 'to_cold' | 'to_archive' | 'delete';
 
@@ -544,6 +546,8 @@ export async function sweep(opts: {
           // would ever remove them. See services/media/sidecars.ts.
           res.sidecarBytes += reclaimRunSidecars(l.uri);
           await query(`UPDATE media_locations SET present = false, removed_at = now() WHERE id = $1`, [l.id]);
+          // The same for a run in the bucket, once its last rendition has gone (2.3).
+          res.sidecarBytes += await reclaimS3RunLeftovers(l.uri);
         }
         await transition(obj.id, 'deleted', {
           action: 'delete', actor,
@@ -631,6 +635,7 @@ export async function sweep(opts: {
           await query(
             `UPDATE media_locations SET present = false, removed_at = now() WHERE id = $1`, [l.id]
           );
+          res.sidecarBytes += await reclaimS3RunLeftovers(l.uri);
         }
         await transition(obj.id, 'deleted', {
           action: 'delete', actor,
@@ -745,9 +750,19 @@ async function removeRecordingMedia(obj: any, reason: string, actor: string,
   const stream = obj.channel_id ?? obj.event_id ?? obj.rec_channel ?? obj.rec_event;
   if (!m || !stream || !obj.recording_id) return false;
   const locs = await locationsOf(obj.id);
-  if (!locs.some((l) => l.tier === 'local')) return false;
-  const { pruneRun } = await import('./prune');
-  const pruned = await pruneRun({ streamId: stream, runId: m[1], accountId: obj.account_id ?? null, recordingId: obj.recording_id, reason, actor });
+  let pruned: PruneResult;
+  if (!locs.some((l) => l.tier === 'local')) {
+    // A run in the bucket (AWS, build queue 2.3): the same clip-aware rule,
+    // acting on the run's keys there.
+    const inBucket = locs.find((l) => runFolderOf(l.uri));
+    if (!inBucket) return false;
+    const p = await pruneS3Run({ uri: inBucket.uri, streamId: stream, recordingId: obj.recording_id, reason, actor });
+    if (!p) return false;
+    pruned = p;
+  } else {
+    const { pruneRun } = await import('./prune');
+    pruned = await pruneRun({ streamId: stream, runId: m[1], accountId: obj.account_id ?? null, recordingId: obj.recording_id, reason, actor });
+  }
   const left = await one<any>(`SELECT count(*)::int AS n FROM media_objects WHERE recording_id = $1 AND state <> 'deleted'`, [obj.recording_id]);
   if (!left?.n) await query(`UPDATE recordings SET storage_state = 'deleted' WHERE id = $1`, [obj.recording_id]);
   await refreshNextAction(obj.recording_id).catch(() => {});

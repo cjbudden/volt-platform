@@ -22,6 +22,40 @@ re-cut, re-trimmed or checked against the original. A held object is never touch
 
 The hourly thumbnail sweep (`sweepThumbnails`, by the thumbnail retention days) skips any hour a clip was cut from.
 
+## Recordings in the bucket (AWS, build queue 2.3)
+
+On AWS a run is not on the control plane's disk: the encoder uploads it under
+`s3://<bucket>/<kind>/<id>/runs/<runId>/` (2.2). `services/media/s3Runs.ts` is
+the bucket side of the same model:
+
+- **Registration.** `reconcileStream` also lists the stream's run folders when
+  `MEDIA_STORE_DRIVER=s3`. Every rendition folder of a run (not `thumbs/`,
+  `filler/`, `subtitles/`, `id3/`, `captions/`) is a media object keyed
+  `run/<runId>/<rendition>`, its location the folder as a prefix, its tier read
+  from the segments' storage class. A run whose own playlists changed within
+  `MEDIA_S3_LIVE_WINDOW_MS` (5 min) is `writing`; once closed it is listed in
+  full exactly once, for its size. The tick passes a stream at most every
+  `MEDIA_S3_RECONCILE_MS` (5 min), because listing is billed per key.
+- **Cool, archive, restore** go through the S3 driver on the rendition prefix,
+  so only the keys under it change class or are restored.
+- **Delete of a recording's run** (`pruneS3Run`): the clip rule above, on the
+  bucket's keys: nothing kept, every key of the run folder goes and its objects
+  are tombstoned; clips cut from it, their segments (one either side), init
+  segments and playlists stay, and the objects are held. Deleted at once, not
+  to the bin (whether recordings should go through the bin on AWS is 2.3b).
+  Exact-frame stills of the run go as on the Mac. Encoder stills and storyboard
+  sheets are not touched on AWS yet (2.3c).
+- **Leftovers.** A run with no recording is deleted rendition by rendition;
+  after the last one, the rest of the run folder goes too
+  (`reclaimS3RunLeftovers`), never for the run `current_run.txt` names and
+  never when the pointer cannot be read.
+- **Missing.** A run folder gone from the bucket loses its location; an object
+  with no copy left is marked deleted (`missing` in its history).
+- **Never touched:** the stream root (stable playlists, `current_run.txt`),
+  another run, another stream's run with the same id.
+
+Tested by `test/s3-recordings-retention.check.ts` against a stand-in S3 client.
+
 ## Exact-frame stills
 
 Added 2 Nov 2026 (build queue 3.2). Code: `services/frames/folders.ts`, `services/frames/store.ts`. Migrations 0121 and 0122.

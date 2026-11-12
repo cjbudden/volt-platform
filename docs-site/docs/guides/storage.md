@@ -49,6 +49,8 @@ Each rung fires once, at the age you set, counted from when the recording closed
 
 Recordings also have their own keep period, set on each channel, station or event (**Keep recordings for**). Both apply, so a recording goes when the first of them says so.
 
+**On a cloud service** recordings are kept in cloud storage as they are made, and the ladder acts on them there. Each quality of a recorded run (for example 1080p, 720p and the sound) is listed and moved on its own. A recording that is still being made is never moved or deleted. When a recording is deleted it goes at once, apart from the parts clips were cut from, which stay on hold so the clips can be cut again.
+
 Exact-frame stills, the single frames Volt makes when someone asks for one frame of an asset or a recording, follow the same ladder, but only its **Delete** rung: they are made again in a moment, so they are never moved to cheaper storage or archived. They also go 7 days after they were last made, as soon as the recording they were taken from is removed, and when their asset is deleted. Each folder of them is listed here as **frames/...**.
 
 ### See what the next sweep would do
