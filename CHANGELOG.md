@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.122.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- changed · Media Library: A file whose policy asks for DRM is no longer packaged in the clear when your account has no DRM key service: its encode stops with the reason, and the upload band warns you first.
+- added · Media Library: Uploaded files whose publishing policy asks for DRM are now encrypted when they are packaged (Widevine, PlayReady and FairPlay, with a key from your account's DRM key service) and get no MP4 download. The Encode tab names the DRM systems, and the upload band says before you add files whether they will be packaged with DRM.
+
+### Internal
+
+- added · Encoding: vod_encoder.py fetches SPEKE keys and passes Shaka the live encoder's cbcs flags for file encodes (dev/test_vod_drm.py); a FAST channel never reuses an encrypted main encode.
+
 ## 0.121.0 (2026-11-12)
 
 ### Product (in customer release notes)
