@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.111.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Publishing Rules: A single item's own publishing rule can no longer set a field that the account, its content type, its channel, event or station, or a metadata rule has locked. Before, the value was saved and then ignored; now the save is refused and says which rule locked it.
+- improved · Media Library: Before you save now checks a single item's own publishing rule too: whether it changes anything, conflicts such as DRM with MP4 download, and a confirmation before DRM changes on a published item.
+
+### Internal
+
+- added · Tests: publishing-asset-rung suite for the asset rung's lock refusal, dry run and confirmation.
+
 ## 0.110.0 (2026-11-12)
 
 ### Product (in customer release notes)
