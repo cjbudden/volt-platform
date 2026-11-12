@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.135.0 (2026-11-12)
+
+### SaaS platform
+
+- changed · Platform: In the cloud service, clips, encodes, loop preparation, intro detection and other media work now each run on their own short-lived server, so heavy work never slows the console or the API and the cost follows the work actually done.
+
+### Internal
+
+- added: New media-jobs-ecs suite: media jobs handed to their own ECS task through the mock launcher, the RunTask input, every failure path of the hand-over, and the media-jobs entrypoint running a real job.
+
 ## 0.134.1 (2026-11-12)
 
 ### SaaS platform
