@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.137.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- improved · Recordings: On a cloud service, the retention ladder now moves, archives, restores and deletes recordings where they are kept in cloud storage, so old recordings no longer stay in standard storage for ever. A recording still being made is never touched, and the parts clips were cut from are kept.
+
+### Internal
+
+- added · Recordings: Test suite s3-recordings-retention: the bucket side of recordings retention against a stand-in S3 client.
+
 ## 0.136.0 (2026-11-12)
 
 ### Internal
