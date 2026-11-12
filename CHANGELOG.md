@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.116.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- improved · API: A play stopped by Concurrent streams can no longer carry on with its old addresses: within about a minute the CDN refuses its on-demand manifests and segments with 403 Playing on too many devices, while the viewer's other plays are untouched.
+- added · Player: When a viewer's account starts more plays than a title's Concurrent streams allows, the Volt player on the oldest device now stops, says why and offers Play here to move the play back to it. Closing or hiding a player's page frees its stream at once.
+
+### Internal
+
+- added · Player: Tests: player-concurrent-stop-browser (the player's stop, Play here, the 409 and end on hide, in Chromium) and the edge stop cases in edge-tokens and publishing-concurrent-streams.
+
 ## 0.115.0 (2026-11-12)
 
 ### Product (in customer release notes)
