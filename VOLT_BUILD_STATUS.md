@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Concurrent streams at the play gate (build queue P3-4d, the server side; vNEXT)
+## 2026-11-12 - Concurrent streams at the play gate (build queue P3-4d, the server side; v0.115.0)
 
 What: the **Concurrent streams** field of a publishing rule was saved and stamped but nothing counted plays. Now, as Christian decided on 11 Nov 2026, a signed-in viewer's plays of content that needs a sign-in (members-only and premium titles and channels) are counted at the play gate; over the limit the viewer's oldest play is stopped and the new one starts. Free content is never limited.
 
