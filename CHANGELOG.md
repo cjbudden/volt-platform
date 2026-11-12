@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.134.0 (2026-11-12)
+
+### SaaS platform
+
+- fixed · Loops & Fillers: In the cloud service, the house preview of a slate or loop and its QC stills are now kept in shared storage, so the preview plays, QC runs again and its stills show from any server, and nothing is lost when a server is replaced.
+
+### Internal
+
+- added: New filler-preview-bucket suite: the house preview stored, served and checked from a second API process against an S3 API (in-test bucket and moto).
+
 ## 0.133.0 (2026-11-12)
 
 ### SaaS platform
