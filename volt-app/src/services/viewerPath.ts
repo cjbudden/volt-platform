@@ -46,6 +46,8 @@ export function keyByHash(hash: string): Promise<KeyLookupRow | null> {
 export interface AppLookupRow {
   id: string; type: 'web' | 'ios' | 'android' | 'tv' | 'roku' | 'server';
   restrictions: any; enabled: boolean;
+  /** Locked titles in public catalogue answers: listed as locked (upsell) or left out (hide). Build queue C2-4. */
+  locked_titles?: 'upsell' | 'hide';
 }
 
 export function appById(id: string | null | undefined): Promise<AppLookupRow | null> {
@@ -53,7 +55,7 @@ export function appById(id: string | null | undefined): Promise<AppLookupRow | n
   return cached<AppLookupRow | null>(
     `app:${id}`,
     { ttlSec: C().keyTtlSec, tags: [`app:${id}`], l2: true },
-    () => one<AppLookupRow>(`SELECT id, type, restrictions, enabled, surface FROM apps WHERE id=$1`, [id])
+    () => one<AppLookupRow>(`SELECT id, type, restrictions, enabled, surface, locked_titles FROM apps WHERE id=$1`, [id])
   );
 }
 

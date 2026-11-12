@@ -58,6 +58,8 @@ const appSchema = z.object({
   type: z.enum(['web', 'ios', 'android', 'tv', 'roku', 'server']),
   /** An embed player on other sites, or venue screens: how the rights see it (build queue R1). */
   surface: z.enum(['embed', 'venue']).nullable().optional(),
+  /** A title a package locks here, in the public catalogue answers: upsell (listed as locked) or hide (build queue C2-4). */
+  lockedTitles: z.enum(['upsell', 'hide']).optional(),
   restrictions: z.record(z.any()).default({}),
 });
 
@@ -77,8 +79,8 @@ appsRouter.post(
   asyncHandler(async (req, res) => {
     const b = appSchema.parse(req.body);
     const app = await one<any>(
-      `INSERT INTO apps(account_id, name, type, restrictions, surface) VALUES ($1,$2,$3::app_type,$4::jsonb,$5) RETURNING *`,
-      [accountId(req), b.name, b.type, JSON.stringify(b.restrictions), b.surface ?? null]
+      `INSERT INTO apps(account_id, name, type, restrictions, surface, locked_titles) VALUES ($1,$2,$3::app_type,$4::jsonb,$5,$6) RETURNING *`,
+      [accountId(req), b.name, b.type, JSON.stringify(b.restrictions), b.surface ?? null, b.lockedTitles ?? 'upsell']
     );
     const key = await issueKey(accountId(req), app.id, 'publishable', ['playback']);
     res.status(201).json({ ...app, publishableKey: key });
@@ -163,13 +165,15 @@ appsRouter.get('/:id', asyncHandler(async (req, res) => {
 appsRouter.put('/:id', asyncHandler(async (req, res) => {
   const b = z.object({ name: z.string().optional(), restrictions: z.record(z.any()).optional(), enabled: z.boolean().optional(),
     /** What the app is used for, for the rights (build queue R1): null for your own site or app. */
-    surface: z.enum(['embed', 'venue']).nullable().optional() }).parse(req.body);
+    surface: z.enum(['embed', 'venue']).nullable().optional(),
+    /** A title a package locks here, in the public catalogue answers: listed as locked with its packages, or left out (build queue C2-4). */
+    lockedTitles: z.enum(['upsell', 'hide']).optional() }).parse(req.body);
   const app = await one(
     `UPDATE apps SET name=COALESCE($3,name), restrictions=COALESCE($4::jsonb,restrictions), enabled=COALESCE($5,enabled),
-            surface=CASE WHEN $6 THEN $7 ELSE surface END, updated_at=now()
+            surface=CASE WHEN $6 THEN $7 ELSE surface END, locked_titles=COALESCE($8,locked_titles), updated_at=now()
       WHERE id=$1 AND account_id=$2 RETURNING *`,
     [req.params.id, accountId(req), b.name ?? null, b.restrictions ? JSON.stringify(b.restrictions) : null, b.enabled ?? null,
-     b.surface !== undefined, b.surface ?? null]
+     b.surface !== undefined, b.surface ?? null, b.lockedTitles ?? null]
   );
   try { (await import('../scale/cache')).invalidateTag(`app:${req.params.id}`); } catch { /* the short cache catches up */ }
   if (!app) throw notFound('App not found');

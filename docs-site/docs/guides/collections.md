@@ -99,6 +99,8 @@ The strictest collection wins, so a title can sit in a free collection while ano
 
 A title that only asks viewers to sign in in another collection is not locked: it stays in, and the player asks the viewer to sign in.
 
+Your apps see the same thing in their rows (see [A collection as a row in your app](#a-collection-as-a-row-in-your-app)): a rule collection's row leaves the locked title out in those apps and countries, and a hand-filled collection's row lists it locked, with the package. Each app chooses whether its rows show locked titles at all: **Titles a package locks** on the app in [API Keys & Apps](api-keys-and-apps.md).
+
 ![View as on a rule collection in Australia: two titles the rules put there left out because Premium picks sells them, the hand-added promo kept and marked, and the matrix with the left-out counts](/img/screens/collections-left-out.png)
 
 ### See one title's access
@@ -175,6 +177,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A title is not added, with "The rights do not allow ..." | The collection has access that the title's rights rule out: apps, territories or premium access its rights profile does not allow | Add it to a collection without that access, or change the title's [rights](rights.md) |
 | "Another collection or rule already sells ..." | A product key names one product, and another collection or access rule uses it | Give this package its own product keys |
 | A title is locked although its own rules make it free | Another collection it is in asks more in that app and country: the strictest collection wins | Open the collection and use **View as** to see which collection decides, then take the title out of it or change that collection's access |
+| An app's row leaves out every title viewers would have to buy | The app is set to **Leave them out** under **Titles a package locks** | Choose **Show them locked** on the app in API Keys & Apps |
 | A rule collection shows fewer titles in an app or a country than it holds | Another collection sells those titles as a package there, so the rule collection leaves them out | **View as** names them and the package. Add a title by hand to keep it in, or change the other collection's access |
 
 ## Through the API
@@ -212,16 +215,20 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/js
 
 Your apps read a collection with the app's publishable key, no sign-in: `GET /api/public/collections/{id}?appKey=pk_...`. The answer has the collection's name, description and sub-collections, and its titles in its order (the sub-collections' after it; `deep=false` for its own only). Only titles that are public and listed are in it, and a title whose publishing rule turns **Sitemap and schema.org** off is left out. Each title says what a viewer who is not signed in gets in that app and country: `access` is `free`, `members` (sign in to watch) or `premium` (a purchase). A title the rights or a geo rule keep from that app or country is not in the answer at all.
 
+**Locked titles.** A `premium` title carries `packages`, the collections whose package unlocks it there (buying any one does), and `products`, what this app can sell for it: the same packages the player is told when it asks to play the title. Each app chooses whether its rows show them: `lockedTitles` is `upsell` (listed, locked; the default) or `hide` (left out), set as **Titles a package locks** on the app. A members-only title is not locked and is listed either way. A title only this collection's rules put here is left out in an app and country where another collection sells it as a package and this one asks nothing; one a person added stays, locked.
+
 | Field | What it is |
 |---|---|
 | `items[].id`, `title`, `description`, `artworkUrl`, `durationMs` | The title, as the player shows it |
 | `items[].series`, `season`, `episode` | For rows that group episodes |
 | `items[].access` | `free`, `members` or `premium`, for a viewer not signed in |
+| `items[].packages`, `products` | A premium title: the packages that unlock it and what this app can sell for it |
+| `lockedTitles` | This app's choice: `upsell` lists locked titles, `hide` leaves them out |
 | `items[].status`, `availableFrom` | `scheduled` for a title listed before it can be played, with when it can |
 | `territoryGroup` | The same for every country with this exact answer; it is also the ETag |
 | `nextChangeAt` | When a title in it opens or closes on its own: ask again then |
 
-The country is the viewer's, from the CDN. Countries with the same answer share it, so a row polled with `If-None-Match` answers 304 until it changes. Adding or taking out a title, or changing one, reaches the answer at once.
+The country is the viewer's, from the CDN. Countries with the same answer share it, so a row polled with `If-None-Match` answers 304 until it changes. Adding or taking out a title, changing one or a collection's access, or changing the app's **Titles a package locks**, reaches the answer at once.
 
 ```bash
 curl "https://your-volt-host/api/public/collections/$COLLECTION_ID?appKey=$PUBLISHABLE_KEY"

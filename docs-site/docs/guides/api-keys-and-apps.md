@@ -34,16 +34,17 @@ Raw keys are shown once, when they are made. Volt keeps only a fingerprint and t
 3. Type the **App name**, for example "Web player".
 4. Under **Platform**, choose **Web player**, **iOS**, **Android**, **Smart TV**, **Roku** or **Server**. The line under each says how its key is protected.
 5. Under **Where the key works**, for a web player or server choose **Any origin** (or **Any address**) or **Only my origins** (or **Only my addresses**). For the second, type one per line. Wildcards like `*.example.com` work for origins. Mobile and TV apps have nothing to set.
-6. Read **What will be created**: where the key will work and what it can do. An unrestricted key is flagged in yellow; a restricted key with an empty list is flagged in red, because it would refuse every request.
-7. Choose **Register and show me the key**.
-8. Copy the key with **Copy** and keep it: it is shown once and cannot be retrieved. Choose **Done, I saved it**.
+6. For an app that shows your [collections](collections.md) as rows, choose under **Titles a package locks**: **Show them locked** (the default) lists a title another viewer would have to buy with the package that unlocks it, so viewers can buy it; **Leave them out** lists only what viewers can watch free or after signing in.
+7. Read **What will be created**: where the key will work and what it can do. An unrestricted key is flagged in yellow; a restricted key with an empty list is flagged in red, because it would refuse every request.
+8. Choose **Register and show me the key**.
+9. Copy the key with **Copy** and keep it: it is shown once and cannot be retrieved. Choose **Done, I saved it**.
 
 The app is listed with its platform, its key prefix, the requests it has made and **Enabled**. **All**, **Client apps** and **Server** filter the list.
 
 ### Change where a key works, or turn an app off
 
 1. Choose **Open** on the app.
-2. Change the name or **Where the key works**. It takes effect at once.
+2. Change the name, **Titles a package locks** or **Where the key works**. It takes effect at once, also in the collection rows the app already shows.
 3. Under **Keys, rotation and availability**, **App enabled** off blocks all of the app's keys at once without deleting them; playback stops immediately.
 4. Choose **Save changes**.
 
@@ -92,6 +93,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Unrestricted.** in yellow | The key would work from any page or address | Add your origins or addresses once you know them |
 | **Restricted with an empty list, so every request would be refused, including your own player.** | **Only my origins** (or addresses) is chosen with nothing typed | Type at least one, or choose **Any origin** |
 | A player stops playing after a change | Its origin is not in the list, the app is disabled, or its key was revoked | Check **Where the key works**, **App enabled** and the keys |
+| A title is missing from an app's collection row but plays from a link | A package locks it in that app and country, and the app is set to **Leave them out** | Choose **Show them locked** under **Titles a package locks** to list it with its package |
 | You lost a key | Keys are shown once | Issue a new key, roll it out, revoke the old one |
 | **None yet. Nothing outside this console can reach the API on your behalf.** | No secret key exists | Create one when a server needs it |
 | **Couldn't load apps and keys.** | The page could not reach Volt | Choose **Retry** |
@@ -102,7 +104,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 |---|---|
 | `GET /api/apps` | The registered apps |
 | `POST /api/apps` | Registers one (`name`, `type`, `restrictions`); answers with its publishable key, once |
-| `PUT /api/apps/{id}` | Changes `name`, `restrictions` or `enabled` |
+| `PUT /api/apps/{id}` | Changes `name`, `restrictions`, `enabled` or `lockedTitles` (`upsell` or `hide`: how its collection rows treat a title a package locks) |
 | `POST /api/apps/{id}/keys` | Issues a new key for it |
 | `GET /api/apps/keys` | Every key in the account, by prefix |
 | `DELETE /api/apps/keys/{keyId}` | Revokes a key |

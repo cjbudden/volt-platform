@@ -483,8 +483,12 @@ collectionsRouter.put('/:id/access', asyncHandler(async (req, res) => {
     changes: { access: { from: c.access ?? null, to: next } } });
   // Every title here and below is compiled again; the first batches now, so
   // the play gate answers by the new access when this returns.
+  // Drained even when nothing new was queued: a title already waiting in the
+  // queue (a membership change the background pass has not reached) is not
+  // queued twice, and used to keep its old access until that pass came by
+  // (found by C2-4: removing a package left the title premium).
   const queued = await enqueueCollections(await subtreeIds(c.id));
-  const compiled = queued ? await drainFor(3000) : 0;
+  const compiled = await drainFor(3000);
   res.json({ id: c.id, access: next, products, queued, compiled });
 }));
 

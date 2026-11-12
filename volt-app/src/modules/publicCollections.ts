@@ -20,8 +20,23 @@
  * own evaluation (services/rights.ts evaluateAccess, for this app and country,
  * no viewer) either lets it play (`access: "free"`) or asks for a sign-in
  * (`"members"`) or a purchase (`"premium"`). A title the rights or a geo rule
- * keep from this app or country is left out. The packages that unlock a
- * premium title and each app's upsell or hide are build queue C2-4.
+ * keep from this app or country is left out.
+ *
+ * LOCKED TITLES (build queue C2-4). A premium title carries `packages`, the
+ * collections whose purchase unlocks it there (any one of them does), and
+ * `products`, what this app can sell for it: the play gate's own answer, so
+ * the row and the 402 the player gets name the same packages. Each app
+ * chooses (apps.locked_titles): `upsell`, the default, lists them locked;
+ * `hide` leaves every premium title out of its rows. A members-only title is
+ * not locked (a sign-in, not a sale) and is listed either way.
+ *
+ * A RULE COLLECTION DOES NOT LIST ANOTHER COLLECTION'S PACKAGE. When only
+ * this collection's rules (or its sub-collections') put a title here and
+ * another collection sells it as a package in this app and country while
+ * this one asks none (services/collectionAccess.ts lockedElsewhere, as View
+ * as leaves it out), the title is left out for this app and country: its
+ * rules did not choose a paid title. A title a person added stays, locked
+ * with the governing package.
  *
  * CACHING BY TERRITORY GROUP. Countries that get the same answer share one
  * cached answer: the answer for a country is worked out once, and its content
@@ -47,6 +62,7 @@ import { sitemapListedOf } from '../services/deliveryPolicy';
 import { evaluateAccess } from '../services/rights';
 import { appTypeOf } from '../services/rightsProfiles';
 import { classifyGate } from '../services/qoe/gateLog';
+import { lockedElsewhere } from '../services/collectionAccess';
 import { metaFor } from './apps';
 
 export const publicCollectionsRouter = Router();
@@ -63,6 +79,10 @@ export interface PublicItem {
   id: string; title: string | null; description: string | null; artworkUrl: string | null; durationMs: number | null;
   series: string | null; season: number | null; episode: number | null;
   access: PublicAccess;
+  /** A premium title: the collections whose package unlocks it here (any one of them does). */
+  packages?: { id: string; name: string }[];
+  /** A premium title: what this app can sell to unlock it (the gate's sellable terms). */
+  products?: any[];
   /** 'scheduled': a teaser, listed before it can be played (availableFrom). */
   status: 'available' | 'scheduled';
   availableFrom: string | null;
@@ -74,10 +94,14 @@ export interface PublicCollection {
   territoryGroup: string;
   /** When an item in it changes status on its own (a window opening or closing), or null. */
   nextChangeAt: string | null;
+  /** This app's choice for locked titles: listed with their packages (upsell) or left out (hide). */
+  lockedTitles: LockedTitles;
 }
+export type LockedTitles = 'upsell' | 'hide';
+interface AppCtx { accountId: string; appId: string; appType: any; lockedTitles: LockedTitles }
 
 /** The app behind the presented publishable key, its restrictions checked. */
-async function appOf(req: Request) {
+async function appOf(req: Request): Promise<AppCtx> {
   const raw = String(req.get('x-volt-app-key') ?? req.query.appKey ?? '').trim();
   if (!raw) throw new ApiError(401, 'appKey required: ?appKey=pk_... or the X-Volt-App-Key header');
   const key = await verifyKey(raw);
@@ -86,14 +110,22 @@ async function appOf(req: Request) {
   if (!app) throw new ApiError(401, 'app not found for key');
   const reason = checkRestrictions(app, { referrer: req.get('referer') || undefined, origin: req.get('origin') || undefined, ip: req.ip });
   if (reason) throw new ApiError(403, reason);
-  return { accountId: String(key.account_id), appId: String(app.id), appType: appTypeOf(app.type, app.surface) };
+  return { accountId: String(key.account_id), appId: String(app.id), appType: appTypeOf(app.type, app.surface),
+    lockedTitles: app.locked_titles === 'hide' ? 'hide' : 'upsell' };
 }
 
-interface Shape { id: string; accountId: string; name: string; description: string | null; children: { id: string; name: string }[]; subtree: string[]; members: string[] }
+interface Shape {
+  id: string; accountId: string; name: string; description: string | null; children: { id: string; name: string }[];
+  subtree: string[]; members: string[];
+  /** The collection and every sub-collection, whatever `deep` is: what View as counts as this collection's own. */
+  family: string[];
+  /** Members only rules put here (no person added them anywhere in the family). */
+  byRule: string[];
+}
 
 /** A collection's shape and members in order, cached until it or a sub-collection changes. */
 function shapeOf(id: string, deep: boolean): Promise<Shape | null> {
-  return cached<Shape | null>(`pubcol:shape:${id}:${deep ? 1 : 0}`, {
+  return cached<Shape | null>(`pubcol:shape2:${id}:${deep ? 1 : 0}`, {
     ttlSec: MAX_AGE_SEC, l2: true,
     tags: (s) => s ? [...s.subtree.map((c) => `collection:${c}`), `acct:${s.accountId}`] : [`collection:${id}`],
   }, async () => {
@@ -104,19 +136,24 @@ function shapeOf(id: string, deep: boolean): Promise<Shape | null> {
       `WITH RECURSIVE t AS (SELECT id, ARRAY[sort_order] AS path FROM collections WHERE id = $1
           UNION ALL SELECT c.id, t.path || c.sort_order FROM collections c JOIN t ON c.parent_id = t.id WHERE $2)
        SELECT id FROM t`, [id, deep]);
-    const rows = await query<{ id: string }>(
+    const family = deep ? tree : await query<any>(
+      `WITH RECURSIVE t AS (SELECT id FROM collections WHERE id = $1 UNION ALL SELECT c.id FROM collections c JOIN t ON c.parent_id = t.id)
+       SELECT id FROM t`, [id]);
+    const rows = await query<{ id: string; by_rule: boolean }>(
       `WITH RECURSIVE t AS (SELECT id, ARRAY[sort_order] AS path FROM collections WHERE id = $1
           UNION ALL SELECT c.id, t.path || c.sort_order FROM collections c JOIN t ON c.parent_id = t.id WHERE $2),
         ranked AS (
           SELECT i.vod_asset_id, i.position, i.added_at, t.path,
-                 row_number() OVER (PARTITION BY i.vod_asset_id ORDER BY t.path, i.position) AS rn
+                 row_number() OVER (PARTITION BY i.vod_asset_id ORDER BY t.path, i.position) AS rn,
+                 bool_and(coalesce(i.source, 'manual') = 'rule') OVER (PARTITION BY i.vod_asset_id) AS by_rule
             FROM t JOIN collection_items i ON i.collection_id = t.id)
-       SELECT v.id FROM ranked r JOIN vod_assets v ON v.id = r.vod_asset_id
+       SELECT v.id, r.by_rule FROM ranked r JOIN vod_assets v ON v.id = r.vod_asset_id
         WHERE r.rn = 1 ORDER BY r.path, ${order}, r.position, r.added_at LIMIT 2000`, [id, deep]);
     const children = await query<any>(`SELECT id, name FROM collections WHERE parent_id = $1 ORDER BY sort_order, name`, [id]);
     return { id: String(c.id), accountId: String(c.account_id), name: String(c.name), description: c.description ?? null,
       children: children.map((x) => ({ id: String(x.id), name: String(x.name) })),
-      subtree: tree.map((x) => String(x.id)), members: rows.map((r) => String(r.id)) };
+      subtree: tree.map((x) => String(x.id)), members: rows.map((r) => String(r.id)),
+      family: family.map((x: any) => String(x.id)), byRule: rows.filter((r) => r.by_rule).map((r) => String(r.id)) };
   });
 }
 
@@ -124,6 +161,12 @@ function shapeOf(id: string, deep: boolean): Promise<Shape | null> {
 export function accessOf(rights: any): PublicAccess | null {
   if (rights.allowed) return 'free';
   if (rights.replacementAssetId) return null;
+  // A collection's package or sign-in (the collection layer answers in the
+  // gate's own words, as the 402 route reads them): before the reading the
+  // reports use, which took "Part of Sport. Buy it to watch." for an
+  // availability refusal and left the title out of the row (found by C2-4).
+  if (rights.rule?.reason === 'payment_required') return 'premium';
+  if (rights.rule?.reason === 'members_only') return 'members';
   const why = classifyGate(451, null, { rights } as any).reason;
   if (why === 'payment') return 'premium';
   if (why === 'sign_in' || why === 'group') return 'members';
@@ -131,9 +174,11 @@ export function accessOf(rights: any): PublicAccess | null {
 }
 
 /** The answer for one app and country, worked out from the cached gate inputs. */
-async function compute(shape: Shape, app: { accountId: string; appId: string; appType: any }, country: string | null): Promise<{ body: PublicCollection; ttlSec: number }> {
+async function compute(shape: Shape, app: AppCtx, country: string | null): Promise<{ body: PublicCollection; ttlSec: number }> {
   publicCollectionStats.computed++;
   const now = new Date();
+  const own = new Set(shape.family ?? shape.subtree);
+  const byRule = new Set(shape.byRule ?? []);
   const items: PublicItem[] = [];
   let next: number | null = null;
   for (const id of shape.members) {
@@ -144,14 +189,26 @@ async function compute(shape: Shape, app: { accountId: string; appId: string; ap
       if (ps?.listedFrom && ps.listedFrom > now) next = Math.min(next ?? Infinity, ps.listedFrom.getTime());
       continue;
     }
-    if (!sitemapListedOf((await vodAvailabilityRow(id))?.availability)) continue;
-    const access = accessOf(await evaluateAccess(id, country ?? undefined, { appId: app.appId, appType: app.appType, accountId: app.accountId }));
+    const row = await vodAvailabilityRow(id);
+    if (!sitemapListedOf(row?.availability)) continue;
+    // Only rules put it here, and another collection sells it as a package
+    // in this app and country while this one asks none: left out (C2-4).
+    if (byRule.has(id) && lockedElsewhere(row?.collection_access, own, app.appId, country)) continue;
+    const gate: any = await evaluateAccess(id, country ?? undefined, { appId: app.appId, appType: app.appType, accountId: app.accountId });
+    const access = accessOf(gate);
     if (!access) continue;
+    // The app hides what a viewer would have to buy (C2-4).
+    if (access === 'premium' && app.lockedTitles === 'hide') continue;
     const m: any = await metaFor(app.accountId, 'vod', id);
     if (!m) continue;
     items.push({ id, title: m.title ?? null, description: m.description ?? null, artworkUrl: m.artworkUrl ?? null, durationMs: m.durationMs ?? null,
       series: null, season: null, episode: null,
-      access, status: ps.status === 'scheduled' ? 'scheduled' : 'available',
+      access,
+      ...(access === 'premium' ? {
+        packages: (gate.rule?.packages ?? []).map((p: any) => ({ id: String(p.id), name: String(p.name) })),
+        products: gate.products ?? gate.rule?.products ?? [],
+      } : {}),
+      status: ps.status === 'scheduled' ? 'scheduled' : 'available',
       availableFrom: ps.status === 'scheduled' ? ps.effectiveFrom?.toISOString() ?? null : null });
   }
   // series, season and episode for the rows that group episodes (one read, on a miss only)
@@ -166,7 +223,7 @@ async function compute(shape: Shape, app: { accountId: string; appId: string; ap
   const content = { collection: { id: shape.id, name: shape.name, description: shape.description, children: shape.children }, items };
   const territoryGroup = createHash('sha1').update(JSON.stringify(content)).digest('base64url').slice(0, 16);
   const ttlSec = Math.max(1, Math.min(MAX_AGE_SEC, next != null ? Math.floor((next - now.getTime()) / 1000) : MAX_AGE_SEC));
-  return { body: { ...content, territoryGroup, nextChangeAt: next != null ? new Date(next).toISOString() : null }, ttlSec };
+  return { body: { ...content, territoryGroup, nextChangeAt: next != null ? new Date(next).toISOString() : null, lockedTitles: app.lockedTitles }, ttlSec };
 }
 
 /**
@@ -175,9 +232,9 @@ async function compute(shape: Shape, app: { accountId: string; appId: string; ap
  * answer out once and files it under its group; a second country with the
  * same answer finds the group's entry already there.
  */
-async function answerFor(shape: Shape, app: { accountId: string; appId: string; appType: any }, country: string | null, deep: boolean): Promise<{ body: PublicCollection; ttlSec: number }> {
+async function answerFor(shape: Shape, app: AppCtx, country: string | null, deep: boolean): Promise<{ body: PublicCollection; ttlSec: number }> {
   const tags = [...shape.subtree.map((c) => `collection:${c}`), ...shape.members.map((a) => `asset:${a}`), `app:${app.appId}`, `acct:${app.accountId}`];
-  const base = `pubcol:${shape.id}:${deep ? 1 : 0}:${app.appId}`;
+  const base = `pubcol:${shape.id}:${deep ? 1 : 0}:${app.appId}:${app.lockedTitles}`;
   let fresh: { body: PublicCollection; ttlSec: number } | null = null;
   const group = await cached<{ g: string; ttlSec: number }>(`${base}:c:${country ?? '-'}`,
     { ttlSec: (v) => v.ttlSec, tags }, async () => {

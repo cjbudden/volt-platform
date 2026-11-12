@@ -315,6 +315,9 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
   // WHAT IT IS USED FOR (build queue R1): rights can allow or block embed
   // players and venue screens separately from the client's own apps.
   const [surface, setSurface] = useState<'embed' | 'venue' | null>(app?.surface ?? null)
+  // LOCKED TITLES (build queue C2-4): in the app's collection rows, a title a
+  // package locks is listed locked with the package (upsell) or left out (hide).
+  const [lockedTitles, setLockedTitles] = useState<'upsell' | 'hide'>(app?.locked_titles ?? 'upsell')
   const r = app?.restrictions || {}
   const initialOrigins = ((r.referrers || r.origins || []) as string[]).join('\n')
   const initialIps = ((r.ipAllowlist || []) as string[]).join('\n')
@@ -371,10 +374,10 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
     setBusy(true)
     try {
       if (isEdit) {
-        await api.updateApp(app!.id, { name: name.trim(), restrictions: buildRestrictions(), enabled, surface: type === 'server' ? null : surface })
+        await api.updateApp(app!.id, { name: name.trim(), restrictions: buildRestrictions(), enabled, surface: type === 'server' ? null : surface, lockedTitles })
         onDone()
       } else {
-        const created = await api.createApp({ name: name.trim(), type, restrictions: buildRestrictions(), surface: type === 'server' ? null : surface })
+        const created = await api.createApp({ name: name.trim(), type, restrictions: buildRestrictions(), surface: type === 'server' ? null : surface, lockedTitles })
         onDone(created.publishableKey)
       }
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
@@ -430,6 +433,10 @@ function AppDrawer({ app, onClose, onDone }: { app?: AppReg; onClose: () => void
             <ChoiceRow on={surface === null} title="Your own site or app" sub="Rights treat it by its platform: web, mobile or smart TV." onPick={() => setSurface(null)} />
             <ChoiceRow on={surface === 'embed'} title="An embed player on other sites" sub="Rights can allow or block embeds separately from your own apps." onPick={() => setSurface('embed')} />
             <ChoiceRow on={surface === 'venue'} title="Venue screens" sub="Kiosks and screens you run on site. Rights can allow or block them separately." onPick={() => setSurface('venue')} />
+
+            <div className="sec-label">Titles a package locks</div>
+            <ChoiceRow on={lockedTitles === 'upsell'} title="Show them locked" sub="Collection rows list them with the package that unlocks them, so viewers can buy it." onPick={() => setLockedTitles('upsell')} />
+            <ChoiceRow on={lockedTitles === 'hide'} title="Leave them out" sub="Collection rows list only what viewers can watch free or after signing in." onPick={() => setLockedTitles('hide')} />
           </>}
 
           <div className="sec-label">Where the key works</div>

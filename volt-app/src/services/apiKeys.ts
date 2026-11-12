@@ -70,6 +70,8 @@ export interface AppRow {
   enabled: boolean;
   /** An embed player or venue screens, for the rights (build queue R1). */
   surface?: 'embed' | 'venue' | null;
+  /** Locked titles in public catalogue answers: upsell or hide (build queue C2-4). */
+  locked_titles?: 'upsell' | 'hide';
 }
 
 /**
