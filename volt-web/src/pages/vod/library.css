@@ -425,3 +425,13 @@
 .qc-verdict { color: var(--muted) } .qc-verdict-n { color: var(--faint); flex-basis: 100% }
 .qc-undo { background: none; border: 0; color: var(--brand); font: inherit; padding: 0; cursor: pointer }
 .qc-note { flex-direction: column; align-items: stretch } .qc-note .inp { width: 100% }
+
+/* The asset panel at phone width (Vod.tsx, build queue LIB-phone): the whole screen, with
+   nothing inside it wider than the screen. */
+.lib-drawer-phone { width: 100vw; max-width: 100vw; border-left: 0 }
+.lib-drawer-phone .drawer-h { padding: 12px 14px; gap: 8px }
+.lib-drawer-phone .drawer-h .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block }
+.lib-drawer-phone .drawer-b { padding: 14px; overflow-x: hidden }
+/* The Preview tab: the player beside the facts, the facts under it on a phone. */
+.lib-play-grid { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start }
+@media (max-width: 640px) { .lib-play-grid { grid-template-columns: minmax(0, 1fr) } }

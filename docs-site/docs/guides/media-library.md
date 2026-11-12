@@ -77,7 +77,7 @@ Files dropped in a watch folder arrive the same way, without the upload band ([W
 
 ### Open an asset
 
-1. Click a row, or choose **Open** on it (in the grid, click the card). The asset opens under the row, or in a panel in grid view.
+1. Click a row, or choose **Open** on it (in the grid, click the card). The asset opens under the row, or in a panel in grid view. On a tablet or a phone it always opens in the panel, and on a phone the panel fills the screen; close it with the cross at the top to go back to the list.
 2. Its tabs are **Preview**, **Skip markers**, **Metadata**, **Encode**, **Formats**, **Availability** and **History**. Beside them is where it stands: **Not published**, **Scheduled**, **Available**, **Expired** or **Access removed**.
 3. **Open the recording** goes to the recording a clip was cut from. **Re-run QC** checks it again; the result appears in the **QC** column when it finishes.
 4. Choose **Close** (or the row again) to fold it away.

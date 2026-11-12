@@ -273,7 +273,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
 
       {tab === 'play' && <AssetStatusPanel asset={d} onChanged={() => { load(); onChanged() }} />}
       {tab === 'play' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
+        <div className="lib-play-grid">
           <div>
             {playable ? (
               <MediaPreview sources={{ file, hls }} audioOnly={audioOnly} title={d.title} thumbnailsVtt={thumbsVtt} assetId={d.id} seek={seek}
@@ -724,6 +724,13 @@ export default function VodPage() {
   const [lastOpen, setLastOpen] = useState<string | null>(null)
   // The asset panel's width: drag its left edge or use the width button (vod/drawerWidth.tsx).
   const panel = useDrawerWidth()
+  // ON A PHONE OR A TABLET (build queue LIB-phone) the list's open asset is not a row inside
+  // the table: the table is about 1245 px wide and scrolls sideways in its card, so a row
+  // under it put the whole asset (tabs, form, Find details) in that sideways scroll, its
+  // left edge out of view. Under 1024 px the asset opens in the panel instead, as it does
+  // from the grid; under 640 px that panel is the whole screen, with no width controls.
+  const listInPanel = useMedia('(max-width: 1023px)')
+  const narrow = useMedia('(max-width: 640px)')
   useEffect(() => { if (open) setLastOpen(open) }, [open])
   const [fresh, setFresh] = useState<Set<string>>(new Set())
   const markFresh = (ids: (string | null | undefined)[]) => {
@@ -868,22 +875,25 @@ export default function VodPage() {
   const filtered = isFiltered(filters)
   const show = (c: string) => columns.includes(c as any)
   const extraCols = ['type', 'complete', 'encode', 'codec', 'renditions', 'blocks'].filter(show).length
+  // The asset panel over the library (deep link, grid, and the list at phone width). At
+  // phone width it is the whole screen, so the resize handle and width button are left out.
+  const assetDrawer = (id: string, title: string, close: () => void) => (
+    <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) close() }}>
+      <div className={`drawer lib-drawer-asset${narrow ? ' lib-drawer-phone' : ''}`} role="dialog" aria-modal="true" aria-label="Asset" style={narrow ? undefined : panel.style} onKeyDown={(e) => { if (e.key === 'Escape') close() }}>
+        {!narrow && <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />}
+        <div className="drawer-h">
+          <span className="t">{title}</span>
+          {!narrow && <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />}
+          <button type="button" className="icon-btn" onClick={close} aria-label="Close" autoFocus>{LibIcon.close}</button>
+        </div>
+        <div className="drawer-b"><AssetDetail id={id} onChanged={changedHere(id)} onDeleted={assetDeleted} /></div>
+      </div>
+    </div>
+  )
 
   return (
     <>
-      {linked && (
-        <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) closeLinked() }}>
-          <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" style={panel.style} onKeyDown={(e) => { if (e.key === 'Escape') closeLinked() }}>
-            <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />
-            <div className="drawer-h">
-              <span className="t">{longTitle(rows.find((r) => r.id === linked), 'Asset')}</span>
-              <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />
-              <button type="button" className="icon-btn" onClick={closeLinked} aria-label="Close" autoFocus>{LibIcon.close}</button>
-            </div>
-            <div className="drawer-b"><AssetDetail id={linked} onChanged={changedHere(linked)} onDeleted={assetDeleted} /></div>
-          </div>
-        </div>
-      )}
+      {linked && assetDrawer(linked, longTitle(rows.find((r) => r.id === linked), 'Asset'), closeLinked)}
       <div className="page-head">
         <div>
           <h1>Media Library</h1>
@@ -993,19 +1003,7 @@ export default function VodPage() {
             <div style={{ marginLeft: 'auto' }}><KindLegend /></div>
           </div>
           <LibraryGrid rows={rows} selected={sel.sel} onToggle={sel.toggle} onOpen={(id) => guardOpen(id)} openId={open} lastOpenId={lastOpen} fresh={fresh} />
-          {open && !linked && (
-            <div className="drawer-scrim" onClick={(e) => { if (e.target === e.currentTarget) guardOpen(null) }}>
-              <div className="drawer lib-drawer-asset" role="dialog" aria-modal="true" aria-label="Asset" style={panel.style} onKeyDown={(e) => { if (e.key === 'Escape') guardOpen(null) }}>
-                <DrawerResizeHandle width={panel.width} setWidth={panel.setWidth} />
-                <div className="drawer-h">
-                  <span className="t">{longTitle(rows.find((r) => r.id === open))}</span>
-                  <WidthButton current={panel.current} next={panel.next} onClick={panel.cycle} />
-                  <button type="button" className="icon-btn" onClick={() => guardOpen(null)} aria-label="Close" autoFocus>{LibIcon.close}</button>
-                </div>
-                <div className="drawer-b"><AssetDetail id={open} onChanged={changedHere(open)} onDeleted={assetDeleted} /></div>
-              </div>
-            </div>
-          )}
+          {open && !linked && assetDrawer(open, longTitle(rows.find((r) => r.id === open)), () => guardOpen(null))}
         </>
       ) : (
         <div className="card lib-table-card">
@@ -1071,7 +1069,7 @@ export default function VodPage() {
                         </button>
                       </td>
                     </tr>
-                    {open === a.id && (
+                    {open === a.id && !listInPanel && (
                       <tr><td colSpan={10 + extraCols} style={{ background: 'var(--panel-2)' }}>
                         <AssetDetail id={a.id} onChanged={changedHere(a.id)} onDeleted={assetDeleted} />
                       </td></tr>
@@ -1081,6 +1079,7 @@ export default function VodPage() {
               })}
             </tbody>
           </table>
+          {listInPanel && open && !linked && assetDrawer(open, longTitle(rows.find((r) => r.id === open)), () => guardOpen(null))}
         </div>
       )}
 
@@ -1101,4 +1100,17 @@ export default function VodPage() {
       </div>
     </>
   )
+}
+
+// Whether a media query matches, following resizes and rotation.
+function useMedia(q: string) {
+  const [n, setN] = useState(() => { try { return window.matchMedia(q).matches } catch { return false } })
+  useEffect(() => {
+    let m: MediaQueryList
+    try { m = window.matchMedia(q) } catch { return }
+    const on = () => setN(m.matches)
+    on(); m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [q])
+  return n
 }
