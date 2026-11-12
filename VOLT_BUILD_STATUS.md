@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Collections as FAST pools (build queue C3, first part; vNEXT)
+## 2026-11-12 - Collections as FAST pools (build queue C3, first part; v0.118.0)
 
 What: a FAST run order slot can now take a collection as its pool. Each time the slot comes round it airs the next title of the collection (in its order, or shuffled without repeats), and the run order follows the collection: titles added or taken out reach the guide at the next Rewrite guide, activation or top-up, with nobody editing the run order. Only titles that can air on that channel are used: the FAST library's rights and publishing checks, the channel's media, and seen somewhere the channel is shown. C3 was split: the public collection endpoint for app rows and rails is C3-2.
 
