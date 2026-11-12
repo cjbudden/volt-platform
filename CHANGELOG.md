@@ -2,6 +2,22 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.130.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: A radio station whose settings were not fully saved yet could show its recordings as a channel's.
+- improved · Recordings: Recordings show the logo of the channel or radio station they belong to, in the Recordings list, on a source's page and on each recording. Open channel, Open station or Open event goes straight to what the recording belongs to.
+
+### SaaS platform
+
+- fixed · Media Library: On AWS, viewers of on-demand titles now get the Skip intro, Skip recap and Skip credits buttons: the markers are written into the playlists viewers fetch, and a moved or removed marker reaches them within a minute.
+
+### Internal
+
+- added · Tests: New bucket-markers check suite: skip markers written into, and removed from, the bucket copy of an encode's media playlists and MPD.
+- added · Tests: recording-source-brand suite: a recording's source logo and type on GET /api/recordings/:id and the lists.
+
 ## 0.129.1 (2026-11-12)
 
 ### SaaS platform
