@@ -9,7 +9,7 @@
 //  since a rule names them.
 // ============================================================================
 import { useEffect, useState } from 'react'
-import { api, type IngestRule, type IngestThen, type IngestWhen, type IngestWebhook, type ContentType, type Watchfolder } from '../api'
+import { api, apiRequest, type IngestRule, type IngestThen, type IngestWhen, type IngestWebhook, type ContentType, type Watchfolder, type PostProcessOptions } from '../api'
 import { PageHead } from '../scaffold'
 import { Notice, useNotify, usePageNotice } from '../notices'
 import { FilenameRulesCard } from './FilenameRules'
@@ -22,6 +22,7 @@ const DUP = { ask: 'Ask', skip: 'Skip', replace: 'Replace', version: 'Keep both 
 const GATE = { none: 'Not required', before_ingest: 'Before ingest (bytes move first)', before_upload: 'Before upload' }
 const TRANSFER = { auto: 'Auto (cloud to cloud when possible)', local: 'From this device', cloud: 'Cloud to cloud only' }
 const FILENAME_META = { auto: 'applied when sure', suggest: 'suggested only', off: 'not read' }
+const SUBTITLES = { off: 'Off', whisper: 'Whisper on this server', addon: 'An add-on' }
 
 // A RULE'S ONE-LINE SUMMARY IN WORDS, not its stored keys (build queue
 // 1.14-G3a-2): the list used to read "when extensions=mov|mp4 then
@@ -68,6 +69,11 @@ function thenWords(t: IngestThen, typeName: (id: string) => string = (id) => id)
     else if (k === 'ladderGroupId') out.push('its own encoding ladder')
     else if (k === 'reject') out.push(`refused: ${v}`)
     else if (k === 'filenameMetadata') out.push(`file name ${(FILENAME_META as any)[v] ?? v}`)
+    else if (k === 'subtitles') out.push(v === 'off' ? 'no subtitles made' : `subtitles by ${v === 'whisper' ? 'Whisper' : 'an add-on'}`)
+    else if (k === 'subtitleAddonId' || k === 'subtitleModel') continue
+    else if (k === 'subtitleSpoken') out.push(v === 'auto' ? 'spoken language detected' : `spoken in ${v}`)
+    else if (k === 'subtitleLanguages') out.push(`also in ${v.join(', ')}`)
+    else if (k === 'describe') out.push(v === 'ai' ? 'AI description when there is none' : 'no AI description')
     else out.push(`${k}: ${Array.isArray(v) ? v.length : String(v)}`)
   }
   return out.join(' · ')
@@ -85,8 +91,54 @@ function Sel<T extends string>({ label, value, options, onChange, inherit }: { l
   )
 }
 
-function RuleForm({ rule, types, folders, hooks, baseline, onSaved, onCancel }: {
+// AFTER ENCODING (services/media/postProcess.ts): subtitles made from the
+// audio, then a short AI description when the asset has none. On the account
+// default this is every file; on a source rule, one watch folder's files.
+function AfterEncoding({ then, setThen, baseline, post }: {
+  then: IngestThen; setThen: (p: Partial<IngestThen>) => void; baseline: Required<IngestThen> | null; post: PostProcessOptions | null
+}) {
+  const subs = then.subtitles ?? baseline?.subtitles ?? 'off'
+  const langs = post?.languages ?? []
+  const name = (c: string) => langs.find(l => l.code === c)?.label ?? c
+  const field = { display: 'grid', gap: 3, fontSize: 'var(--fs-xs)' } as const
+  const note = { fontSize: 'var(--fs-xs)', color: 'var(--muted)' } as const
+  return (
+    <>
+      <div className="sec-label">After encoding</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+        <Sel label="Make subtitles from the audio" value={then.subtitles} options={SUBTITLES} onChange={v => setThen({ subtitles: v, ...(v !== 'addon' ? { subtitleAddonId: undefined } : {}) })} inherit={(SUBTITLES as any)[baseline?.subtitles ?? 'off']?.toLowerCase() ?? 'off'} />
+        {subs === 'addon' && <label style={field}><span style={{ color: 'var(--muted)' }}>Add-on</span>
+          <select value={then.subtitleAddonId ?? ''} onChange={e => setThen({ subtitleAddonId: e.target.value || null })}>
+            <option value="">Choose an add-on</option>
+            {(post?.addons ?? []).map(a => <option key={a.id} value={a.id}>{a.name}{a.simulated ? ' (simulated)' : ''}</option>)}
+          </select></label>}
+        {subs !== 'off' && <label style={field}><span style={{ color: 'var(--muted)' }}>Language spoken</span>
+          <select value={then.subtitleSpoken ?? ''} onChange={e => setThen({ subtitleSpoken: e.target.value || undefined })}>
+            <option value="">Inherit ({baseline?.subtitleSpoken === 'auto' || !baseline ? 'detect it' : name(baseline.subtitleSpoken)})</option>
+            <option value="auto">Detect it</option>
+            {langs.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select></label>}
+        {subs !== 'off' && <label style={field}><span style={{ color: 'var(--muted)' }}>Also make (translated)</span>
+          <select multiple value={then.subtitleLanguages ?? []} onChange={e => setThen({ subtitleLanguages: [...e.target.selectedOptions].map(o => o.value) })} style={{ minHeight: 60 }}>
+            {langs.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select></label>}
+        {subs === 'whisper' && <Sel label="Whisper model" value={then.subtitleModel} options={{ tiny: 'Tiny (fastest)', base: 'Base', small: 'Small', medium: 'Medium', 'large-v3': 'Large (best, slowest)' }} onChange={v => setThen({ subtitleModel: v })} inherit={baseline?.subtitleModel ?? 'base'} />}
+        <Sel label="AI description" value={then.describe} options={{ off: 'Off', ai: 'Write one when it has none' }} onChange={v => setThen({ describe: v })} inherit={baseline?.describe === 'ai' ? 'write one' : 'off'} />
+      </div>
+      {subs === 'whisper' && post && !post.whisper.ready && <div style={note}>{post.whisper.reason}</div>}
+      {subs === 'whisper' && post?.whisper.ready && !post.whisper.translate && (then.subtitleLanguages ?? []).some(l => l !== 'en') && <div style={note}>Whisper translates into English by itself. Other languages need the NLLB translation model on this server, or an add-on.</div>}
+      {subs === 'addon' && post && !post.addons.length && <div style={note}>No add-on that takes assets is switched on. Add one in Workflows, Add-ons.</div>}
+      {then.describe === 'ai' && post && (!post.ai.offered
+        ? <div style={note}>AI descriptions is not available on this deployment.</div>
+        : !post.ai.on ? <div style={note}>AI descriptions is an add-on ({post.ai.includedQuantity} {post.ai.unit} a month): an account administrator turns it on in Admin, Billing. Until then the step says so on each asset and writes nothing.</div>
+        : <div style={note}>Counted against this month's AI descriptions{post.ai.allowance ? ` (${post.ai.allowance.left} of ${post.ai.allowance.included} left)` : ''}. Only an asset with no description from its file name, sidecar, tags or a person gets one.</div>)}
+    </>
+  )
+}
+
+function RuleForm({ rule, types, folders, hooks, baseline, post, onSaved, onCancel }: {
   rule: Partial<IngestRule>; types: ContentType[]; folders: Watchfolder[]; hooks: IngestWebhook[]; baseline: Required<IngestThen> | null
+  post: PostProcessOptions | null
   onSaved: () => void; onCancel: () => void
 }) {
   const [r, setR] = useState<Partial<IngestRule>>({ then: {}, when: null, ...rule })
@@ -150,6 +202,7 @@ function RuleForm({ rule, types, folders, hooks, baseline, onSaved, onCancel }: 
           <select multiple value={then.webhooks ?? []} onChange={e => setThen({ webhooks: [...e.target.selectedOptions].map(o => o.value) })} style={{ minHeight: 60 }}>{hooks.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}</select></label>
         <label style={{ display: 'grid', gap: 3, fontSize: 'var(--fs-xs)' }}><span style={{ color: 'var(--muted)' }}>Refuse with reason (instead of ingesting)</span><input value={then.reject ?? ''} onChange={e => setThen({ reject: e.target.value || null })} placeholder="project files are never wanted here" /></label>
       </div>
+      <AfterEncoding then={then} setThen={setThen} baseline={baseline} post={post} />
       {err && <Notice kind="error" variant="compact" message={err} />}
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn primary" onClick={save}>Save rule</button>
@@ -165,6 +218,7 @@ export default function IngestRulesPage() {
   const [folders, setFolders] = useState<Watchfolder[]>([])
   const [hooks, setHooks] = useState<IngestWebhook[]>([])
   const [baseline, setBaseline] = useState<Required<IngestThen> | null>(null)
+  const [post, setPost] = useState<PostProcessOptions | null>(null)
   const [editing, setEditing] = useState<Partial<IngestRule> | null>(null)
   const [newHook, setNewHook] = useState({ name: '', url: '' })
   const [shownSecret, setShownSecret] = useState<string | null>(null)
@@ -180,6 +234,7 @@ export default function IngestRulesPage() {
       const [r, t, f, h, b] = await Promise.all([api.ingestRules(), api.contentTypes('vod'), api.watchfolders().catch(() => [] as Watchfolder[]), api.ingestWebhooks(), api.ingestBaseline()])
       setRules(r); setTypes(t); setFolders(f); setHooks(h); setBaseline(b.baseline)
       api.ingestProviders().then(setProviders).catch(() => {})
+      apiRequest('/vod/post-process/options').then(setPost).catch(() => setPost(null))
       setErr('')
     } catch (e: any) { setErr(e.message) }
   }
@@ -203,7 +258,7 @@ export default function IngestRulesPage() {
           naming {NAMING[baseline.naming]} · structure {STRUCTURE[baseline.structure]} · duplicate {DUP[baseline.duplicate]} · metadata {GATE[baseline.metadataRequired]} · transfer {TRANSFER[baseline.transfer]} · {thenWords({ sidecar: baseline.sidecar, autoUpload: baseline.autoUpload })}
         </div>
       )}
-      {editing && <div style={{ marginBottom: 14 }}><RuleForm rule={editing} types={types} folders={folders} hooks={hooks} baseline={baseline} onSaved={() => { setEditing(null); load() }} onCancel={() => setEditing(null)} /></div>}
+      {editing && <div style={{ marginBottom: 14 }}><RuleForm rule={editing} types={types} folders={folders} hooks={hooks} baseline={baseline} post={post} onSaved={() => { setEditing(null); load() }} onCancel={() => setEditing(null)} /></div>}
       {(['account', 'type', 'source'] as const).map(rung => (
         <div key={rung} className="card" style={{ padding: 14, marginBottom: 14 }}>
           <div className="sec-label">{RUNG_LABEL[rung]}</div>

@@ -311,15 +311,21 @@ export async function ingestLanded(f: LandedFile): Promise<IngestOutcome> {
     } else console.warn('[ingest] the sidecar of a site-kept original is too large to send to the site; not written', f.assetId);
   }
 
+  // AFTER ENCODING (services/media/postProcess.ts): subtitles and an AI
+  // description, when a rule on any rung asks. Recorded as waiting; the encode
+  // starts them. A refused or skipped file asks for nothing; library media only.
+  const { planFromSettings, initialState } = await import('../media/postProcess');
+  const ppPlan = status !== 'rejected' && duplicate.outcome !== 'skip' && (s.targetKind ?? 'vod') === 'vod' ? planFromSettings(s, resolved.sources) : null;
   await query(
     `UPDATE vod_assets
         SET original_filename = $2, original_path = $3, sha256 = $4, mime = $5, ingest = $6,
             metadata = $7, schema_id = COALESCE($8, schema_id), title = COALESCE($9, title),
-            source_key = $10, awaiting_metadata = $11, updated_at = now()
+            source_key = $10, awaiting_metadata = $11, post_process = COALESCE($12::jsonb, post_process), updated_at = now()
       WHERE id = $1`,
     [f.assetId, f.originalName, f.relativePath ?? null, f.sha256, extracted.type.mime,
      JSON.stringify({ status, rules: payload.rules, naming: payload.naming, duplicate: payload.duplicate, type: extracted.type, probe: extracted.probe, id3: extracted.id3, metadataSources: merged.sources, unmapped: merged.unmapped, objectUri, store, ...(siteSource ? { siteSource } : {}), ...(siteSidecar ? { siteSidecar } : {}) }),
-     JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, siteSource ? null : finalPath, missing.length ? missing : null]);
+     JSON.stringify(merged.metadata), s.contentTypeId, payload.asset.title, siteSource ? null : finalPath, missing.length ? missing : null,
+     ppPlan ? JSON.stringify(initialState(ppPlan, false)) : null]);
 
   let sidecarPath: string | null = null;
   if (status !== 'rejected' && duplicate.outcome !== 'skip' && s.sidecar !== 'none' && !siteSource) {

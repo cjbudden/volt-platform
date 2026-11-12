@@ -55,6 +55,8 @@ export function isLicence(v: unknown): boolean { return v == null || (LICENCES a
  */
 const NEEDS: Record<string, () => boolean> = {
   find_details_ai: () => !!String(process.env.ANTHROPIC_API_KEY ?? '').trim(),
+  // AI descriptions (services/media/aiDescribe.ts) asks the same model.
+  ai_descriptions: () => !!String(process.env.ANTHROPIC_API_KEY ?? '').trim(),
 };
 export const addonOffered = (key: string) => NEEDS[key]?.() ?? true;
 

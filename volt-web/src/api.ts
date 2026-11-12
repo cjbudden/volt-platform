@@ -1075,6 +1075,19 @@ export interface IngestThen {
   sidecar?: 'none' | 'json' | 'xml'; webhooks?: string[]; ladderGroupId?: string | null; reject?: string | null
   /** Read the file name for type, fields and links: auto applies what is confident, suggest only records it. */
   filenameMetadata?: 'auto' | 'suggest' | 'off'
+  /** After encoding: subtitles from the audio (Whisper here, or an external add-on). */
+  subtitles?: 'off' | 'whisper' | 'addon'; subtitleAddonId?: string | null
+  subtitleSpoken?: string; subtitleLanguages?: string[]; subtitleModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+  /** After encoding: a short AI description, only when the asset has none. */
+  describe?: 'off' | 'ai'
+}
+/** What this deployment and account can do after encoding (GET /api/vod/post-process/options). */
+export interface PostProcessOptions {
+  whisper: { ready: boolean; translate: boolean; reason: string | null }
+  addons: { id: string; name: string; simulated: boolean; category: string | null }[]
+  ai: { offered: boolean; on: boolean; name?: string; unit?: string; monthlyUsd?: number; includedQuantity?: number; allowance?: { period: string; included: number; used: number; left: number; resets: string } | null; pack?: string | null }
+  models: string[]
+  languages: { code: string; label: string }[]
 }
 export interface IngestRule {
   id: string; rung: 'account' | 'type' | 'source'; scopeId: string | null; ordinal: number; name: string; enabled: boolean

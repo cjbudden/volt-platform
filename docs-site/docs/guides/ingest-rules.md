@@ -63,8 +63,38 @@ Library and media operations staff use it, usually set up once by an administrat
    | **Auto upload** | **On** or **Off** |
    | **Webhooks** | The webhooks to call (hold Ctrl or Cmd to choose several) |
    | **Refuse with reason (instead of ingesting)** | A reason; matching files are refused instead of ingested |
+   | **Make subtitles from the audio** (under **After encoding**) | **Off**, **Whisper on this server**, or **An add-on** with the **Add-on** to use. With either, also **Language spoken** (**Detect it**, or a language), **Also make (translated)** and, for Whisper, the **Whisper model** |
+   | **AI description** (under **After encoding**) | **Off**, or **Write one when it has none** |
 
 6. Choose **Save rule**, or **Cancel**. The rule appears on its rung with its order, name, what it applies to and a summary in words of when it applies and what it does, for example *when the extension is mov or mp4: metadata: Before upload · uploads wait for Start* (**always:** when it has no conditions, or **inherits everything** when it sets nothing).
+
+### Make subtitles and a description after encoding
+
+Under **After encoding**, a rule can ask for two things once a file has been encoded:
+
+- **Subtitles made from the audio.** **Whisper on this server** listens to the file with the same engine as live captions. **An add-on** sends it to an external processing service you have added in [Workflows](workflows.md). The subtitles are attached to the asset as caption files, so viewers get them as a subtitle track and you can check, edit or switch them off on the asset's **Files** tab. A language the asset already has a caption file for (an SRT delivered with it, say) is not made again.
+- **An AI description.** A short description, one or two sentences, written by an AI model from the subtitles, or from the audio when there are none. It is written **only when the asset has no description from anything else**: its file name, a sidecar, embedded tags, **Find details…** or a person. It needs the **AI descriptions** add-on ([Billing](billing.md#add-ons-and-packs)); each description written counts one of the month's allowance.
+
+Which rung you set them on decides which files get them:
+
+| Set on | Files that get them |
+|---|---|
+| **Account default** | Every file, from any source |
+| **Content type** | Files of that type |
+| **Source or folder** with **Folder:** and a watchfolder's name | Files dropped in that watchfolder |
+
+For example, to subtitle everything dropped in the *Archive drop* folder and give every file a description when it has none:
+
+1. Add a rule on **Account default**, leave **When** empty, and set **AI description** to **Write one when it has none**.
+2. Add a rule on **Source or folder** with **Source** **Folder: Archive drop**, and set **Make subtitles from the audio** to **Whisper on this server**, **Language spoken** to **Detect it** and **Also make (translated)** to **English**.
+
+A file from that folder is encoded, then subtitled (its spoken language and English), then described from those subtitles. A file from anywhere else is described from its audio. Progress shows on the asset's **Files** tab, and the steps are on the [Workflows](workflows.md) map under **Subtitles and description**.
+
+Good to know:
+
+- **Whisper on this server** needs Whisper (faster-whisper) installed for the server's Python. The form says so when it is not; use an add-on instead. Bigger models are more accurate and slower.
+- Whisper translates into **English** by itself. Other languages need the NLLB translation model on the server, or an add-on; a language that cannot be made is listed as not made.
+- An AI description is marked **for review** on the asset. Change it like any field.
 
 ### Teach Volt your file names
 
@@ -105,6 +135,8 @@ Linked accounts let Volt copy files from cloud to cloud instead of through your 
 |---|---|
 | [Media Library](media-library.md) | Adding files there shows what these rules will do to each one before anything moves, and lists files held for metadata or as duplicates |
 | [Watchfolders](watchfolders.md) | Video files a watchfolder accepts are ingested through these rules, with the folder as their source |
+| [Workflows](workflows.md) | An add-on can make subtitles after encoding; **Subtitles and description** is a stage on the map |
+| [Billing](billing.md) | An AI description needs the **AI descriptions** add-on |
 | [Content Types](content-types.md) | A rule can give files a type, or apply only to files of one type |
 | [Encoding Profiles](encoding-profiles.md) | How accepted video is encoded |
 | [Storage](storage.md) | Where the stored files are kept |
@@ -134,6 +166,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Add provider** shows an error | The connection details are not valid JSON | Keep the quotes and braces from the example and fill in the values |
 | A webhook row shows an error after **last** | Your system did not accept the last call | Check the address and that your system answers; the error text says what came back |
 | Files added in the Media Library show **refused** | A rule with **Refuse with reason** matched | Read the reason; change the file or the rule |
+| **Whisper on this server (not installed)** | Whisper is not installed for this server's Python | Install faster-whisper there, or make subtitles with an add-on |
+| An asset's description step says **Not on** | The **AI descriptions** add-on is off, or not offered here | An account administrator turns it on in **Billing** |
+| An asset's description step says **Not needed** | It already had a description, or too little is said in it (music, a short clip) | Expected; nothing was written or counted |
 | "The pattern is not a valid regular expression" | The **Pattern** of a file-name rule cannot be read | Correct it, and check it with **Try a file name** |
 | A word in your titles keeps disappearing | A file-name rule lists it under **Any of these words** | Take the word out of the rule, or switch the rule off |
 

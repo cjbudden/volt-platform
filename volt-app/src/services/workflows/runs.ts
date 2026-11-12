@@ -171,6 +171,12 @@ export async function applyUpdate(runId: string, u: RunUpdate, source: string): 
     message: u.message ?? u.error ?? (to !== from ? `${from} -> ${to} (${source})` : null),
   });
   notify(run.account_id, updated);
+  // A run that was asked for subtitles (services/media/postProcess.ts) attaches
+  // what came back to the asset when it ends. Never fails the update.
+  if (TERMINAL.has(to) && (updated?.options as any)?.purpose === 'subtitles') {
+    try { await (await import('../media/postProcess')).onAddonRunFinished(updated); }
+    catch (e) { console.error('[workflows] could not attach the add-on\'s subtitles', runId, e); }
+  }
   return { applied: true, run: updated };
 }
 
@@ -253,6 +259,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function runDemo(ctx: JobContext, run: any, subject: Subject) {
   const stepMs = Math.max(200, Number((run.options as any)?.demoStepMs) || 3000);
   await applyUpdate(run.id, { state: 'running', steps: DEMO_STEPS, step: DEMO_STEPS[0], progress: 2, externalRef: `demo-${run.id.slice(0, 8)}` }, 'demo');
+  // Asked for subtitles (services/media/postProcess.ts): a few simulated cues,
+  // labelled as such, so the whole path to a caption track can be seen working.
+  if ((run.options as any)?.purpose === 'subtitles') {
+    const ts = (ms: number) => new Date(ms).toISOString().slice(11, 23);
+    const lines = ['[Simulated subtitles from the demo agent]', 'A real add-on returns what is said here.', 'Each cue is timed to the asset.'];
+    const content = 'WEBVTT\n\n' + lines.map((l, i) => `${ts(1000 + i * 4000)} --> ${ts(4000 + i * 4000)}\n${l}`).join('\n\n') + '\n';
+    await applyUpdate(run.id, { state: 'succeeded', step: 'Done', result: { simulated: true, captions: [{ language: 'en', label: 'English (simulated)', format: 'vtt', content }] } }, 'demo');
+    return;
+  }
   for (let i = 0; i < DEMO_STEPS.length; i++) {
     const cur = await one<any>(`SELECT state FROM addon_runs WHERE id = $1`, [run.id]);
     if (!cur || TERMINAL.has(cur.state)) return;          // cancelled while running

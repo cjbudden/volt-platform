@@ -42,7 +42,9 @@ const syncTracks = async (assetId: string, removed?: string[]) => {
 
 export interface AddInput {
   name: string; buf: Buffer; contentType?: string | null; kind?: CompanionKind | null; language?: string | null; label?: string | null;
-  isDefault?: boolean; forced?: boolean; sdh?: boolean; offsetMs?: number; by: string; source?: 'upload' | 'api' | 'watchfolder';
+  isDefault?: boolean; forced?: boolean; sdh?: boolean; offsetMs?: number; by: string;
+  /** generated: made from the audio by Whisper; addon: returned by an external processing add-on (services/media/postProcess.ts). */
+  source?: 'upload' | 'api' | 'watchfolder' | 'generated' | 'addon';
 }
 
 /** Store a file for an asset and read what it is. Captions get their clean WebVTT and a check. */

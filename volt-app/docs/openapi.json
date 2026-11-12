@@ -40684,6 +40684,76 @@
     }
    }
   },
+  "/api/vod/{id}/post-process": {
+   "get": {
+    "operationId": "getVODByIDPostProcess",
+    "summary": "Get a VOD asset's post process",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postVODByIDPostProcess",
+    "summary": "Post process (VOD asset)",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/{id}/provenance": {
    "get": {
     "operationId": "getVODByIDProvenance",
@@ -42394,6 +42464,32 @@
      "VOD"
     ],
     "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/vod/post-process/options": {
+   "get": {
+    "operationId": "getVODPostProcessOptions",
+    "summary": "Get post process options",
+    "tags": [
+     "VOD"
+    ],
+    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []

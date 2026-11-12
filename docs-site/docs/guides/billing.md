@@ -65,6 +65,8 @@ The meter under an add-on that is on shows how much of this month's quantity is 
 
 **AI Find details** is one of the add-ons when your Volt provider has set it up. It lets **Find details…** in the Media Library read a page about a title with an AI model, for pages that publish no details for search engines (see [Media Library](media-library.md)). It includes 500 lookups a month; each page read with AI is one lookup. Packs add more lookups. When the month's lookups are used up, nothing more is sent to the AI model until you choose a bigger pack or the 1st comes round. If your provider has not set it up, it is not listed.
 
+**AI descriptions** is another add-on of the same kind. An AI model writes a short description of an asset from its subtitles or its audio, when the asset has no description from anything else (see [Ingest Rules](ingest-rules.md) and [Media Library](media-library.md)). It includes 500 descriptions a month; each description written is one. An asset that already has a description, or says too little to describe, is not sent and not counted, and a description the AI model could not write is not counted either. When the month's descriptions are used up, the asset says so and nothing more is sent until you choose a bigger pack or the 1st comes round.
+
 How they are charged:
 
 - **Turning an add-on on**, or moving it to a **bigger pack**, charges the full monthly price for the current month. There is no part-month price.

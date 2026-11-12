@@ -67,6 +67,13 @@ const then = z.object({
   reject: z.string().max(300).nullable().optional(),
   // Read the file name for type, fields and links (services/ingest/filenameApply.ts).
   filenameMetadata: z.enum(['auto', 'suggest', 'off']).optional(),
+  // After encoding (services/media/postProcess.ts).
+  subtitles: z.enum(['off', 'whisper', 'addon']).optional(),
+  subtitleAddonId: z.string().uuid().nullable().optional(),
+  subtitleSpoken: z.string().trim().regex(/^(auto|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/, 'auto or a language code such as en').optional(),
+  subtitleLanguages: z.array(z.string().trim().regex(/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/)).max(10).optional(),
+  subtitleModel: z.enum(['tiny', 'base', 'small', 'medium', 'large-v3']).optional(),
+  describe: z.enum(['off', 'ai']).optional(),
 }).strict();
 
 const ruleBody = z.object({

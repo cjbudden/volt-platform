@@ -502,6 +502,10 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
     }
   }
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
+  // Subtitles and a description, when an ingest rule asked for them
+  // (services/media/postProcess.ts): only steps still waiting start, so a
+  // re-encode does not make them again. Own jobs; never fails the encode.
+  await (await import('../../media/postProcess')).startPostProcess(p.vodAssetId);
   // While the source is on disk: candidate stills to pick the asset's image
   // from (services/media/assetImage.ts) and the sprite sheets for hover
   // previews (services/thumbnails/fileSprites.ts). Never fails the encode.

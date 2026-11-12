@@ -121,6 +121,21 @@ Files dropped in a watch folder arrive the same way, without the upload band ([W
 
 When a file is added, Volt reads its name in the same way and applies only what is clear: the content type when nobody chose one and Volt is at least 80% sure with no conflicting signal, empty fields, and a trailer's link when exactly one record matches clearly. Anything less certain is left for you under **Read from file name**. What is applied automatically is set under **File names** in [Ingest Rules](ingest-rules.md).
 
+### Add subtitles and other files (Files)
+
+The **Files** tab holds the files that travel with an asset: caption files that become subtitle tracks, metadata sidecars, and anything else kept with it. Drop files on it, or choose **Add files**.
+
+**Make from the audio**, at the top, makes subtitles and a description for this asset now. It does the same as the **After encoding** settings in [Ingest Rules](ingest-rules.md), for an asset from any source: a clip cut from a recording, or a file added before a rule asked.
+
+1. Choose **Make…**.
+2. Under **Subtitles**, choose **Whisper on this server** or **An add-on** (and the **Add-on**), or **Don't make subtitles**. Set **Language spoken** (or leave **Detect it**), any languages to **Also make (translated)**, and for Whisper the **Model**.
+3. Tick **Write a description with AI** for a short description written from the subtitles, or from the audio when there are none. If the asset already has a description, nothing is written unless you also tick **Replace the description it has now**.
+4. Choose **Start**.
+
+The steps show under **Make from the audio** as **Queued**, **Working**, then **Done** with what was made, or why not (**Not needed** when it already had subtitles in that language, for example). Subtitles made this way appear in **Captions and subtitles** named, for example, **English (generated)**, and say **made from the audio by Whisper base**. They are offered to viewers at once; check them with **Cues**, and untick **Offered** to hide them. A description is written into the content type's description field and marked as written by AI for review.
+
+A description counts one of the month's **AI descriptions** ([Billing](billing.md#add-ons-and-packs)). Without the add-on, the box says so.
+
 ### See how it was encoded (Encode)
 
 The **Encode** tab shows the **Workflow** and **Ladder profile**, the **Source / mezzanine** it was made from, every rendition with its resolution, bitrate, codec, profile and frame rate, the audio tracks and the captions. For audio it shows the audio encode instead.

@@ -159,7 +159,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   ok(rec.runs === 2 && rec.failed === 0 && near(rec.p50Ms, 60_000) && near(rec.p95Ms, 120_000), 'Record: two recordings, times from their duration', rec);
   ok(st(r7, 'review').runs === 1, 'Review: one decision');
   ok(st(r7, 'rules').fedBy === 'none' && st(r7, 'rules').runs === 0, 'a stage with no jobs and no completion hook says so, with zeros');
-  ok(r7.body.stages.length === 13 && r7.body.lanes.length === 3, 'every stage and lane of the map is in the report');
+  ok(r7.body.stages.length === 14 && r7.body.lanes.length === 3, 'every stage and lane of the map is in the report');
   const fr = r7.body.otherJobs.find((o: any) => o.type === 'frames.index');
   ok(fr && fr.runs === 2 && fr.failed === 1, 'a job type no stage claims is listed apart, by type', r7.body.otherJobs);
   ok(!r7.body.otherJobs.some((o: any) => o.type === 'addon.dispatch') && !r7.body.stages.some((s: any) => s.topCodes.some((c: any) => c.code === 'http_500')), 'add-on delivery jobs are not counted (their runs are)');

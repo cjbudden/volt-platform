@@ -8074,6 +8074,24 @@
  },
  {
   "method": "GET",
+  "path": "/api/vod/:id/post-process",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
+  "path": "/api/vod/:id/post-process",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
   "path": "/api/vod/:id/provenance",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
@@ -8519,6 +8537,15 @@
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",
   "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "GET",
+  "path": "/api/vod/post-process/options",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
   "viewerTier": false,
   "group": "/api/vod"
  },

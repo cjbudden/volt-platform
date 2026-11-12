@@ -141,6 +141,7 @@ boot().then(async () => {
     (await import('./services/jobs/handlers/trickPlay')).registerTrickPlayHandlers();
     (await import('./services/archive/recordings')).registerArchiveRecordingHandlers();
     (await import('./services/workflows/runs')).registerAddonHandlers();
+    (await import('./services/media/postProcess')).registerPostProcessHandlers();
     await registerFillerHandlers();
     await (await import('./services/social')).registerSocialHandlers();
     worker = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 2) });

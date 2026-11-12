@@ -13,7 +13,7 @@ Workflows shows the path every channel, recording and uploaded file follows thro
 
 ## What it is for
 
-- **The map.** The pipeline in three lanes: **Live** (Source, Encode, Package, Deliver, Record), **Post-production** (Thumbnails, Clip, QC, Review, Publish) and **File ingest** (Upload, Ingest rules, Encode). An account with the Hybrid Sites or Mirror and Archive add-on has a fourth lane, **Your sites**: **Encode at site** (files encoded by the Volt agent on your own servers) and **Archive copies** (copies to your own storage, and the checks that read them back). Each add-on brings only its own stage. Hover over a stage to read what it does.
+- **The map.** The pipeline in three lanes: **Live** (Source, Encode, Package, Deliver, Record), **Post-production** (Thumbnails, Clip, QC, Review, Publish) and **File ingest** (Upload, Ingest rules, Encode, Subtitles and description). An account with the Hybrid Sites or Mirror and Archive add-on has a fourth lane, **Your sites**: **Encode at site** (files encoded by the Volt agent on your own servers) and **Archive copies** (copies to your own storage, and the checks that read them back). Each add-on brings only its own stage. Hover over a stage to read what it does.
 - **Hooks.** Moments along the way when Volt can call an add-on:
 
   | Hook | On the stage | Fires when |
@@ -25,6 +25,8 @@ Workflows shows the path every channel, recording and uploaded file follows thro
   | **QC completed** | QC | Automatic QC finishes |
   | **Review decided** | Review | A reviewer approves, rejects or asks for changes |
   | **VOD encoded** | Encode (file ingest) | An uploaded file finishes encoding and packaging |
+  | **Subtitles made** | Subtitles and description | Subtitles made from the audio (by Whisper or an add-on) are attached to an asset |
+  | **Description written** | Subtitles and description | An AI model writes the description of an asset that had none |
   | **Published**, **Upload received** | Publish, Upload | Planned: shown on the map but not fired yet |
 
 - **Add-on services and triggers.** An add-on is an outside platform Volt sends work to. A trigger attaches it to a hook, for every channel and event or only some.
@@ -181,6 +183,17 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   -d '{"addonId": "ADDON_ID", "subjectType": "recording", "subjectId": "RECORDING_ID"}' \
   "https://your-volt-host/api/workflows/runs"
 ```
+
+**Subtitles from an add-on.** When an ingest rule or a person asks an add-on for subtitles ([Ingest Rules](ingest-rules.md), the asset's **Files** tab), the run's `options` carry `"purpose": "subtitles"`, `spoken` (`auto` or a language) and `languages` (more languages wanted). Return the caption files in the result when the run succeeds, and Volt attaches them to the asset as subtitle tracks:
+
+```json
+{ "state": "succeeded",
+  "result": { "captions": [
+    { "language": "en", "format": "vtt", "content": "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello" },
+    { "language": "fr", "format": "srt", "url": "https://files.example.com/run-123/fr.srt" } ] } }
+```
+
+Each entry has `content` (the file's text) or an `https` `url` Volt fetches (up to 25 MB), a `format` (`vtt`, `srt` or `ttml`), a `language` code, and an optional `label`. The **Demo agent** returns a few simulated English cues, labelled as simulated. The hooks **Subtitles made** (`subtitles.ready`) and **Description written** (`description.written`) fire afterwards, so another add-on can follow on.
 
 For the service itself: Volt sends each run as a signed POST to its endpoint, with the signature in the `X-Volt-Signature` header (an HMAC SHA-256 of the timestamp and body, made with the add-on's signing secret). The request carries the subject, links to the media, the options, and a `callbackUrl` and `callbackToken` for that run. The service reports progress, steps, state and the result by posting to `callbackUrl` with `Authorization: Bearer` and the callback token.
 

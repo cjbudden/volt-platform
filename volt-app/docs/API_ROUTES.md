@@ -3,7 +3,7 @@
 Generated from the running app by `npm run docs:routes` (scripts/api-routes.ts). Do not edit by hand.
 The usage guide is [API_GUIDE.md](API_GUIDE.md), the access model is [ACCESS_CONTROL.md](../../ACCESS_CONTROL.md).
 
-**1006 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 763 · Platform API: 66 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
+**1009 routes.** Public API: 91 · Sign-in (no session yet): 7 · Admin API: 766 · Platform API: 66 · Machine-to-machine: 41 · Delivery and previews (outside /api): 30 · Health and discovery: 8
 
 - **Access:** for admin routes, `feature: level` is what one of the user's roles must grant (levels: view < operate < manage). The API answers `403 forbidden_feature` with the feature and level when it is missing.
 - **Viewer tier:** ✓ means the public tier (ROLE=api-public) serves the route. Everything else answers 404 there.
@@ -1245,6 +1245,8 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PUT | `/api/vod/:id/markers/:kind` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/markers/:kind/accept` | admin session (Bearer) or account secret key | vod: manage |  |
 | POST | `/api/vod/:id/markers/detect` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/:id/post-process` | admin session (Bearer) or account secret key | vod: view |  |
+| POST | `/api/vod/:id/post-process` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/:id/provenance` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/:id/publish` | admin session (Bearer) or account secret key | vod: operate |  |
 | POST | `/api/vod/:id/qc` | admin session (Bearer) or account secret key | vod: manage |  |
@@ -1295,6 +1297,7 @@ A client's staff. Admin session (audience `volt:admin`) or the account secret ke
 | PATCH | `/api/vod/image-types/:key` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/link-candidates` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/music-lookup` | admin session (Bearer) or account secret key | vod: manage |  |
+| GET | `/api/vod/post-process/options` | admin session (Bearer) or account secret key | vod: view |  |
 | POST | `/api/vod/qc-unchecked` | admin session (Bearer) or account secret key | vod: manage |  |
 | GET | `/api/vod/review/queue` | admin session (Bearer) or account secret key | vod: view |  |
 

@@ -39,16 +39,16 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   if (typeof (wmap as any).mapFor !== 'function') ok(false, 'the map takes the account\'s licences (mapFor)');
   else {
     const base = wmap.mapFor([]);
-    ok(base.lanes.length === 3 && base.stages.length === 13 && base.edges.length === 12, 'no licence: the three lanes, 13 stages and 12 arrows as before', [base.lanes.length, base.stages.length, base.edges.length]);
+    ok(base.lanes.length === 3 && base.stages.length === 14 && base.edges.length === 13, 'no licence: the three lanes, 14 stages and 13 arrows (Subtitles and description after Encode)', [base.lanes.length, base.stages.length, base.edges.length]);
     const both = wmap.mapFor(['hybrid_sites', 'mirror_archive']);
-    ok(both.lanes.map((l) => l.id).join() === 'live,post,file,site' && both.stages.length === 15, 'both licences: a fourth lane with two stages', both.lanes.map((l) => l.id));
+    ok(both.lanes.map((l) => l.id).join() === 'live,post,file,site' && both.stages.length === 16, 'both licences: a fourth lane with two stages', both.lanes.map((l) => l.id));
     const hy = wmap.mapFor(['hybrid_sites']);
     ok(hy.stages.some((s) => s.id === 'siteenc') && !hy.stages.some((s) => s.id === 'archive'), 'Hybrid Sites alone: Encode at site, no copies');
     ok(hy.edges.every(([a, b]) => a !== 'archive' && b !== 'archive') && hy.edges.some(([a, b]) => a === 'rules' && b === 'siteenc') && hy.edges.some(([a, b]) => a === 'siteenc' && b === 'qc'),
       'its arrows: Ingest rules to Encode at site to QC, none to a stage it does not have');
     const ma = wmap.mapFor(['mirror_archive']);
     ok(ma.stages.some((s) => s.id === 'archive') && !ma.stages.some((s) => s.id === 'siteenc'), 'Mirror and Archive alone: copies, no site encode');
-    ok(ma.edges.filter(([, y]) => y === 'archive').map(([x]) => x).join() === 'publish' && ma.edges.length === 13, 'one arrow into the copies, from Publish (ingest, schedule and recordings are in its description)');
+    ok(ma.edges.filter(([, y]) => y === 'archive').map(([x]) => x).join() === 'publish' && ma.edges.length === 14, 'one arrow into the copies, from Publish (ingest, schedule and recordings are in its description)');
     ok(/ingested/.test(ma.stages.find((s) => s.id === 'archive')!.description) && /recordings close/.test(ma.stages.find((s) => s.id === 'archive')!.description), 'its description names the other moments a copy is made');
     const ids = new Set(both.stages.map((s) => s.id));
     ok(wmap.EDGES.every(([a, b]) => ids.has(a) && ids.has(b)), 'every arrow joins two stages that exist');
@@ -152,9 +152,9 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   ok(siteenc?.lane === 'site' && siteenc.label === 'Encode at site' && arch?.lane === 'site' && arch.label === 'Archive copies', 'with Encode at site and Archive copies', [siteenc, arch]);
   ok(!('impl' in siteenc) && m.body.edges.some(([a, b]: string[]) => a === 'publish' && b === 'archive'), 'no source file names in the API; the arrows come with them');
   const mb = await get('/api/workflows/map', tokB);
-  ok(mb.body.lanes.length === 4 && mb.body.stages.length === 14 && !mb.body.stages.some((s: any) => s.id === 'siteenc'), 'Mirror and Archive only: the lane with copies, no site encode', mb.body.stages.length);
+  ok(mb.body.lanes.length === 4 && mb.body.stages.length === 15 && !mb.body.stages.some((s: any) => s.id === 'siteenc'), 'Mirror and Archive only: the lane with copies, no site encode', mb.body.stages.length);
   const mc = await get('/api/workflows/map', tokC);
-  ok(mc.body.lanes.length === 3 && mc.body.stages.length === 13 && mc.body.edges.length === 12, 'no licence: the map as it always was', [mc.body.lanes.length, mc.body.stages.length, mc.body.edges.length]);
+  ok(mc.body.lanes.length === 3 && mc.body.stages.length === 14 && mc.body.edges.length === 13, 'no licence: the map as it always was', [mc.body.lanes.length, mc.body.stages.length, mc.body.edges.length]);
 
   console.log('== the report ==');
   const r7 = await get('/api/workflows/report?range=7d');
@@ -170,7 +170,7 @@ const ok = (c: unknown, m: string, d?: unknown) => { if (c) { pass++; console.lo
   const today = new Date(base).toISOString().slice(0, 10);
   const lane = r7.body.series.find((s: any) => s.lane === 'site' && s.t.startsWith(today));
   ok(lane && lane.runs === 12 && lane.failed === 3, 'per lane per day: the Your sites lane, 12 runs, 3 failed', lane);
-  ok(r7.body.lanes.length === 4 && r7.body.stages.length === 15, 'the report has the same lanes and stages as this account\'s map');
+  ok(r7.body.lanes.length === 4 && r7.body.stages.length === 16, 'the report has the same lanes and stages as this account\'s map');
   ok(r7.body.totals.runs === 12 && r7.body.totals.failed === 3, 'totals include the site work', r7.body.totals);
   const r30 = await get('/api/workflows/report?range=30d');
   ok(st(r30, 'siteenc').runs === 11, 'a day rolled up before site encodes had a stage is counted on the stage now (6 + 5)', st(r30, 'siteenc').runs);

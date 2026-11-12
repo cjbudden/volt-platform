@@ -40,6 +40,7 @@ import { parseIcyTitle } from '../services/radio/trackMeta';
 import { assetImagesRouter } from './assetImages';
 import { assetFilesRouter } from './assetFiles';
 import { vodDetailsRouter } from './vodDetails';
+import { vodPostProcessRouter } from './vodPostProcess';
 
 export const vodImageRouter = Router();
 vodImageRouter.use(requireAuth);
@@ -49,6 +50,8 @@ vodImageRouter.use(assetImagesRouter);
 vodImageRouter.use(assetFilesRouter);
 // Find details: which finder a type uses, and the general one (modules/vodDetails.ts, build queue F1).
 vodImageRouter.use(vodDetailsRouter);
+// After encoding, by hand: subtitles and an AI description (modules/vodPostProcess.ts).
+vodImageRouter.use(vodPostProcessRouter);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

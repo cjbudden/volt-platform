@@ -59,12 +59,34 @@ export interface IngestSettings {
    * 'off' leaves the name alone.
    */
   filenameMetadata?: 'auto' | 'suggest' | 'off';
+  /**
+   * AFTER ENCODING (services/media/postProcess.ts, Christian 12 Nov 2026).
+   * Subtitles made from the audio: 'whisper' on this server, 'addon' by an
+   * external processing add-on (subtitleAddonId), 'off'. Attached to the
+   * asset as companion caption files. A language that already has a caption
+   * file is not made again.
+   */
+  subtitles?: 'off' | 'whisper' | 'addon';
+  subtitleAddonId?: string | null;
+  /** The language spoken: 'auto' to detect, or a code such as en. */
+  subtitleSpoken?: string;
+  /** More languages to make besides the one spoken (translated). */
+  subtitleLanguages?: string[];
+  /** Whisper model size for files (bigger is better and slower). */
+  subtitleModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3';
+  /**
+   * A short description written by an AI model from the subtitles (or the
+   * audio when there are none), ONLY when the asset has no description from
+   * anything else. Counted against the AI descriptions add-on.
+   */
+  describe?: 'off' | 'ai';
 }
 export type IngestKey = keyof IngestSettings;
 export const INGEST_KEYS: IngestKey[] = [
   'contentTypeId', 'targetKind', 'naming', 'structure', 'nameTemplate', 'pathTemplate', 'lowercase',
   'duplicate', 'nameCheck', 'transfer', 'metadataRequired', 'autoUpload', 'sidecar', 'webhooks',
   'ladderGroupId', 'reject', 'filenameMetadata',
+  'subtitles', 'subtitleAddonId', 'subtitleSpoken', 'subtitleLanguages', 'subtitleModel', 'describe',
 ];
 
 /** The platform baseline. Decisions of 17 Sep: guid, flat, ask, auto, acceleration on. */
@@ -74,6 +96,8 @@ export const BASELINE: Required<IngestSettings> = {
   duplicate: 'ask', nameCheck: true, transfer: 'auto',
   metadataRequired: 'before_ingest', autoUpload: true,
   sidecar: 'json', webhooks: [], ladderGroupId: null, reject: null, filenameMetadata: 'auto',
+  // After encoding: nothing unless a rule (or the account default) turns it on.
+  subtitles: 'off', subtitleAddonId: null, subtitleSpoken: 'auto', subtitleLanguages: [], subtitleModel: 'base', describe: 'off',
 };
 
 /** What a rule can test. All present conditions must hold. */

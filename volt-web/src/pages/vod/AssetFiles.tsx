@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiRequest, getToken } from '../../api'
 import './assetFiles.css'
+import { AssetPostProcess } from './AssetPostProcess'
 
 interface Issue { level: 'error' | 'warning'; code: string; message: string }
 interface CFile {
@@ -14,6 +15,8 @@ interface CFile {
   report: null | { ok: boolean; cues?: number; firstMs?: number | null; lastMs?: number | null; issues?: Issue[]; values?: number }
   applied: null | { fields: string[]; by: string; at: string }
   uploadedBy: string | null; createdAt: string; download: string; webvtt?: string; duplicate?: boolean
+  /** upload | api | watchfolder | generated (Whisper) | addon */
+  source?: string
 }
 interface Proposal { field: string; label: string; value: any; from: string; current: any; changes: boolean; byPerson: boolean }
 
@@ -84,6 +87,7 @@ export function AssetFiles({ id, onMetadataApplied }: { id: string; onMetadataAp
 
   return (
     <div className="afiles">
+      <AssetPostProcess id={id} onFilesChanged={load} onMetadataChanged={onMetadataApplied} />
       <div className={`afiles-drop${over ? ' over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) send(e.dataTransfer.files) }}>
@@ -118,7 +122,7 @@ export function AssetFiles({ id, onMetadataApplied }: { id: string; onMetadataAp
                     const errs = issues.filter((i) => i.level === 'error'), warns = issues.filter((i) => i.level === 'warning')
                     return (
                       <tr key={f.id} className={f.enabled ? '' : 'off'}>
-                        <td><div className="mono afiles-name" title={f.name}>{f.name}</div><div className="lib-faint">{f.format.toUpperCase()} · {size(f.bytes)}{f.encoding === 'windows-1252' ? ' · read as Windows-1252' : ''}</div></td>
+                        <td><div className="mono afiles-name" title={f.name}>{f.name}</div><div className="lib-faint">{f.format.toUpperCase()} · {size(f.bytes)}{f.encoding === 'windows-1252' ? ' · read as Windows-1252' : ''}{f.source === 'generated' || f.source === 'addon' ? ` · made from the audio by ${f.uploadedBy ?? 'Volt'}` : ''}</div></td>
                         <td><SaveOnBlur value={f.language ?? ''} width={70} placeholder="en" onSave={(v) => patch(f, { language: v || null } as any)} /></td>
                         <td><SaveOnBlur value={f.label ?? ''} width={150} onSave={(v) => patch(f, { label: v })} /></td>
                         <td><input type="radio" name={`def-${id}`} checked={f.isDefault} disabled={!f.report?.ok} onChange={() => patch(f, { isDefault: true })} /></td>

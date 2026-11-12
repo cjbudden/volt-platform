@@ -65,6 +65,7 @@ export const STAGES: StageDef[] = [
   { id: 'upload',   lane: 'file', col: 0, label: 'Upload',          impl: 'uploads.ts, tus.ts, watchfolder', description: 'Files arrive by upload, cloud picker or watch folder.' },
   { id: 'rules',    lane: 'file', col: 1, label: 'Ingest rules',    impl: 'ingest/rules.ts', description: 'Naming, content type, duplicates and metadata rules decide what the file becomes.' },
   { id: 'vodenc',   lane: 'file', col: 2, label: 'Encode',          impl: 'jobs/handlers/vodEncode.ts', description: 'The file is encoded to the account ladder and packaged.' },
+  { id: 'enrich',   lane: 'file', col: 3, label: 'Subtitles and description', impl: 'media/postProcess.ts, vod_subtitles.py, media/aiDescribe.ts', description: 'When an ingest rule or a person asks: subtitles made from the audio by Whisper or an add-on, then a short AI description when the asset has none.' },
 
   // HYBRID SITES (build queue H5-2). Jobs in a site's pool, leased by the
   // agent on the customer's servers (services/sites/siteJobs.ts). Encode at
@@ -81,7 +82,7 @@ export const STAGES: StageDef[] = [
 export const EDGES: Array<[string, string]> = [
   ['source', 'encode'], ['encode', 'package'], ['package', 'deliver'], ['package', 'record'],
   ['record', 'thumbs'], ['record', 'clip'], ['clip', 'qc'], ['qc', 'review'], ['review', 'publish'],
-  ['upload', 'rules'], ['rules', 'vodenc'], ['vodenc', 'qc'],
+  ['upload', 'rules'], ['rules', 'vodenc'], ['vodenc', 'qc'], ['vodenc', 'enrich'],
   ['rules', 'siteenc'], ['siteenc', 'qc'],
   ['publish', 'archive'],
 ];
@@ -96,6 +97,8 @@ export const HOOKS: HookDef[] = [
   { id: 'publication.published', stage: 'publish', subject: 'vod_asset', live: false, label: 'Published',         description: 'An asset became available on a destination. Planned.' },
   { id: 'upload.received',     stage: 'upload',  subject: 'vod_asset', live: false, label: 'Upload received',     description: 'A file finished uploading, before ingest rules. Planned.' },
   { id: 'vod.encoded',         stage: 'vodenc',  subject: 'vod_asset', live: true,  label: 'VOD encoded',         description: 'An uploaded file finished encoding and packaging.' },
+  { id: 'subtitles.ready',     stage: 'enrich',  subject: 'vod_asset', live: true,  label: 'Subtitles made',      description: 'Subtitles made from the audio (Whisper or an add-on) were attached to the asset. detail.languages lists them.' },
+  { id: 'description.written', stage: 'enrich',  subject: 'vod_asset', live: true,  label: 'Description written', description: 'An AI model wrote the description of an asset that had none. detail.source is captions or audio.' },
 ];
 
 export const HOOK_IDS = new Set(HOOKS.map((h) => h.id));
@@ -112,6 +115,8 @@ export const JOB_STAGES: Record<string, string> = {
   'ingest.remote': 'upload',
   'vod.encode': 'vodenc',
   'vod.ladder': 'vodenc',
+  'vod.subtitles': 'enrich',
+  'vod.describe': 'enrich',
   'vod.image': 'thumbs',
   'filler.thumbs': 'thumbs',
   'clip.extract': 'clip',
