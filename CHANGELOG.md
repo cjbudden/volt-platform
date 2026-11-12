@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.126.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Storage: Put a legal hold on a title with POST /api/storage/vod/{id}/hold, and see the titles retention deletes soon with GET /api/storage/vod-retention and what it did with GET /api/storage/vod-retention/log.
+- added · Storage: Retention in a publishing policy now deletes titles: a title is listed seven days before its days are up and then moved to the restore bin, where it can still be restored. A legal hold, an open publish window, a FAST lineup or an archive copy that is not verified yet keeps it, and the list says which.
+
+### Internal
+
+- added · Storage: vod-retention check suite (56 assertions) for the title retention sweep, legal holds and the copy-before-delete rung.
+
 ## 0.125.0 (2026-11-12)
 
 ### Product (in customer release notes)
