@@ -43,8 +43,7 @@ const OWNED = `
 async function ownedRecording(req: any): Promise<any> {
   const row = await one<any>(
     `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
-            CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
-                 WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END AS source_type ${OWNED}
+            ${SOURCE_TYPE} AS source_type ${OWNED}
       WHERE r.id = $1 AND g.account_id = $2`,
     [req.params.id, accountId(req)]
   );
@@ -174,7 +173,9 @@ recordingsRouter.get(
  * its transcript (checked on disk after SQL), so q is handled below and kept
  * out of the generic parser. sourceId matches either owner column.
  */
-const SOURCE_TYPE = `CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
+// channels.kind, not a guess from radio_config (a station whose config is not
+// written yet read as a channel; the sources list already reads the kind).
+const SOURCE_TYPE = `CASE WHEN c.kind = 'radio' THEN 'radio'
                    WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END`;
 const RECORDINGS_LIST = defineList({
   path: '/api/recordings',
@@ -606,9 +607,10 @@ recordingsRouter.get(
 
 async function fetchOwned(id: string, acct: string) {
   return one<any>(
+    // The source's own logo comes along, so the recording page wears the
+    // same brand as the channel or station it belongs to (events have none).
     `SELECT r.*, COALESCE(c.name, e.name) AS source_name,
-            CASE WHEN c.radio_config IS NOT NULL THEN 'radio'
-                 WHEN c.id IS NOT NULL THEN 'channel' ELSE 'event' END AS source_type
+            ${SOURCE_TYPE} AS source_type, c.brand_ref AS source_brand_ref
      ${OWNED} WHERE r.id = $1 AND g.account_id = $2`, [id, acct]);
 }
 

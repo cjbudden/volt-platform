@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type RecordingSource, type RecordingSourcesFeed, type RecordingSourceQuery } from '../api'
+import { sourceLogo } from '../sourceLink'
 import { PageHead, FChip, EntityCell, StatusPill } from '../scaffold'
 import { navigate } from '../router'
 import { usePageNotice } from '../notices'
@@ -170,7 +171,7 @@ export default function Recordings() {
               {rows.map((s, i) => (
                 <tr key={s.id} onClick={() => navigate(`/recordings/source/${s.id}`)} style={{ cursor: 'pointer' }}>
                   <td>
-                    <EntityCell name={s.name} sub={`created ${fmtDate(new Date(s.createdAt).getTime())}`} index={i} />
+                    <EntityCell name={s.name} sub={`created ${fmtDate(new Date(s.createdAt).getTime())}`} index={i} imgUrl={sourceLogo(s.type, s.brandRef)} />
                     {/* WHY IT MATCHED when the search found what aired, not the name:
                         otherwise a station found by a song looks like a wrong answer. */}
                     {s.match?.by === 'aired' && (

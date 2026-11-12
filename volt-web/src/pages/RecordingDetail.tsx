@@ -13,6 +13,8 @@ import { useAccess } from '../access'
 import { SendToAddon } from './Workflows'
 import { removalText } from '../programmeMedia'
 import { MetadataForm } from '../ContentTypeFields'
+import { initials } from '../scaffold'
+import { sourceLogo, OpenSourceButton } from '../sourceLink'
 import type { ClipDefaults, ContentType } from '../api'
 
 /* ============================================================================
@@ -584,7 +586,12 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
       <BackRow onBack={onBack} name={rec.source_name || 'Recording'} />
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
-          <h1 style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>{rec.source_name || 'Recording'}
+          <h1 className="page-id" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {/* The source's own logo, as on its own page (events: initials). */}
+            {(() => { const logo = sourceLogo(rec.source_type, rec.source_brand_ref); return logo
+              ? <span className="dthumb" style={{ background: '#0b0f16', overflow: 'hidden', padding: 0 }}><img src={logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /></span>
+              : <span className="dthumb" style={{ background: 'linear-gradient(135deg,#1d4ed8,#3b82f6)' }}>{initials(rec.source_name || 'Recording')}</span> })()}
+            {rec.source_name || 'Recording'}
             <span style={{ fontSize: 'var(--fs-body)', fontWeight: 400, color: 'var(--faint)' }}>{KIND_LABEL[rec.kind] || rec.kind} · {fmtDate(domain.start)} {fmtClock(domain.start)} → {rec.end_epoch_ms != null ? fmtClock(domain.end) : 'recording…'}</span>
           </h1>
           <p>{rec.title || 'Scrub with the keyboard, mark the range, cut the clip.'}
@@ -637,6 +644,8 @@ export default function RecordingDetail({ id, onBack }: { id: string; onBack: ()
           )}
         </div>
         <div className="spacer" />
+        {/* Back to what it belongs to: the channel, station or event itself. */}
+        <OpenSourceButton type={rec.source_type} id={rec.channel_id ?? rec.event_id} name={rec.source_name} />
         {/* Send the recording to an add-on (AI agent, transcription, QC). Shows a
             live run's step and progress, and links to it on the Workflows map. */}
         <SendToAddon subjectType="recording" subjectId={id} />

@@ -36,6 +36,8 @@ Producers, clip editors and the people who look after a channel's catch-up conte
 5. Click a column heading (**Source**, **Recordings**, **Available range** or **Content held**) to sort by it; click again to reverse the order.
 6. Choose **Open** on a row, or click the row, to open the source.
 
+Each source shows the logo of its channel or radio station, the same one its own page and list show; an event, which has no logo, shows its initials. On a source page or a recording, **Open channel**, **Open station** or **Open event** takes you to the channel, station or event the recording belongs to.
+
 The **Status** column says **Recording** while the source is capturing, **Idle** when it is not, and **Off** when recording is turned off in its settings. Under the recording count you can see the keep period (for example **kept for 30d**) and when the next recording is due to go (**next removal**).
 
 ### Find a moment in a source
@@ -91,7 +93,7 @@ Choose **Send to add-on** at the top of the recording and pick an add-on (for ex
 
 | Section | How it relates |
 |---|---|
-| [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each one turns recording on and sets **Keep recordings for** in its settings |
+| [Channels](channels.md), [Radio](radio.md), [Events](events.md) | Each one turns recording on and sets **Keep recordings for** in its settings; its recordings carry its logo and open it with **Open channel**, **Open station** or **Open event** |
 | [Media Library](media-library.md) | Clips and full VOD made here are listed and published there |
 | [Live Streams](live-streams.md) | Its timeline can open a range of a recording here with the marks already set |
 | [EPG](epg.md) | Programme titles and times fill the metadata lane, so one click marks a programme |

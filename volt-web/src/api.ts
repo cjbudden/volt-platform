@@ -2748,6 +2748,8 @@ export interface RecordingRow {
   title: string | null; status: 'recording' | 'complete' | 'error' | string
   /** Derived server-side from the source, not from `kind`. */
   source_type?: RecordingSourceType
+  /** The channel's or station's logo (null for events), so the recording wears its source's brand. */
+  source_brand_ref?: string | null
   start_epoch_ms: number | string; end_epoch_ms: number | string | null
   duration_ms: number | string | null; expires_at: string | null
   vod_count?: number

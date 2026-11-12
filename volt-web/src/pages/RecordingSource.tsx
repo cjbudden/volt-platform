@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type RecordingRow, type RecordingSource } from '../api'
 import { PageIdentity, StatusPill, TypeTag } from '../scaffold'
 import { navigate } from '../router'
+import { sourceLogo, OpenSourceButton } from '../sourceLink'
 import { SourceTimeline, type TimelineSelection } from '../SourceTimeline'
 import { useNotify } from '../notices'
 import { removalText } from '../programmeMedia'
@@ -107,7 +108,7 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
     <>
       <div className="page-head">
         <PageIdentity
-          crumbLabel="Recordings" onCrumb={onBack} name={src?.name ?? 'Source'} imgUrl={null}
+          crumbLabel="Recordings" onCrumb={onBack} name={src?.name ?? 'Source'} imgUrl={sourceLogo(src?.type, src?.brandRef)}
           tags={<>
             {src && <TypeTag label={TYPE_LABEL[src.type]} kind={src.type === 'event' ? 'event' : 'chan'} />}
             {src && <StatusPill state={src.capturing ? 'onair' : 'idle'}
@@ -118,6 +119,7 @@ export default function RecordingSourceView({ id, onBack }: { id: string; onBack
             : 'No captures retained'}
         />
         <div className="spacer" />
+        {src && <OpenSourceButton type={src.type} id={src.id} name={src.name} />}
       </div>
 
       {/* THE TIMELINE. Three lanes on one wall-clock axis, spanning every
