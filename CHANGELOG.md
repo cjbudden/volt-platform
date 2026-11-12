@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.129.1 (2026-11-12)
+
+### SaaS platform
+
+- fixed · FAST channels: On AWS, a title whose original is kept in the cloud and is not yet prepared for a FAST channel can be picked in the FAST builder again; it used to be left out as No source.
+
+### Internal
+
+- added · Tests: New fast-bucket-originals check suite: the FAST library counts bucket originals the way the readiness check does.
+
 ## 0.129.0 (2026-11-12)
 
 ### Internal
