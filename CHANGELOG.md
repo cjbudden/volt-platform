@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.115.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Publishing Rules: A publishing rule's Concurrent streams limit now applies to members-only and premium titles and channels: when a signed-in viewer starts more plays than it allows, their oldest play is stopped and the player is told why. Free content is never limited.
+- added · Play gate: The play gate counts a signed-in viewer's plays where a Concurrent streams limit applies: the answer carries streams and sid, the viewer report of a stopped play answers stop with code concurrent_streams and the words to show, and a stopped play asking again gets 409.
+
+### Internal
+
+- added · Tests: New publishing-concurrent-streams check suite.
+
 ## 0.114.0 (2026-11-12)
 
 ### Product (in customer release notes)
