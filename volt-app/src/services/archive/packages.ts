@@ -48,6 +48,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import { one, query } from '../../db';
 import { config } from '../../config';
+import { REPACK_DIR } from '../fast/vodStore';
 import { enqueue, sitePool } from '../jobs/queue';
 import { ARCHIVE_COPY_FOLDER, ownedTarget, targetForAgent } from './archive';
 import { baseNameFor, clipBaseName, isClipAsset, ownedAsset } from './sidecars';
@@ -82,7 +83,9 @@ export function packageRootOf(a: { id: string; master_key?: string | null }): st
   if (dir.split('/').some((s) => s === '..')) return null;
   const parts = dir.split('/').filter(Boolean);
   const id = String(a.id).toLowerCase();
-  const own = (parts[0] === 'vod' && parts[1]?.toLowerCase() === id && parts.length === 2) || (parts[0]?.toLowerCase() === id && parts.length >= 2);
+  // An encode's own folder, or the folder a repackage moved it into (P4-4).
+  const own = (parts[0] === 'vod' && parts[1]?.toLowerCase() === id && (parts.length === 2 || (parts.length === 3 && REPACK_DIR.test(parts[2]))))
+    || (parts[0]?.toLowerCase() === id && parts.length >= 2);
   return own ? dir : null;
 }
 

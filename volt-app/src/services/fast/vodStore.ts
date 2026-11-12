@@ -10,6 +10,9 @@
 //           leading slash), which every consumer already resolves against the
 //           CDN (services/shareLinks.ts manifestUrls).
 //
+//  A repackage (DRM turned on or off for a published title) uploads into a
+//  prefix of its own under vod/<id>/ and points master_key there (below).
+//
 //  VOD_STORE chooses; unset, ECS deployments use s3 and everything else local.
 //  The local copy is kept after upload (the skip-marker annotator and clip
 //  extraction read it while the task lives); the bucket is the record.
@@ -38,6 +41,24 @@ async function walk(dir: string): Promise<string[]> {
     else out.push(p);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+//  A REPACKAGE'S OWN PREFIX (build queue P4-4). The CDN caches a title's
+//  segments as immutable for a year under their names, so a repackage after a
+//  DRM change (services/repackage.ts) cannot upload under the title's keys:
+//  old and new files, clear and encrypted, would mix in viewers' players. Its
+//  files go under vod/<id>/r-<job>-a<attempt>/ instead and master_key moves
+//  there; the old package is removed once no viewer can still be reading it.
+//  The pattern is narrow on purpose: `reframe/` and `ladders/` share the
+//  asset's folder and must never be taken for a package.
+// ---------------------------------------------------------------------------
+export const REPACK_DIR = /^r-[0-9a-z]{4,32}-a\d{1,3}$/i;
+
+/** PURE. The folder under vod/<id>/ that one attempt of a repackage job uploads into. */
+export function repackSubdir(jobId: string | null | undefined, attempt: number | null | undefined): string {
+  const j = String(jobId ?? '').replace(/[^0-9a-z]/gi, '').slice(0, 12).toLowerCase() || Date.now().toString(36);
+  return `r-${j}-a${Math.max(1, Math.min(999, Number(attempt) || 1))}`;
 }
 
 let s3: any = null;
@@ -127,6 +148,16 @@ export async function deletePrefix(prefix: string): Promise<number> {
   const keys = await listPrefix(prefix);
   for (let i = 0; i < keys.length; i += 1000) {
     await c.send(new DeleteObjectsCommand({ Bucket: config.aws.s3Bucket, Delete: { Objects: keys.slice(i, i + 1000).map((k) => ({ Key: k.key })), Quiet: true } }));
+  }
+  return keys.length;
+}
+
+/** Delete these keys (a repackage's old package, services/repackage.ts). */
+export async function deleteKeys(keys: string[]): Promise<number> {
+  const { DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
+  const c = await client();
+  for (let i = 0; i < keys.length; i += 1000) {
+    await c.send(new DeleteObjectsCommand({ Bucket: config.aws.s3Bucket, Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true } }));
   }
   return keys.length;
 }

@@ -36,17 +36,24 @@
 import { one, query } from '../../db';
 import { config } from '../../config';
 import { imageStore } from '../imageStore';
+import { REPACK_DIR } from '../fast/vodStore';
 import { withHlsSubtitles, withoutHlsSubtitles, withDashSubtitles, subtitlePlaylist } from './delivery';
 
 const PLAYLIST_CACHE = 'public, max-age=60';
 
 export interface SyncResult { written: string[]; removed: string[]; skipped?: string; error?: string }
 
-/** vod/<id>/ when the asset's master is an encode in the bucket, else null. */
+/**
+ * vod/<id> when the asset's master is an encode in the bucket, else null. A
+ * repackaged title's master is one folder down (vod/<id>/r-<job>-a<n>, build
+ * queue P4-4), and its caption tracks go beside that master, not the old one.
+ */
 export function bucketBaseOf(assetId: string, masterKey: string | null | undefined): string | null {
   const k = String(masterKey ?? '');
-  const m = /^vod\/([0-9a-f-]{36})\/master\.m3u8$/i.exec(k);
-  return m && m[1].toLowerCase() === String(assetId).toLowerCase() ? `vod/${m[1]}` : null;
+  const m = /^vod\/([0-9a-f-]{36})(?:\/([^/]+))?\/master\.m3u8$/i.exec(k);
+  if (!m || m[1].toLowerCase() !== String(assetId).toLowerCase()) return null;
+  if (m[2] && !REPACK_DIR.test(m[2])) return null;
+  return m[2] ? `vod/${m[1]}/${m[2]}` : `vod/${m[1]}`;
 }
 
 async function s3() {

@@ -228,10 +228,6 @@ async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unkn
     throw new PermanentError('vod.encode payload needs vodAssetId, accountId and sourcePath', 'bad_payload');
   }
   if (given.repackage) {
-    // ON THE BUCKET the CDN keeps a title's segments under the same names for
-    // a year, so new files cannot be swapped in under them (services/repackage.ts).
-    const { vodStore } = await import('../../fast/vodStore');
-    if (vodStore() === 's3') throw new PermanentError('repackaging titles whose files are in the origin bucket is not built yet; the title keeps its current files', 'repackage_not_on_bucket');
     // Looked at again when the job runs: a change undone since, or a title
     // encoded since, has nothing left to repackage.
     const { stillPending } = await import('../../repackage');
@@ -387,7 +383,11 @@ async function encodeInto(ctx: JobContext, log: JobLog, p: VodEncodePayload,
       await rm(old, { recursive: true, force: true }).catch(() => null);
     }
   };
-  return finishEncode(ctx, log, { p, probe, plan, master, mpd, outDir, sourcePath: p.sourcePath, srcBytes, result, swapIn });
+  // ON THE BUCKET a repackage uploads under a prefix of its own (P4-4,
+  // fast/vodStore.ts repackSubdir): one per job attempt, so a retry never
+  // writes over files a viewer may already be reading.
+  const bucketSubdir = swapIn ? (await import('../../fast/vodStore')).repackSubdir(ctx.job.id, ctx.job.attempts) : undefined;
+  return finishEncode(ctx, log, { p, probe, plan, master, mpd, outDir, sourcePath: p.sourcePath, srcBytes, result, swapIn, bucketSubdir });
 }
 
 /** What the execute half produced, for the finish. */
@@ -405,6 +405,8 @@ export interface EncodeOutcome {
   result: any;
   /** A repackage (P4-3): put the finished folder in place of the title's own, before anything is recorded. */
   swapIn?: () => Promise<void>;
+  /** A repackage on the bucket (P4-4): the folder under vod/<id>/ its files go to. */
+  bucketSubdir?: string;
 }
 
 /**
@@ -533,6 +535,30 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
     if (facts) await query(`UPDATE vod_assets SET ingest = jsonb_set(COALESCE(ingest, '{}'::jsonb), '{probe}', $2::jsonb) WHERE id = $1`, [p.vodAssetId, JSON.stringify(facts)]);
   } catch (e: any) { log.warn(`source facts not refreshed: ${String(e?.message ?? e).slice(0, 200)}`); }
 
+  let storedMaster = master, storedMpd = mpd;
+  const { vodStore, uploadVodDir } = await import('../../fast/vodStore');
+  // A REPACKAGE ON THE BUCKET (P4-4): the new files go under a prefix of their
+  // own before anything moves, because the CDN keeps the title's current
+  // segments under their names for a year. Viewers keep the current files
+  // until master_key is pointed at the new prefix below. An upload that
+  // fails takes its partial prefix with it and leaves the title as it was.
+  let bucketRepack: { oldBase: string | null } | null = null;
+  if (o.swapIn && o.bucketSubdir && vodStore() === 's3') {
+    const before = await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [p.vodAssetId]);
+    const { bucketBaseOf } = await import('../../companions/bucketTracks');
+    bucketRepack = { oldBase: bucketBaseOf(p.vodAssetId, before?.master_key) };
+    await ctx.progress(96, 'uploading the repackaged files to the origin');
+    log.step(`uploading the repackaged files to the origin bucket under vod/${p.vodAssetId}/${o.bucketSubdir}/ (the current files stay in place until the switch)`);
+    try {
+      const up = await uploadVodDir(outDir, p.vodAssetId, { subdir: o.bucketSubdir });
+      storedMaster = master ? up.master : null;
+      storedMpd = mpd ? up.mpd : null;
+    } catch (e) {
+      await (await import('../../fast/vodStore')).deletePrefix(`vod/${p.vodAssetId}/${o.bucketSubdir}/`).catch(() => null);
+      throw e;
+    }
+  }
+
   // A REPACKAGE'S FILES ARE COMPLETE (the MP4 too): they take the title's place now.
   if (o.swapIn) {
     await o.swapIn();
@@ -542,9 +568,7 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
   // PRODUCTION: the packaged media goes to the origin bucket, so it is served
   // by the CDN and readable by a FAST playout on another server, instead of
   // living on this task's disk (services/fast/vodStore.ts).
-  let storedMaster = master, storedMpd = mpd;
-  const { vodStore, uploadVodDir } = await import('../../fast/vodStore');
-  if (vodStore() === 's3') {
+  if (vodStore() === 's3' && !bucketRepack) {
     await ctx.progress(97, 'uploading to the origin');
     log.step('uploading the packaged media to the origin bucket');
     const up = await uploadVodDir(outDir, p.vodAssetId);
@@ -599,6 +623,17 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
     else {
       const n = st.written.filter((k) => k.includes('/subs/') && k.endsWith('.m3u8')).length;
       if (n) log.step(`caption tracks written into the bucket's playlists (${n})`);
+    }
+  }
+  // THE OLD PACKAGE ON THE BUCKET goes once no viewer can still be reading it
+  // (services/repackage.ts oldPackageGraceMs). Never fails the repackage.
+  if (bucketRepack?.oldBase) {
+    try {
+      const { queueOldPackageCleanup, oldPackageGraceMs } = await import('../../repackage');
+      await queueOldPackageCleanup(p.vodAssetId, bucketRepack.oldBase, probe.durationMs ?? null);
+      log.step(`the old files under ${bucketRepack.oldBase}/ are removed in about ${Math.round(oldPackageGraceMs(probe.durationMs ?? null) / 60_000)} min, once viewers who started before the switch have finished`);
+    } catch (e: any) {
+      log.warn(`removal of the old files not queued: ${String(e?.message ?? e).slice(0, 200)}`);
     }
   }
   // A REPACKAGE CHANGES THE PACKAGING ONLY (P4-3): the picture, the source
@@ -705,6 +740,13 @@ export function registerVodEncodeHandlers(): void {
   // A repackage after a confirmed DRM change (services/repackage.ts): the same
   // encode, written beside the title's files and swapped in when complete.
   registerHandler('vod.repackage', (ctx) => handleVodEncode({ ...ctx, job: { ...ctx.job, payload: { ...(ctx.job.payload as any), repackage: true } } }));
+  // The old package of a repackage on the bucket, once its grace is over (P4-4).
+  registerHandler('vod.repackage.cleanup', async (ctx) => {
+    const q = ctx.job.payload as { vodAssetId?: string; oldBase?: string };
+    if (!q?.vodAssetId || !q?.oldBase) return {};
+    const { removeOldPackage } = await import('../../repackage');
+    return { ...(await removeOldPackage(q.vodAssetId, q.oldBase)) };
+  });
   // A FAST channel's ladder, encoded beside the asset's own (vodLadder.ts). Registered
   // here so it starts wherever vod.encode does.
   registerHandler('vod.ladder', async (ctx) => (await import('./vodLadder')).handleVodLadder(ctx));

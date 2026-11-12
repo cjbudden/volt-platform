@@ -15,8 +15,9 @@
 //    - a repackage that fails (the key service down) leaves the title's files
 //      and state exactly as they were, and no staging folder behind;
 //    - a job whose change was undone before it ran does nothing;
-//    - an original kept at a site, or files in the origin bucket, wait with
-//      the reason instead of being queued.
+//    - an original kept at a site waits with the reason instead of being
+//      queued; files in the origin bucket are queued (P4-4, the job itself is
+//      in publishing-repackage-bucket.check.ts).
 //
 //  THE PACKAGER: real with Shaka on PATH or PACKAGER_BIN, otherwise the
 //  recording stub of publishing-encode-policy.check.ts (the cloud container).
@@ -295,9 +296,9 @@ if opt('--mpd_output'):
     process.env.VOD_STORE = 's3';
     const wb = await call('PUT', `/api/publishing-rules/schema/${film}`, { ...rule, confirm: true });
     const wA = (wb.j?.repackage?.waiting ?? []).find((w: any) => w.id === A);
-    check('files in the origin bucket: wait with the reason, nothing queued', [wb.s, wb.j?.repackage?.queued, /origin bucket/.test(wA?.reason ?? ''), (await jobsFor(A)).filter((j: any) => j.state === 'queued').length], [200, 0, true, 0]);
-    const rb = await ctxRun({ vodAssetId: A, accountId: acct, sourcePath: mp4, repackage: true }, null);
-    check('...and a repackage job there is refused with the reason, the title untouched', [lastCode, /origin bucket/.test(rb.err ?? ''), (await row(A)).drm], ['repackage_not_on_bucket', true, 'clear']);
+    // P4-4: the bucket store no longer waits; the job itself is checked against a real S3 API in publishing-repackage-bucket.
+    check('files in the origin bucket: queued like any other (P4-4), none waiting for that reason', [wb.s, wb.j?.repackage?.queued, wA ?? null, (await jobsFor(A)).filter((j: any) => j.state === 'queued').length], [200, 1, null, 1]);
+    await query(`UPDATE jobs SET state = 'cancelled' WHERE type = 'vod.repackage' AND state = 'queued'`);
     delete process.env.VOD_STORE;
   } finally {
     srv.close();

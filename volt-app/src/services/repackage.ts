@@ -32,12 +32,14 @@
 //  (lower priority), so a policy change never holds up the account's new
 //  titles or takes every encode worker at once.
 //
-//  NOT YET ON THE BUCKET STORE (VOD_STORE=s3): there a title's segments are
-//  cached by the CDN as immutable under the same names, so swapping new
-//  files in under the old names would mix old and new segments for a year.
-//  The bucket needs the new files under a prefix of their own and the
-//  title's playlists pointed at it; until that is built (build queue P4-4)
-//  the titles are counted as waiting and keep their current files.
+//  ON THE BUCKET STORE (VOD_STORE=s3, build queue P4-4) a title's segments
+//  are cached by the CDN as immutable under their names for a year, so the
+//  new files cannot replace the old ones under the same keys: old and new
+//  (clear and encrypted) would mix. The repackage uploads under a prefix of
+//  its own, vod/<id>/r-<job>-a<n>/ (fast/vodStore.ts repackSubdir), and
+//  master_key moves there; everything that reads a title's files follows
+//  master_key. The old package is removed by `vod.repackage.cleanup` once
+//  no viewer can still be reading it (oldPackageGraceMs).
 // ============================================================================
 import { one, query } from '../db';
 import { resolveForAsset } from './publishingRules';
@@ -113,15 +115,10 @@ export async function queueRepackage(accountId: string, scope: RepackageScope, o
     due.push(t);
   }
   if (!due.length) return out;
-  const { vodStore } = await import('./fast/vodStore');
   const { enqueue } = await import('./jobs/queue');
   const start = Date.now();
   let n = 0;
   for (const t of due) {
-    if (vodStore() === 's3') {
-      out.waiting.push({ id: t.id, title: t.title, reason: 'its files are in the origin bucket, where repackaging is not built yet; it keeps its current files' });
-      continue;
-    }
     const payload = { vodAssetId: t.id, accountId, ladderGroupId: t.ladder_group_id ?? null, repackage: true };
     const dedupeKey = `${VOD_REPACKAGE}:${t.id}`;
     if (!t.source_key) {
@@ -185,4 +182,87 @@ export async function stillPending(assetId: string): Promise<string | null> {
   if (!pendingFields({ drm: !!r.settings.protection?.drm }, { drm: packagedOf(t).drm }).length)
     return 'its files already carry what its publishing policy asks for';
   return null;
+}
+
+// ---------------------------------------------------------------------------
+//  THE OLD PACKAGE ON THE BUCKET (P4-4). Once master_key points at the new
+//  prefix, the old files are no longer listed by any playlist Volt serves,
+//  but a viewer who started before the switch still has the old media
+//  playlists loaded (an on-demand player reads them once) and asks for old
+//  segments until the end of the title. So the old prefix goes after the
+//  playlist cache time (60 s, fast/vodStore.ts) PLUS the title's length and
+//  a margin, not after the cache time alone: deleting sooner would stop
+//  every viewer who was mid-title at the moment of the switch.
+// ---------------------------------------------------------------------------
+export const VOD_REPACKAGE_CLEANUP = 'vod.repackage.cleanup';
+/** The playlists' Cache-Control max-age on the bucket (uploadVodDir). */
+const PLAYLIST_CACHE_MS = 60_000;
+/** Margin for a paused viewer, a slow CDN and clock skew. */
+const OLD_PACKAGE_MARGIN_MS = 10 * 60_000;
+/** A title with no length is given this long, as if it were a feature film. */
+const UNKNOWN_LENGTH_MS = 3 * 3_600_000;
+
+/** PURE. How long the old package stays on the bucket after the switch. */
+export function oldPackageGraceMs(durationMs: number | null | undefined): number {
+  const d = Number(durationMs);
+  return PLAYLIST_CACHE_MS + OLD_PACKAGE_MARGIN_MS + (Number.isFinite(d) && d > 0 ? d : UNKNOWN_LENGTH_MS);
+}
+
+/** Folders at the asset's root that are not the packaging's own and outlive a repackage. */
+const KEPT_AT_ROOT = new Set(['ladders', 'reframe']);
+
+/**
+ * PURE. Which of the keys under an old package's folder go. `oldBase` and
+ * `currentBase` are folders (vod/<id> or vod/<id>/r-<job>-a<n>, no slash at
+ * the end). When the old package is the asset's root folder, FAST ladder
+ * variants, reframes and every repackage folder (the current one, and one a
+ * later repackage is still writing) stay. A repackage folder goes whole.
+ * Nothing ever goes when the old and current folders are the same, or when
+ * the old folder is not one of the asset's own.
+ */
+export function stalePackageKeys(keys: string[], o: { assetId: string; oldBase: string; currentBase: string | null }, isRepackDir: (name: string) => boolean): string[] {
+  const root = `vod/${o.assetId}`;
+  const oldBase = String(o.oldBase).replace(/\/+$/, '');
+  const cur = o.currentBase ? String(o.currentBase).replace(/\/+$/, '') : null;
+  if (!oldBase || oldBase === cur) return [];
+  const sub = oldBase === root ? null : oldBase.slice(root.length + 1);
+  if (!oldBase.startsWith(root) || (sub !== null && (!oldBase.startsWith(root + '/') || sub.includes('/') || !isRepackDir(sub)))) return [];
+  return keys.filter((k) => {
+    if (!k.startsWith(oldBase + '/')) return false;
+    if (cur && k.startsWith(cur + '/')) return false;
+    if (sub !== null) return true;
+    const first = k.slice(root.length + 1).split('/')[0];
+    return !(KEPT_AT_ROOT.has(first) || isRepackDir(first));
+  });
+}
+
+/** After a repackage on the bucket: remove the old package once its grace is over. */
+export async function queueOldPackageCleanup(assetId: string, oldBase: string, durationMs: number | null | undefined): Promise<string | null> {
+  const { enqueue } = await import('./jobs/queue');
+  const j = await enqueue({
+    type: VOD_REPACKAGE_CLEANUP, payload: { vodAssetId: assetId, oldBase },
+    dedupeKey: `${VOD_REPACKAGE_CLEANUP}:${assetId}:${oldBase}`, priority: REPACKAGE_PRIORITY, maxAttempts: 3,
+    runAfter: new Date(Date.now() + oldPackageGraceMs(durationMs)),
+  });
+  return j?.id ?? null;
+}
+
+/**
+ * The cleanup job: delete the old package's keys, reading where the title's
+ * master is NOW (a later repackage may have moved it again, or the title
+ * may be gone, in which case its files went to the restore bin with it).
+ */
+export async function removeOldPackage(assetId: string, oldBase: string): Promise<{ removed: number; reason?: string }> {
+  const a = await one<any>(`SELECT id, master_key FROM vod_assets WHERE id = $1`, [assetId]);
+  if (!a) return { removed: 0, reason: 'the title is gone; its files went with it' };
+  const { bucketBaseOf } = await import('./companions/bucketTracks');
+  const { listPrefix, REPACK_DIR } = await import('./fast/vodStore');
+  const current = bucketBaseOf(a.id, a.master_key);
+  if (!current) return { removed: 0, reason: 'the title\'s master is not in the bucket' };
+  const keys = (await listPrefix(`${String(oldBase).replace(/\/+$/, '')}/`)).map((k) => k.key);
+  const gone = stalePackageKeys(keys, { assetId: a.id, oldBase, currentBase: current }, (n) => REPACK_DIR.test(n));
+  if (!gone.length) return { removed: 0 };
+  const { deleteKeys } = await import('./fast/vodStore');
+  await deleteKeys(gone);
+  return { removed: gone.length };
 }

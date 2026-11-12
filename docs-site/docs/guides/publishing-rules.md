@@ -160,8 +160,9 @@ Each title keeps what its policy asked for when it was encoded, and its **Encode
 Some titles wait instead of being packaged again, and the answer lists them with the reason:
 
 - a title whose original is kept at your site (Encode at site): packaging at a site with DRM is not available yet;
-- a title whose original was not kept;
-- for now, titles whose files are served from the cloud origin bucket (the AWS deployment): packaging them again there is not available yet. On a single server (the Mac) it works as described above.
+- a title whose original was not kept.
+
+Where titles are served through a CDN (the cloud deployment), the new files get addresses of their own instead of replacing the old ones, because a CDN keeps media segments for a long time under their names and old and new would otherwise mix in viewers' players. The title's playlists point at the new files from the moment they are complete, so new viewers get the new protection at once. Someone already watching when the switch happens finishes on the files they started with, and Volt removes the old files after that: the title's length plus about 11 minutes later.
 
 A title whose original was moved to the archive is brought back first, then packaged again.
 
