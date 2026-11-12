@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.134.1 (2026-11-12)
+
+### SaaS platform
+
+- fixed · Media Library: On AWS, Volt now finds the intro and credits of an episode by itself, comparing it with the other episodes of its series; before, it could not read their audio and asked for the markers to be set by hand.
+
+### Internal
+
+- added · Tests: New markers-s3 check suite: intro detection with every episode held in the bucket, on real audio.
+
 ## 0.134.0 (2026-11-12)
 
 ### SaaS platform
