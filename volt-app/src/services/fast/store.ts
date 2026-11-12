@@ -72,7 +72,8 @@ export async function libraryFor(accountId: string): Promise<Map<string, Library
             v.availability_state, v.break_cues_ms, v.poster_key,
             v.source_key, v.encode_result, v.ingest, v.export_mp3_key, v.export_m4a_key, v.top_height, v.progressive_key,
             c.kind AS channel_kind, ${usageStatusSql('v')} AS usage_status,
-            v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at
+            v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at,
+            v.schema_id, v.channel_id, v.event_id, v.availability_override, v.availability
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
@@ -88,8 +89,14 @@ export async function libraryFor(accountId: string): Promise<Map<string, Library
   // window is the narrower of its availability and its rights window.
   const profiles = new Map<string, RightsProfile>((await query<RightsProfile>(
     `SELECT * FROM rights_profiles WHERE account_id = $1`, [accountId])).map((p) => [p.id, p]));
+  // THE PUBLISHING POLICY (build queue P3-4c): a title whose rule turns FAST
+  // eligibility off is not in the library either, read from its stamp when
+  // published and from its rules otherwise (deliveryPolicy.fastOffIds).
+  const { fastOffIds } = await import('../deliveryPolicy');
+  const policyOff = await fastOffIds(accountId, rows);
   const m = new Map<string, LibraryAsset>();
   for (const r of rows) {
+    if (policyOff.has(String(r.id))) continue;
     const rights = effectiveRights(r.rights_profile_id ? profiles.get(String(r.rights_profile_id)) ?? null : null, r);
     if (!rights.uses.includes('fast')) continue;
     if (rights.from && (!r.available_from || new Date(r.available_from) < rights.from)) r.available_from = rights.from;
@@ -738,4 +745,38 @@ export async function adReport(channelId: string, since: Date) {
     timeouts: r?.timeouts ?? 0, errors: r?.errors ?? 0, empty: r?.empty ?? 0, notConditioned: r?.not_conditioned ?? 0,
     p95Ms: r?.p95_ms != null ? Math.round(Number(r.p95_ms)) : null,
   };
+}
+
+/**
+ * A TITLE LEAVES THE LINEUPS IT IS IN when its publishing policy turns FAST
+ * eligibility off (build queue P3-4c). Each active lineup whose guide still
+ * has the title in a programme to come is planned again from the programme on
+ * air (applyLineup, as Apply does): the title is no longer in the library, so
+ * its slot falls back to the slot's rotation or the backfill, with a notice,
+ * as a title that failed QC does. The programme on air is never cut. With
+ * `assetIds`, only lineups with those titles to come are looked at.
+ */
+export async function dropFastIneligible(accountId: string, assetIds?: string[]): Promise<{ lineups: string[]; titles: string[] }> {
+  if (assetIds && !assetIds.length) return { lineups: [], titles: [] };
+  const rows = await query<any>(
+    `SELECT DISTINCT l.id AS lineup_id, p.metadata->>'vodAssetId' AS asset_id
+       FROM programmes p
+       JOIN channels c ON c.id = p.channel_id
+       JOIN groups g ON g.id = c.group_id
+       JOIN fast_lineups l ON l.channel_id = c.id AND l.status = 'active'
+      WHERE g.account_id = $1 AND p.source_ref LIKE 'fast:%' AND p.status = 'scheduled' AND p.starts_at > now()
+        AND p.metadata->>'vodAssetId' IS NOT NULL ${assetIds ? `AND p.metadata->>'vodAssetId' = ANY($2::text[])` : ''}`,
+    assetIds ? [accountId, assetIds] : [accountId]);
+  if (!rows.length) return { lineups: [], titles: [] };
+  const ids = [...new Set(rows.map((r) => String(r.asset_id)))].filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+  const assets = await query<any>(
+    `SELECT id, title, availability_state, availability, schema_id, channel_id, event_id, availability_override FROM vod_assets WHERE id = ANY($1::uuid[])`, [ids]);
+  const { fastOffIds } = await import('../deliveryPolicy');
+  const off = await fastOffIds(accountId, assets);
+  if (!off.size) return { lineups: [], titles: [] };
+  const lineups = [...new Set(rows.filter((r) => off.has(String(r.asset_id))).map((r) => String(r.lineup_id)))];
+  for (const l of lineups) {
+    try { await applyLineup(l); } catch (e: any) { console.warn('[fast] planning a lineup again without a title FAST is off for failed', l, e?.message ?? e); }
+  }
+  return { lineups, titles: assets.filter((a) => off.has(String(a.id))).map((a) => String(a.title ?? 'Untitled')) };
 }

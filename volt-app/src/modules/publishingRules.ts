@@ -353,7 +353,7 @@ async function saveMetaRule(req: any, res: any, existing: MetadataRule | null) {
     snapshot: existing ? undefined : row }).catch(() => {});
   const { syncProductsFromRules } = await import('../services/entitlements');
   await syncProductsFromRules(acct, settings.accessRules ?? [], row.id, null).catch((e) => console.warn('[publishing-rules] product sync failed', e));
-  const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind: 'metadata', id: row.id }) : 0;
+  const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind: 'metadata', id: row.id }) : (fastAfterChange(acct), 0);
   res.status(existing ? 200 : 201).json({ ...row, warnings, impact, restamp: { marked } });
 }
 
@@ -521,7 +521,7 @@ publishingRulesRouter.put('/:scopeKind/:scopeId?', asyncHandler(async (req, res)
   // Every premium TERM is a product the providers sell: keep them in step.
   const { syncProductsFromRules } = await import('../services/entitlements');
   await syncProductsFromRules(acct, settings.accessRules ?? [], row.id, id).catch((e) => console.warn('[publishing-rules] product sync failed', e));
-  const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind, id }) : 0;
+  const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind, id }) : (fastAfterChange(acct), 0);
   res.json({ ...row, warnings, impact, restamp: { marked } });
 }));
 
@@ -549,5 +549,20 @@ async function restampAfterChange(acct: string, scope: { kind: 'account' | 'sche
   const { markPolicyStale, restampFor } = await import('../services/availability');
   const marked = await markPolicyStale(acct, scope).catch((e) => { console.warn('[publishing-rules] marking titles failed', e?.message ?? e); return 0; });
   if (marked) setImmediate(() => { restampFor(20_000).catch((e) => console.warn('[publishing-rules] restamp failed, left for the sweep', e?.message ?? e)); });
+  fastAfterChange(acct);
   return marked;
+}
+
+/**
+ * FAST ELIGIBILITY (build queue P3-4c): a title that is not published has no
+ * stamp, so it is read from the rules, and a rule change that turns FAST off
+ * takes such titles out of the FAST lineups they are in now, without holding
+ * the response (published ones go as the restamp stamps them). Called on every
+ * save, whether or not a published title changed.
+ */
+function fastAfterChange(acct: string): void {
+  setImmediate(() => {
+    import('../services/fast/store').then(({ dropFastIneligible }) => dropFastIneligible(acct))
+      .catch((e) => console.warn('[publishing-rules] FAST lineups not planned again, the next top-up skips the titles', e?.message ?? e));
+  });
 }

@@ -380,6 +380,23 @@ async function checkMedia(req: Request, channelId: string, slots: Slot[] | undef
     if (eps.length && !eps.some((a) => a.media === media)) wrong.add(`${s.series} (series)`);
   }
   if (wrong.size) throw badRequest(`This is ${media === 'audio' ? 'an audio' : 'a video'} channel, so it cannot use ${[...wrong].slice(0, 5).join(', ')}${wrong.size > 5 ? ` and ${wrong.size - 5} more` : ''}.`);
+  // FAST ELIGIBILITY (build queue P3-4c): a title whose publishing rule turns
+  // FAST off is not in the library above, and naming it is refused rather than
+  // saved and then skipped at every plan.
+  const named = [...new Set(ids)].filter((id) => !lib.has(id) && /^[0-9a-f-]{36}$/i.test(id));
+  if (named.length) {
+    const rows = await query<any>(
+      `SELECT v.id, v.title, v.availability_state, v.availability, v.schema_id, v.channel_id, v.event_id, v.availability_override
+         FROM vod_assets v
+         LEFT JOIN channels c ON c.id = v.channel_id
+         LEFT JOIN events   e ON e.id = v.event_id
+         LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+        WHERE v.id = ANY($1::uuid[]) AND (v.account_id = $2 OR g.account_id = $2)`, [named, accountId(req)]);
+    const { fastOffIds } = await import('../services/deliveryPolicy');
+    const off = await fastOffIds(accountId(req), rows);
+    const titles = rows.filter((r) => off.has(String(r.id))).map((r) => String(r.title ?? 'Untitled'));
+    if (titles.length) throw badRequest(`${titles.slice(0, 5).join(', ')}${titles.length > 5 ? ` and ${titles.length - 5} more` : ''} cannot go on a FAST channel: ${titles.length === 1 ? 'its' : 'their'} publishing rule turns FAST eligible off (Distribution).`);
+  }
 }
 
 function checkSlots(slots: Slot[]) {

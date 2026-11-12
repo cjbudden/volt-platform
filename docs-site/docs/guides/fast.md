@@ -24,7 +24,7 @@ Programmers and channel managers use it.
 
 ## Before you start
 
-- Titles in the Media Library whose rights allow **FAST**, packaged, or with their source still in Volt. The library only offers titles that can air.
+- Titles in the Media Library whose rights allow **FAST**, packaged, or with their source still in Volt. The library only offers titles that can air, and not a title whose publishing rule turns **FAST eligible** off ([Publishing Rules](publishing-rules.md)): when a rule turns it off, the title leaves the guide from the programme after the one on air.
 - For a video channel, a **ladder** (the renditions viewers get). Titles are packaged to it in the background.
 - Room in a channel group: a FAST channel counts towards the group's share of the plan like any channel.
 - For stitched ads, the VAST tag URL of your ad server.

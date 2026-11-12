@@ -22,8 +22,13 @@
 //  reach one (making a share link, staff downloads) resolve its rules instead,
 //  which is a database read on a console path, never on the play path.
 //
-//  Concurrent streams, FAST eligibility and the sitemap and schema.org
-//  exposure are P3-4c.
+//    distribution.fastEligible    the title on FAST channels (build queue
+//                                 P3-4c): off, it is not in the FAST library a
+//                                 lineup plans from, a lineup naming it is
+//                                 refused, and the active lineups it is in are
+//                                 planned again without it (fast/store.ts)
+//
+//  Concurrent streams are P3-4d; the sitemap and schema.org exposure P3-4c-2.
 //
 //    protection.tokenFree         plain addresses for content no viewer
 //                                 condition applies to (build queue P2-2c):
@@ -219,4 +224,40 @@ async function accountOf(assetId: string): Promise<string | null> {
   const { one } = await import('../db');
   return cached<string | null>(`vodacct:${assetId}`, { ttlSec: 3600, tags: [`asset:${assetId}`] },
     async () => (await one<any>(`SELECT account_id FROM vod_assets WHERE id = $1`, [assetId]))?.account_id ?? null);
+}
+
+/** Whether a stamp (or resolved settings) lets the title on FAST channels; the baseline under anything missing. */
+export function fastEligibleOf(settings: any): boolean {
+  const d = settings?.distribution ?? {};
+  return typeof d.fastEligible === 'boolean' ? d.fastEligible : (BASELINE as any).distribution?.fastEligible !== false;
+}
+
+/**
+ * THE TITLES A POLICY KEEPS OFF FAST (build queue P3-4c), of the rows given.
+ * A published title (scheduled, available or expired) answers from its stamp,
+ * as every delivery path does; any other from its rules as they resolve now,
+ * resolved in memory with one read of the rules and one metadata match for
+ * the batch, so a FAST library of thousands of titles costs three queries.
+ * Rows need id, availability_state, availability, schema_id, channel_id,
+ * event_id and availability_override.
+ */
+export async function fastOffIds(accountId: string, rows: any[]): Promise<Set<string>> {
+  const off = new Set<string>();
+  const stamped = (r: any) => ['scheduled', 'available', 'expired'].includes(r.availability_state) && r.availability && typeof r.availability === 'object';
+  const loose = rows.filter((r) => !stamped(r));
+  for (const r of rows) if (stamped(r) && !fastEligibleOf(r.availability)) off.add(String(r.id));
+  if (!loose.length) return off;
+  const { query } = await import('../db');
+  const rules = await query<any>(`SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
+  const { loadRules, firstMatches } = await import('./publishingMetadataRules');
+  const meta = await loadRules(accountId, { enabledOnly: true });
+  const matched = meta.length ? await firstMatches(accountId, loose.map((r) => String(r.id)), meta) : new Map();
+  // A title with no rules of its own and no metadata rule resolves like any other of its type and owner.
+  if (!rules.length && !meta.length && loose.every((r) => !r.availability_override || !Object.keys(r.availability_override).length)) {
+    if (!fastEligibleOf(BASELINE)) for (const r of loose) off.add(String(r.id));
+    return off;
+  }
+  const { resolveWith } = await import('./publishingPolicies');
+  for (const r of loose) if (!fastEligibleOf(resolveWith(rules, r, matched.get(String(r.id)) ?? null).settings)) off.add(String(r.id));
+  return off;
 }

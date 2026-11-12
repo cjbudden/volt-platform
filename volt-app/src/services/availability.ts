@@ -488,6 +488,10 @@ export async function restampStale(limit = 500, now: Date = new Date()): Promise
       WHERE v.id = ANY($1::uuid[]) AND v.availability_state IN ('scheduled', 'available') AND v.archived_at IS NULL`,
     [claimed.map((r) => r.id)]);
   const { resolveWith, stableJson } = await import('./publishingPolicies');
+  const { fastEligibleOf } = await import('./deliveryPolicy');
+  // Titles whose new stamp takes FAST eligibility away, by account: they leave
+  // the FAST lineups they are in once the batch is stamped (build queue P3-4c).
+  const fastOff = new Map<string, string[]>();
   const { invalidateTag } = await import('../scale/cache');
   const { refreshPublicStatus } = await import('./publicStatus');
   // The account's rules are read once per batch, not once per title, and the
@@ -519,6 +523,7 @@ export async function restampStale(limit = 500, now: Date = new Date()): Promise
           WHERE id = $1 AND availability_state IN ('scheduled', 'available') RETURNING id`,
         [a.id, JSON.stringify(next.availability), JSON.stringify(plan.sources), next.state, next.from, next.until]);
       if (!w) continue;   // withdrawn or archived by a person meanwhile: theirs wins
+      if (fastEligibleOf(a.availability) && !fastEligibleOf(next.availability)) fastOff.set(a._account, [...(fastOff.get(a._account) ?? []), a.id]);
       // The window now ends in the past: closed as the sweep closes one.
       if (ended) await query(`UPDATE publications SET status = 'removed' WHERE vod_asset_id = $1 AND status = 'published'`, [a.id]);
       out.changed++;
@@ -531,6 +536,11 @@ export async function restampStale(limit = 500, now: Date = new Date()): Promise
       console.warn(`[availability] restamp ${a.id} failed, left for the next sweep:`, e?.message ?? e);
       await query(`UPDATE vod_assets SET policy_stale_at = now() WHERE id = $1`, [a.id]).catch(() => {});
     }
+  }
+  if (fastOff.size) {
+    const { dropFastIneligible } = await import('./fast/store');
+    for (const [acct, ids] of fastOff)
+      await dropFastIneligible(acct, ids).catch((e) => console.warn('[availability] FAST lineups not planned again, the next top-up skips the titles:', e?.message ?? e));
   }
   return out;
 }

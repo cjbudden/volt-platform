@@ -110,6 +110,10 @@ vodBulkRouter.post('/availability', asyncHandler(async (req, res) => {
   const { markPolicyStale, restampFor } = await import('../services/availability');
   const marked = await markPolicyStale(acct, { kind: 'assets', id: null, ids: okIds }).catch((e) => { console.warn('[vod-bulk] marking titles failed', e?.message ?? e); return 0; });
   if (marked) setImmediate(() => { restampFor(20_000).catch((e) => console.warn('[vod-bulk] restamp failed, left for the sweep', e?.message ?? e)); });
+  // Titles their new policy keeps off FAST leave the lineups they are in (build
+  // queue P3-4c): the ones not published now, the published ones as they are restamped.
+  { const { dropFastIneligible } = await import('../services/fast/store');
+    await dropFastIneligible(acct, okIds).catch((e) => console.warn('[vod-bulk] FAST lineups not planned again, the next top-up skips the titles', e?.message ?? e)); }
   const by = actor(req);
   for (const b of before)
     await writeAudit(null, { accountId: acct, userId: by.userId, label: by.label, action: 'update', entityType: 'vod_asset', entityId: b.id,

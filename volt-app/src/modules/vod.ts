@@ -1273,6 +1273,9 @@ vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {
     await query(`DELETE FROM publications WHERE vod_asset_id = $1 AND status = 'published' AND id <> ALL($2::uuid[])`,
       [asset.id, outcome.publications.map((p: any) => p.id)]).catch(() => {});
   }
+  // A title its own policy now keeps off FAST leaves the lineups it is in (build queue P3-4c).
+  { const { dropFastIneligible } = await import('../services/fast/store');
+    await dropFastIneligible(acct, [asset.id]).catch((e) => console.warn('[vod] FAST lineups not planned again, the next top-up skips the title', e?.message ?? e)); }
   const who = actor(req);
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: 'update', entityType: 'vod_asset', entityId: asset.id,
