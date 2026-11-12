@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.128.2 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Media Library: On a phone or a tablet, an asset opened from the Media Library list now opens in a panel that fits the screen (the whole screen on a phone), so its tabs, the Metadata form and Find details no longer sit off to the side of the list. The Preview tab's facts now sit under the player on a phone.
+
+### Internal
+
+- added: library-phone browser check: the Media Library list's open asset at 390, 768 and 1440 px, every tab at 390 and 768, the grid and a deep link at 390.
+
 ## 0.128.1 (2026-11-12)
 
 ### Product (in customer release notes)
