@@ -71,7 +71,7 @@ Administrators set the default; the people who run a channel, an event or the li
    | **Retention**, **Retention days**, **Retention counts from** | **Keep forever**, or **Keep for a number of days** counted from when it came in, became available or stops being available |
    | **Legal hold allowed**, **Archive storage tier** | Whether a title may be put on legal hold, and the storage it moves to when archived |
 
-   **Playback token lifetime**, **Allowed referrer domains**, **Concurrent streams**, **MP4 download**, **Share links**, **FAST eligible** and **Sitemap and schema.org** apply where titles are played and handed out (see [What the protection and distribution fields do](#what-the-protection-and-distribution-fields-do)). The WAF profile and retention are stored and checked now and take effect in later releases.
+   **Playback token lifetime**, **Allowed referrer domains**, **Concurrent streams**, **MP4 download**, **Share links**, **FAST eligible** and **Sitemap and schema.org** apply where titles are played and handed out (see [What the protection and distribution fields do](#what-the-protection-and-distribution-fields-do)). Retention deletes titles when their days are up (see [When retention deletes a title](#when-retention-deletes-a-title)). The WAF profile and the archive storage tier are stored and checked now and take effect in later releases.
 2. Check **Before you save** under the fields (see [Before you save](#before-you-save-conflicts-and-impact)).
 3. Choose **Save publishing rule**. **Saved.** appears beside the button, or **Saved, with 1 warning.** when a warning stands.
 
@@ -204,6 +204,20 @@ A saved rule reaches the titles that are already published within about a minute
 | **Sitemap and schema.org** | The title's schema.org data, which your portal, search engines and partners read to list it | Off: the title is left out. Its schema.org data answers **This title is not listed: its publishing rule turns Sitemap and schema.org off (Distribution).** and is not offered to anyone, so nothing lists it. The title still plays for viewers who have its link. With **MP4 download** off, the data never names the MP4 file, only the streaming addresses where those are allowed |
 
 A title that is not published yet is judged by its rule as it stands: you cannot share or download the MP4 of a draft whose rule turns them off.
+
+### When retention deletes a title
+
+With **Retention** set to **Keep for a number of days**, a title is deleted that many days after the moment **Retention counts from** names: when it came in, when it became available, or when it stops being available. A title with no such date (for example counted from when it stops being available, with no end date) is kept.
+
+1. Seven days before a title is due, it appears on the warning list (`GET /api/storage/vod-retention` in the API) with its date, once.
+2. When it is due, the hourly retention sweep moves it to the restore bin, the same as deleting it from the Media Library, and logs it. Until the bin empties it can be put back from **Storage > Recently removed**, or with `POST /api/vod/{id}/restore`.
+3. A due title is kept, and says why on the warning list, while:
+   - it is on **legal hold** (`POST /api/storage/vod/{id}/hold` with a reason). A hold can be placed only where **Legal hold allowed** is on; a hold placed earlier keeps the title even if that is turned off later. Release it and the next sweep deletes the title;
+   - it is published and can still be watched (its **Available until** has not passed). Set an end date, or archive it, to let retention take it;
+   - it is in the active lineup of a FAST channel;
+   - its rule copies originals to your own storage (Mirror and Archive) and the copy of this title's original is not verified yet: the same check that keeps an original in the cloud until its copy is safe.
+
+The list and the hold come to the console in a later release; until then use the API.
 
 ### See every override
 

@@ -62,8 +62,10 @@ const restrictedGeo = (s: Settings) =>
   || (s.accessRules ?? []).some((r) => !(r.if?.geo === 'in' && (r.if.countries ?? []).every((c) => c.toUpperCase() === 'WORLD')));
 const hasSocial = (s: Settings) => (s.targets ?? []).some((t) => t.kind === 'social');
 
-/** The publish window a resolved policy gives a title, by its own dates where it has them. */
-function windowOf(s: Settings, t: { availableFrom?: Date | null; availableUntil?: Date | null }): { from: Date | null; until: Date | null } {
+/** The publish window a resolved policy gives a title, by its own dates where it has them.
+ *  Exported for the retention sweep (services/media/vodRetention.ts), so the
+ *  date it deletes on is the date this file's conflict check reasons about. */
+export function windowOf(s: Settings, t: { availableFrom?: Date | null; availableUntil?: Date | null }): { from: Date | null; until: Date | null } {
   const from = t.availableFrom ?? (s.availableFrom?.mode === 'at' ? new Date(s.availableFrom.at) : null);
   let until = t.availableUntil ?? null;
   if (!until && s.expire?.mode === 'at') until = new Date(s.expire.at);
@@ -72,7 +74,7 @@ function windowOf(s: Settings, t: { availableFrom?: Date | null; availableUntil?
 }
 
 /** When retention would delete the title, or null when it keeps it or cannot say yet. */
-function retainUntil(s: Settings, t: { createdAt?: Date | null }, w: { from: Date | null; until: Date | null }): Date | null {
+export function retainUntil(s: Settings, t: { createdAt?: Date | null }, w: { from: Date | null; until: Date | null }): Date | null {
   const r = s.retention;
   if (!r || r.keep !== 'days' || !r.days) return null;
   const anchor = r.anchor === 'ingest' ? (t.createdAt ?? null) : r.anchor === 'available_from' ? w.from : w.until;

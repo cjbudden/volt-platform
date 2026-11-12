@@ -7210,6 +7210,33 @@
  },
  {
   "method": "GET",
+  "path": "/api/storage/vod-retention",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
+  "path": "/api/storage/vod-retention/log",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: view",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "POST",
+  "path": "/api/storage/vod/:id/hold",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "media: manage",
+  "viewerTier": false,
+  "group": "/api/storage"
+ },
+ {
+  "method": "GET",
   "path": "/api/streams/:id/burn-graphics",
   "api": "machine",
   "credential": "X-Volt-Ingest-Token",

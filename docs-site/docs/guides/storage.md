@@ -185,6 +185,10 @@ You do not have to restore by hand before a re-encode. When an encode, or a FAST
 
 **Recordings wait for their archive file.** When a channel's, station's or event's copy rule archives **Recordings**, retention never deletes one of its recordings (by the ladder or on a date you set by hand) until every archive file covering it is **Verified** at your storage target. Until then the **Retention list** shows **Waiting for its archive copy** with the reason (the file is not made yet, is being made or copied, or its copy failed or went missing), and so does the recording's page. Recordings from before the rule began archiving, and those of streams no copy rule archives, are deleted as before.
 
+### Titles deleted by their publishing policy
+
+Recordings follow the retention ladder above; titles in the Media Library follow the **Retention** section of their publishing policy instead (see [When retention deletes a title](publishing-rules.md#when-retention-deletes-a-title)). The same hourly sweep warns seven days ahead, moves a due title to **Recently removed**, and keeps one on legal hold, still published, in a FAST lineup or waiting for its archive copy. For now the list (`GET /api/storage/vod-retention`) and the legal hold (`POST /api/storage/vod/{id}/hold`) are in the API.
+
 ## How it connects
 
 | Section | How it relates |
@@ -241,6 +245,9 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/storage/objects` | Lists media; filter with `state`, `channelId`, `recordingId`, `limit` |
 | `GET /api/storage/objects/{id}` | One piece of media, with its copies, history and whether it can be read |
 | `POST /api/storage/objects/{id}/hold` | Holds or releases it (`{"hold": true, "reason": "Legal hold"}`; a hold needs a reason) |
+| `GET /api/storage/vod-retention?within=7` | Titles their publishing policy deletes within the days given, and due titles something keeps, with why |
+| `GET /api/storage/vod-retention/log` | What the sweep warned about, waited on and removed (`assetId` for one title) |
+| `POST /api/storage/vod/{id}/hold` | A legal hold on a title, or its release (`{"hold": true, "reason": "Litigation 114"}`; a hold needs a reason, and is refused with `409 legal_hold_not_allowed` where the policy does not allow holds) |
 | `POST /api/storage/objects/{id}/restore` | Asks for an archived piece to be restored |
 | `GET /api/storage/retention` | The retention rules |
 | `GET /api/storage/retention/effective?channelId={id}` | Which rule governs a channel (or `eventId`), and where it comes from |

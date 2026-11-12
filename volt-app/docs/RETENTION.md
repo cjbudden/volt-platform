@@ -101,6 +101,35 @@ the reason is on the recording (`archive_wait`, `services/archive/
 recordingWait.ts`) and in the retention list. Details:
 `services/archive/originals.ts` and HYBRID_SITES.md, Phase 3j.
 
+## Retention for VOD titles (publishing policies, P5)
+
+Built 12 Nov 2026 (build queue P5). Code: `services/media/vodRetention.ts`, routes in `modules/storage.ts`,
+called from the hourly `sweepRetention` after the originals pass. Migration 0178. Test: `test/vod-retention.check.ts`.
+
+Titles in the Media Library are governed by the **Retention** section of their publishing policy
+(`services/publishingRules.ts`: `keep` forever or `days`, counted from `anchor` ingest, available_from or
+available_until), not by the recording ladder above. The due date is `retainUntil` in `publishingPolicies.ts`,
+the same date the editor's conflict check reasons about, and is stored on the title (`retention_due_at`).
+
+| When | What happens |
+|---|---|
+| 7 days before | Warned once (`retention_warned_at`, a `warned` row in `vod_retention_log`); a date that moves later clears it |
+| Due, nothing keeps it | `removeVodAsset` into the restore bin (library bin days), a `removed` log row with the bin item, an audit entry |
+| Due, kept | `retention_wait_code` and `retention_wait` on the title, logged when the reason changes |
+
+What keeps a due title, in this order: `legal_hold`; `still_available` (published and its window still open, so it
+is never deleted while it can be watched); `in_fast_lineup`; and, when its policy has a copy rule of the original
+(Mirror and Archive), the copy-before-delete verdict of H3-5 (`judgeOriginal`: `no_copy`, `copy_pending`,
+`copy_failed`, `copy_corrupt`, `copy_missing`, `copy_stale`, `copy_unchecked`, `in_use`, or `no_licence` with the
+add-on off). An original already out of the cloud on a verified copy counts as copied.
+
+A legal hold (`legal_hold_at`, `_by`, `_reason`) needs a reason and is refused where the policy has
+`legalHoldAllowed` off. A hold that exists always keeps the title, even after the policy turns holds off: the
+setting stops new holds and never deletes held material. Up to 200 titles are removed per pass.
+
+Not built yet (P5-2): the storage tier move for archived titles (`archiveTier`) and the console (the list on the
+Storage page, the hold on the asset drawer).
+
 ## API
 
 | Method | Path | |
@@ -113,6 +142,9 @@ recordingWait.ts`) and in the retention list. Details:
 | DELETE | `/api/storage/bin/:id` | Purge now |
 | GET | `/api/vod/:id/delete-impact` | What the delete dialog shows: what goes, posts that stay, `binDays`, and `blocker` (in an active FAST lineup) |
 | DELETE | `/api/vod/:id` | Delete an asset into the bin; answers `{ bin, binDays, purgeAfter }` (the asset form's Delete) |
+| GET | `/api/storage/vod-retention?within=7` | Titles their policy deletes within N days, due titles something keeps, held titles |
+| GET | `/api/storage/vod-retention/log?assetId=` | The titles' retention log |
+| POST | `/api/storage/vod/:id/hold` | `{ hold, reason? }` a legal hold (409 `legal_hold_not_allowed` where the policy forbids it) |
 | POST | `/api/vod/:id/restore` | Undelete that asset (latest held bin item), with `vod: manage` rather than the storage permission |
 
 ## Removed recordings leave the tables, the record stays

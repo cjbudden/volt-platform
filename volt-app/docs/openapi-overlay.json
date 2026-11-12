@@ -359,7 +359,7 @@
     },
     "Storage": {
       "displayName": "Storage and retention",
-      "description": "Storage shows what media your account holds, where it lives, whether it can be read now, and what the retention rules will do to it next.\n\n**Use it to:**\n- Check what your storage supports with `GET /api/storage/capabilities`\n- List media objects with `GET /api/storage/objects`, and hold or restore one with `POST /api/storage/objects/{id}/hold` and `.../restore`\n- Set retention rules with `PUT /api/storage/retention`, preview them with `POST /api/storage/retention/preview`, and see the effective result with `GET /api/storage/retention/effective`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** read capabilities first. Archive tiers and restore are only offered where storage supports them."
+      "description": "Storage shows what media your account holds, where it lives, whether it can be read now, and what the retention rules will do to it next.\n\n**Use it to:**\n- Check what your storage supports with `GET /api/storage/capabilities`\n- List media objects with `GET /api/storage/objects`, and hold or restore one with `POST /api/storage/objects/{id}/hold` and `.../restore`\n- Set retention rules with `PUT /api/storage/retention`, preview them with `POST /api/storage/retention/preview`, and see the effective result with `GET /api/storage/retention/effective`\n- See the titles a publishing policy's retention deletes in the next 7 days, and what keeps due ones, with `GET /api/storage/vod-retention`, and put a legal hold on one with `POST /api/storage/vod/{id}/hold`\n\n**Credential:** admin session (Bearer) or account secret key, with `media: view` to read and `media: manage` to change.\n\n**Good to know:** read capabilities first. Archive tiers and restore are only offered where storage supports them."
     },
     "Thumbnails": {
       "displayName": "Thumbnails",
@@ -996,6 +996,18 @@
   "PUT /api/storage/retention": {
     "summary": "Create or change a retention rule",
     "description": "`name` and `stages` (each `afterDays` and `action`: `keep`, `to_cold`, `to_archive` or `delete`, with an optional `targetTier`), scoped to the account, a `channelId` or an `eventId`; `ruleId` changes an existing rule. `appliesTo` (`recording`, `asset` or `both`) and `enabled` are kept when not sent. `originalAfterDays` removes an asset's original file from the cloud that many days after it landed, and only once a verified archive copy of it is held at one of the account's storage targets (the renditions stay, so the title keeps playing); `null` keeps originals, not sending it keeps the rule's setting, and it needs the Mirror and Archive add-on (403 `licence_required`). `includeUploads` makes an account rule reach uploads and watch folder files too: on for a rule created now, off for rules made before it existed until it is turned on. A ladder this storage cannot carry out is refused with 400 and the reason."
+  },
+  "GET /api/storage/vod-retention": {
+    "summary": "List titles retention will delete",
+    "description": "Titles whose publishing policy deletes them within `within` days (7 by default, the warning list), titles already due that something keeps, and titles on legal hold, soonest first. Each item has `dueAt` (when its policy's Retention section deletes it: `days` counted from its `anchor`, ingest, available_from or available_until), `warnedAt` (when it was first listed 7 days ahead), `due`, `legalHold` (`at`, `by`, `reason`) and `waiting` (`code` and `message`) for a due title that is kept: `legal_hold`, `still_available` (published and its publish window still open), `in_fast_lineup`, or, when its policy copies the original to an archive target first, the copy's state (`no_copy`, `copy_pending`, `copy_failed`, `copy_corrupt`, `copy_missing`, `copy_stale`, `copy_unchecked`, `in_use`, `no_licence`). The hourly retention sweep moves a due title that nothing keeps to the restore bin, where it can be restored for the library bin's days. Set retention in a publishing rule's `retention` section."
+  },
+  "GET /api/storage/vod-retention/log": {
+    "summary": "Retention log for titles",
+    "description": "What the retention sweep did to titles, newest first: `event` is `warned` (listed 7 days ahead), `waiting` or `held` (due but kept, with `code` and `message`, logged when the reason changes), `released` (a legal hold taken off), `removed` (moved to the restore bin, with `binItemId`) or `failed`. Kept after a title is gone. Filter by `assetId`; `limit` up to 500 (100 by default)."
+  },
+  "POST /api/storage/vod/:id/hold": {
+    "summary": "Put a legal hold on a title, or release it",
+    "description": "`{ hold: true, reason }` keeps the title from retention until it is released; the reason is required. `{ hold: false }` releases it, and the next hourly sweep deletes it if it is due and nothing else keeps it. A new hold is refused with 409 `legal_hold_not_allowed` when the title's publishing policy has `legalHoldAllowed` off; a hold placed earlier always keeps the title, even after that. Logged in the retention log and the audit log. Another account's title answers 404."
   },
   "GET /api/archive/originals": {
     "summary": "List originals out of the cloud, or waiting",

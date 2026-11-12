@@ -14,7 +14,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
-import { asyncHandler, notFound, badRequest } from '../util/http';
+import { asyncHandler, notFound, badRequest, ApiError } from '../util/http';
 import { capabilities, type StorageTier } from '../services/media/storage';
 import {
   historyOf, locationsOf, readability, requestRestore, setHold,
@@ -381,6 +381,42 @@ storageRouter.post('/recordings/:id/hold', asyncHandler(async (req, res) => {
   const who = `user:${await actorLabel(req)}`;
   for (const o of objs) await setHold(o.id, b.hold, b.hold ? (b.reason ?? 'kept from the retention list') : null, who);
   res.json({ id: rec.id, hold: b.hold, objects: objs.length });
+}));
+
+// ------------------------------------------------- retention for VOD titles (build queue P5)
+//
+//   GET  /api/storage/vod-retention?within=7     titles a publishing policy deletes within N days,
+//                                                due titles something keeps, and titles on legal hold
+//   GET  /api/storage/vod-retention/log?assetId= what the sweep warned about, waited on and removed
+//   POST /api/storage/vod/:id/hold               { hold, reason? }  a legal hold on a title
+//
+// services/media/vodRetention.ts, docs/RETENTION.md "Retention for VOD titles".
+
+storageRouter.get('/vod-retention', asyncHandler(async (req, res) => {
+  const within = req.query.within ? Math.max(0, Math.min(3650, Math.floor(Number(req.query.within)) || 0)) : 7;
+  const { retentionList } = await import('../services/media/vodRetention');
+  res.json({ within, items: await retentionList(accountId(req), within) });
+}));
+
+storageRouter.get('/vod-retention/log', asyncHandler(async (req, res) => {
+  const q = z.object({ assetId: z.string().uuid().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }).parse(req.query ?? {});
+  const { retentionLog } = await import('../services/media/vodRetention');
+  res.json({ items: await retentionLog(accountId(req), { assetId: q.assetId, limit: q.limit }) });
+}));
+
+storageRouter.post('/vod/:id/hold', asyncHandler(async (req, res) => {
+  const b = z.object({ hold: z.boolean(), reason: z.string().max(500).optional() }).parse(req.body ?? {});
+  // A legal hold has to say why, so whoever releases it later knows what it was for.
+  if (b.hold && !b.reason?.trim()) throw badRequest('A legal hold needs a reason.');
+  const { setLegalHold, HoldRefused } = await import('../services/media/vodRetention');
+  try {
+    const out = await setLegalHold(accountId(req), req.params.id, b.hold, b.hold ? b.reason!.trim() : null, `user:${await actorLabel(req)}`);
+    if (!out) throw notFound('VOD asset not found');
+    res.json(out);
+  } catch (e: any) {
+    if (e instanceof HoldRefused) throw Object.assign(new ApiError(409, e.message), { code: e.code });
+    throw e;
+  }
 }));
 
 /**

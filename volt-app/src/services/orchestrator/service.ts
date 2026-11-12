@@ -1399,6 +1399,15 @@ export class Orchestrator {
       const o = await sweepOriginals({ actor: 'retention:sweep' });
       if (o.removed || o.failed) console.log(`[retention] originals: ${o.removed} removed from the cloud, ${o.waiting} waiting, ${o.failed} failed`);
     } catch (e) { console.error('[retention] originals pass failed', e); }
+    // VOD titles a publishing policy's Retention section deletes (build queue
+    // P5): warned 7 days ahead, then moved to the restore bin unless a legal
+    // hold, an open publish window, a FAST lineup or an unverified archive
+    // copy keeps them. Its own pass, like the originals above.
+    try {
+      const { sweepVodRetention } = await import('../media/vodRetention');
+      const v = await sweepVodRetention({ actor: 'retention:sweep' });
+      if (v.removed || v.failed || v.warned) console.log(`[retention] titles: ${v.removed} removed, ${v.warned} warned, ${v.waiting} waiting, ${v.held} on legal hold, ${v.failed} failed`);
+    } catch (e) { console.error('[retention] titles pass failed', e); }
     if (result.cooled || result.archived || result.deleted || result.failed
         || result.unavailable || result.orphaned) {
       console.log(
