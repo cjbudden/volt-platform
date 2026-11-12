@@ -625,6 +625,14 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
       if (n) log.step(`caption tracks written into the bucket's playlists (${n})`);
     }
   }
+  // Its skip markers too (build queue 2.1a-2b-6): the new playlists carry none,
+  // and a re-encode keeps the asset's markers. Fails open.
+  if (vodStore() === 's3') {
+    const { syncBucketMarkers } = await import('../../vodMarkersBucket');
+    const sm = await syncBucketMarkers(p.vodAssetId);
+    if (sm.error) log.warn(`skip markers not written into the bucket's playlists: ${sm.error}`);
+    else if (sm.written.length) log.step(`skip markers written into the bucket's playlists (${sm.written.length})`);
+  }
   // THE OLD PACKAGE ON THE BUCKET goes once no viewer can still be reading it
   // (services/repackage.ts oldPackageGraceMs). Never fails the repackage.
   if (bucketRepack?.oldBase) {

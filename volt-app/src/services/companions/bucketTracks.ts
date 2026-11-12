@@ -74,18 +74,26 @@ async function remove(key: string) {
 // One sync at a time per asset in this task, so two quick edits cannot write
 // their playlists out of order. Each sync reads the tracks fresh, so the last
 // one to run writes the current state.
+// The skip markers' sync (services/vodMarkersBucket.ts, build queue 2.1a-2b-6)
+// rewrites the same MPD, so it queues on the same chain: neither can write a
+// copy that drops the other's change.
 const chains = new Map<string, Promise<unknown>>();
+
+/** Run `fn` after every earlier bucket playlist write for this asset in this task. */
+export function onAssetChain<T>(assetId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = chains.get(assetId) ?? Promise.resolve();
+  const run = prev.catch(() => null).then(fn);
+  chains.set(assetId, run);
+  run.finally(() => { if (chains.get(assetId) === run) chains.delete(assetId); }).catch(() => null);
+  return run;
+}
 
 /**
  * Bring the bucket copy of an encode's playlists in line with its caption
  * tracks. `removed`: ids of caption files just deleted (their rows are gone).
  */
 export function syncBucketTracks(assetId: string, opts: { removed?: string[] } = {}): Promise<SyncResult> {
-  const prev = chains.get(assetId) ?? Promise.resolve();
-  const run = prev.catch(() => null).then(() => doSync(assetId, opts));
-  chains.set(assetId, run);
-  run.finally(() => { if (chains.get(assetId) === run) chains.delete(assetId); }).catch(() => null);
-  return run;
+  return onAssetChain(assetId, () => doSync(assetId, opts));
 }
 
 async function doSync(assetId: string, opts: { removed?: string[] }): Promise<SyncResult> {

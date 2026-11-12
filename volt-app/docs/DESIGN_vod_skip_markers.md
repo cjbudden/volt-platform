@@ -55,6 +55,16 @@ player asks** (`server.ts`, ahead of the `/clips` files):
   process and dropped on any edit (migration 0062's trigger, tag `asset:<id>`).
 - Apps that draw their own button get the same ranges as `skip` in the item details (`modules/apps.ts`).
 
+**On AWS (S3 store) the encodes play from the CDN** and never ask the `/clips` route, so the markers are
+also written into the bucket copy of each encode (build queue 2.1a-2b-6, `services/vodMarkersBucket.ts`): every
+media playlist the master names (variants and audio renditions, never caption or I-frame playlists) and
+`manifest.mpd`, with the same `annotateHls` / `annotateMpd` output, at 60 s cache. It runs after every set,
+accept and delete, after detection writes markers (for each asset written), and after an encode or repackage
+lands in the bucket. A repackaged title is written beside its current master. It queues per asset with the
+caption track sync (`companions/bucketTracks.ts` `onAssetChain`), which rewrites the same MPD. Fails open: a
+failed write is logged, and `/clips` still serves the asset with its markers. A moved marker reaches CDN
+viewers within the playlists' 60 s max-age.
+
 ## Fixed on the way
 
 - On-demand share links pointed at `<master_key>/master.m3u8`, which did not exist (`master_key` already is the

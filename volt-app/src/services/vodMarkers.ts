@@ -18,6 +18,9 @@
 //    rebuilt, so an edit reaches viewers on their next playlist fetch. The
 //    segments keep their long cache; only the small playlists are short-lived.
 //    Live and FAST manifests never carry them: Skip is for on-demand playback.
+//    On S3 players fetch an encode's playlists from the CDN and never ask that
+//    route, so every change is also written into the bucket copy
+//    (vodMarkersBucket.ts, build queue 2.1a-2b-6).
 //
 //  SERIES
 //    Episodes are grouped by the series in their metadata (the `episode`
@@ -73,6 +76,7 @@ export async function setMarker(assetId: string, kind: MarkerKind, startMs: numb
        SET start_ms = EXCLUDED.start_ms, end_ms = EXCLUDED.end_ms, source = 'manual', status = 'active',
            updated_by = EXCLUDED.updated_by, updated_at = now()
      RETURNING *`, [assetId, kind, s, e, userId]);
+  await bucketSync([assetId]);
   return row2(r);
 }
 
@@ -81,12 +85,23 @@ export async function acceptMarker(assetId: string, kind: MarkerKind, userId: st
   const r = await one<any>(
     `UPDATE vod_markers SET status = 'active', source = 'manual', updated_by = $3, updated_at = now()
       WHERE vod_asset_id = $1 AND kind = $2 RETURNING *`, [assetId, kind, userId]);
+  if (r) await bucketSync([assetId]);
   return r ? row2(r) : null;
 }
 
 export async function deleteMarker(assetId: string, kind: MarkerKind): Promise<boolean> {
   const r = await query<any>(`DELETE FROM vod_markers WHERE vod_asset_id = $1 AND kind = $2 RETURNING id`, [assetId, kind]);
+  if (r.length) await bucketSync([assetId]);
   return r.length > 0;
+}
+
+/**
+ * On S3 players read an encode's playlists from the CDN, never through the
+ * /clips route that annotates them, so a change is written into the bucket
+ * copy too (services/vodMarkersBucket.ts, build queue 2.1a-2b-6). Fails open.
+ */
+async function bucketSync(assetIds: string[]): Promise<void> {
+  try { await (await import('./vodMarkersBucket')).syncBucketMarkersQuietly(assetIds); } catch { /* fails open */ }
 }
 
 // ------------------------------------------------------------------ series
@@ -161,6 +176,8 @@ export async function detectMarkers(assetId: string, deps: { fp?: typeof fingerp
   const finish = async (note: string) => {
     report.note = note;
     await query(`UPDATE vod_assets SET marker_group = $2, markers_detected_at = now(), markers_note = $3 WHERE id = $1`, [assetId, report.group, note]);
+    // Detection may have written this asset's markers and its peers'.
+    if (report.written.length) await bucketSync(report.written.map((w) => w.assetId));
     return report;
   };
   const group = await groupFor(a);
