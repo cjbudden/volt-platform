@@ -164,8 +164,12 @@ snapshot and the bucket won't force‑empty — intentional guard rails.
 - **GPU transcode.** Default nodes are CPU (packaging + x264). For GPU density set
   `encoder_instance_types = ["g4dn.xlarge"]` and switch the ECS AMI SSM parameter
   in `ecs_cluster.tf` to the GPU‑recommended one.
-- **NAT/HA.** One NAT gateway to keep staging cheap; use one per AZ and
-  `db_multi_az = true` for prod.
+- **NAT/HA.** One NAT gateway to keep staging cheap; use one per AZ for prod.
+- **Database resilience** (`resilience.tf`). The SaaS service in prod is always
+  Multi-AZ, with a Valkey replica, 14 to 35 days of backups and daily snapshot
+  copies to a second region; a dedicated deployment picks `resilience`
+  (`standard`, `high`, `dr`). Major Postgres upgrades go through RDS Blue/Green
+  (APPLY.md, step 6).
 - **Capacity provider names** (`volt-spot` / `volt-ondemand`) match the control‑
   plane config defaults, so the orchestrator's `capacityProviderStrategy`
   (Spot weight 4 + on‑demand base 1) lands tasks correctly. If you change

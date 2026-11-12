@@ -169,8 +169,9 @@ variable "db_username" {
 }
 
 variable "db_multi_az" {
-  type    = bool
-  default = false # true for prod
+  type        = bool
+  default     = false
+  description = "Multi-AZ for the database. Forced on by the high and dr tiers, so the SaaS service in prod always has it (resilience.tf)."
 }
 
 # ---- JWT / ingest secrets ---------------------------------------------------

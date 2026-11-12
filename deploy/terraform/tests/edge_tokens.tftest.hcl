@@ -18,6 +18,10 @@ mock_provider "aws" {
 mock_provider "aws" {
   alias = "us_east_1"
 }
+# The second region for the dr tier's snapshot copies (resilience.tf).
+mock_provider "aws" {
+  alias = "backup_copy"
+}
 mock_provider "random" {}
 
 variables {

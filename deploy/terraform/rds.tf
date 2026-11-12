@@ -21,9 +21,10 @@ resource "aws_db_instance" "pg" {
 
   db_subnet_group_name   = aws_db_subnet_group.pg.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  multi_az               = var.db_multi_az
+  # Multi-AZ and the backup days follow the resilience tier (resilience.tf).
+  multi_az = local.db_multi_az
 
-  backup_retention_period = var.env == "prod" ? 7 : 1
+  backup_retention_period = local.db_backup_days
   deletion_protection     = var.env == "prod"
   skip_final_snapshot     = var.env != "prod"
   apply_immediately       = var.env != "prod"

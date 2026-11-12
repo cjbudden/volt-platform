@@ -35,6 +35,7 @@ have it, `tflint --init && tflint` in this folder is worth a look.
 | AWS account, region and an admin role to apply with | your AWS CLI profile; `region` in `terraform.tfvars` |
 | Environment name (`staging`, `prod`) | `env`; `prod` turns on deletion protection and a final database snapshot |
 | One customer or many | `deployment = "single"` (default) or `"saas"` |
+| How well the database survives a zone or a region going down | `resilience`: the SaaS service in `prod` is always `dr`; one customer's own Volt picks `standard` (default), `high` or `dr` (step 6). `backup_copy_region` if the usual pair of your region does not suit |
 | Email provider for invites, password resets, sign-in codes and alerts | `SMTP_URL` in the integrations secret and `app_secret_keys`, `NOTIFY_FROM` in `app_env` (step 7). Without them production cannot send email |
 | The domain Volt is served under, and its Route 53 hosted zone if it has one | `domain_name`, `route53_zone_id` (step 3). Terraform makes the certificates, the HTTPS listener and the records from these two |
 | Remote state | step 2 |
@@ -144,6 +145,44 @@ Nothing to run. The roles that own the schema (`all`, `api-admin`,
 `scheduler`) apply every migration in `volt-app/migrations` on boot, under a
 lock, before they serve; the others wait. The control plane's log shows each
 migration as it runs.
+
+**Resilience** (`resilience.tf`). The `db_resilience` output says what is in
+force:
+
+| Tier | Database | Cache (Valkey) | Second region |
+|---|---|---|---|
+| `standard` | one zone (or `db_multi_az = true`) | `valkey_replicas` as set | none |
+| `high` | Multi-AZ | at least one replica, automatic fail-over | none |
+| `dr` | Multi-AZ | at least one replica, automatic fail-over | a daily AWS Backup snapshot at 04:00 UTC, copied to `backup_copy_region` |
+
+The SaaS service (`deployment = "saas"`) in `prod` is always `dr`, whatever
+`resilience` says. A dedicated deployment (`deployment = "single"`) chooses:
+`high` and `dr` are the premium options, because Multi-AZ doubles the
+database's cost and the copies add storage in a second region. In `prod` RDS
+keeps automated backups (point-in-time restore) for `db_backup_retention_days`,
+14 to 35 days, 14 when unset; the snapshot copies are kept as long. Plan
+refuses fewer than 14 days in prod, and a copy region equal to the stack's.
+
+A Multi-AZ fail-over test (reboot with fail-over, the control plane
+reconnecting) is part of the AWS staging run.
+
+**Upgrading Postgres to a new major version** (16 to 17, say). Never change
+`engine_version` in place on prod: the database is down for the whole
+upgrade. Use an RDS Blue/Green deployment instead:
+
+1. Take a manual snapshot.
+2. Create the Blue/Green deployment from the console or
+   `aws rds create-blue-green-deployment --source <the pg instance ARN> --target-engine-version 17 --target-db-parameter-group-name <a 17 group>`.
+   RDS builds a copy (green) on the new version and keeps it in step with the
+   live database (blue) by logical replication.
+3. Point a staging control plane at the green endpoint and run the smoke
+   test (step 8). Migrations still run on blue only.
+4. Switch over (`aws rds switchover-blue-green-deployment`). It takes about a
+   minute; the endpoint name stays the same, so the control plane reconnects
+   by itself.
+5. Set `engine_version` in `rds.tf` to the new version and run `terraform plan`:
+   it should show no change to the instance. Then delete the Blue/Green
+   deployment and, after a few days, the old blue instance.
 
 ## 7. Secrets you add
 

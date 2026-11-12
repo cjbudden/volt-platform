@@ -43,9 +43,10 @@ resource "aws_elasticache_replication_group" "valkey" {
   port                 = 6379
   parameter_group_name = "default.valkey8"
 
-  num_cache_clusters         = 1 + var.valkey_replicas
-  automatic_failover_enabled = var.valkey_replicas > 0
-  multi_az_enabled           = var.valkey_replicas > 0
+  # At least one replica in the high and dr tiers (resilience.tf).
+  num_cache_clusters         = 1 + local.valkey_replicas
+  automatic_failover_enabled = local.valkey_replicas > 0
+  multi_az_enabled           = local.valkey_replicas > 0
 
   # TLS in transit (the app connects with rediss://), encrypted at rest.
   transit_encryption_enabled = true

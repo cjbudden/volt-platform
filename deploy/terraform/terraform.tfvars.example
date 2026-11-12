@@ -21,7 +21,15 @@ ondemand_min = 1   # base=1 fallback for Spot interruptions
 ondemand_max = 2
 
 db_instance_class = "db.t4g.medium"
-db_multi_az       = false   # true for prod
+db_multi_az       = false   # forced on by resilience high and dr (resilience.tf)
+
+# ---- Database resilience (resilience.tf) ---------------------------------------
+# The SaaS service (deployment = "saas") in prod is always dr. A dedicated
+# deployment picks: standard (one zone), high (Multi-AZ, cache replica) or dr
+# (high plus a daily snapshot copied to a second region).
+resilience = "standard"
+# db_backup_retention_days = 14     # prod: 14 to 35 (default 14); elsewhere 1
+# backup_copy_region       = "us-west-2"   # dr only; default: the usual pair of region
 
 control_plane_desired   = 2
 # A release, never latest (D1). After the first deploy, use the one running:
