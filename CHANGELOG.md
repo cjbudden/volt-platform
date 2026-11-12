@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.123.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Publishing Rules: Confirming a DRM change on published titles now packages them again on their own, in the background and in batches: each title keeps playing with its current protection until its new files are complete, then switches. Before you save and the confirmation say about how long the jobs take.
+- improved · Media Library: The Encode tab shows Repackage queued or Repackaging while a title is being packaged again after a DRM change.
+
+### Internal
+
+- added · Tests: publishing-repackage suite: repackage jobs on a confirmed DRM change, the swap, a failed repackage, batches and what waits.
+
 ## 0.122.0 (2026-11-12)
 
 ### Product (in customer release notes)
