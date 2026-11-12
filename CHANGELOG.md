@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.131.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- improved · Events: Open on the Events list is blue, as on Channels, Radio, FAST and Recordings. On an event's page the programme guide sits under the players by default, as on a channel; a layout you customised stays as you set it.
+- improved · Loops & Fillers: The view, archive and delete buttons on each row sit in outlined, rounded boxes, like the row buttons on every other list.
+
 ## 0.130.0 (2026-11-12)
 
 ### Product (in customer release notes)
