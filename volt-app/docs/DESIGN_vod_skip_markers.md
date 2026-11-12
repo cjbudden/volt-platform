@@ -31,6 +31,10 @@ stretch is the intro; the closing 7 minutes give the credits.
 - Series: the episode metadata's `series`, else the guide programme the asset was recorded from (its title on its
   channel), else the asset's own title with episode numbers and dates removed.
 - Cost: audio only, a few seconds per episode.
+- Where the audio comes from (`mediaSourceFor`): a file on the task's disk when there is one (the Mac); with the S3
+  store (build queue 2.1a-2b-7) the smallest bucket copy that carries the audio, fetched into job scratch and
+  removed when detection ends: the audio export, the progressive MP4, the MP4 download, else the original under
+  `vod-src/`. An encrypted title is read from its original only. In-region S3 to the task costs nothing per byte.
 
 ## Editing, any time
 

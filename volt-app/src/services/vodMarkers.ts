@@ -154,6 +154,67 @@ export function mediaPathFor(a: any): string | null {
   return local(a.master_key);
 }
 
+/** A file ffmpeg can read the asset's audio from, and how to give it back. */
+export interface MediaSource { path: string; fetched: boolean; release: () => Promise<void> }
+
+/**
+ * mediaPathFor, and on S3 the bucket copy when this task has no file (build
+ * queue 2.1a-2b-7). On AWS the encode or clip was made by whichever task ran
+ * the job and its files live in the bucket, so the task running detection
+ * usually holds none of them and detection found nothing. The smallest copy
+ * that carries the audio is fetched into job scratch (the same order as
+ * mediaPathFor: the audio export, the progressive MP4, the MP4 download), else
+ * the original in the bucket; an encrypted title is read from its original
+ * only (its packaged files decode to noise without the key). The caller
+ * releases it. In-region S3 to the task costs nothing per byte, and only
+ * minutes of each file are read, so the cheapest copy wins over a range read.
+ */
+export async function mediaSourceFor(a: any): Promise<MediaSource | null> {
+  const here = mediaPathFor(a);
+  if (here) return { path: here, fetched: false, release: async () => {} };
+  const encrypted = !!(a.encode_result?.drm && a.encode_result.drm !== 'clear');
+  if (!encrypted) {
+    const { readThroughKey, isEncodeBucketKey } = await import('./media/clipsStore');
+    for (const k of [a.export_m4a_key, a.export_mp3_key, a.progressive_key, a.export_mp4_key]) {
+      if (!k) continue;
+      const key = String(k).startsWith('/clips/') ? await readThroughKey(String(k).slice('/clips'.length)) : isEncodeBucketKey(k) ? String(k) : null;
+      if (!key) continue;
+      const got = await fetchObject(key).catch(() => null);
+      if (got) return got;
+    }
+  }
+  const { isBucketSource, fetchVodSource } = await import('./media/vodSource');
+  if (isBucketSource(a.source_key)) {
+    const f = await fetchVodSource(a.source_key).catch(() => null);
+    if (f) return { path: f.path, fetched: f.fetched, release: f.release };
+  }
+  return null;
+}
+
+/** One bucket object into its own scratch folder, or null when it is not there. */
+async function fetchObject(key: string): Promise<MediaSource | null> {
+  const { openObject } = await import('./media/clipsStore');
+  const o = await openObject(key);
+  if (!o) return null;
+  const { mkdir, mkdtemp, rm } = await import('node:fs/promises');
+  const { createWriteStream } = await import('node:fs');
+  const { pipeline } = await import('node:stream/promises');
+  const { tmpdir } = await import('node:os');
+  const { basename, resolve } = await import('node:path');
+  const root = resolve(process.env.VOD_SOURCE_CACHE_DIR || join(tmpdir(), 'volt-vod-src'));
+  await mkdir(root, { recursive: true });
+  const dir = await mkdtemp(join(root, 'markers-'));
+  const release = async () => { await rm(dir, { recursive: true, force: true }).catch(() => {}); };
+  try {
+    const path = join(dir, basename(key));
+    await pipeline(o.body, createWriteStream(path));
+    return { path, fetched: true, release };
+  } catch (e) {
+    await release();
+    throw e;
+  }
+}
+
 // ------------------------------------------------------------------ detection
 export const INTRO: DetectOptions & { windowSec: number } = { minSec: 10, maxSec: 150, windowSec: 600 };
 export const CREDITS: DetectOptions & { windowSec: number } = { minSec: 15, maxSec: 420, windowSec: 420 };
@@ -183,74 +244,90 @@ export async function detectMarkers(assetId: string, deps: { fp?: typeof fingerp
   const group = await groupFor(a);
   report.group = group;
   if (!group) return finish('Not part of a series, so there is nothing to compare it with. Set the markers by hand.');
-  const self = mediaPathFor(a);
-  if (!self) return finish('The media is not available on this server yet.');
+  // Bucket copies fetched for this run are released however it ends (2.1a-2b-7).
+  const held: MediaSource[] = [];
+  try {
+    const selfSrc = await mediaSourceFor(a);
+    if (!selfSrc) return finish('The media is not available yet: no file of it on this server or in the storage bucket.');
+    held.push(selfSrc);
+    const self = selfSrc.path;
 
-  // Episodes that have never been through detection (built before this existed,
-  // or still queued) have no group yet: work theirs out now, for the recent ones
-  // that could be in this series (same channel or event, or any with a series).
-  const ungrouped = await query<any>(
-    `SELECT * FROM vod_assets
-      WHERE id <> $1 AND marker_group IS NULL AND COALESCE(account_id::text, '') = COALESCE($2::text, '')
-        AND (channel_id IS NOT DISTINCT FROM $3 AND event_id IS NOT DISTINCT FROM $4 OR metadata ? 'series')
-      ORDER BY created_at DESC LIMIT 50`, [assetId, a.account_id ?? null, a.channel_id ?? null, a.event_id ?? null]);
-  for (const u of ungrouped) {
-    const g = await groupFor(u);
-    if (g) await query(`UPDATE vod_assets SET marker_group = $2 WHERE id = $1 AND marker_group IS NULL`, [u.id, g]);
-  }
-
-  const peers = await query<any>(
-    `SELECT * FROM vod_assets
-      WHERE id <> $1 AND marker_group = $2 AND COALESCE(account_id::text, '') = COALESCE($3::text, '')
-      ORDER BY created_at DESC LIMIT 12`, [assetId, group, a.account_id ?? null]);
-  const usable = peers.map((p) => ({ row: p, path: mediaPathFor(p) })).filter((p) => p.path).slice(0, MAX_PEERS);
-  report.peers = usable.map((p) => p.row.id);
-  if (!usable.length) {
-    return finish('No other episode of this series yet. Markers are found when the next episode arrives.');
-  }
-
-  const all = [{ row: a, path: self }, ...usable];
-  let fpError = '';
-  const durSec = (r: any) => Math.max(0, Number(r.duration_ms) || 0) / 1000;
-  for (const [kind, o] of [['intro', INTRO], ['credits', CREDITS]] as const) {
-    const eps: Array<{ id: string; fp: Uint32Array; offsetSec: number }> = [];
-    for (const e of all) {
-      const d = durSec(e.row);
-      // intro: the opening minutes (at most half); credits: the closing minutes (at most 40%)
-      const win = kind === 'intro' ? Math.min(o.windowSec, d > 0 ? d * 0.5 : o.windowSec) : Math.min(o.windowSec, d > 0 ? d * 0.4 : o.windowSec);
-      const from = kind === 'intro' ? 0 : Math.max(0, d - win);
-      if (kind === 'credits' && d <= 0) continue;
-      try { eps.push({ id: e.row.id, fp: await fp(e.path!, from, win), offsetSec: from }); } catch (err: any) { fpError ||= String(err?.message ?? err); /* unreadable: leave it out */ }
+    // Episodes that have never been through detection (built before this existed,
+    // or still queued) have no group yet: work theirs out now, for the recent ones
+    // that could be in this series (same channel or event, or any with a series).
+    const ungrouped = await query<any>(
+      `SELECT * FROM vod_assets
+        WHERE id <> $1 AND marker_group IS NULL AND COALESCE(account_id::text, '') = COALESCE($2::text, '')
+          AND (channel_id IS NOT DISTINCT FROM $3 AND event_id IS NOT DISTINCT FROM $4 OR metadata ? 'series')
+        ORDER BY created_at DESC LIMIT 50`, [assetId, a.account_id ?? null, a.channel_id ?? null, a.event_id ?? null]);
+    for (const u of ungrouped) {
+      const g = await groupFor(u);
+      if (g) await query(`UPDATE vod_assets SET marker_group = $2 WHERE id = $1 AND marker_group IS NULL`, [u.id, g]);
     }
-    if (eps.length < 2 || !eps.some((x) => x.id === assetId)) continue;
-    const res = detectAcross(eps, { ...o, peers: MAX_PEERS });
-    for (const r of res) {
-      if (!r.interval) continue;
-      // The asset being detected always gets its answer; a peer only when this is news for it.
-      const isSelf = r.id === assetId;
-      const startMs = Math.round(r.interval.start * 1000), endMs = Math.round(r.interval.end * 1000);
-      const status = r.confidence >= ACTIVE_AT ? 'active' : 'suggested';
-      const detail = { comparedWith: r.comparedWith, agreed: r.agreed, group, peers: eps.map((x) => x.id).filter((x) => x !== r.id), at: new Date().toISOString() };
-      const w = await one<any>(
-        `INSERT INTO vod_markers (vod_asset_id, kind, start_ms, end_ms, source, status, confidence, detail)
-         VALUES ($1, $2, $3, $4, 'auto', $5, $6, $7)
-         ON CONFLICT (vod_asset_id, kind) DO UPDATE
-           SET start_ms = EXCLUDED.start_ms, end_ms = EXCLUDED.end_ms, status = EXCLUDED.status,
-               confidence = EXCLUDED.confidence, detail = EXCLUDED.detail, updated_at = now()
-           WHERE vod_markers.source = 'auto'
-             AND ($8 OR vod_markers.confidence IS NULL OR EXCLUDED.confidence >= vod_markers.confidence)
-         RETURNING *`,
-        [r.id, kind, startMs, endMs, status, r.confidence, detail, isSelf]);
-      if (w) report.written.push({ assetId: r.id, kind, startMs, endMs, status, confidence: r.confidence });
+
+    const peers = await query<any>(
+      `SELECT * FROM vod_assets
+        WHERE id <> $1 AND marker_group = $2 AND COALESCE(account_id::text, '') = COALESCE($3::text, '')
+        ORDER BY created_at DESC LIMIT 12`, [assetId, group, a.account_id ?? null]);
+    // The first few peers whose audio can be read, here or from the bucket.
+    const usable: Array<{ row: any; path: string }> = [];
+    for (const p of peers) {
+      if (usable.length >= MAX_PEERS) break;
+      const src = await mediaSourceFor(p).catch(() => null);
+      if (!src) continue;
+      held.push(src);
+      usable.push({ row: p, path: src.path });
     }
+    report.peers = usable.map((p) => p.row.id);
+    if (!usable.length) {
+      return finish('No other episode of this series yet. Markers are found when the next episode arrives.');
+    }
+
+    const all = [{ row: a, path: self }, ...usable];
+    let fpError = '';
+    const durSec = (r: any) => Math.max(0, Number(r.duration_ms) || 0) / 1000;
+    for (const [kind, o] of [['intro', INTRO], ['credits', CREDITS]] as const) {
+      const eps: Array<{ id: string; fp: Uint32Array; offsetSec: number }> = [];
+      for (const e of all) {
+        const d = durSec(e.row);
+        // intro: the opening minutes (at most half); credits: the closing minutes (at most 40%)
+        const win = kind === 'intro' ? Math.min(o.windowSec, d > 0 ? d * 0.5 : o.windowSec) : Math.min(o.windowSec, d > 0 ? d * 0.4 : o.windowSec);
+        const from = kind === 'intro' ? 0 : Math.max(0, d - win);
+        if (kind === 'credits' && d <= 0) continue;
+        try { eps.push({ id: e.row.id, fp: await fp(e.path!, from, win), offsetSec: from }); } catch (err: any) { fpError ||= String(err?.message ?? err); /* unreadable: leave it out */ }
+      }
+      if (eps.length < 2 || !eps.some((x) => x.id === assetId)) continue;
+      const res = detectAcross(eps, { ...o, peers: MAX_PEERS });
+      for (const r of res) {
+        if (!r.interval) continue;
+        // The asset being detected always gets its answer; a peer only when this is news for it.
+        const isSelf = r.id === assetId;
+        const startMs = Math.round(r.interval.start * 1000), endMs = Math.round(r.interval.end * 1000);
+        const status = r.confidence >= ACTIVE_AT ? 'active' : 'suggested';
+        const detail = { comparedWith: r.comparedWith, agreed: r.agreed, group, peers: eps.map((x) => x.id).filter((x) => x !== r.id), at: new Date().toISOString() };
+        const w = await one<any>(
+          `INSERT INTO vod_markers (vod_asset_id, kind, start_ms, end_ms, source, status, confidence, detail)
+           VALUES ($1, $2, $3, $4, 'auto', $5, $6, $7)
+           ON CONFLICT (vod_asset_id, kind) DO UPDATE
+             SET start_ms = EXCLUDED.start_ms, end_ms = EXCLUDED.end_ms, status = EXCLUDED.status,
+                 confidence = EXCLUDED.confidence, detail = EXCLUDED.detail, updated_at = now()
+             WHERE vod_markers.source = 'auto'
+               AND ($8 OR vod_markers.confidence IS NULL OR EXCLUDED.confidence >= vod_markers.confidence)
+           RETURNING *`,
+          [r.id, kind, startMs, endMs, status, r.confidence, detail, isSelf]);
+        if (w) report.written.push({ assetId: r.id, kind, startMs, endMs, status, confidence: r.confidence });
+      }
+    }
+    const mine = report.written.filter((w) => w.assetId === assetId);
+    // Nothing could be fingerprinted at all: say why, rather than "nothing found".
+    // The usual cause is an ffmpeg built without Chromaprint (the images have it).
+    if (!mine.length && fpError) return finish(`The audio could not be fingerprinted: ${fpError.slice(0, 200)}. This needs an ffmpeg built with Chromaprint.`);
+    return finish(mine.length
+      ? `Compared with ${usable.length} other episode${usable.length === 1 ? '' : 's'}: ${mine.map((m) => `${m.kind}${m.status === 'suggested' ? ' (suggested)' : ''}`).join(', ')} found.`
+      : `Compared with ${usable.length} other episode${usable.length === 1 ? '' : 's'}: no shared intro or credits found.`);
+  } finally {
+    for (const h of held) await h.release().catch(() => {});
   }
-  const mine = report.written.filter((w) => w.assetId === assetId);
-  // Nothing could be fingerprinted at all: say why, rather than "nothing found".
-  // The usual cause is an ffmpeg built without Chromaprint (the images have it).
-  if (!mine.length && fpError) return finish(`The audio could not be fingerprinted: ${fpError.slice(0, 200)}. This needs an ffmpeg built with Chromaprint.`);
-  return finish(mine.length
-    ? `Compared with ${usable.length} other episode${usable.length === 1 ? '' : 's'}: ${mine.map((m) => `${m.kind}${m.status === 'suggested' ? ' (suggested)' : ''}`).join(', ')} found.`
-    : `Compared with ${usable.length} other episode${usable.length === 1 ? '' : 's'}: no shared intro or credits found.`);
 }
 
 // ------------------------------------------------------------------ outputs
