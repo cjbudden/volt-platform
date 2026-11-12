@@ -131,11 +131,18 @@ export function mintPlaybackToken(opts: {
    * proxy or the variant service reading the token logs the same session.
    */
   sid?: string;
+  /**
+   * The signed-in viewer, only on a play the concurrent streams limit counts
+   * (services/concurrentStreams.ts, build queue P3-4d): the beacon's
+   * heartbeats keep that play open in the viewer's record by it.
+   */
+  viewerId?: string;
 }): { token: string; expiresIn: number } {
   const ttl = opts.ttlSec ?? 120;
   const token = jwt.sign(
     { typ: 'playback', aid: opts.accountId, app: opts.appId,
-      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null, ...(opts.source ? { src: opts.source } : {}), ...(opts.sid ? { sid: opts.sid } : {}) },
+      asset: opts.assetId, kind: opts.assetKind, geo: opts.geo ?? null, ...(opts.source ? { src: opts.source } : {}), ...(opts.sid ? { sid: opts.sid } : {}),
+      ...(opts.viewerId ? { v: opts.viewerId } : {}) },
     playbackSecret(),
     { expiresIn: ttl }
   );

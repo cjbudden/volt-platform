@@ -16,6 +16,7 @@ import { ingest, liveConcurrency } from '../services/analytics';
 import { demandPeriod, rightsDemandCsv, rightsDemandReport } from '../services/availabilityDemand';
 import { publicDecision } from '../services/publicStatus';
 import { rightsForAssetId } from '../services/rightsProfiles';
+import { endPlay, isStopped, touchPlay, STOPPED_CODE, STOPPED_MESSAGE } from '../services/concurrentStreams';
 
 // ---- public beacon (playback-token auth) -----------------------------------
 export const analyticsBeaconRouter = Router();
@@ -73,6 +74,18 @@ analyticsBeaconRouter.post(
       },
       { seconds: b.seconds, bitrateKbps: b.bitrateKbps, ttffMs: b.ttffMs, rebufferMs: b.rebufferMs, bytes: b.bytes }
     );
+    // CONCURRENT STREAMS (build queue P3-4d). A play the limit counts carries
+    // its viewer in the token: a heartbeat keeps it open, its end closes it.
+    // A play stopped because the account opened too many is told so on its
+    // next beacon, with the words to show; the player stops there.
+    const sid = typeof tok.sid === 'string' ? tok.sid : b.sessionId;
+    if (await isStopped(sid)) {
+      return res.status(202).json({ ...(r as any), stop: { code: STOPPED_CODE, message: STOPPED_MESSAGE } });
+    }
+    if (tok.v && typeof tok.sid === 'string') {
+      if (b.event === 'end') await endPlay(String(tok.aid), String(tok.v), tok.sid);
+      else await touchPlay(String(tok.aid), String(tok.v), tok.sid);
+    }
     res.status(202).json(r);
   })
 );

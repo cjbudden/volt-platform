@@ -64,6 +64,7 @@ If the viewer has just bought a pass, the gate checks their purchases again befo
 | `403` | `sign_in` | Members only | Sign in |
 | `403` | `scheduled` | An on-demand title announced ahead of its release (its **Listed from** date has passed). `until` (and `availableFrom`, its older name) says when it opens and `meta` what it is; there is no token and no `delivery` | Coming soon, with the date |
 | `451` | `blocked` | Not available where the viewer is. `code` is `region` (a geo rule) or `rights` (the rights' territories or apps, a blackout); `reason` says which rule; `meta` says what it is | The title locked, with `message` |
+| `409` | `stopped` | `code: "concurrent_streams"`: this play attempt (its `sid`) was stopped because the viewer's account started more plays than the title's publishing rule allows (**Concurrent streams**), and it asked again with the same `sid`. A new play attempt (a new `sid`) starts, and stops their oldest one instead | `error` (*Playback stopped because this account is playing on too many devices.*) and a way to start again |
 | `403` | `blocked` | `code: "referrer"`: the title's publishing rule lists the sites it may be embedded on, and this page is not on one of them (or a web app's request named no page). `reason` names the site | **Not available on this site**, from `message` |
 | `403` | | The app's key does not work on this site, or the app is off: `error` says which | Nothing: fix the app's settings |
 | `401` | | The key is not valid | Nothing: fix the key |
@@ -100,6 +101,16 @@ For a catalogue screen, ask for a yes or no without minting a token:
 `playbackToken` names this app, this asset and this play attempt, and lasts `expiresIn` seconds (two minutes). Send it with the viewer reports for Analytics. It carries no personal details, so a cached anonymous answer can be shared by many viewers. Ask the gate again for each new play, not once per page load: a token is for starting playback, and an old one is refused.
 
 To tie the gate, the reports and the CDN logs together, pass your play attempt's id as `sid` in the request body (8 to 64 letters, digits, `.`, `_`, `:` or `-`). The Volt player does this itself.
+
+#### Concurrent streams
+
+A title or channel whose publishing rule sets **Concurrent streams** limits how many plays one signed-in viewer may have open at once. It counts only signed-in viewers let in by a sign-in (members only, or a pass or package); free content is never limited. Over the limit, the viewer's **oldest** play is stopped and the new one starts:
+
+- The `200` answer of a counted play has `streams` (`limit`, `open`, and `stopped`, how many other plays it stopped) and `sid`, the play attempt's id (the gate makes one when the request sent none).
+- The stopped player learns it on its next viewer report (`POST /api/analytics/beacon`, every 30 seconds): the `202` answer has `stop` with `code: "concurrent_streams"` and `message`, the words to show. Stop playback and show them.
+- If the stopped player asks the gate again with the same `sid`, the answer is `409` with `mode: "stopped"`. Starting again with a new `sid` is the viewer's choice to move the play to this device.
+
+A play the player has not reported on for 90 seconds, or that sent its `end` report, no longer counts.
 
 ### 6. On-demand ads
 
@@ -182,5 +193,6 @@ The guided playlist itself (`delivery.hls` under `/vod-ads/g/...`) is the same f
 | Members get `sign_in` although your app knows them | A `viewer` or `entitled` sent in the body is ignored from browsers and phones | Sign them in, or use the [token exchange](authentication.md) from your server |
 | `200` with `delivery: null` | The live channel is off air, or its output is not ready | Show "not on air" and try again |
 | `200` with `ads` and `delivery.dash: null` | The title has ad breaks for this viewer, carried in the HLS address: the ads are guided, or the title has no DASH encode | Play `delivery.hls` |
+| `409` with `code: "concurrent_streams"`, or a report answered with `stop` | The viewer's account started more plays than the title's rule allows, and this was the oldest | Stop and show the message; offer to play here, which asks the gate with a new `sid` |
 | `403` from the CDN on a manifest or segment of an on-demand title | The address's token expired, the viewer is in another country than when they asked, or the title stopped being public | Ask the gate again for a new address (step 7) |
 | `404` on `delivery.dash` with ads | One of the ads chosen for this viewer has no fMP4 version and cannot be a DASH Period | Play `delivery.hls` |

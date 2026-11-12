@@ -36,6 +36,10 @@ import { limit } from '../scale/ratelimit';
 import { blockSettings, addNotifyRequest, type NotifyReason } from '../services/blockMessage';
 import { vodAvailabilityRow } from '../services/viewerPath';
 import { deliveryPolicyOf, referrerRefusal, tokenFreeNow } from '../services/deliveryPolicy';
+import { admitPlay, concurrentLimitOf, countedPlay, isStopped, STOPPED_CODE, STOPPED_MESSAGE } from '../services/concurrentStreams';
+import { liveOwner, cachedPlan } from '../services/viewerPath';
+import { resolveForAsset } from '../services/publishingRules';
+import { randomUUID } from 'node:crypto';
 
 // ---- management (JWT-auth) --------------------------------------------------
 export const appsRouter = Router();
@@ -440,7 +444,31 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
       edgeSec,
     };
   }
-  const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo, sid: b.sid });
+  // CONCURRENT STREAMS (the rule's Protection, build queue P3-4d; decided by
+  // Christian, 11 Nov 2026). Only a signed-in viewer let in by a sign-in
+  // (members or an entitlement) is counted; free content never is. Over the
+  // limit the viewer's oldest play is stopped and this one starts. A play
+  // already stopped that asks again with its own sid (a token refresh) is
+  // refused, so two devices do not take turns stopping each other. The limit
+  // comes from the title's stamp or the stream's cached rules, and the record
+  // of plays from Valkey or this process: no database read when warm.
+  let streams: { limit: number; open: number; stopped: number } | null = null;
+  const via = (rights as any).rule?.via ?? null;
+  if (vi.claims?.sub && (via === 'members' || via === 'entitlement')) {
+    const limitNow = await concurrentLimitFor(kind, b.assetId, key.account_id);
+    if (countedPlay({ signedIn: true, via, limit: limitNow })) {
+      if (b.sid && await isStopped(b.sid)) {
+        return { status: 409, edgeSec: 0, body: { available: false, mode: 'stopped', code: STOPPED_CODE, error: STOPPED_MESSAGE, reason: STOPPED_MESSAGE,
+          message: 'Playing on too many devices', limit: limitNow } };
+      }
+      // A play with no sid of its own gets one, so its heartbeats can keep it open.
+      if (!b.sid) b = { ...b, sid: `cs-${randomUUID()}` };
+      const a = await admitPlay({ accountId: key.account_id, viewerId: String(vi.claims.sub), sid: b.sid!, assetId: b.assetId, limit: limitNow! });
+      streams = { limit: limitNow!, open: a.open, stopped: a.stopped.length };
+    }
+  }
+  const tok = mintPlaybackToken({ accountId: key.account_id, appId: key.app_id, assetId: b.assetId, assetKind: kind, geo, sid: b.sid,
+    viewerId: streams ? String(vi.claims!.sub) : undefined });
   let delivery = await deliveryFor(kind, b.assetId, key.account_id, b.sid);
   // ON-DEMAND ADS (services/vodAds). A viewer the rule makes ad-free (paid, a
   // member) gets the asset as it is. Otherwise the HLS address carries the ads
@@ -507,9 +535,25 @@ async function decide(req: Request, b: GateInput, opts: { cacheable: boolean }, 
     status: 200, edgeSec,
     body: { available: true, mode: 'play', assetId: b.assetId, playbackToken: tok.token, expiresIn: tok.expiresIn,
       delivery,
+      // Counted by the concurrent streams limit: the play's sid (the gate's own when the player sent none), and how many other plays this one stopped.
+      ...(streams ? { sid: b.sid, streams } : {}),
       ...(ads ? { ads: { delivery: ads.delivery, sessionId: ads.sessionId, timelineUrl: ads.timelineUrl } } : {}),
       meta: await metaFor(key.account_id, kind, b.assetId) },
   };
+}
+
+/**
+ * The concurrent streams limit of what is being played: a title's from its
+ * stamp (the cached availability row), a channel's or event's from its rules
+ * ladder (cached, the same entry the rights check reads). null: no limit.
+ */
+async function concurrentLimitFor(kind: string, assetId: string, acct: string): Promise<number | null> {
+  if (kind === 'vod') return concurrentLimitOf((await vodAvailabilityRow(assetId))?.availability);
+  const owner = await liveOwner(assetId);
+  if (!owner) return null;
+  const plan: any = await cachedPlan(acct, owner, () => resolveForAsset(acct, { schema_id: owner.schema_id,
+    channel_id: owner.kind === 'channel' ? owner.id : null, event_id: owner.kind === 'event' ? owner.id : null }));
+  return concurrentLimitOf(plan?.settings);
 }
 
 /**
