@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Publishing policies 4e: the Repackage pending filter and decoding an encrypted title (build queue P4-5; vX.Y.Z)
+## 2026-11-12 - Publishing policies 4e: the Repackage pending filter and decoding an encrypted title (build queue P4-5; v0.125.0)
 
 What: the Media Library can now list every title whose files do not carry what its publishing policy asks for (DRM on or off), and the parts of Volt that decode a title's pictures and sound read an encrypted title's original instead of its encrypted files, which Volt cannot decode because it never keeps the content key.
 
