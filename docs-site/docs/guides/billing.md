@@ -63,6 +63,8 @@ Add-ons are extra services your Volt provider offers for a monthly price, such a
 
 The meter under an add-on that is on shows how much of this month's quantity is used, what is left, and the day it starts again.
 
+**AI Find details** is one of the add-ons when your Volt provider has set it up. It lets **Find details…** in the Media Library read a page about a title with an AI model, for pages that publish no details for search engines (see [Media Library](media-library.md)). It includes 500 lookups a month; each page read with AI is one lookup. Packs add more lookups. When the month's lookups are used up, nothing more is sent to the AI model until you choose a bigger pack or the 1st comes round. If your provider has not set it up, it is not listed.
+
 How they are charged:
 
 - **Turning an add-on on**, or moving it to a **bigger pack**, charges the full monthly price for the current month. There is no part-month price.

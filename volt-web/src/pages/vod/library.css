@@ -274,6 +274,10 @@
 .songf-t .inp.sm { padding: 4px 8px; width: 100% }
 .songf-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; display: block }
 .songf-note { font-size: var(--fs-xs); color: var(--warn) }
+/* AI Find details (build queue F4): the sentence each suggestion came from, and the month's lookups. */
+.songf-quote { margin: 4px 0 0; padding: 4px 8px; font-size: var(--fs-xs); color: var(--muted); background: var(--panel-2); border-radius: 6px; font-style: italic; overflow-wrap: anywhere }
+.songf-ai-left, .songf-ai-why { margin-top: 6px }
+.songf-ai-why { margin-bottom: 8px }
 .songf-act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px }
 @media (max-width: 720px) { .songf-q { grid-template-columns: 1fr } }
 /* Find details on the Metadata tab (DetailsFinder.tsx, or the song finder for Songs and Music videos). */

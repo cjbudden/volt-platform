@@ -51,6 +51,15 @@
       "class": "default",
       "why": "Analytics tuning; the built-in values suit the Tier-2 sizes (SCALING.md)."
     },
+    "ANTHROPIC_API_BASE": {
+      "class": "local",
+      "why": "A stand-in for the Claude API in tests; unset on AWS so the real API is used."
+    },
+    "ANTHROPIC_API_KEY": {
+      "class": "operator",
+      "why": "AI Find details (build queue F4): the Claude API key. Without it the add-on is not offered at all.",
+      "how": "app_secret_keys"
+    },
     "AUTO_CONNECT": {
       "class": "default",
       "why": "Auto-reconnect policy for streams; the product defaults."
@@ -803,6 +812,10 @@
     "VOD_SOURCE_S3_PREFIX": {
       "class": "default",
       "why": "vod-src, the prefix the origin bucket policy keeps away from the CDN."
+    },
+    "VOLT_AI_MODEL": {
+      "class": "default",
+      "why": "AI Find details uses the smallest current Haiku by default; set only to move to a newer model before a release does."
     },
     "VOLT_ENCODER_VERSION": {
       "class": "not-on-aws-yet",

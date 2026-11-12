@@ -7732,6 +7732,15 @@
  },
  {
   "method": "POST",
+  "path": "/api/vod/:id/details/ai",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
   "path": "/api/vod/:id/details/find",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

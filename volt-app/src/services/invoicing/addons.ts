@@ -46,6 +46,18 @@ export interface Addon {
 
 export function isLicence(v: unknown): boolean { return v == null || (LICENCES as readonly string[]).includes(String(v)); }
 
+/**
+ * An add-on that needs something this deployment does not have is not
+ * offered: accounts do not see it and cannot turn it on (an account that has
+ * it keeps it, and its feature says why it cannot run). AI Find details needs
+ * the model's key (build queue F4, Christian: without a key the option is not
+ * offered).
+ */
+const NEEDS: Record<string, () => boolean> = {
+  find_details_ai: () => !!String(process.env.ANTHROPIC_API_KEY ?? '').trim(),
+};
+export const addonOffered = (key: string) => NEEDS[key]?.() ?? true;
+
 // ---- the catalogue ------------------------------------------------------------
 
 export async function catalogue(o: { activeOnly?: boolean } = {}, c?: PoolClient): Promise<Addon[]> {
@@ -146,12 +158,12 @@ export async function accountAddons(accountId: string) {
   ]);
   const paid = new Set(charged.map((c) => c.item_key));
   return cat
-    .filter((a) => a.active || held.some((h) => h.addonKey === a.key))
+    .filter((a) => (a.active && addonOffered(a.key)) || held.some((h) => h.addonKey === a.key))
     .map((a) => {
       const h = held.find((x) => x.addonKey === a.key) ?? null;
       return {
         key: a.key, name: a.name, description: a.description, monthlyUsd: a.monthlyUsd, includedQuantity: a.includedQuantity, unit: a.unit,
-        licence: a.licence, offered: a.active,
+        licence: a.licence, offered: a.active && addonOffered(a.key),
         packs: a.packs.filter((p) => p.active || p.key === h?.packKey).map((p) => ({ ...p, paidThisMonth: paid.has(`addon_pack:${a.key}:${p.key}`) })),
         on: !!h, pack: h?.packKey ?? null, since: h?.startedAt ?? null,
         paidThisMonth: paid.has(`addon:${a.key}`),
@@ -184,6 +196,7 @@ export async function setAddon(accountId: string, addonKey: string, packKey: str
     if (!a) throw new ApiError(404, 'Add-on not found');
     const cur = (await c.query(`SELECT * FROM account_addons WHERE account_id = $1 AND addon_key = $2`, [accountId, addonKey])).rows[0];
     if (!cur && !a.active) throw new ApiError(409, `${a.name} is no longer offered.`);
+    if (!cur && !addonOffered(a.key)) throw Object.assign(new ApiError(409, `${a.name} is not available on this deployment.`), { code: 'addon_not_offered' });
     const pack = packKey == null ? null : a.packs.find((p) => p.key === packKey);
     if (packKey != null && !pack) throw new ApiError(404, 'Pack not found');
     if (pack && !pack.active && cur?.pack_key !== pack.key) throw new ApiError(409, `${pack.name} is no longer offered.`);
@@ -264,6 +277,18 @@ export class AllowanceExceeded extends ApiError {
 export async function allowanceLeft(accountId: string, addonKey: string): Promise<number | null> {
   const h = (await heldAddons(accountId)).find((x) => x.addonKey === addonKey);
   return h ? Math.max(0, cents(h.allowance - h.used)) : null;
+}
+
+/**
+ * Give back units counted for work that did not happen (build queue F4: a
+ * lookup the AI model never answered is not one of the month's lookups).
+ * Never below zero.
+ */
+export async function releaseAllowance(accountId: string, addonKey: string, quantity: number): Promise<void> {
+  if (!(quantity > 0)) return;
+  await query(`UPDATE addon_usage SET used = GREATEST(0, used - $4::numeric), updated_at = now() WHERE account_id = $1 AND addon_key = $2 AND period_month = $3`,
+    [accountId, addonKey, monthOf(), quantity]);
+  await addonsChanged(accountId);
 }
 
 /**

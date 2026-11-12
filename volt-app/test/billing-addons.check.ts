@@ -64,7 +64,8 @@ const OPA = '00000000-0000-4000-8000-00000000b2a3', SYS = '00000000-0000-4000-80
     check('the System Admin adds an add-on to the catalogue', [add.s, add.j?.key, add.j?.includedQuantity, add.j?.licence], [201, 'archive_storage', 100, 'mirror_archive']);
     for (const p of [{ key: 'small', name: 'Small pack', extraQuantity: 100, monthlyUsd: 20 }, { key: 'large', name: 'Large pack', extraQuantity: 500, monthlyUsd: 60 }]) await call('POST', '/api/platform/billing/addons/archive_storage/packs', p, sys);
     const cat = await call('GET', '/api/platform/billing/addons', undefined, sys);
-    check('...with its packs, smallest first', cat.j?.[0]?.packs?.map((p: any) => [p.key, p.extraQuantity, p.monthlyUsd]), [['small', 100, 20], ['large', 500, 60]]);
+    // The catalogue also ships with AI Find details (migration 0172, build queue F4), so look this one up by key.
+    check('...with its packs, smallest first', cat.j?.find((a: any) => a.key === 'archive_storage')?.packs?.map((p: any) => [p.key, p.extraQuantity, p.monthlyUsd]), [['small', 100, 20], ['large', 500, 60]]);
     check('refused: a duplicate key, an unknown licence, a plain account owner',
       [(await call('POST', '/api/platform/billing/addons', { key: 'archive_storage', name: 'x', monthlyUsd: 1, unit: 'GB' }, sys)).s,
        (await call('POST', '/api/platform/billing/addons', { key: 'other', name: 'x', monthlyUsd: 1, unit: 'GB', licence: 'everything' }, sys)).s,

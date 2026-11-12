@@ -519,7 +519,7 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
   // FIND DETAILS (build queue F1): the content type's finder, the song service
   // for Songs and Music videos, Wikidata for every other type. It works on the
   // SAVED type and values, so it waits for unsaved changes to be saved first.
-  const [finder, setFinder] = useState<{ finder: 'song' | 'general'; term: string; song: { artist: string; title: string } | null; contentType: { name: string } | null } | null>(null)
+  const [finder, setFinder] = useState<{ finder: 'song' | 'general'; term: string; song: { artist: string; title: string } | null; contentType: { name: string } | null; ai?: any } | null>(null)
   const openFinder = async () => {
     setErr('')
     try { setFinder(await apiRequest(`/vod/${d.id}/finder`)) } catch (e: any) { setErr(e.message) }
@@ -543,7 +543,7 @@ function AssetMetadata({ d, onSaved }: { d: any; onSaved: () => void }) {
         <SongFinder id={d.id} who={finder.song} onClose={() => setFinder(null)} onApplied={() => found([])} />
       )}
       {finder && finder.finder === 'general' && (
-        <DetailsFinder id={d.id} term={finder.term} typeName={finder.contentType?.name ?? 'content type'} onClose={() => setFinder(null)} onApplied={found} />
+        <DetailsFinder id={d.id} term={finder.term} typeName={finder.contentType?.name ?? 'content type'} ai={finder.ai} onClose={() => setFinder(null)} onApplied={found} />
       )}
       <MetadataForm typeId={typeId} value={meta} onChange={setMeta} compact imageFolder={imgFolder ?? undefined} assetId={d.id} links={links} />
       <div role="status" aria-live="polite" style={{ position: 'sticky', bottom: 0, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',

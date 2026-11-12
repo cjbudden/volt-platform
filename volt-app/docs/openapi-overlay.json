@@ -1002,7 +1002,7 @@
   },
   "GET /api/vod/:id/finder": {
     "summary": "Which Find details an asset uses",
-    "description": "The finder for the asset's content type: `song` (Songs and Music videos use the song service: `POST /api/vod/{id}/song/find`) or `general` (every other type: `POST /api/vod/{id}/details/find`), the default search `term` (the type's title field, else the asset title) and, for the song finder, `song` (artist and title). Needs `vod: view`."
+    "description": "The finder for the asset's content type: `song` (Songs and Music videos use the song service: `POST /api/vod/{id}/song/find`) or `general` (every other type: `POST /api/vod/{id}/details/find`), the default search `term` (the type's title field, else the asset title) and, for the song finder, `song` (artist and title). `ai` says whether **AI Find details** is offered on this deployment (`offered`: the add-on exists and the server has the model's key) and on for the account (`on`), with this month's `allowance` (`included`, `used`, `left`, `resets`) and `biggerPack`, the next pack to offer when it runs out. Needs `vod: view`."
   },
   "GET /api/vod/:id/schema.org": {
     "summary": "An asset as schema.org JSON-LD",
@@ -1014,7 +1014,11 @@
   },
   "POST /api/vod/:id/details/use": {
     "summary": "Use found details",
-    "description": "Writes exactly the `values` given (field key to value, the ones a person ticked), checked as a metadata save checks them (`422` for a field the type does not have or a value that does not fit). `source` is `wikidata` (with `itemId`) or `page` (with `link`, the page read by `details/page`). An image found on the web is copied into the Image Library and the field holds the library reference. Each written field's `metadata_provenance` records `source`, `item` (Wikidata) or `site` (a page), `link`, who chose it, when, and the value it replaced (`was`). Audited. Needs `vod: manage`."
+    "description": "Writes exactly the `values` given (field key to value, the ones a person ticked), checked as a metadata save checks them (`422` for a field the type does not have or a value that does not fit). `source` is `wikidata` (with `itemId`), `page` (with `link`, the page read by `details/page`) or `ai` (with `link` and `lookupId`, the lookup made by `details/ai`; `422` without one of this asset's). An image found on the web is copied into the Image Library and the field holds the library reference. Each written field's `metadata_provenance` records `source`, `item` (Wikidata) or `site` (a page), for `ai` also `model`, `lookup` and the `sentence` of the page the value came from, `link`, who chose it, when, and the value it replaced (`was`). Audited. Needs `vod: manage`."
+  },
+  "POST /api/vod/:id/details/ai": {
+    "summary": "Find details on a page with AI",
+    "description": "The **AI Find details** add-on: reads the page at `url` (fetched once; private network addresses refused with `400`) as text and asks an AI model for the values of the asset's content type fields it can fill from text (text, numbers, dates, options, tags and links; `unmapped` names the others). Each value comes with the sentence of the page it came from (`result.from`, field key to sentence); a value whose sentence is not on the page, or that does not fit its field, is left out (`result.dropped`). Shaped like `details/page` otherwise, with `result.lookupId` and `result.model`, and `ai`, the account's allowance after this lookup. Saves nothing: apply with `{\"source\":\"ai\",\"link\",\"lookupId\",\"values\"}` on `details/use`. One page read by the model is one lookup of the month's allowance; the same page, unchanged, for the same asset that day answers again with `reused: true` and is not counted; a call the model does not answer is not counted. Answers `200` with `error` set and `result: null` when the page cannot be read or has almost no text; `403` (`addon_required`) when the account does not have the add-on; `409` (`ai_not_offered`) when the deployment has no model key; `409` (`allowance_exceeded`, with `ai.biggerPack`) when the month's lookups are used up, and then nothing is sent to the model; `400` when the asset has no content type; `409` when the type uses the song finder. Needs `vod: manage`."
   },
   "POST /api/vod/:id/details/page": {
     "summary": "Find details on a page",
