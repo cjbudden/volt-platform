@@ -16,7 +16,7 @@
 // ============================================================================
 import { query, one, tx } from '../../db';
 import { usageStatusSql } from '../assetReadiness';
-import { existsSync } from 'node:fs';
+import { vodSourceAvailable } from '../media/vodSource';
 import { planLineup, rebase, type AssetInfo, type Lineup, type Slot, type PlannedProgramme } from './lineup';
 import { resolveAdPolicy, adRuleOf, type AdPolicy } from './adPlan';
 import { houseFill, fillBreak, type HouseAd, type PodPlan } from './pod';
@@ -39,7 +39,8 @@ export interface LibraryAsset extends AssetInfo {
   media: FastMedia;
   /**
    * Can it go on a channel? Packaged with audio and video aligned for splicing,
-   * or its source file is still on this server so activation can prepare it.
+   * or its original can be read (on this server, or in the bucket on AWS) so
+   * activation can prepare it.
    * False is the readiness check's "No source" (services/fast/prepare.ts).
    */
   sourceOk: boolean;
@@ -59,10 +60,19 @@ export function isAudioRow(a: any): boolean {
   return !!(a.export_mp3_key || a.export_m4a_key) && !a.top_height && !a.progressive_key;
 }
 
-/** The source file is on this server (the encoder reads a local path only). */
+/**
+ * The original can be read to prepare the asset: a file on this server, or an
+ * original held in the bucket (build queue 2.1a-2b-5). On AWS every upload's
+ * original lands in the bucket and the task that prepares it takes a scratch
+ * copy for the job (media/vodSource.ts fetchVodSource), so reading s3:// as
+ * "no source" left every not-yet-splice-ready title out of the FAST builder
+ * there. Same test as the readiness check (services/fast/prepare.ts), so the
+ * builder never offers a title Prepare would call "No source", nor hides one
+ * Prepare could build. Any other s3:// address (outside vod-src/) still reads
+ * as no source: nothing fetches it.
+ */
 export function sourceOnServer(key: string | null | undefined): boolean {
-  if (!key || String(key).startsWith('s3://')) return false;
-  try { return existsSync(String(key)); } catch { return false; }
+  return vodSourceAvailable(key);
 }
 
 /** Every playable on-demand asset the account owns, in the engine's shape. */

@@ -272,8 +272,8 @@ fastRouter.post('/channels/:id/on-air', asyncHandler(async (req, res) => {
 /**
  * THE BUILDER'S LIBRARY. With ?channel=<id> it is that channel's library: an
  * audio channel sees audio assets only, a video channel video assets only, and
- * either sees only what can air (packaged for splicing, or a source file on
- * this server to prepare it from). `hidden` says how many were left out and
+ * either sees only what can air (packaged for splicing, or an original to
+ * prepare it from: on this server, or in the bucket on AWS). `hidden` says how many were left out and
  * why, so an empty list can explain itself. Without a channel: everything.
  */
 fastRouter.get('/library', asyncHandler(async (req, res) => {
