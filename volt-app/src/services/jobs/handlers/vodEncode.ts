@@ -21,7 +21,7 @@
 //  broken.
 // ============================================================================
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, writeFile, rm, stat, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { one, query } from '../../../db';
@@ -45,7 +45,17 @@ export interface VodEncodePayload {
   segmentSeconds?: number | null;
   /** Bring the audio to broadcast loudness (ads and house spots on FAST channels). */
   loudnorm?: boolean;
+  /** A repackage of a playable title after a confirmed DRM change (build queue
+   *  P4-3, services/repackage.ts): the new files are made beside the title's
+   *  own and swapped in whole when they are complete. */
+  repackage?: boolean;
 }
+
+/** What a repackage carries from the title's folder into the new one: made
+ *  from the original or by hand, not from the packaging. Trick play, the MP4
+ *  and the renditions are the packaging's own and are never carried, so a
+ *  title that turns DRM on keeps no clear copy beside its encrypted files. */
+const REPACKAGE_CARRIED = ['ladders', 'reframe', 'subs'];
 
 /** Where a file-sourced asset's media lives. Under clips/, not origin/, for the
  *  same reason a clip is: origin is pruned by the channel's retention rules and
@@ -217,6 +227,21 @@ async function encode(ctx: JobContext, log: JobLog): Promise<Record<string, unkn
   if (!given?.vodAssetId || !given?.sourcePath || !given?.accountId) {
     throw new PermanentError('vod.encode payload needs vodAssetId, accountId and sourcePath', 'bad_payload');
   }
+  if (given.repackage) {
+    // ON THE BUCKET the CDN keeps a title's segments under the same names for
+    // a year, so new files cannot be swapped in under them (services/repackage.ts).
+    const { vodStore } = await import('../../fast/vodStore');
+    if (vodStore() === 's3') throw new PermanentError('repackaging titles whose files are in the origin bucket is not built yet; the title keeps its current files', 'repackage_not_on_bucket');
+    // Looked at again when the job runs: a change undone since, or a title
+    // encoded since, has nothing left to repackage.
+    const { stillPending } = await import('../../repackage');
+    const why = await stillPending(given.vodAssetId);
+    if (why) {
+      log.step(`nothing to repackage: ${why}`);
+      return { vodAssetId: given.vodAssetId, repackaged: false, reason: why };
+    }
+    log.step('repackage: the title\'s files no longer carry what its publishing policy asks for; it keeps playing from them until the new ones are ready');
+  }
   // THE ORIGINAL MAY BE IN THE BUCKET (build queue 2.1a-2b): on AWS the task that
   // finished the upload is rarely the one running this job, so an s3:// source is
   // fetched into this task's scratch space for the length of the encode and
@@ -254,7 +279,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
       `the source could not be read (${probe.error ?? 'no reason given'})`, 'unreadable_source');
   }
   const plan = await planEncode(p, probe, log, ctx);
-  const { ladder, fit, audioOnly, summary } = plan;
+  const { summary } = plan;
 
   // DRM IS DECIDED HERE, AT PACKAGING (build queue P4-2, services/encodePolicy.ts):
   // the title's publishing policy as it stands now. Asked for and the account
@@ -268,8 +293,25 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   if (drmJob) log.step(`DRM: ${String(drmJob.mode)} for ${(drmJob.systems as string[]).join(', ')}, asked by ${drm!.from}; the key comes from the account's key service`);
   await ctx.progress(10, `encoding ${summary}`);
 
-  const outDir = outDirFor(p.vodAssetId);
+  // A REPACKAGE WRITES BESIDE THE TITLE'S OWN FOLDER (build queue P4-3): the
+  // title keeps playing from its current files, with its current protection,
+  // until the new ones are complete and swapped in whole.
+  const finalDir = outDirFor(p.vodAssetId);
+  const outDir = p.repackage ? `${finalDir}.repack-${ctx.job.id ?? 'x'}-a${ctx.job.attempts || 1}` : finalDir;
+  if (p.repackage) await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
+  try {
+    return await encodeInto(ctx, log, p, { probe, plan, summary, drmJob, outDir, finalDir, srcBytes });
+  } catch (e) {
+    // A repackage that fails leaves the title as it was: its files untouched.
+    if (p.repackage) await rm(outDir, { recursive: true, force: true }).catch(() => null);
+    throw e;
+  }
+}
+
+async function encodeInto(ctx: JobContext, log: JobLog, p: VodEncodePayload,
+  x: { probe: Awaited<ReturnType<typeof probeSource>>; plan: EncodePlan; summary: string; drmJob: Record<string, unknown> | null; outDir: string; finalDir: string; srcBytes: number | null }): Promise<Record<string, unknown>> {
+  const { probe, plan, summary, drmJob, outDir, finalDir, srcBytes } = x;
   const jobPath = join(outDir, 'encode-job.json');
   await writeFile(jobPath, JSON.stringify({
     input: p.sourcePath,
@@ -333,12 +375,24 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   }
   log.step(`packaged: ${[master ? 'HLS master.m3u8' : null, mpd ? 'DASH manifest.mpd' : null].filter(Boolean).join(', ')}`);
 
-  return finishEncode(ctx, log, { p, probe, plan, master, mpd, outDir, sourcePath: p.sourcePath, srcBytes, result });
+  // THE SWAP: the new folder replaces the old whole, carrying across what was
+  // not made by the packaging. The two renames are back to back; the old
+  // folder goes once the new one is in place.
+  const swapIn = outDir === finalDir ? undefined : async () => {
+    const old = existsSync(finalDir) ? `${finalDir}.replaced-${Date.now()}` : null;
+    if (old) await rename(finalDir, old);
+    await rename(outDir, finalDir);
+    if (old) {
+      for (const k of REPACKAGE_CARRIED) if (existsSync(join(old, k)) && !existsSync(join(finalDir, k))) await rename(join(old, k), join(finalDir, k));
+      await rm(old, { recursive: true, force: true }).catch(() => null);
+    }
+  };
+  return finishEncode(ctx, log, { p, probe, plan, master, mpd, outDir, sourcePath: p.sourcePath, srcBytes, result, swapIn });
 }
 
 /** What the execute half produced, for the finish. */
 export interface EncodeOutcome {
-  p: Pick<VodEncodePayload, 'vodAssetId' | 'accountId' | 'segmentSeconds'>;
+  p: Pick<VodEncodePayload, 'vodAssetId' | 'accountId' | 'segmentSeconds' | 'repackage'>;
   probe: SourceProbe & Record<string, any>;
   plan: EncodePlan;
   master: string | null;
@@ -349,6 +403,8 @@ export interface EncodeOutcome {
   srcBytes: number | null;
   /** vod_encoder.py's JSON result line (zero_start, loudnorm). */
   result: any;
+  /** A repackage (P4-3): put the finished folder in place of the title's own, before anything is recorded. */
+  swapIn?: () => Promise<void>;
 }
 
 /**
@@ -477,6 +533,12 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
     if (facts) await query(`UPDATE vod_assets SET ingest = jsonb_set(COALESCE(ingest, '{}'::jsonb), '{probe}', $2::jsonb) WHERE id = $1`, [p.vodAssetId, JSON.stringify(facts)]);
   } catch (e: any) { log.warn(`source facts not refreshed: ${String(e?.message ?? e).slice(0, 200)}`); }
 
+  // A REPACKAGE'S FILES ARE COMPLETE (the MP4 too): they take the title's place now.
+  if (o.swapIn) {
+    await o.swapIn();
+    log.step('repackaged: the new files replaced the title\'s own in one step');
+  }
+
   // PRODUCTION: the packaged media goes to the origin bucket, so it is served
   // by the CDN and readable by a FAST playout on another server, instead of
   // living on this task's disk (services/fast/vodStore.ts).
@@ -538,6 +600,23 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
       const n = st.written.filter((k) => k.includes('/subs/') && k.endsWith('.m3u8')).length;
       if (n) log.step(`caption tracks written into the bucket's playlists (${n})`);
     }
+  }
+  // A REPACKAGE CHANGES THE PACKAGING ONLY (P4-3): the picture, the source
+  // and the title's workflows are as they were, so no stills, sprite sheets,
+  // markers, social formats or vod.encoded hook. The frame index and QC read
+  // the packaged files, so those run again.
+  if (p.repackage) {
+    await (await import('./frameIndex')).queueFrameIndex(p.vodAssetId).catch((e) => log.warn(`frame index not queued: ${String(e?.message ?? e).slice(0, 200)}`));
+    try {
+      const { enqueue } = await import('../queue');
+      const { QC_RUN } = await import('./qcRun');
+      await enqueue({ type: QC_RUN, payload: { vodAssetId: p.vodAssetId }, dedupeKey: `qc.run:${p.vodAssetId}`, priority: 40 });
+      log.step('queued: frame index and QC of the new files');
+    } catch (e: any) {
+      log.warn(`QC not queued: ${String(e?.message ?? e).slice(0, 200)}`);
+    }
+    log.step('done');
+    return { vodAssetId: p.vodAssetId, repackaged: true, drm: encodeResult.drm, master, mpd, renditions: fit.kept.length, summary };
   }
   fireHook('vod.encoded', 'vod_asset', p.vodAssetId, { renditions: fit.kept.length });
   // Subtitles and a description, when an ingest rule asked for them
@@ -623,6 +702,9 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
 
 export function registerVodEncodeHandlers(): void {
   registerHandler(VOD_ENCODE, handleVodEncode);
+  // A repackage after a confirmed DRM change (services/repackage.ts): the same
+  // encode, written beside the title's files and swapped in when complete.
+  registerHandler('vod.repackage', (ctx) => handleVodEncode({ ...ctx, job: { ...ctx.job, payload: { ...(ctx.job.payload as any), repackage: true } } }));
   // A FAST channel's ladder, encoded beside the asset's own (vodLadder.ts). Registered
   // here so it starts wherever vod.encode does.
   registerHandler('vod.ladder', async (ctx) => (await import('./vodLadder')).handleVodLadder(ctx));

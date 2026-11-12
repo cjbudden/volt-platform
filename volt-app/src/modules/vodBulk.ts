@@ -118,5 +118,14 @@ vodBulkRouter.post('/availability', asyncHandler(async (req, res) => {
   for (const b of before)
     await writeAudit(null, { accountId: acct, userId: by.userId, label: by.label, action: 'update', entityType: 'vod_asset', entityId: b.id,
       changes: { availability_override: { from: b.availability_override ?? {}, to: override } }, snapshot: { bulk: true, action, presetKey } }).catch(() => {});
-  res.json({ saved: true, ...summary, marked });
+  // Confirmed: the titles are packaged again (build queue P4-3), in batches, playing from their current files meanwhile.
+  let repackage: any = null;
+  if (check.impact.repackage) {
+    const { queueRepackage } = await import('../services/repackage');
+    repackage = await queueRepackage(acct, { kind: 'assets', id: null, ids: okIds }, { createdBy: by.userId }).catch((e) => {
+      console.warn('[vod-bulk] repackage jobs not queued', e?.message ?? e);
+      return { queued: 0, seconds: 0, waiting: [], jobs: [], error: 'the repackage jobs could not be queued; the titles keep their current files' };
+    });
+  }
+  res.json({ saved: true, ...summary, marked, ...(repackage ? { repackage } : {}) });
 }));

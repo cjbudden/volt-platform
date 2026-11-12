@@ -95,6 +95,8 @@ export interface EncodeDetails {
     packaged: { drm: boolean; recorded: boolean }
     pending: string[]
     note: string | null
+    /** A repackage queued or running for the title (build queue P4-3). */
+    repackage?: { jobId: string; state: string; runAfter: string | null }
   }
 }
 

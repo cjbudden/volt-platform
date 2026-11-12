@@ -654,7 +654,7 @@ export function EncodePanel({ id, place }: { id: string; place?: React.ReactNode
             {e.policy && <Row k="Policy asks">
               <span data-testid="encode-policy">{e.policy.now.drm ? 'DRM' : 'No DRM'}
                 <span style={{ color: 'var(--muted)' }}> · {e.policy.now.source === 'asset' ? 'its own setting' : `${e.policy.now.sourceLabel}${e.policy.now.rule ? ` "${e.policy.now.rule}"` : ''}`}</span>
-                {e.policy.pending.length > 0 && <span className="tag warn" style={{ marginLeft: 6 }}>Repackage pending</span>}
+                {e.policy.pending.length > 0 && <span className="tag warn" style={{ marginLeft: 6 }}>{e.policy.repackage ? (e.policy.repackage.state === 'running' ? 'Repackaging' : 'Repackage queued') : 'Repackage pending'}</span>}
               </span>
               {e.policy.note && <div style={{ color: 'var(--muted)', fontSize: 'var(--fs-sm)', marginTop: 4, maxWidth: 420 }}>{e.policy.note}</div>}
               {e.policy.atEncode && <div style={{ color: 'var(--faint)', fontSize: 'var(--fs-xs)', marginTop: 2 }}>At encode ({new Date(e.policy.atEncode.at).toLocaleDateString()}): {e.policy.atEncode.wanted.drm ? 'DRM' : 'no DRM'} asked, {e.policy.atEncode.packaged.drm ? 'encrypted' : 'packaged in the clear'}</div>}

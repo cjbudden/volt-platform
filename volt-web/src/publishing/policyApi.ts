@@ -21,7 +21,14 @@ export type ConflictLevel = 'block' | 'warn' | 'confirm'
 export interface Conflict { code: string; level: ConflictLevel; fields: string[]; message: string }
 export interface ImpactEntry { code: string; message: string; count: number; titles: { id: string; title: string }[] }
 /** publishedChanged and unavailableNow (build queue P3-4): published titles take up a save within about a minute. */
-export interface Impact { assets: number; published: number; changed: number; repackage: number; publishedChanged?: number; unavailableNow?: number; blocks: ImpactEntry[]; warnings: ImpactEntry[] }
+/** repackageSeconds (build queue P4-3): the projected job time of the repackages. */
+export interface Impact { assets: number; published: number; changed: number; repackage: number; repackageSeconds?: number; publishedChanged?: number; unavailableNow?: number; blocks: ImpactEntry[]; warnings: ImpactEntry[] }
+/** "about 3 h", "about 25 min" of jobs (services/repackage.ts repackageTimeLabel). */
+export function repackageTime(seconds: number | undefined): string {
+  const s = Number(seconds) || 0
+  if (s >= 7200) return `about ${Math.round(s / 3600)} h`
+  return `about ${Math.max(1, Math.round(s / 60))} min`
+}
 export interface DryRun { dryRun: true; saved: false; canSave: boolean; conflicts: Conflict[]; impact: Impact }
 
 /** A rung as stored, with what P3 added beside its settings. */

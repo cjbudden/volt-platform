@@ -20,6 +20,7 @@
 //
 //  Conflicts are caught when a policy is saved, never discovered by a viewer.
 // ============================================================================
+import { repackageSeconds } from './repackage';
 import { query } from '../db';
 import {
   resolveLadder, BASELINE, SECTION_KEYS, LOCKABLE_FIELDS,
@@ -188,6 +189,9 @@ export interface Impact {
   changed: number;
   /** Published titles whose DRM setting changes: their files must be repackaged (build queue P4). */
   repackage: number;
+  /** The job time those repackages are projected to take, in seconds (P4-3,
+   *  services/repackage.ts repackageSeconds): "about 3 h of jobs". */
+  repackageSeconds: number;
   /** Published titles that take up the change within about a minute of the save (build queue P3-4). */
   publishedChanged: number;
   /** Titles playable now that would stop being playable at once: their window
@@ -276,7 +280,7 @@ export async function policyImpact(accountId: string,
   const titles = await query<any>(
     `SELECT v.id, v.title, v.schema_id, v.channel_id, v.event_id, v.availability_override, v.availability_state, v.available_from, v.available_until,
             v.availability->>'publishedAt' AS published_at,
-            v.created_at, v.rights_profile_id, v.rights_narrow, v.first_aired_at, v.collection_access
+            v.created_at, v.rights_profile_id, v.rights_narrow, v.first_aired_at, v.collection_access, v.duration_ms
        FROM vod_assets v
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
@@ -285,7 +289,7 @@ export async function policyImpact(accountId: string,
     where ? [accountId, scope.kind === 'assets' ? scope.ids : scope.id] : [accountId]);
   const memo = new Map<string, [Resolved, Resolved]>();
   const profiles = new Map<string, any>();
-  const impact: Impact = { assets: titles.length, published: 0, changed: 0, repackage: 0, publishedChanged: 0, unavailableNow: 0, blocks: [], warnings: [] };
+  const impact: Impact = { assets: titles.length, published: 0, changed: 0, repackage: 0, repackageSeconds: 0, publishedChanged: 0, unavailableNow: 0, blocks: [], warnings: [] };
   const { restampPublished, publishedAnchor } = await import('./availability');
   const at = new Date();
   const tally = (list: Impact['blocks'], c: Conflict, t: any) => {
@@ -305,7 +309,7 @@ export async function policyImpact(accountId: string,
     const live = ['available', 'scheduled'].includes(t.availability_state);
     if (live) impact.published++;
     if (stableJson(was.settings) !== stableJson(now.settings)) impact.changed++;
-    if (live && !!was.settings.protection.drm !== !!now.settings.protection.drm) impact.repackage++;
+    if (live && !!was.settings.protection.drm !== !!now.settings.protection.drm) { impact.repackage++; impact.repackageSeconds += repackageSeconds(t.duration_ms); }
     // The title's rights, from the cached profile, as the play gate sees them.
     const pid = t.rights_profile_id ?? '';
     if (!profiles.has(pid)) profiles.set(pid, await cachedProfile(t.rights_profile_id ?? null));

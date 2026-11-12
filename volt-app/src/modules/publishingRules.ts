@@ -317,6 +317,15 @@ async function checkMetaRule(acct: string, id: string | null, rule: { name: stri
   return { conflicts, impact };
 }
 
+/** After a confirmed DRM change: queue the repackages (P4-3). A failure to queue never undoes the save. */
+async function repackageAfter(acct: string, scope: any, userId: string | null): Promise<any> {
+  const { queueRepackage } = await import('../services/repackage');
+  return queueRepackage(acct, scope, { createdBy: userId }).catch((e) => {
+    console.warn('[publishing] repackage jobs not queued', e?.message ?? e);
+    return { queued: 0, seconds: 0, waiting: [], jobs: [], error: 'the repackage jobs could not be queued; the titles keep their current files' };
+  });
+}
+
 async function saveMetaRule(req: any, res: any, existing: MetadataRule | null) {
   const acct = accountId(req);
   const b = metaRuleBody.parse(req.body ?? {});
@@ -359,7 +368,9 @@ async function saveMetaRule(req: any, res: any, existing: MetadataRule | null) {
   const { syncProductsFromRules } = await import('../services/entitlements');
   await syncProductsFromRules(acct, settings.accessRules ?? [], row.id, null).catch((e) => console.warn('[publishing-rules] product sync failed', e));
   const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind: 'metadata', id: row.id }) : (fastAfterChange(acct), 0);
-  res.status(existing ? 200 : 201).json({ ...row, warnings, impact, restamp: { marked } });
+  // Confirmed: the titles are packaged again (build queue P4-3), in batches, playing from their current files meanwhile.
+  const repackage = impact.repackage ? await repackageAfter(acct, { kind: 'metadata', id: row.id }, who.userId) : null;
+  res.status(existing ? 200 : 201).json({ ...row, warnings, impact, restamp: { marked }, ...(repackage ? { repackage } : {}) });
 }
 
 publishingRulesRouter.get('/metadata-rules', asyncHandler(async (req, res) => {
@@ -527,7 +538,8 @@ publishingRulesRouter.put('/:scopeKind/:scopeId?', asyncHandler(async (req, res)
   const { syncProductsFromRules } = await import('../services/entitlements');
   await syncProductsFromRules(acct, settings.accessRules ?? [], row.id, id).catch((e) => console.warn('[publishing-rules] product sync failed', e));
   const marked = impact.publishedChanged ? await restampAfterChange(acct, { kind, id }) : (fastAfterChange(acct), 0);
-  res.json({ ...row, warnings, impact, restamp: { marked } });
+  const repackage = impact.repackage ? await repackageAfter(acct, { kind, id }, who.userId) : null;
+  res.json({ ...row, warnings, impact, restamp: { marked }, ...(repackage ? { repackage } : {}) });
 }));
 
 publishingRulesRouter.delete('/:scopeKind/:scopeId?', asyncHandler(async (req, res) => {

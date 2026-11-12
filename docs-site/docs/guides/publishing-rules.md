@@ -147,13 +147,23 @@ As you change a rung, **Before you save** checks it:
 Turning DRM on or off changes the files, so published titles must be packaged again.
 
 1. Change **DRM** and choose **Save publishing rule**.
-2. A box says how many published titles will be packaged again. Choose **Package again and save**, or **Cancel** to leave the rule as it was.
+2. A box says how many published titles will be packaged again and about how long the jobs take (for example **about 91 min of jobs**). **Before you save** shows the same while you edit. Choose **Package again and save**, or **Cancel** to leave the rule as it was.
 
-Titles keep their current protection until they have been packaged again.
+Volt then packages each of those titles again from its original, in the background: in batches of 25, a batch every 10 minutes, behind new uploads so they are never held up. Each title keeps playing from its current files, with its current protection, until its new files are complete, and then switches to them in one step. So a title turning DRM off stays encrypted until its clear files are ready, and a title turning DRM on gets no clear copy left beside its encrypted files (its MP4 download goes). If a title cannot be packaged again (the key service fails, say), it keeps the files it has. Saving the same change again, or undoing it before the job runs, does not package a title twice.
+
+The time is a projection: about the length of each title plus half a minute, as an encode from the original runs at about real time.
 
 DRM is applied when a file is packaged: a file encoded under a policy that asks for DRM is encrypted with a key from your account's DRM key service and gets no MP4 download. Without a key service set up for the account, such a file does not encode, and the upload band says so before you add it.
 
-Each title keeps what its policy asked for when it was encoded, and its **Encode** tab in the [Media Library](media-library.md) shows **Repackage pending** while its files and its policy disagree. Packaging titles again on their own after a change is not available yet: until it is, a title that should now have DRM stays in the clear until it is encoded again, and one that should no longer have DRM keeps it.
+Each title keeps what its policy asked for when it was encoded, and its **Encode** tab in the [Media Library](media-library.md) shows **Repackage queued** (or **Repackaging**) while its new files are being made, and **Repackage pending** when its files and its policy disagree with nothing on the way.
+
+Some titles wait instead of being packaged again, and the answer lists them with the reason:
+
+- a title whose original is kept at your site (Encode at site): packaging at a site with DRM is not available yet;
+- a title whose original was not kept;
+- for now, titles whose files are served from the cloud origin bucket (the AWS deployment): packaging them again there is not available yet. On a single server (the Mac) it works as described above.
+
+A title whose original was moved to the archive is brought back first, then packaged again.
 
 ### Play without tokens (token-free playback)
 
@@ -340,10 +350,10 @@ A rung can also say how content is protected, what else may be done with it and 
 | Retention shorter than the time an item is available, or retention on items that never expire | Refused: content would be deleted while live |
 | Rights-managed on an item whose rights have no window | Refused, with the items named |
 | A field locked by a rung above | Refused, naming the lock |
-| DRM turned on or off for published items | `409` with the code `confirm_repackage` and the count; send it again with `"confirm": true` |
+| DRM turned on or off for published items | `409` with the code `confirm_repackage`, the count and the projected job time (`impact.repackageSeconds`); send it again with `"confirm": true`. The answer's `repackage` says how many titles were queued (`queued`), their projected job time in seconds (`seconds`), and the titles that wait, each with its `reason` (`waiting`) |
 | Geo restriction without a WAF profile; geo or limited rights with a social account; **Only in these countries** with none chosen; a publish window reaching outside the rights window | Saved, with a warning in `warnings` |
 
-A refusal answers `422` with the code `policy_conflict`; `details` holds the conflicts and the impact. The impact, also what a dry run returns, counts the items the rung governs (`assets`), how many are published (`published`), how many change (`changed`), how many would need packaging again (`repackage`), how many published items take the change up (`publishedChanged`) and how many of those stop being playable at once (`unavailableNow`). A save that changes published items marks them, and the answer's `restamp.marked` says how many; they take the new rules up within about a minute, keeping where they were published and their DRM until packaged again. Removing a rung does the same for its items.
+A refusal answers `422` with the code `policy_conflict`; `details` holds the conflicts and the impact. The impact, also what a dry run returns, counts the items the rung governs (`assets`), how many are published (`published`), how many change (`changed`), how many would need packaging again (`repackage`) and the projected job time in seconds (`repackageSeconds`), how many published items take the change up (`publishedChanged`) and how many of those stop being playable at once (`unavailableNow`). A save that changes published items marks them, and the answer's `restamp.marked` says how many; they take the new rules up within about a minute, keeping where they were published and their DRM until packaged again. Removing a rung does the same for its items.
 
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

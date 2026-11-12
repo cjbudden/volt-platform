@@ -442,7 +442,17 @@ vodRouter.get(
     // policy asks of its files now, what it asked at the encode, what the
     // files carry, and whether it waits for repackaging.
     const { encodePolicyView } = await import('../services/encodePolicy');
-    const policy = encodePolicyView(await resolveForAsset(accountId(req), a), a);
+    const policy: any = encodePolicyView(await resolveForAsset(accountId(req), a), a);
+    // A repackage queued or running for it (P4-3): the tab says so instead of "encode it again".
+    if (policy.pending.length) {
+      const { repackageInFlight } = await import('../services/repackage');
+      const r = await repackageInFlight(a.id).catch(() => null);
+      if (r) {
+        policy.repackage = r;
+        // The repackage is the "encode it again", already on its way.
+        policy.note = `${String(policy.note).replace(': encode it again to package it with DRM.', '.')} A repackage is ${r.state === 'running' ? 'running' : 'queued'}: it switches to the new files once they are complete.`;
+      }
+    }
     res.json({ ...encodeDetails(a, { ladderGroup, outputProfile, radioConfig: ch?.radio_config ?? null,
       audioOnly: ch?.kind === 'radio' || (streamId ? await Promise.resolve(isAudioOnly(streamId)).catch(() => false) : false),
       extract: job ? { formats: Array.isArray(job.formats) ? job.formats : [], state: String(job.state) } : null }), policy });
@@ -1252,6 +1262,15 @@ vodRouter.post('/:id/evaluate', asyncHandler(async (req, res) => {
   res.json(out);
 }));
 
+/** After a confirmed DRM change: queue the repackages (P4-3). A failure to queue never undoes the save. */
+async function repackageAfter(acct: string, scope: any, userId: string | null): Promise<any> {
+  const { queueRepackage } = await import('../services/repackage');
+  return queueRepackage(acct, scope, { createdBy: userId }).catch((e) => {
+    console.warn('[publishing] repackage jobs not queued', e?.message ?? e);
+    return { queued: 0, seconds: 0, waiting: [], jobs: [], error: 'the repackage jobs could not be queued; the titles keep their current files' };
+  });
+}
+
 vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {
   const acct = accountId(req);
   const asset = await fetchOwned(req.params.id, acct);
@@ -1300,7 +1319,9 @@ vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: 'update', entityType: 'vod_asset', entityId: asset.id,
     changes: { availability_override: { from: asset.availability_override ?? {}, to: override } } }).catch(() => {});
-  res.json({ override, reapplied: !!outcome, state: outcome?.state ?? asset.availability_state, warnings: conflicts.filter((c) => c.level !== 'block') });
+  // Confirmed: the title is packaged again (build queue P4-3), playing from its current files meanwhile.
+  const repackage = impact.repackage ? await repackageAfter(acct, { kind: 'asset', id: asset.id }, who.userId) : null;
+  res.json({ override, reapplied: !!outcome, state: outcome?.state ?? asset.availability_state, warnings: conflicts.filter((c) => c.level !== 'block'), ...(repackage ? { repackage } : {}) });
 }));
 
 vodRouter.post('/:id/publish', asyncHandler(async (req, res) => {

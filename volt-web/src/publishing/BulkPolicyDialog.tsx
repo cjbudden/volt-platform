@@ -15,7 +15,7 @@
 import { useEffect, useState } from 'react'
 import { ConflictLine } from '../RuleEditor'
 import { FormStatus } from '../notices'
-import { bulkPolicyApi, policyApi, policyRefusal, type BulkPolicyAnswer, type BulkPolicyBody, type Preset, type PresetKey } from './policyApi'
+import { bulkPolicyApi, policyApi, policyRefusal, repackageTime, type BulkPolicyAnswer, type BulkPolicyBody, type Preset, type PresetKey } from './policyApi'
 import './policy.css'
 
 const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`
@@ -104,7 +104,7 @@ export default function BulkPolicyDialog({ ids, onClose, onDone }: {
                 <span data-impact-ok><b>{check.ok}</b> of {ids.length} can take this</span>
                 <span><b>{check.impact.published}</b> published</span>
                 <span>Saving changes <b>{check.impact.changed}</b></span>
-                {repackage > 0 && <span style={{ color: 'var(--warn)' }}><b>{repackage}</b> published title{repackage === 1 ? '' : 's'} to be packaged again</span>}
+                {repackage > 0 && <span style={{ color: 'var(--warn)' }} data-impact-repackage><b>{repackage}</b> published title{repackage === 1 ? '' : 's'} to be packaged again, {repackageTime(check.impact.repackageSeconds)} of jobs</span>}
                 {(check.impact.unavailableNow ?? 0) > 0 && <span style={{ color: 'var(--warn)' }} data-impact-unavailable><b>{check.impact.unavailableNow}</b> become{check.impact.unavailableNow === 1 ? 's' : ''} unavailable now</span>}
               </div>
               {(check.impact.publishedChanged ?? 0) > 0 && <div style={{ color: 'var(--muted)' }} data-impact-published>
@@ -126,7 +126,7 @@ export default function BulkPolicyDialog({ ids, onClose, onDone }: {
         {check && repackage > 0 && (
           <label className="pol-confirm" data-policy-confirm style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
             <input type="checkbox" checked={confirm} onChange={e => setConfirm(e.target.checked)} style={{ marginTop: 3 }} />
-            <span><b>Package {plural(repackage, 'published title')} again.</b> DRM changes, so their files must be packaged again; they keep their current protection until then.</span>
+            <span><b>Package {plural(repackage, 'published title')} again.</b> DRM changes, so their files must be packaged again from the originals ({repackageTime(check.impact.repackageSeconds)} of jobs, in batches); they keep playing with their current protection until their new files are ready.</span>
           </label>)}
         <p style={{ color: 'var(--faint)', fontSize: 'var(--fs-sm)', margin: '10px 0 0' }}>Each change is recorded in the audit log with your name, title by title.</p>
         <div className="modal-f">

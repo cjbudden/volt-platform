@@ -30,7 +30,7 @@ import { api, type RuleKey, type PublishingPoints, type PublishTarget, type Rung
 import { useAccess } from './access'
 import { navigate } from './router'
 import { AccessRulesEditor } from './AccessRulesEditor'
-import { policyApi, policyRefusal, type PolicyScope, type PolicySettings, type ResolvedPolicy, type Preset, type PresetKey, type DryRun, type Impact } from './publishing/policyApi'
+import { policyApi, policyRefusal, repackageTime, type PolicyScope, type PolicySettings, type ResolvedPolicy, type Preset, type PresetKey, type DryRun, type Impact } from './publishing/policyApi'
 import { SECTIONS, SECTION_FIELD_LABEL, isSectionField, getVal, withVal, statedIds, baselineOf, describeSection, SectionFieldControl, Padlock, SectionGlyph, type FieldId } from './publishing/PolicyFields'
 import './publishing/policy.css'
 
@@ -327,7 +327,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
                 : <><span>Governs <b>{check.impact.assets}</b> title{check.impact.assets === 1 ? '' : 's'}</span>
                   <span><b>{check.impact.published}</b> published</span></>}
               {!asset && <span>Saving changes <b>{check.impact.changed}</b></span>}
-              {check.impact.repackage > 0 && <span style={{ color: 'var(--warn)' }}><b>{check.impact.repackage}</b> published title{check.impact.repackage === 1 ? '' : 's'} to be packaged again</span>}
+              {check.impact.repackage > 0 && <span style={{ color: 'var(--warn)' }} data-impact-repackage><b>{check.impact.repackage}</b> published title{check.impact.repackage === 1 ? '' : 's'} to be packaged again, {repackageTime(check.impact.repackageSeconds)} of jobs</span>}
               {(check.impact.unavailableNow ?? 0) > 0 && <span style={{ color: 'var(--warn)' }} data-impact-unavailable><b>{check.impact.unavailableNow}</b> become{check.impact.unavailableNow === 1 ? 's' : ''} unavailable now</span>}
             </div>
             {/* Published titles take up a save within about a minute (build queue P3-4). */}
@@ -341,7 +341,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
         </div>)}
       {confirm && (
         <div className="pol-confirm" role="alertdialog" aria-label="Confirm packaging again" data-policy-confirm>
-          <b>{confirm.impact?.repackage ?? ''} published title{confirm.impact?.repackage === 1 ? '' : 's'} to be packaged again</b>
+          <b>{confirm.impact?.repackage ?? ''} published title{confirm.impact?.repackage === 1 ? '' : 's'} to be packaged again, {repackageTime(confirm.impact?.repackageSeconds)} of jobs</b>
           <div>{confirm.message}</div>
           <div className="pol-foot">
             <button className="btn primary" disabled={busy} onClick={() => save(true)}>Package again and save</button>
