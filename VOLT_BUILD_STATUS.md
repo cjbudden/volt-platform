@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Publishing policies 4c: repackage on a confirmed DRM change (build queue P4-3, part (b); vX.Y.Z)
+## 2026-11-12 - Publishing policies 4c: repackage on a confirmed DRM change (build queue P4-3, part (b); v0.123.0)
 
 What: when a rule, a title's own setting or a bulk change turns DRM on or off for published titles and the change is confirmed, Volt now packages those titles again on its own. Each title keeps playing from its current files, with its current protection, until the new files are complete, and then switches in one step: turning DRM off keeps the title encrypted until its clear files are ready, turning it on leaves no clear copy (the MP4 goes). Before you save and the confirmation give the projected job time beside the count.
 
