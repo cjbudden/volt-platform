@@ -195,6 +195,12 @@ The top of the **Availability** tab says what a viewer gets right now and why.
 2. Choose **Test**. The answer is the play gate's own decision: **Plays**, **Teaser, no play**, **Not found**, **Paywall**, **Sign in** or **Blocked**, the reason, the step that decided it and the status at that moment.
 3. It cannot know the page the player is on (a rule's **Allowed referrer domains**) or a real viewer's purchases, so it says so under the answer.
 
+### Check what its collections ask (Rights)
+
+The **Rights** tab ends with **Collection access**: the [collections](collections.md) the title is in and what each asks, by app and country. Choose an app, a country and a viewer (**Not signed in**, **Signed in** or **Holding a package**) to see whether that viewer **Plays**, must **Sign in**, finds it **Locked** (with the package and price that unlock it) or **Blocked by rights**, and the matrix shows every app against those countries.
+
+![The Collection access card on a title's Rights tab: the collections it is in, the web player in Australia for a viewer not signed in finding it locked with the pass that unlocks it, and the matrix of apps by regions](/img/screens/media-library-collection-access.png)
+
 ### Publish it, or take it off (Availability)
 
 1. Further down the **Availability** tab, **Publishing** shows the publishing state and, if published, from and until when.

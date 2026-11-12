@@ -29,6 +29,9 @@ import { CollectionAccessCard } from './vod/CollectionAccess'
 const SWATCHES = ['#ff4d6d', '#ffb703', '#2ec4b6', '#b8a1ff', '#3f7bff', '#d4a64a', '#8bd450', '#f78fb3']
 const durOf = (ms: number) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 
+/** The package (or, for members only, the collection) that governs a locked title. */
+const lockName = (l: NonNullable<CollectionItem['lockedBy']>) => l.packages.length ? l.packages.map((p) => p.name).join(' or ') : l.by.map((b) => b.name).join(', ')
+
 export default function CollectionsPage() {
   useRoute()
   const notify = useNotify()
@@ -198,6 +201,11 @@ function Detail({ node, all, maxDepth, onChanged, onChoose, onNewSub }: {
                   <div className="t"><a href={`/vod?asset=${it.id}`} onClick={(e) => { e.preventDefault(); navigate(`/vod?asset=${it.id}`) }} style={{ color: 'inherit', textDecoration: 'none' }}>{it.title || 'Untitled'}</a></div>
                   <div className="m">
                     {it.source === 'rule' ? <span className="col-src rule" title="The collection's rules put it here">Rule</span> : info?.rules ? <span className="col-src" title="Added by a person: it stays whatever the rules say">Added</span> : null}
+                    {it.lockedBy && <span className="col-lock" title={it.source === 'rule'
+                      ? `Where ${lockName(it.lockedBy)} locks it, this collection leaves it out of the apps' lists. Add it by hand to keep it in.`
+                      : `${lockName(it.lockedBy)} governs it: viewers need that to watch it, wherever it asks more than this collection.`}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                      {it.source === 'rule' ? 'Left out where locked' : 'Locked'} by {lockName(it.lockedBy)}</span>}
                     {[it.series, it.genre, from ? `in ${from}` : null].filter(Boolean).join(' · ')}
                   </div>
                 </div>

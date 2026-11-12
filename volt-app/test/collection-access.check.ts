@@ -94,6 +94,16 @@ const check = (m: string, got: unknown, want: unknown) => {
   check('rights: territories the rights exclude', CA.rightsConflict([L('uk', { territories: { mode: 'allow', countries: ['GB'] } })], { ...open, territoryMode: 'allow', territories: ['FR'] }, apps),
     'The rights do not allow this title in GB, the territories this collection applies to.');
 
+  // ---- locked by another collection (C2-3)
+  const le = (own: string[], app: string, cc: string) => { const x = CA.lockedElsewhere(comp, new Set(own), app, cc); return x ? [x.access, x.packages.map((p) => p.id)] : null; };
+  check('locked elsewhere: in the free collection, GB on the web is locked by Sport', le(['free'], 'web', 'GB'), ['premium', ['sport']]);
+  check('...seen from Sport itself, nothing stricter', le(['sport'], 'web', 'GB'), null);
+  check('...FR on the web: nothing; FR on the TV app, members only elsewhere: not locked (a sign-in, not a package)', [le(['free'], 'web', 'FR'), le(['free'], 'tv', 'FR')], [null, null]);
+  const ge = CA.governedElsewhere(comp, new Set(['free']));
+  check('governed elsewhere (any app, any region): the Sport package; Members asks no package, so it is not named', [ge?.access, ge?.packages.map((p) => p.id), ge?.by.map((b) => b.id)], ['premium', ['sport'], ['sport']]);
+  check('...only a members collection elsewhere: not marked', CA.governedElsewhere({ v: 1, g: [{ c: 'members', n: 'MEMBERS', levels: [members] }] }, new Set(['free'])), null);
+  check('...from Sport, nothing asks more anywhere; nothing compiled: null', [CA.governedElsewhere(comp, new Set(['sport'])), CA.governedElsewhere(null, new Set())], [null, null]);
+
   // ======================= end to end ========================================
   const { createServer } = await import('../src/server');
   const { pool, one, query } = await import('../src/db');
@@ -238,6 +248,51 @@ const check = (m: string, got: unknown, want: unknown) => {
     check('View as anonymous in FR: sign in', by(await va(`appId=${webApp.id}&country=FR`), final).outcome, 'sign_in');
     check('View as holding the Sport package in GB: plays', by(await va(`appId=${webApp.id}&country=GB&viewer=package&packageId=${sportC}`), final).outcome, 'plays');
     check('View as with another account\'s app: refused', (await va(`appId=00000000-0000-0000-0000-000000000000&country=GB`)).s, 400);
+
+    // ---- locked by another collection (C2-3): rule collections leave it out, manual ones mark it
+    const cupC = await col('Cup titles');
+    await admin('PATCH', `/api/collections/${cupC}`, { rules: { match: 'all', conditions: [{ field: 'title', op: 'contains', value: 'Cup' }] } });
+    const cupItems = await admin('GET', `/api/collections/${cupC}/items`);
+    const it = (x: any, id: string) => x.j.items.find((r: any) => r.id === id);
+    check('a rule collection matches the final and the semi', [cupItems.s, !!it(cupItems, final), !!it(cupItems, semi), it(cupItems, final)?.source], [200, true, true, 'rule']);
+    check('...its admin list marks the final with the package that governs it; the semi is not marked',
+      [it(cupItems, final)?.lockedBy?.access, it(cupItems, final)?.lockedBy?.packages?.map((p: any) => p.name), it(cupItems, semi)?.lockedBy], ['premium', ['Sport'], undefined]);
+    const cupGB = await admin('GET', `/api/collections/${cupC}/access/view-as?appId=${webApp.id}&country=GB`);
+    const vi = (x: any, id: string) => x.j.items.find((r: any) => r.assetId === id);
+    check('View as on the rule collection, web in GB: the final is left out (locked by Sport), with a count and the reason',
+      [cupGB.s, vi(cupGB, final).leftOut, vi(cupGB, final).lockedBy.packages.map((p: any) => p.name), vi(cupGB, semi).leftOut, cupGB.j.leftOut.count, /locked by Sport/.test(cupGB.j.leftOut.reason)],
+      [200, true, ['Sport'], undefined, 1, true]);
+    const cupDE = await admin('GET', `/api/collections/${cupC}/access/view-as?appId=${webApp.id}&country=DE`);
+    check('...in DE, where Sport asks nothing, nothing is left out', [cupDE.j.leftOut.count, cupDE.j.leftOut.reason, vi(cupDE, final).leftOut], [0, null, undefined]);
+    await admin('POST', `/api/collections/${cupC}/items`, { assetIds: [final] });
+    const cupKept = await admin('GET', `/api/collections/${cupC}/access/view-as?appId=${webApp.id}&country=GB`);
+    check('...added by hand as well: it stays, still marked', [vi(cupKept, final).leftOut, vi(cupKept, final).lockedBy?.access, cupKept.j.leftOut.count], [undefined, 'premium', 0]);
+    const picksGB = await admin('GET', `/api/collections/${picksC}/access/view-as?appId=${webApp.id}&country=GB`);
+    check('a manual collection keeps the final, marked with Sport; nothing left out',
+      [vi(picksGB, final).leftOut, vi(picksGB, final).lockedBy?.packages?.map((p: any) => p.name), picksGB.j.leftOut.count], [undefined, ['Sport'], 0]);
+    const picksItems = await admin('GET', `/api/collections/${picksC}/items`);
+    check('...and its admin list marks it with the governing package', it(picksItems, final)?.lockedBy?.packages?.map((p: any) => p.name), ['Sport']);
+    const sportItems = await admin('GET', `/api/collections/${sportC}/items`);
+    check('Sport\'s own list marks nothing it governs itself', it(sportItems, final)?.lockedBy, undefined);
+    check('GET access on the rule collection names the countries its titles\' collections name, for the matrix', (await admin('GET', `/api/collections/${cupC}/access`)).j.titleRegions, ['FR', 'GB', 'IE']);
+
+    // ---- the asset page's breakdown (C2-3)
+    const aa = (id: string, q: string, who = me) => admin('GET', `/api/collections/asset-access/${id}?${q}`, undefined, who);
+    const a1 = await aa(final, `appId=${webApp.id}&country=GB`);
+    check('asset breakdown: the final in GB on the web is locked, unlocked by Sport, with the web product',
+      [a1.s, a1.j.result.outcome, a1.j.result.packages.map((p: any) => p.name), a1.j.result.products?.map((p: any) => p.productKey)], [200, 'locked', ['Sport'], [`sport.web.${tag}`]]);
+    check('...its collections, how each came to hold it, and what Sport asks',
+      [a1.j.collections.map((c: any) => c.name), a1.j.collections.find((c: any) => c.name === 'Cup titles').source, a1.j.collections.find((c: any) => c.name === 'Sport').asks[0].rules.map((r: any) => r.access)],
+      [['Cup titles', 'Free picks', 'Sport'], 'manual', ['premium', 'members']]);
+    check('...the regions to show: those the rules name, then one no rule names; the packages', [a1.j.regions, a1.j.packages.map((p: any) => p.name)], [['GB', 'IE', 'FR', 'US'], ['Sport']]);
+    check('...the same answer as the collection\'s View as', a1.j.result.outcome, by(anon, final).outcome);
+    check('...holding Sport: plays; a member in FR: plays; anonymous in FR: sign in',
+      [(await aa(final, `appId=${webApp.id}&country=GB&viewer=package&packageId=${sportC}`)).j.result.outcome, (await aa(final, `appId=${webApp.id}&country=FR&viewer=member`)).j.result.outcome, (await aa(final, `appId=${webApp.id}&country=FR`)).j.result.outcome],
+      ['plays', 'plays', 'sign_in']);
+    check('...a title in no collection with access plays, with no packages', [(await aa(semi, `appId=${webApp.id}&country=GB`)).j.result.outcome, (await aa(semi, '')).j.packages], ['plays', []]);
+    check('...the rights-blocked title says so', (await aa(freeTitle, `appId=${webApp.id}&country=GB`)).j.result.outcome, 'blocked_by_rights');
+    check('...another account: 404; another account\'s app: 400; not an id: 404',
+      [(await aa(final, '', them)).s, (await aa(final, 'appId=00000000-0000-0000-0000-000000000000')).s, (await aa('nope', '')).s], [404, 400, 404]);
 
     // tenancy
     check('another account cannot read or set the access', [(await admin('GET', `/api/collections/${sportC}/access`, undefined, them)).s,

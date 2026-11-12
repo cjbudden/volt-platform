@@ -27,6 +27,14 @@
  * Members are what the rules match, plus what a person added, minus what a
  * person took out. Each item says which (source: rule or manual).
  *
+ * ACCESS BY APP AND REGION (build queue C2 to C2-3, services/collectionAccess.ts):
+ *   GET    /api/collections/:id/access          its access, its parents', the apps (with ruledOut)
+ *   PUT    /api/collections/:id/access          { access } (null: inherit)
+ *   GET    /api/collections/:id/access/view-as  ?appId&country&viewer&packageId: each title's outcome,
+ *                                               leftOut (rule titles a stricter collection locks here)
+ *   GET    /api/collections/asset-access/:assetId  the same for one title, with its collections
+ * Items carry lockedBy when another collection locks them more strictly.
+ *
  * The Media Library list filters by collection with
  * GET /api/vod?collection=<id>[&collection_deep=true] (modules/vod.ts).
  * Tenant-scoped throughout: a collection and every asset added to it belong
@@ -41,7 +49,8 @@ import { actorId } from '../util/actor';
 import { fieldsFor, validateRules, RuleError, recompute, preview, matchAssets, OPS, ORDERS, type Group } from '../services/collectionRules';
 import {
   validateAccess, AccessError, looserThan, ancestorsOf, levelsOf, enqueueCollections, drainFor, syncPackageProducts, productKeyClashes,
-  appsOf, rightsConflict, cellFor, compileFor, holdsPackage, kindsFor, ALL_ACCESS, type CollectionAccess,
+  appsOf, rightsConflict, cellFor, compileFor, holdsPackage, kindsFor, lockedElsewhere, governedElsewhere, ALL_ACCESS, type CollectionAccess,
+  type Cell, type Compiled,
 } from '../services/collectionAccess';
 import { rightsForAsset, evaluateRights, appTypeOf, accessAllowed, appAllowed } from '../services/rightsProfiles';
 import { actor, writeAudit } from '../services/audit';
@@ -287,11 +296,20 @@ collectionsRouter.get('/:id/items', asyncHandler(async (req, res) => {
                row_number() OVER (PARTITION BY i.vod_asset_id ORDER BY t.path, i.position) AS rn
           FROM t JOIN collection_items i ON i.collection_id = t.id)
      SELECT v.id, v.title, v.duration_ms AS "durationMs", v.poster_key AS "posterKey", v.metadata->>'series' AS series,
-            v.metadata->>'genre' AS genre, r.collection_id AS "collectionId", r.position, r.added_at AS "addedAt", r.source
+            v.metadata->>'genre' AS genre, r.collection_id AS "collectionId", r.position, r.added_at AS "addedAt", r.source,
+            v.collection_access AS ca
        FROM ranked r JOIN vod_assets v ON v.id = r.vod_asset_id
       WHERE r.rn = 1
       ORDER BY r.path, ${(ORDERS[c.order_by] ?? ORDERS.manual).sql.replace('i.position', 'r.position')}, r.position, r.added_at`, [c.id, deep]);
-  res.json({ collection: { id: c.id, name: c.name }, deep, items: rows.map((r) => ({ ...r, durationMs: Number(r.durationMs ?? 0) })) });
+  // A title another collection locks more strictly than this one (any app or
+  // region) is marked with the package that governs it (build queue C2-3):
+  // a person added it, so it stays; a rule put it here, so the public answers
+  // and View as leave it out where it is locked.
+  const ownIds = new Set(deep ? await subtreeIds(c.id) : [c.id]);
+  res.json({ collection: { id: c.id, name: c.name }, deep, items: rows.map(({ ca, ...r }) => {
+    const g = governedElsewhere(ca as Compiled | null, ownIds);
+    return { ...r, durationMs: Number(r.durationMs ?? 0), ...(g ? { lockedBy: g } : {}) };
+  }) });
 }));
 
 const idsBody = z.object({ assetIds: z.array(uuid).min(1).max(MAX_BATCH) });
@@ -427,8 +445,16 @@ collectionsRouter.get('/:id/access', asyncHandler(async (req, res) => {
   const apps = await appsOf(accountId(req));
   const items = (await one<{ n: number }>(`SELECT count(DISTINCT vod_asset_id)::int AS n FROM collection_items WHERE collection_id = ANY($1::uuid[])`, [await subtreeIds(c.id)]))?.n ?? 0;
   const ruledOut = await appsRuledOut(c.id, apps);
+  // The countries the access governing the titles here names (their other
+  // collections' too), so View as's matrix shows where a title is locked by
+  // another collection even when this one sets nothing (build queue C2-3).
+  const named = await query<{ cc: string }>(
+    `SELECT DISTINCT cc FROM (SELECT v.collection_access AS ca FROM collection_items i JOIN vod_assets v ON v.id = i.vod_asset_id
+       WHERE i.collection_id = ANY($1::uuid[]) AND v.collection_access IS NOT NULL LIMIT 500) t,
+       jsonb_array_elements(t.ca->'g') g, jsonb_array_elements(g->'levels') l, jsonb_array_elements(l->'rules') r, jsonb_array_elements_text(r->'countries') cc
+      WHERE cc <> 'WORLD' ORDER BY cc LIMIT 12`, [await subtreeIds(c.id)]);
   res.json({ id: c.id, access: accessView(c.access), inherits: !c.access, ancestors, default: ALL_ACCESS,
-    apps: apps.map((a) => ({ id: a.id, name: a.name, type: a.type, ruledOut: ruledOut.get(a.id)! })), items });
+    apps: apps.map((a) => ({ id: a.id, name: a.name, type: a.type, ruledOut: ruledOut.get(a.id)! })), items, titleRegions: named.map((r) => r.cc) });
 }));
 
 /**
@@ -462,6 +488,65 @@ collectionsRouter.put('/:id/access', asyncHandler(async (req, res) => {
   res.json({ id: c.id, access: next, products, queued, compiled });
 }));
 
+type AppRowT = { id: string; name: string; type: string; surface: string | null };
+const viewAsViewer = (kind: string, packageId: string | null) => ({ viewerId: kind === 'anonymous' ? null : 'view-as', groups: [] as string[],
+  entitlements: kind === 'package' && packageId ? [{ grants: { collectionIds: [packageId] } }] : [] });
+
+/** One title as View as sees it: the rights cap first, then the collections' cell, then the viewer. */
+async function viewAsItem(r: any, comp: Compiled | null | undefined, viewer: ReturnType<typeof viewAsViewer>, app: AppRowT | null, appId: string | null, country: string | null) {
+  const rights = await rightsForAsset(r);
+  const capped = evaluateRights(rights, { country, appType: app ? appTypeOf(app.type, app.surface) : null, appId, use: 'on_demand' });
+  const cell: Cell = cellFor(comp, appId, country);
+  let outcome: string;
+  if (!capped.allowed) outcome = 'blocked_by_rights';
+  else if (cell.access !== 'free' && !accessAllowed(rights, kindsFor(cell))) outcome = 'blocked_by_rights';
+  else if (cell.access === 'members') outcome = viewer.viewerId ? 'plays' : 'sign_in';
+  else if (cell.access === 'premium') outcome = holdsPackage(viewer as any, cell) ? 'plays' : 'locked';
+  else outcome = 'plays';
+  return { assetId: r.id, title: r.title, outcome, access: cell.access, reason: !capped.allowed ? capped.reason : undefined,
+    packages: cell.packages, products: outcome === 'locked' ? cell.terms : undefined, decidedBy: cell.decidedBy };
+}
+
+/**
+ * THE ASSET PAGE'S BREAKDOWN (build queue C2-3): the same answer as a
+ * collection's View as, for one title. The collections it is in (with what
+ * each asks), the regions those name plus one no rule names, and what a
+ * viewer in an app and a country gets. The console asks once per cell to
+ * build the apps by regions matrix, as it does for a collection.
+ */
+collectionsRouter.get('/asset-access/:assetId', asyncHandler(async (req, res) => {
+  const acct = accountId(req);
+  const assetId = String(req.params.assetId);
+  if (!uuid.safeParse(assetId).success) throw notFound('Asset not found');
+  const r = await one<any>(`SELECT id, title, rights_profile_id, rights_narrow, created_at, first_aired_at FROM vod_assets WHERE id = $1 AND account_id = $2`, [assetId, acct]);
+  if (!r) throw notFound('Asset not found');
+  const appId = typeof req.query.appId === 'string' && req.query.appId ? req.query.appId : null;
+  const country = typeof req.query.country === 'string' && /^[A-Za-z]{2}$/.test(req.query.country) ? req.query.country.toUpperCase() : null;
+  const kind = req.query.viewer === 'member' || req.query.viewer === 'package' ? String(req.query.viewer) : 'anonymous';
+  const packageId = typeof req.query.packageId === 'string' ? req.query.packageId : null;
+  const apps = await appsOf(acct);
+  const app = appId ? apps.find((a) => a.id === appId) : null;
+  if (appId && !app) throw badRequest('Not an app of this account.');
+  const comp = (await compileFor([assetId])).get(assetId) ?? null;
+  const inCols = await query<any>(
+    `SELECT c.id, c.name, (c.rules IS NOT NULL) AS "hasRules", bool_and(coalesce(i.source, 'manual') = 'rule') AS "byRule"
+       FROM collection_items i JOIN collections c ON c.id = i.collection_id
+      WHERE i.vod_asset_id = $1 AND c.account_id = $2 GROUP BY c.id ORDER BY c.name`, [assetId, acct]);
+  const chainOf = new Map((comp?.g ?? []).map((g) => [g.c, g]));
+  const collections = inCols.map((c) => {
+    const g = chainOf.get(c.id);
+    return { id: c.id, name: c.name, hasRules: c.hasRules, source: c.byRule ? 'rule' : 'manual',
+      // root first: what each level of its chain asks, where
+      asks: (g?.levels ?? []).map((l) => ({ id: l.c, name: l.n, apps: l.apps, territories: l.territories, rules: l.rules.map((x) => ({ countries: x.countries, access: x.access })) })) };
+  });
+  const named = [...new Set((comp?.g ?? []).flatMap((g) => g.levels.flatMap((l) => [...l.rules.flatMap((x) => x.countries), ...l.territories.countries])))].filter((x) => x !== 'WORLD');
+  const elsewhere = ['US', 'FR', 'DE', 'JP', 'BR'].find((x) => !named.includes(x)) ?? 'US';
+  const packages = [...new Map((comp?.g ?? []).flatMap((g) => g.levels.filter((l) => l.rules.some((x) => x.access === 'premium')).map((l) => [l.c, { id: l.c, name: l.n }] as const))).values()];
+  const result = await viewAsItem(r, comp, viewAsViewer(kind, packageId), app ?? null, appId, country);
+  res.json({ assetId, title: r.title, app: app ? { id: app.id, name: app.name } : null, country, viewer: kind, packageId,
+    apps: apps.map((a) => ({ id: a.id, name: a.name, type: a.type })), regions: [...named.slice(0, 5), elsewhere], packages, collections, result });
+}));
+
 /**
  * VIEW AS: what a viewer in an app and a country gets for each title here.
  * viewer = anonymous | member | package (with packageId: holding that
@@ -479,30 +564,33 @@ collectionsRouter.get('/:id/access/view-as', asyncHandler(async (req, res) => {
   const apps = await appsOf(acct);
   const app = appId ? apps.find((a) => a.id === appId) : null;
   if (appId && !app) throw badRequest('Not an app of this account.');
+  const ids = await subtreeIds(c.id);
   const rows = await query<any>(
-    `SELECT DISTINCT ON (v.id) v.id, v.title, v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at
+    `SELECT v.id, v.title, v.rights_profile_id, v.rights_narrow, v.created_at, v.first_aired_at,
+            bool_and(coalesce(i.source, 'manual') = 'rule') AS by_rule
        FROM collection_items i JOIN vod_assets v ON v.id = i.vod_asset_id
-      WHERE i.collection_id = ANY($1::uuid[]) ORDER BY v.id LIMIT 500`, [await subtreeIds(c.id)]);
+      WHERE i.collection_id = ANY($1::uuid[]) GROUP BY v.id ORDER BY v.id LIMIT 500`, [ids]);
   // From the collections as they stand now (not the stored compile), so a
   // person checking a change sees it before the queue has caught up.
   const compiled = await compileFor(rows.map((r) => String(r.id)));
-  const viewer = { viewerId: kind === 'anonymous' ? null : 'view-as', groups: [],
-    entitlements: kind === 'package' && packageId ? [{ grants: { collectionIds: [packageId] } }] : [] };
+  const viewer = viewAsViewer(kind, packageId);
+  const ownIds = new Set(ids);
   const items = [];
   for (const r of rows) {
-    const rights = await rightsForAsset(r);
-    const capped = evaluateRights(rights, { country, appType: app ? appTypeOf(app.type, app.surface) : null, appId, use: 'on_demand' });
-    const cell = cellFor(compiled.get(String(r.id)), appId, country);
-    let outcome: string;
-    if (!capped.allowed) outcome = 'blocked_by_rights';
-    else if (cell.access !== 'free' && !accessAllowed(rights, kindsFor(cell))) outcome = 'blocked_by_rights';
-    else if (cell.access === 'members') outcome = viewer.viewerId ? 'plays' : 'sign_in';
-    else if (cell.access === 'premium') outcome = holdsPackage(viewer as any, cell) ? 'plays' : 'locked';
-    else outcome = 'plays';
-    items.push({ assetId: r.id, title: r.title, outcome, access: cell.access, reason: !capped.allowed ? capped.reason : undefined,
-      packages: cell.packages, products: outcome === 'locked' ? cell.terms : undefined, decidedBy: cell.decidedBy });
+    const comp = compiled.get(String(r.id));
+    const it: any = await viewAsItem(r, comp, viewer, app ?? null, appId, country);
+    // Another collection locks it here more strictly than this one: a rule
+    // put it here, so it is left out for this app and region; a person
+    // added it, so it stays, marked with the governing package (C2-3).
+    const el = lockedElsewhere(comp, ownIds, appId, country);
+    if (el) { it.lockedBy = el; if (r.by_rule) it.leftOut = true; }
+    items.push(it);
   }
   const counts: Record<string, number> = {};
   for (const i of items) counts[i.outcome] = (counts[i.outcome] ?? 0) + 1;
-  res.json({ app: app ? { id: app.id, name: app.name } : null, country, viewer: kind, packageId, counts, items });
+  const out = items.filter((i) => i.leftOut);
+  const leftOut = { count: out.length, reason: out.length
+    ? `${out.length === 1 ? 'A title the rules put here is' : `${out.length} titles the rules put here are`} locked by ${[...new Set(out.flatMap((i) => i.lockedBy.packages.map((p: any) => p.name)))].join(' or ')}, a package this collection does not ask for here, so ${out.length === 1 ? 'it is' : 'they are'} left out for this app and region.`
+    : null };
+  res.json({ app: app ? { id: app.id, name: app.name } : null, country, viewer: kind, packageId, counts, leftOut, items });
 }));

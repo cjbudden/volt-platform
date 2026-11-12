@@ -9504,11 +9504,11 @@
   "/api/collections/{id}/access": {
    "get": {
     "operationId": "getCollectionsByIDAccess",
-    "summary": "Get a collection's access",
+    "summary": "A collection's access",
     "tags": [
      "Collections"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "description": "Its own access by app and region (`access`, `null` when it inherits), what its parents ask (`ancestors`, root first), the default, how many titles it governs (`items`), the account's apps, each with `ruledOut` (how many of the titles here its rights keep out of that app, of how many, and a few of their titles), and `titleRegions`: the countries named by the access governing the titles here, their other collections' included.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -9542,7 +9542,7 @@
     "tags": [
      "Collections"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "description": "`{ \"access\": { apps, territories, rules } }`, or `{ \"access\": null }` to inherit. Each rule names countries (or `WORLD`) and asks `free`, `members` or `premium`; a premium rule lists its products in `terms` and an app's own prices in `appTerms`. Saving makes or updates the products and applies to every title here and in sub-collections at once. `422` with `code` `invalid_access` or `looser_than_parent` and the `problems`; `409` with `code` `product_key_taken`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []
@@ -9574,11 +9574,11 @@
   "/api/collections/{id}/access/view-as": {
    "get": {
     "operationId": "getCollectionsByIDAccessViewAs",
-    "summary": "Get access view as",
+    "summary": "What a viewer gets for each title",
     "tags": [
      "Collections"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "description": "`appId`, `country` (two letters) and `viewer` (`anonymous`, `member`, or `package` with `packageId`). Each title's `outcome` (`plays`, `sign_in`, `locked` with the `packages` and `products` that unlock it, or `blocked_by_rights` with the `reason`) and the collections that decided (`decidedBy`), with `counts`. A title another collection sells as a package there carries `lockedBy`; one the rules put here also has `leftOut: true`, and `leftOut` gives the `count` and the `reason`. The same evaluation as the play gate.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -9686,7 +9686,7 @@
     "tags": [
      "Collections"
     ],
-    "description": "In the collection's order. `deep=true` adds the sub-collections' media after, each asset once.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "description": "In the collection's order. `deep=true` adds the sub-collections' media after, each asset once. A title another collection sells as a package (where this collection asks for none) carries `lockedBy`: `access`, the `packages` that unlock it and `by`, the collections. A title the rules put here is left out of the apps' lists where that package is asked; one a person added stays.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
     "security": [
      {
       "adminBearer": []
@@ -9837,6 +9837,42 @@
     "parameters": [
      {
       "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/collections/asset-access/{assetId}": {
+   "get": {
+    "operationId": "getCollectionsAssetAccessByAssetId",
+    "summary": "What a viewer gets for one title",
+    "tags": [
+     "Collections"
+    ],
+    "description": "The View as answer for one title (`result`), with the collections it is in (`collections`: each with `source`, `rule` or `manual`, and `asks`, what each level of its chain asks where), the `packages` that can unlock it, the account's `apps` and the `regions` to show (the countries its collections name, then one none names). Same query as View as.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: view",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "assetId",
       "in": "path",
       "required": true,
       "schema": {
@@ -24856,7 +24892,7 @@
     "tags": [
      "Availability"
     ],
-    "description": "The answer for one viewer: 200 with a playback token and the addresses to play (on-demand addresses carry a play token in the path, `/t/<token>/...`, which the CDN checks on every manifest and segment request); 402 (`mode: paywall`, with `products` or `packages`) or 403 (`mode: sign_in` or `blocked`) with what would let them in and `message`; 451 (`mode: blocked`) where the region or the rights say no, with `code` (`region` or `rights`), `message` (the account's block message, default \"Not available in your region\") and `notify` (true when the account offers Notify me; see `POST /api/public/availability/notify`). An on-demand title that is not public (draft, in review, processing, restricted, expired or archived) is answered exactly as an unknown id: 404. A Scheduled title past its Listed from date is a teaser: 403 with `mode: scheduled`, `until` (when it becomes available; `availableFrom` is the same date for older players), `message`, `notify` and `meta` (title, description and artwork), never a token or an address. A title or channel whose publishing rule sets Concurrent streams counts a signed-in viewer's plays of members-only and premium content: the 200 has `streams` (`limit`, `open`, `stopped`) and `sid`; over the limit the viewer's oldest play is stopped (its next `POST /api/public/analytics/beacon` answer has `stop` with `code: concurrent_streams` and `message`), and a stopped play asking again with the same `sid` gets 409 with `mode: stopped` and `code: concurrent_streams`.\n\nThe viewer token decides groups and entitlements. Body viewer/entitled are ignored unless the app has trustAssertedViewer. Never edge cached.\n\n**Credential:** publishable key; viewer session optional",
+    "description": "The answer for one viewer: 200 with a playback token and the addresses to play (on-demand addresses carry a play token in the path, `/t/<token>/...`, which the CDN checks on every manifest and segment request); 402 (`mode: paywall`, with the `products` this app sells and, when a premium collection locks the title, `packages`: the collections whose package unlocks it, any one of them) or 403 (`mode: sign_in` or `blocked`) with what would let them in and `message`; 451 (`mode: blocked`) where the region or the rights say no, with `code` (`region` or `rights`), `message` (the account's block message, default \"Not available in your region\") and `notify` (true when the account offers Notify me; see `POST /api/public/availability/notify`). An on-demand title that is not public (draft, in review, processing, restricted, expired or archived) is answered exactly as an unknown id: 404. A Scheduled title past its Listed from date is a teaser: 403 with `mode: scheduled`, `until` (when it becomes available; `availableFrom` is the same date for older players), `message`, `notify` and `meta` (title, description and artwork), never a token or an address. A title or channel whose publishing rule sets Concurrent streams counts a signed-in viewer's plays of members-only and premium content: the 200 has `streams` (`limit`, `open`, `stopped`) and `sid`; over the limit the viewer's oldest play is stopped (its next `POST /api/public/analytics/beacon` answer has `stop` with `code: concurrent_streams` and `message`), and a stopped play asking again with the same `sid` gets 409 with `mode: stopped` and `code: concurrent_streams`.\n\nThe viewer token decides groups and entitlements. Body viewer/entitled are ignored unless the app has trustAssertedViewer. Never edge cached.\n\n**Credential:** publishable key; viewer session optional",
     "security": [
      {
       "publishableKey": []

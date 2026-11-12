@@ -86,9 +86,24 @@ A sub-collection can only ask more than its parents. If it would let viewers in 
 
 The **View as** card under **Access** answers the way the player does. Choose an app, type a country code and choose the viewer: **Not signed in**, **Signed in** or **Holding a package**. Each title shows **Plays**, **Sign in**, **Locked** (with the packages and prices that unlock it) or **Blocked by rights** (with the reason), and which collections decided.
 
-Below it, the matrix shows every app against each country the access names, plus one country no rule names, for a viewer who is not signed in.
+Below it, the matrix shows every app against each country the access names (this collection's, and that of the other collections its titles are in), plus one country no rule names, for a viewer who is not signed in.
 
 ![View as on a collection: the web player in Australia for a viewer not signed in, two titles locked with the pass that unlocks them and one blocked by rights, then the matrix of apps by regions](/img/screens/collections-view-as.png)
+
+### Titles another collection locks
+
+The strictest collection wins, so a title can sit in a free collection while another collection it is in sells it as part of a package. Each collection shows this in its own way:
+
+- **In a rule collection**, the rules did not choose a locked title, so the collection **leaves it out** for the apps and countries where the package is asked. The media list marks it **Left out where locked by** the package, and **View as** tags it **Left out** and says how many titles are left out there and which package locks them. Elsewhere it stays in. To keep it in everywhere, add it by hand.
+- **In a collection you fill by hand**, the title stays, because a person put it there. The media list marks it **Locked by** the package, and **View as** says it is kept and locked.
+
+A title that only asks viewers to sign in in another collection is not locked: it stays in, and the player asks the viewer to sign in.
+
+![View as on a rule collection in Australia: two titles the rules put there left out because Premium picks sells them, the hand-added promo kept and marked, and the matrix with the left-out counts](/img/screens/collections-left-out.png)
+
+### See one title's access
+
+On a title in the [Media Library](media-library.md), open the **Rights** tab. The **Collection access** card lists the collections the title is in, how each came to hold it (**Rule** or **Added**) and what each asks where. Choose an app, a country and a viewer to see what that viewer gets, and the matrix shows every app against the countries those collections name. It gives the same answer as **View as** and the player.
 
 ### Put a collection in order
 
@@ -159,6 +174,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A title is not added, with "The rights do not allow ..." | The collection has access that the title's rights rule out: apps, territories or premium access its rights profile does not allow | Add it to a collection without that access, or change the title's [rights](rights.md) |
 | "Another collection or rule already sells ..." | A product key names one product, and another collection or access rule uses it | Give this package its own product keys |
 | A title is locked although its own rules make it free | Another collection it is in asks more in that app and country: the strictest collection wins | Open the collection and use **View as** to see which collection decides, then take the title out of it or change that collection's access |
+| A rule collection shows fewer titles in an app or a country than it holds | Another collection sells those titles as a package there, so the rule collection leaves them out | **View as** names them and the package. Add a title by hand to keep it in, or change the other collection's access |
 
 ## Through the API
 
@@ -207,7 +223,10 @@ A sub-collection inherits its parent's access and can only tighten it: it can ap
 |---|---|
 | `GET /api/collections/{id}/access` | The collection's own access (`null` when it inherits), what its parents ask, the account's apps (each with `ruledOut`: how many of the titles here its rights keep out of that app, of how many, and a few of their titles) and how many titles it governs |
 | `PUT /api/collections/{id}/access` | Sets the access (`{"access": null}` clears it). `422` with `code: "looser_than_parent"` or `"invalid_access"` and the problems; `409` with `code: "product_key_taken"` |
-| `GET /api/collections/{id}/access/view-as?appId=…&country=GB&viewer=anonymous` | What a viewer gets for each title here: `plays`, `sign_in`, `locked` (with the packages and products), or `blocked_by_rights`, and which collections decided. `viewer` is `anonymous`, `member`, or `package` with `packageId` |
+| `GET /api/collections/{id}/access/view-as?appId=…&country=GB&viewer=anonymous` | What a viewer gets for each title here: `plays`, `sign_in`, `locked` (with the packages and products), or `blocked_by_rights`, and which collections decided. `viewer` is `anonymous`, `member`, or `package` with `packageId`. A title another collection sells as a package there carries `lockedBy` (that package); one the rules put here also has `leftOut: true`, and `leftOut` gives the `count` and the `reason` |
+| `GET /api/collections/asset-access/{assetId}?appId=…&country=GB&viewer=anonymous` | The same answer for one title (`result`), with the collections it is in (`collections`: each one's `source` and what its levels ask), the `packages` that can unlock it and the `regions` to show |
+
+`GET /api/collections/{id}/items` marks a title another collection sells as a package with `lockedBy` (`packages`, and `by`: the collections), and `GET /api/collections/{id}/access` lists in `titleRegions` the countries named by the access governing the titles here.
 
 ```bash
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

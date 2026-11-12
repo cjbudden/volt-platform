@@ -195,6 +195,19 @@
       "alt": "The Availability tab: the public status and its reason, the lifecycle with today marked, the dates, Listing, Archive and Who can watch"
     },
     {
+      "name": "media-library-collection-access",
+      "guide": "guides/media-library.md",
+      "path": "/vod?asset=5d0c6a1e-2f4b-4c1a-9e1d-3a7b2c9d0e41",
+      "fresh": true,
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1500,
+      "click": ["button:text-is(\"Rights\")", { "fill": ".cax-asset input[aria-label=\"Country\"]", "value": "AU" }],
+      "waitAfter": ".cax-asset .cax-mx tbody tr",
+      "clip": ".cax-asset",
+      "alt": "The Collection access card on a title's Rights tab: the collections it is in, the web player in Australia for a viewer not signed in finding it locked with the pass that unlocks it, and the matrix of apps by regions"
+    },
+    {
       "name": "media-library-exact-frame",
       "guide": "guides/media-library.md",
       "path": "/vod",
@@ -687,6 +700,17 @@
       "waitFor": ".cax-mx tbody tr",
       "clip": ".card:has(.cax-va)",
       "alt": "View as on a collection: the web player in Australia for a viewer not signed in, two titles locked with the pass that unlocks them and one blocked by rights, then the matrix of apps by regions"
+    },
+    {
+      "name": "collections-left-out",
+      "guide": "guides/collections.md",
+      "path": "/collections/7c2e1a40-5b6d-4e8f-9a0b-1c2d3e4f5a04",
+      "waitFor": ".cax-mx tbody tr",
+      "click": [{ "fill": ".cax-va input[aria-label=\"Country\"]", "value": "AU" }],
+      "waitAfter": ".cax-left",
+      "clip": ".card:has(.cax-va)",
+      "remove": [".topbar"],
+      "alt": "View as on a rule collection in Australia: two titles the rules put there left out because Premium picks sells them, the hand-added promo kept and marked, and the matrix with the left-out counts"
     },
     {
       "name": "encoding-queue",

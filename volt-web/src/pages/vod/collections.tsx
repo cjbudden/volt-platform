@@ -24,7 +24,9 @@ export interface Collection {
 }
 export interface CollectionItem { id: string; title: string | null; durationMs: number; posterKey: string | null; series: string | null; genre: string | null; collectionId: string; position: number
   /** 'rule': the collection's rules put it here; 'manual': a person did (build queue C1). */
-  source?: 'rule' | 'manual' }
+  source?: 'rule' | 'manual'
+  /** Another collection locks it more strictly than this one somewhere (build queue C2-3): the governing package. */
+  lockedBy?: { access: 'premium'; packages: { id: string; name: string }[]; by: { id: string; name: string; access: string }[] } }
 export interface TreeNode extends Collection { children: TreeNode[]; depth: number }
 
 const J = (b: unknown) => ({ body: JSON.stringify(b) })

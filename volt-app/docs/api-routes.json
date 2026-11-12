@@ -1423,6 +1423,15 @@
  },
  {
   "method": "GET",
+  "path": "/api/collections/asset-access/:assetId",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: view",
+  "viewerTier": false,
+  "group": "/api/collections"
+ },
+ {
+  "method": "GET",
   "path": "/api/collections/memberships",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

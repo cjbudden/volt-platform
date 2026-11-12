@@ -45,6 +45,7 @@ import { AssetStatusPanel, QcChecks, UsageBadge, USAGE_LABEL, hasNoMedia } from 
 import './vod/library.css'
 import { SourceFacts } from './vod/SourceFacts'
 import { EncodePlaceLine, EncodePlaceTag, OriginalReturnLine, encodePlaceText, encodeProgressWords } from './vod/EncodePlace'
+import { AssetCollectionAccess } from './vod/CollectionAccess'
 import { AddToCollectionDialog, CollectionTree, ColIcon, NewCollection, collectionsApi, flatten, pathName, useCollections } from './vod/collections'
 import { longTitle, seriesLabel } from './vod/libraryTitles'
 
@@ -452,6 +453,7 @@ function AssetDetail({ id, onChanged, onDeleted }: { id: string; onChanged: () =
       {tab === 'formats' && <FormatsPanel asset={d} />}
 
       {tab === 'rights' && <AssetRightsPanel assetId={d.id} />}
+      {tab === 'rights' && <AssetCollectionAccess assetId={d.id} />}
       {tab === 'availability' && (
         <AvailabilityPanel d={d} onChanged={() => { load(); onChanged() }} />
       )}

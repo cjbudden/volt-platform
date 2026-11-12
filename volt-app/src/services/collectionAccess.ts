@@ -204,6 +204,54 @@ export function cellFor(compiled: Compiled | null | undefined, appId: string | n
   return cell;
 }
 
+// ---------------------------------------------------------------------------
+//  Locked by another collection (build queue C2-3)
+// ---------------------------------------------------------------------------
+// Most restrictive wins across collections, so a title can sit in a free or
+// looser collection while a stricter one (a premium package, members only)
+// governs it. A rule-based collection leaves such a title out for that app
+// and region (its rules did not choose a locked title; listing it would show
+// a row the viewer cannot play); a title a person added stays, marked with
+// the package that governs it. Locked means a package is asked (premium),
+// as View as says: a members-only title asks a sign-in, not a sale, so it
+// stays in a looser collection's lists and the player asks the viewer to
+// sign in.
+
+/** The package a title's other collections (not ownIds) ask for in an app and a country, where this one asks none. null: not locked by another. Pure. */
+export function lockedElsewhere(compiled: Compiled | null | undefined, ownIds: Set<string>, appId: string | null, country: string | null):
+  { access: CollectionAccessType; packages: { id: string; name: string }[]; decidedBy: Cell['decidedBy'] } | null {
+  if (!compiled?.g?.length) return null;
+  const own = cellFor({ v: 1, g: compiled.g.filter((c) => ownIds.has(c.c)) }, appId, country);
+  const other = cellFor({ v: 1, g: compiled.g.filter((c) => !ownIds.has(c.c)) }, appId, country);
+  if (other.access !== 'premium' || own.access === 'premium') return null;
+  return { access: other.access, packages: other.packages, decidedBy: other.decidedBy };
+}
+
+/**
+ * For the admin list, any app and any region: the collections outside ownIds
+ * that sell a package for the title somewhere while this one never does, and
+ * those packages. null: none. Pure.
+ */
+export function governedElsewhere(compiled: Compiled | null | undefined, ownIds: Set<string>):
+  { access: CollectionAccessType; packages: { id: string; name: string }[]; by: { id: string; name: string; access: CollectionAccessType }[] } | null {
+  if (!compiled?.g?.length) return null;
+  const most = (levels: Level[]) => levels.reduce<CollectionAccessType>((m, l) => l.rules.reduce((x, r) => RANK[r.access] > RANK[x] ? r.access : x, m), 'free');
+  let ownMax: CollectionAccessType = 'free';
+  for (const c of compiled.g) if (ownIds.has(c.c)) { const m = most(c.levels); if (RANK[m] > RANK[ownMax]) ownMax = m; }
+  const by: { id: string; name: string; access: CollectionAccessType }[] = [];
+  const packages: { id: string; name: string }[] = [];
+  let access: CollectionAccessType = 'free';
+  for (const c of compiled.g) {
+    if (ownIds.has(c.c)) continue;
+    const m = most(c.levels);
+    if (m !== 'premium' || ownMax === 'premium') continue;
+    by.push({ id: c.c, name: c.n, access: m });
+    if (RANK[m] > RANK[access]) access = m;
+    for (const l of c.levels) if (l.rules.some((r) => r.access === 'premium') && !packages.some((p) => p.id === l.c)) packages.push({ id: l.c, name: l.n });
+  }
+  return by.length ? { access, packages, by } : null;
+}
+
 /** Does the viewer hold one of the packages (an entitlement granting the collection, or one of its products)? */
 export function holdsPackage(viewer: ViewerCtx | null | undefined, cell: Cell, now = new Date()): boolean {
   const ids = new Set(cell.packages.map((p) => p.id));

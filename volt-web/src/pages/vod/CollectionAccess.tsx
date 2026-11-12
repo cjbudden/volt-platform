@@ -25,16 +25,28 @@ interface Term { productKey: string; kind: 'period' | 'published_dates'; count?:
 interface Rule { id?: string; countries: string[]; access: Access; terms?: Term[]; appTerms?: Record<string, Term[]> }
 export interface AccessDef { apps: 'all' | string[]; territories: { mode: 'world' | 'allow' | 'block'; countries: string[] }; rules: Rule[] }
 interface AppRow { id: string; name: string; type: string; ruledOut: { count: number; of: number; titles: string[] } }
-interface AccessInfo { id: string; access: AccessDef | null; inherits: boolean; ancestors: { id: string; name: string; access: AccessDef }[]; default: AccessDef; apps: AppRow[]; items: number }
+interface AccessInfo { id: string; access: AccessDef | null; inherits: boolean; ancestors: { id: string; name: string; access: AccessDef }[]; default: AccessDef; apps: AppRow[]; items: number
+  /** Countries the access governing the titles here names, their other collections' included (C2-3). */
+  titleRegions?: string[] }
 type Outcome = 'plays' | 'sign_in' | 'locked' | 'blocked_by_rights'
-interface ViewAs { counts: Partial<Record<Outcome, number>>; items: { assetId: string; title: string | null; outcome: Outcome; access: Access; reason?: string; packages: { id: string; name: string }[]; products?: Term[]; decidedBy: { id: string; name: string; access: Access }[] }[] }
+interface Pkg { id: string; name: string }
+interface Decided { id: string; name: string; access: Access }
+interface ViewItem { assetId: string; title: string | null; outcome: Outcome; access: Access; reason?: string; packages: Pkg[]; products?: Term[]; decidedBy: Decided[]
+  /** Another collection locks it here more strictly than this one (C2-3); leftOut: the rules put it here, so it is left out for this app and region. */
+  lockedBy?: { access: Access; packages: Pkg[]; decidedBy: Decided[] }; leftOut?: boolean }
+interface ViewAs { counts: Partial<Record<Outcome, number>>; leftOut?: { count: number; reason: string | null }; items: ViewItem[] }
+interface AssetAccess { assetId: string; apps: { id: string; name: string }[]; regions: string[]; packages: Pkg[]; result: ViewItem
+  collections: { id: string; name: string; hasRules: boolean; source: 'rule' | 'manual'; asks: { id: string; name: string; rules: { countries: string[]; access: Access }[] }[] }[] }
 
 const J = (b: unknown) => ({ body: JSON.stringify(b) })
+const qs = (q: Record<string, string | undefined>) => new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()
 export const accessApi = {
   get: (id: string): Promise<AccessInfo> => apiRequest(`/collections/${id}/access`),
   save: (id: string, access: AccessDef | null): Promise<{ products: number; queued: number }> => apiRequest(`/collections/${id}/access`, { method: 'PUT', ...J({ access }) }),
   viewAs: (id: string, q: { appId?: string; country?: string; viewer?: string; packageId?: string }): Promise<ViewAs> =>
-    apiRequest(`/collections/${id}/access/view-as?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString()}`),
+    apiRequest(`/collections/${id}/access/view-as?${qs(q)}`),
+  asset: (assetId: string, q: { appId?: string; country?: string; viewer?: string; packageId?: string }): Promise<AssetAccess> =>
+    apiRequest(`/collections/asset-access/${assetId}?${qs(q)}`),
 }
 
 const ACCESS_LABEL: Record<Access, string> = { free: 'Free', members: 'Members (signed in)', premium: 'Premium (a package)' }
@@ -237,7 +249,7 @@ function ViewAsCard({ collectionId, collectionName, info, rev }: { collectionId:
   const packages = useMemo(() => [...info.ancestors.map((a) => ({ id: a.id, name: a.name, access: a.access })), ...(info.access ? [{ id: collectionId, name: collectionName, access: info.access }] : [])]
     .filter((p) => p.access.rules.some((r) => r.access === 'premium')), [info, collectionId, collectionName])
   const regions = useMemo(() => {
-    const named = [...new Set([...info.ancestors.map((a) => a.access), ...(info.access ? [info.access] : [])].flatMap((a) => [...a.rules.flatMap((r) => r.countries), ...a.territories.countries]))].filter((c) => c !== 'WORLD')
+    const named = [...new Set([...[...info.ancestors.map((a) => a.access), ...(info.access ? [info.access] : [])].flatMap((a) => [...a.rules.flatMap((r) => r.countries), ...a.territories.countries]), ...(info.titleRegions ?? [])])].filter((c) => c !== 'WORLD')
     const elsewhere = ['US', 'FR', 'DE', 'JP', 'BR'].find((c) => !named.includes(c)) ?? 'US'
     return [...named.slice(0, 5), elsewhere]
   }, [info])
@@ -246,7 +258,7 @@ function ViewAsCard({ collectionId, collectionName, info, rev }: { collectionId:
   const [viewer, setViewer] = useState('anonymous')
   const [pkg, setPkg] = useState(packages[0]?.id ?? '')
   const [ans, setAns] = useState<ViewAs | null>(null)
-  const [matrix, setMatrix] = useState<Record<string, ViewAs['counts']> | null>(null)
+  const [matrix, setMatrix] = useState<Record<string, ViewAs['counts'] & { left_out?: number }> | null>(null)
   useEffect(() => {
     if (!/^[A-Za-z]{2}$/.test(country)) return
     setAns(null)
@@ -255,7 +267,7 @@ function ViewAsCard({ collectionId, collectionName, info, rev }: { collectionId:
   useEffect(() => {
     let live = true; setMatrix(null)
     const apps = info.apps.length ? info.apps : [{ id: '', name: 'Any app' } as AppRow]
-    Promise.all(apps.flatMap((a) => regions.map((c) => accessApi.viewAs(collectionId, { appId: a.id, country: c }).then((r) => [`${a.id}|${c}`, r.counts] as const))))
+    Promise.all(apps.flatMap((a) => regions.map((c) => accessApi.viewAs(collectionId, { appId: a.id, country: c }).then((r) => [`${a.id}|${c}`, { ...r.counts, left_out: r.leftOut?.count || undefined }] as const))))
       .then((cells) => { if (live) setMatrix(Object.fromEntries(cells)) }).catch(() => { if (live) setMatrix({}) })
     return () => { live = false }
   }, [collectionId, rev, regions.join(), info.apps.length])
@@ -281,12 +293,16 @@ function ViewAsCard({ collectionId, collectionName, info, rev }: { collectionId:
       <div className="card-b" style={{ paddingTop: 0 }}>
         {!ans ? <div className="loading">Checking…</div> : <>
           <div className="cax-counts">{(Object.keys(OUTCOME) as Outcome[]).filter((o) => ans.counts[o]).map((o) => <span key={o} className={`tag ${OUTCOME[o].cls}`}>{ans.counts[o]} {OUTCOME[o].label.toLowerCase()}</span>)}
+            {!!ans.leftOut?.count && <span className="tag">{ans.leftOut.count} left out</span>}
             {!ans.items.length && <span className="hintxt" style={{ margin: 0 }}>No titles here yet.</span>}</div>
+          {ans.leftOut?.reason && <div className="cax-left">{Icon.lock}<span>{ans.leftOut.reason}</span></div>}
           {ans.items.map((it) => (
             <div key={it.assetId} className="cax-item">
               <span className="t">{it.title || 'Untitled'}</span>
-              <span className={`tag ${OUTCOME[it.outcome].cls}`}>{OUTCOME[it.outcome].label}</span>
+              <span className="cax-tags">{it.leftOut && <span className="tag" title="The rules put it here, but a stricter collection locks it in this app and region">Left out</span>}
+                <span className={`tag ${OUTCOME[it.outcome].cls}`}>{OUTCOME[it.outcome].label}</span></span>
               <span className="cax-dim cax-why2">
+                {it.lockedBy && <span className="cax-gov">{Icon.lock} {it.leftOut ? 'Left out here: locked' : 'Kept here, locked'} by {it.lockedBy.packages.length ? it.lockedBy.packages.map((p) => p.name).join(' or ') : it.lockedBy.decidedBy.map((d) => d.name).join(', ')} ({it.lockedBy.access}).</span>}
                 {it.outcome === 'blocked_by_rights' ? (it.reason ?? 'The rights do not allow the access a collection asks for here.')
                   : it.outcome === 'locked' ? `Unlocked by ${it.packages.map((p) => p.name).join(' or ')}${it.products?.length ? `: ${it.products.map((t) => `${t.name || t.productKey} ${money(t)} ${per(t)}`).join(', ')}` : ''}`
                   : it.decidedBy.length ? `Decided by ${it.decidedBy.map((d) => `${d.name} (${d.access})`).join(', ')}` : 'No collection asks anything of it here'}
@@ -304,7 +320,100 @@ function ViewAsCard({ collectionId, collectionName, info, rev }: { collectionId:
                 <tr key={a.id}><th scope="row">{a.name}</th>{regions.map((c) => {
                   const k = matrix[`${a.id}|${c}`] ?? {}
                   return <td key={c}><span className="cax-cell">{(Object.keys(OUTCOME) as Outcome[]).filter((o) => k[o]).map((o) => <span key={o} className={`tag ${OUTCOME[o].cls}`} title={OUTCOME[o].label}>{k[o]} {OUTCOME[o].label.toLowerCase()}</span>)}
+                    {!!k.left_out && <span className="tag" title="Locked by a stricter collection, so this rule collection leaves them out here">{k.left_out} left out</span>}
                     {!Object.keys(k).length && <span className="cax-dim">none</span>}</span></td>
+                })}</tr>))}</tbody>
+            </table>
+          </div>)}
+      </div>
+    </div>)
+}
+
+/**
+ * THE ASSET PAGE'S BREAKDOWN (build queue C2-3): the collections a title is
+ * in and what each asks, what a viewer gets in an app and a country, and the
+ * matrix of apps by regions. Reads GET /collections/asset-access/:assetId,
+ * the same evaluation as a collection's View as and the play gate.
+ */
+export function AssetCollectionAccess({ assetId }: { assetId: string }) {
+  const notify = useNotify()
+  const [base, setBase] = useState<AssetAccess | null>(null)
+  const [appId, setAppId] = useState('')
+  const [country, setCountry] = useState('')
+  const [viewer, setViewer] = useState('anonymous')
+  const [pkg, setPkg] = useState('')
+  const [ans, setAns] = useState<AssetAccess | null>(null)
+  const [matrix, setMatrix] = useState<Record<string, Outcome> | null>(null)
+  useEffect(() => {
+    let live = true; setBase(null); setMatrix(null)
+    accessApi.asset(assetId, {}).then((b) => {
+      if (!live) return
+      setBase(b); setAppId(b.apps[0]?.id ?? ''); setCountry(b.regions[0] ?? 'GB'); setPkg(b.packages[0]?.id ?? '')
+      const apps = b.apps.length ? b.apps : [{ id: '', name: 'Any app' }]
+      Promise.all(apps.flatMap((a) => b.regions.map((c) => accessApi.asset(assetId, { appId: a.id, country: c }).then((r) => [`${a.id}|${c}`, r.result.outcome] as const))))
+        .then((cells) => { if (live) setMatrix(Object.fromEntries(cells)) }).catch(() => { if (live) setMatrix({}) })
+    }).catch((e: any) => notify({ kind: 'error', message: e.message }))
+    return () => { live = false }
+  }, [assetId])
+  useEffect(() => {
+    if (!base || !/^[A-Za-z]{2}$/.test(country)) return
+    setAns(null)
+    accessApi.asset(assetId, { appId, country, viewer, packageId: viewer === 'package' ? pkg : undefined }).then(setAns).catch((e: any) => notify({ kind: 'error', message: e.message }))
+  }, [assetId, base, appId, country, viewer, pkg])
+
+  if (!base) return <div className="card"><div className="card-b loading">Loading collection access…</div></div>
+  const apps = base.apps.length ? base.apps : [{ id: '', name: 'Any app' }]
+  const it = ans?.result
+  return (
+    <div className="card cax-asset">
+      <div className="card-h" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{Icon.lock} Collection access</h3>
+        <span className="sub">What its collections ask, by app and region, the way the player decides</span>
+      </div>
+      <div className="card-b" style={{ paddingTop: 0 }}>
+        {!base.collections.length ? <div className="hintxt" style={{ margin: 0 }}>It is in no collection, so no collection asks anything of it.</div> : (
+          <div className="cax-cols">{base.collections.map((c) => (
+            <div key={c.id} className="cax-col">
+              <span className="t">{c.name}</span>
+              <span className={`col-src${c.source === 'rule' ? ' rule' : ''}`}>{c.source === 'rule' ? 'Rule' : 'Added'}</span>
+              <span className="cax-dim cax-why2">{c.asks.length
+                ? c.asks.map((l) => `${l.name}: ${l.rules.length ? l.rules.map((r) => `${r.access} ${r.countries.includes('WORLD') ? 'everywhere else' : `in ${r.countries.join(', ')}`}`).join(', ') : 'free'}`).join(' · ')
+                : 'Asks nothing (free)'}</span>
+            </div>))}</div>)}
+      </div>
+      <div className="card-b cax-va" style={{ borderTop: '1px solid var(--border)' }}>
+        <select className="inp" aria-label="App" value={appId} onChange={(e) => setAppId(e.target.value)}>
+          {apps.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <input className="inp" aria-label="Country" maxLength={2} style={{ width: 70 }} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} />
+        <select className="inp" aria-label="Viewer" value={viewer} onChange={(e) => setViewer(e.target.value)}>
+          <option value="anonymous">Not signed in</option><option value="member">Signed in</option>
+          {base.packages.length > 0 && <option value="package">Holding a package</option>}
+        </select>
+        {viewer === 'package' && <select className="inp" aria-label="Package" value={pkg} onChange={(e) => setPkg(e.target.value)}>{base.packages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+      </div>
+      <div className="card-b" style={{ paddingTop: 0 }}>
+        {!it ? <div className="loading">Checking…</div> : (
+          <div className="cax-item" style={{ borderTop: 0 }}>
+            <span className="t">{OUTCOME[it.outcome].label}</span>
+            <span className={`tag ${OUTCOME[it.outcome].cls}`}>{it.access === 'free' ? 'Free' : ACCESS_LABEL[it.access]}</span>
+            <span className="cax-dim cax-why2">
+              {it.outcome === 'blocked_by_rights' ? (it.reason ?? 'The rights do not allow the access a collection asks for here.')
+                : it.outcome === 'locked' ? `Unlocked by ${it.packages.map((p) => p.name).join(' or ')}${it.products?.length ? `: ${it.products.map((t) => `${t.name || t.productKey} ${money(t)} ${per(t)}`).join(', ')}` : ''}`
+                : it.decidedBy.length ? `Decided by ${it.decidedBy.map((d) => `${d.name} (${d.access})`).join(', ')}` : 'No collection asks anything of it here'}
+            </span>
+          </div>)}
+      </div>
+      <div className="card-b" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="hintxt" style={{ marginTop: 0 }}>Apps by region, for a viewer who is not signed in. {base.regions[base.regions.length - 1]} stands for everywhere no rule names.</div>
+        {!matrix ? <div className="loading">Building…</div> : (
+          <div className="cax-mx-wrap">
+            <table className="cax-mx">
+              <thead><tr><th scope="col">App</th>{base.regions.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>
+              <tbody>{apps.map((a) => (
+                <tr key={a.id}><th scope="row">{a.name}</th>{base.regions.map((c) => {
+                  const o = matrix[`${a.id}|${c}`]
+                  return <td key={c}>{o ? <span className={`tag ${OUTCOME[o].cls}`}>{OUTCOME[o].label}</span> : <span className="cax-dim">none</span>}</td>
                 })}</tr>))}</tbody>
             </table>
           </div>)}

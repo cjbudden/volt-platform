@@ -129,3 +129,14 @@
   .cax-term{grid-template-columns:1fr 1fr;padding-bottom:8px;border-bottom:1px solid var(--border)}
   .cax-va .inp{flex:1 1 140px}
 }
+.cax-tags{display:inline-flex;gap:6px;align-items:center}
+.cax-gov{display:flex;align-items:center;gap:4px;color:var(--muted);margin-bottom:2px}
+.cax-gov svg{width:12px;height:12px}
+.cax-left{display:flex;gap:8px;align-items:flex-start;font-size:var(--fs-sm);color:var(--muted);padding:8px 10px;margin-bottom:8px;border-radius:var(--radius-sm);background:var(--panel-2);border:1px solid var(--border)}
+.cax-left svg{flex:none;margin-top:2px}
+.cax-cols{display:flex;flex-direction:column}
+.cax-col{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;padding:8px 0;border-top:1px solid var(--border)}
+.cax-col:first-child{border-top:0}
+.cax-col .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.col-lock{display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-xs);font-weight:600;padding:1px 7px;border-radius:999px;background:var(--panel-3);color:var(--warn);margin-right:6px}
+.col-lock svg{width:11px;height:11px}
