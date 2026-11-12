@@ -2,6 +2,14 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.117.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Collections: A rule collection now leaves out a title that another collection sells as a package, in the apps and countries where that package is asked, and View as says how many titles are left out and which package locks them. A collection you fill by hand keeps such a title and marks it with the package.
+- added · API: GET /api/collections/asset-access/{assetId} answers what a viewer gets for one title from its collections. View as and a collection's items mark a title another collection sells as a package (lockedBy, leftOut), and the collection access routes are in the API reference.
+- added · Media Library: The Rights tab of a title now shows Collection access: the collections it is in, what each asks where, what a viewer gets in any app and country, and a matrix of apps by regions.
+
 ## 0.116.0 (2026-11-12)
 
 ### Product (in customer release notes)
