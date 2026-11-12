@@ -143,6 +143,11 @@ them back, drop any migration of theirs from `release/migrations-baseline.json`,
 and commit only the release paths with `git commit --no-verify -- <paths>`, then
 `git tag -a vX.Y.Z`.
 
+**Before every release, list `changes/unreleased`** even when nothing of
+theirs is staged: `release.mjs` releases every note in that folder, so another
+session's untracked notes for uncommitted work go out in your release (12 Nov
+2026). Move notes that are not yours aside first, as above.
+
 The mounted folder refuses deletes, so git leaves `.lock` files behind; move
 them aside (above) before every git command. `release.mjs` usually fails at its
 final `--amend` because of that: when it does, move the locks and finish it by
