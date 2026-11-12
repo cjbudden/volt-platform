@@ -5,7 +5,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
 import { validateMetadata, SchemaField } from '../services/metadataValidator';
 import { videoObjectFromAsset } from '../services/schemaOrg';
-import { schemaOrgMediaAllowed } from '../services/deliveryPolicy';
+import { schemaOrgMediaAllowed, schemaOrgExposure } from '../services/deliveryPolicy';
 import { traceClip } from '../services/clips/provenance';
 import { enqueueClipBuild } from '../services/clips';
 import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, qcFailedQueue, IllegalReview } from '../services/review';
@@ -563,7 +563,12 @@ vodRouter.get(
     // coming back, and what waits for it. Null while it is in the cloud.
     const { originalReturnOf } = await import('../services/archive/originals');
     const originalReturn = await originalReturnOf(row).catch(() => null);
-    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld: videoObjectFromAsset(row, pubs as any, { media: await schemaOrgMediaAllowed(row.id, { accountId: accountId(req) }).catch(() => false) }), encode_place: encodePlaceOf(row.ingest, siteName),
+    // Its schema.org data as a partner or search engine would get it: null when its rule keeps it out (P3-4c-2).
+    const exposure = await schemaOrgExposure(row.id, accountId(req)).catch(() => ({ listed: true, mp4: true }));
+    const jsonld = exposure.listed
+      ? videoObjectFromAsset(row, pubs as any, { media: await schemaOrgMediaAllowed(row.id, { accountId: accountId(req) }).catch(() => false), mp4: exposure.mp4 })
+      : null;
+    res.json({ ...row, audioOnly, schema, publications: pubs, jsonld, encode_place: encodePlaceOf(row.ingest, siteName),
       original_return: originalReturn, ...(await statusFields(row)), preview: previewUrls(row), ...extra });
   })
 );
@@ -844,10 +849,20 @@ vodRouter.get(
   asyncHandler(async (req, res) => {
     const row = await fetchOwned(req.params.id, accountId(req));
     if (!row) throw notFound('VOD asset not found');
+    // A title whose publishing rule turns Sitemap and schema.org off is left
+    // out (P3-4c-2): the portal and partners read this route to publish it, so
+    // answering anything would list it. Read from the stamp, as delivery is.
+    const exposure = await schemaOrgExposure(row.id, accountId(req));
+    if (!exposure.listed) {
+      const e: any = notFound('This title is not listed: its publishing rule turns Sitemap and schema.org off (Distribution).');
+      e.code = 'not_listed';
+      throw e;
+    }
     const pubs = await query('SELECT platform, external_url, views, published_at, status FROM publications WHERE vod_asset_id=$1', [req.params.id]);
-    // Plain media addresses only where they would not go round the play gate (P2-2g).
+    // Plain media addresses only where they would not go round the play gate (P2-2g),
+    // and never the MP4 when its download is off (P3-4c-2).
     const media = await schemaOrgMediaAllowed(row.id, { accountId: accountId(req) }).catch(() => false);
-    res.type('application/ld+json').json(videoObjectFromAsset(row, pubs as any, { media }));
+    res.type('application/ld+json').json(videoObjectFromAsset(row, pubs as any, { media, mp4: exposure.mp4 }));
   })
 );
 

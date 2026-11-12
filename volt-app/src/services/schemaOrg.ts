@@ -71,18 +71,21 @@ export interface PublicationForSchema {
  * leaves out the plain media addresses (`contentUrl`, `associatedMedia`):
  * where play tokens decide who plays, they would go round the play gate
  * (deliveryPolicy.ts schemaOrgMediaAllowed, build queue P2-2g). `embedUrl`,
- * the watch page, always stays.
+ * the watch page, always stays. `mp4: false` (the title's MP4 download is
+ * off, build queue P3-4c-2) leaves out the plain MP4 alone: `contentUrl` and
+ * its `associatedMedia` entry.
  */
-export function videoObjectFromAsset(a: AssetForSchema, pubs: PublicationForSchema[] = [], o: { media?: boolean } = {}): Record<string, any> {
+export function videoObjectFromAsset(a: AssetForSchema, pubs: PublicationForSchema[] = [], o: { media?: boolean; mp4?: boolean } = {}): Record<string, any> {
   const md = a.metadata ?? {};
   const media = o.media !== false;
+  const mp4 = media && o.mp4 !== false;
   const associatedMedia: any[] = [];
   if (media) {
     if (a.formats?.hls !== false && a.master_key)
       associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'application/vnd.apple.mpegurl', contentUrl: cdn(a.master_key) });
     if (a.formats?.dash && a.master_key)
       associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'application/dash+xml', contentUrl: cdn(a.master_key.replace(/master\.m3u8$/, 'manifest.mpd')) });
-    if (a.formats?.progressive && a.progressive_key)
+    if (mp4 && a.formats?.progressive && a.progressive_key)
       associatedMedia.push({ '@type': 'MediaObject', encodingFormat: 'video/mp4', contentUrl: cdn(a.progressive_key) });
   }
 
@@ -99,7 +102,7 @@ export function videoObjectFromAsset(a: AssetForSchema, pubs: PublicationForSche
     duration: isoDuration(a.duration_ms),
     thumbnail: imageObject(a.poster_key),
     thumbnailUrl: cdn(a.poster_key),
-    contentUrl: media && a.formats?.progressive ? cdn(a.progressive_key) : undefined,
+    contentUrl: mp4 && a.formats?.progressive ? cdn(a.progressive_key) : undefined,
     embedUrl: portalUrl,
     isLiveBroadcast: false,
     genre: md.genre,

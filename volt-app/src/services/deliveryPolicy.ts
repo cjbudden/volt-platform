@@ -28,7 +28,17 @@
 //                                 refused, and the active lineups it is in are
 //                                 planned again without it (fast/store.ts)
 //
-//  Concurrent streams are P3-4d; the sitemap and schema.org exposure P3-4c-2.
+//    distribution.sitemap         the title in its schema.org data and any
+//                                 public listing (build queue P3-4c-2): off,
+//                                 `GET /api/vod/{id}/schema.org` answers 404
+//                                 not_listed and the asset's `jsonld` is null
+//    distribution.mp4Download     also takes the plain MP4 out of the
+//                                 schema.org data (`contentUrl` and its
+//                                 `associatedMedia` entry) when it is off
+//
+//  Concurrent streams are P3-4d. Volt has no public sitemap or public catalogue
+//  listing yet; when one is built (C2-3, C3) it filters with sitemapListedOf on
+//  the stamp, as schemaOrgExposure does here.
 //
 //    protection.tokenFree         plain addresses for content no viewer
 //                                 condition applies to (build queue P2-2c):
@@ -70,13 +80,44 @@ export function deliveryPolicyOf(settings: any): DeliveryPolicy {
  * null when there is no such asset.
  */
 export async function deliveryPolicyFor(assetId: string, accountId: string): Promise<DeliveryPolicy | null> {
+  const settings = await deliverySettingsFor(assetId, accountId);
+  return settings === undefined ? null : deliveryPolicyOf(settings);
+}
+
+/**
+ * The settings the delivery paths read for a title: its stamp when it is
+ * published (cached), otherwise its rules as they resolve now. undefined when
+ * there is no such asset.
+ */
+async function deliverySettingsFor(assetId: string, accountId: string): Promise<any> {
   const row = await vodAvailabilityRow(assetId);
-  if (!row) return null;
+  if (!row) return undefined;
   if (row.availability && typeof row.availability === 'object' && row.availability_state && row.availability_state !== 'draft')
-    return deliveryPolicyOf(row.availability);
+    return row.availability;
   const plan = await resolveForAsset(accountId, { id: assetId, schema_id: row.schema_id ?? null, channel_id: row.channel_id ?? null, event_id: row.event_id ?? null,
     availability_override: await overrideOf(assetId) });
-  return deliveryPolicyOf(plan.settings);
+  return plan.settings;
+}
+
+/** Whether a stamp (or resolved settings) lists the title in the sitemap and schema.org data; the baseline under anything missing. */
+export function sitemapListedOf(settings: any): boolean {
+  const d = settings?.distribution ?? {};
+  return typeof d.sitemap === 'boolean' ? d.sitemap : (BASELINE as any).distribution?.sitemap !== false;
+}
+
+/**
+ * WHAT THE schema.org DATA MAY SAY ABOUT A TITLE (build queue P3-4c-2), read
+ * as every delivery path reads: the stamp of a published title, the rules of
+ * any other. `listed` false: the title is left out altogether (its rule turns
+ * Sitemap and schema.org off). `mp4` false: its MP4 download is off, so the
+ * plain MP4 is not named even where the other media addresses are
+ * (schemaOrgMediaAllowed decides those). An unknown title is not listed.
+ */
+export async function schemaOrgExposure(assetId: string, accountId: string): Promise<{ listed: boolean; mp4: boolean }> {
+  if (!/^[0-9a-f-]{36}$/i.test(assetId)) return { listed: false, mp4: false };
+  const settings = await deliverySettingsFor(assetId, accountId);
+  if (settings === undefined) return { listed: false, mp4: false };
+  return { listed: sitemapListedOf(settings), mp4: deliveryPolicyOf(settings).mp4Download };
 }
 
 async function overrideOf(assetId: string): Promise<any> {
