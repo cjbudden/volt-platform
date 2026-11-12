@@ -2,6 +2,18 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.128.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Media Library: An archived title whose publishing policy sets Archive storage tier now has its media moved to Infrequent access or Archive storage, which costs less to keep. Restoring it from Archive storage says first that it takes about 5 hours and by when; the title stays archived until its media is back, then becomes a draft or is published as you chose.
+- fixed · Storage: Moving a file larger than 5 GB to a cheaper storage tier no longer fails.
+- added · Media Library: The Availability tab now shows when a title's publishing policy deletes it, its legal hold with the reason, and where an archived title's media is kept. A legal hold can be placed, with a reason, and released right there.
+
+### Internal
+
+- added · Tests: vod-archive-tier check suite (moto and Postgres) and the asset-retention browser check.
+
 ## 0.127.0 (2026-11-12)
 
 ### Product (in customer release notes)
