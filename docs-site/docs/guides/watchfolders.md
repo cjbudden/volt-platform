@@ -29,6 +29,7 @@ Media operations staff and librarians use it day to day; an administrator usuall
 - The folder's path as Volt sees it. Volt can only watch folders it can reach; ask your Volt contact which paths your account can use.
 - For video files, the encoding ladder they should be encoded to ([Encoding Profiles](encoding-profiles.md)). Without one, the account default is used.
 - **Files, uploads & storage: Manage** to create a watchfolder or change its rules (see [Who can do it](#who-can-do-it)).
+- Any screen size works. On a phone each rule, file in the queue and folder is shown as a stacked card (its name first, then the details and buttons), so nothing runs off the side of the screen.
 
 ## Step by step
 

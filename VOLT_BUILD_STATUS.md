@@ -2295,7 +2295,15 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Publishing policies 5c: the archive storage tier and retention on the asset drawer (build queue P5-3; v0.128.0)
+## 2026-11-12 - Watchfolders page at phone width (build queue WF-phone; v0.128.1)
+
+What: at 390 px the Watchfolders page scrolled sideways (rules, the add-rule row, the queue rows and the list cards are grids with desktop column widths). They now stack on a phone, and the add-rule row also fits a tablet.
+
+- **Where**: `volt-web/src/pages/Watchfolders.tsx` (classes `wf-rule`, `wf-add`, `wf-item`, `wf-card`, `wf-head`; the header buttons and the Encode video to row wrap, the ladder select is capped at the width), `volt-web/src/index.css` (the WF-phone block: under 640 px and the add-rule row under 1024 px; `!important` beats the inline desktop columns, which stay as they were).
+- **Checked**: typecheck clean on the device. `volt-web/test/watchfolders-phone.browser.mjs` **28/28** (Playwright, real API on the docs seed plus an on-prem folder with a long path and three queue items, vite) at 1440, 768 and 390 px: the list, a local folder and an on-prem folder have no sideways scroll and nothing past the right edge; at 390 queue rows and rules stack; at 1440 the rule, queue and add-rule rows keep 6, 5 and 5 columns. Before the header and tablet fixes it measured 92 px of sideways scroll at 768 and 46 px at 390. Screenshots looked at for all nine. Docs: coverage 64/64, scrub clean, docusaurus build ok.
+- **Guides**: Watchfolders (a line saying the page works at any size). The guide's desktop screenshots are unchanged.
+
+ the archive storage tier and retention on the asset drawer (build queue P5-3; v0.128.0)
 
 What: an archived title whose publishing policy sets **Archive storage tier** has its media moved to that storage class (Infrequent access or Archive storage), and back when it is restored, with a restore from Archive storage saying its wait first. The asset drawer's Availability tab shows when the policy deletes the title, its legal hold (placed and released there, with a reason) and where an archived title's media is.
 

@@ -1694,3 +1694,31 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .addon-effect{margin-top:14px;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border);font-size:var(--fs-body)}
 .addon-packs{display:flex;flex-wrap:wrap;gap:6px}
 @media (max-width:640px){.bill-pay{flex-wrap:wrap}.bill-pay>.btn{width:100%}.plan-head{flex-wrap:wrap}.addon-head{flex-wrap:wrap}.addon-actions{width:100%}.addon-actions .btn{flex:1;justify-content:center}}
+
+/* WATCHFOLDERS AT PHONE WIDTH (build queue WF-phone). The rule rows, the add-rule
+   row, the queue rows and the list cards are grids sized for a desktop (inline
+   column widths in Watchfolders.tsx), so at 390 px they ran 470 px wide and the
+   page scrolled sideways. Under 640 px they stack: a rule keeps its number in a
+   narrow first column with everything else beneath its name; a queue row puts
+   the file name on its own line, then its status, size and time, then its
+   buttons; a folder card puts the name and path first. Long paths wrap. The
+   add-rule row already runs out of room on a tablet (768 px with the sidebar),
+   so under 1024 px it is two fields a line. The !important beats the inline
+   desktop columns. */
+@media (max-width:1024px){
+  .wf-add{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .wf-add>.btn{grid-column:1/-1;justify-self:start}
+}
+@media (max-width:640px){
+  .wf-head code{overflow-wrap:anywhere;min-width:0}
+  .wf-rule{grid-template-columns:28px minmax(0,1fr)!important;gap:4px 10px!important}
+  .wf-rule>:nth-child(n+3){grid-column:2}
+  .wf-rule code,.wf-item code,.wf-card code{overflow-wrap:anywhere}
+  .wf-add{grid-template-columns:minmax(0,1fr)!important}
+  .wf-add>*{width:100%;min-width:0}
+  .wf-item{grid-template-columns:auto auto minmax(0,1fr)!important;gap:6px 10px!important}
+  .wf-item>:first-child,.wf-item>:last-child{grid-column:1/-1}
+  .wf-item>:last-child{flex-wrap:wrap}
+  .wf-card{grid-template-columns:minmax(0,1fr) auto!important;gap:6px 12px!important}
+  .wf-card>:first-child{grid-column:1/-1;min-width:0}
+}

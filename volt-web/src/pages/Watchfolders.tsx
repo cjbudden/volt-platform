@@ -242,7 +242,7 @@ function Rules({ folder, rules, kinds, defaultsMissing, imageTypes, reload }: {
 
       <div style={{ display: 'grid', gap: 6, margin: '10px 0' }}>
         {rules.map((r, i) => (
-          <div key={r.id} style={{
+          <div key={r.id} className="wf-rule" style={{
             display: 'grid', gridTemplateColumns: '28px 1fr 1fr 130px 120px auto',
             gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 8,
             background: r.id === winner ? 'rgba(63,123,255,.12)' : 'var(--panel-2,#151922)',
@@ -310,7 +310,7 @@ function Rules({ folder, rules, kinds, defaultsMissing, imageTypes, reload }: {
       )}
 
       {canManage && (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 170px 120px auto', gap: 8, marginTop: 12 }}>
+      <div className="wf-add" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 170px 120px auto', gap: 8, marginTop: 12 }}>
         <input style={box} placeholder="Rule name" value={draft.name}
           onChange={e => setDraft({ ...draft, name: e.target.value })} />
         <input style={box} placeholder="slate_*.png" value={draft.pattern}
@@ -458,7 +458,7 @@ function Queue({ folder, reload }: { folder: Watchfolder; reload: () => void }) 
 
       <div style={{ display: 'grid', gap: 6 }}>
         {items.map(it => (
-          <div key={it.id} style={{
+          <div key={it.id} className="wf-item" style={{
             display: 'grid', gridTemplateColumns: '1fr 110px 90px 100px auto', gap: 10,
             alignItems: 'center', padding: '9px 10px', borderRadius: 8,
             background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
@@ -580,7 +580,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
     <div>
       <button type="button" className="btn ghost" onClick={onBack} style={{ marginBottom: 12 }}>← Watchfolders</button>
       <div className="card" style={{ padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div className="wf-head" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           {renaming == null ? (
             <h2 style={{ margin: 0 }}>{folder.name}</h2>
           ) : (
@@ -595,7 +595,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
           <code style={{ fontSize: 'var(--fs-xs)', color: 'var(--faint,#8b93a7)' }}>{folder.config?.path}</code>
           {folder.kind === 'site' && <SiteTag name={folder.site_name} />}
           {!folder.enabled && <Pill status="off" />}
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <span style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {canManage && renaming == null && (
               <button type="button" className="btn ghost" onClick={() => setRenaming(folder.name)}>✎ Rename</button>
             )}
@@ -676,10 +676,10 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
         {/* THE LADDER. Video files this folder accepts are encoded to it; images
             and slates are unaffected, which is why it sits with the scan
             settings rather than with the rules. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
           <label style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Encode video to</label>
           <select
-            style={{ background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
+            style={{ maxWidth: '100%', background: 'var(--panel-2,#151922)', border: '1px solid var(--border,#242a36)',
                      color: 'var(--text,#e7ebf3)', borderRadius: 8, padding: '6px 9px',
                      fontFamily: 'inherit', fontSize: 'var(--fs-sm)' }}
             value={folder.ladder_group_id ?? ''} disabled={!canManage}
@@ -851,7 +851,7 @@ export default function Watchfolders() {
 
       <div style={{ display: 'grid', gap: 10 }}>
         {folders.map(f => (
-          <div key={f.id} className="card" {...pressable(() => setOpen(f.id))}
+          <div key={f.id} className="card wf-card" {...pressable(() => setOpen(f.id))}
             style={{ padding: 16, display: 'grid', gridTemplateColumns: '1fr 120px 140px 120px', gap: 12, alignItems: 'center', cursor: 'pointer' }}>
             <div>
               <div style={{ fontWeight: 600 }}>{f.name}</div>
