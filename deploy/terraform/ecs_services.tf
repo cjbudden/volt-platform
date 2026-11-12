@@ -369,6 +369,9 @@ locals {
     # in the bucket under vod-src/, because the task that finishes an upload is
     # rarely the one whose worker encodes it (build queue 2.1a-2b).
     { name = "VOD_SOURCE_DRIVER", value = "s3" },
+    # The restore bin (services/media/trash.ts): deleted media waits in the bucket
+    # under trash/, so a restore works from any task (build queue 2.1a-2c).
+    { name = "VOLT_TRASH_DRIVER", value = "s3" },
     { name = "PUBLIC_BASE_URL", value = local.public_base_url },
     { name = "ECS_SPOT_PROVIDER", value = aws_ecs_capacity_provider.spot.name },
     { name = "ECS_ONDEMAND_PROVIDER", value = aws_ecs_capacity_provider.ondemand.name },

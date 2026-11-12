@@ -5,14 +5,16 @@
 //  provenance) are kept in a bin item with the links that pointed at it, its encode
 //  output (clips/vod/<id>) and an uploaded source under clips/vod-src move into the bin,
 //  and any encode still waiting is cancelled. Restoring puts all of it back; after
-//  VOLT_TRASH_DAYS the bin purges it. A source elsewhere (an S3 key, a watchfolder path)
-//  is never touched from here.
+//  VOLT_TRASH_DAYS the bin purges it. An original Volt holds in the bucket (vod-src/,
+//  VOD_SOURCE_DRIVER=s3) and its sidecar go into the bin too (build queue 2.1a-2c).
+//  A source elsewhere (a customer's bucket, a watchfolder path) is never touched from here.
 // ============================================================================
 import { existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { config } from '../config';
 import { one, query } from '../db';
 import { BinItem, snapshotDelete, LIBRARY_TRASH_DAYS } from './media/trash';
+import { parseSourceUri } from './media/vodSource';
 
 const inside = (p: string, dir: string) => { const r = resolve(p); const d = resolve(dir); return r.startsWith(d + sep); };
 
@@ -36,11 +38,20 @@ export async function removeVodAsset(assetId: string, opts: { keepPath?: string 
   // this disk has moved, and the asset is still whole.
   const { vodStore } = await import('./fast/vodStore');
   if (vodStore() === 's3') await bin.objects(`vod/${a.id}/`);
-  bin.file(join(config.clips.dir, 'vod', a.id), 'output');
+  await bin.file(join(config.clips.dir, 'vod', a.id), 'output');
   const src = a.source_key as string | null;
   if (src && !/^[a-z0-9]+:\/\//i.test(src) && src !== opts.keepPath && inside(src, join(config.clips.dir, 'vod-src')) && existsSync(src)) {
-    bin.file(src, 'source');
+    await bin.file(src, 'source');
   }
+  // THE ORIGINAL IN THE BUCKET (2.1a-2b put it there): before 2.1a-2c it stayed for good
+  // after the asset was deleted and purged. Only Volt's own vod-src keys in the origin
+  // bucket (parseSourceUri refuses anything else), with the sidecar the ingest landed.
+  // An original another asset still points at stays where it is.
+  const loc = src && src !== opts.keepPath ? parseSourceUri(src) : null;
+  const shared = loc ? !!(await one<any>(`SELECT 1 FROM vod_assets WHERE source_key = $1 AND id <> $2 LIMIT 1`, [src, a.id])) : false;
+  if (loc && shared) { /* kept for the other asset */ }
+  else if (loc && loc.bucket === config.aws.s3Bucket) await bin.keys([loc.key, `${loc.key}.json`, `${loc.key}.xml`]);
+  else if (loc) console.warn('[vod] original in another bucket left where it is', src);
   // IMAGES AND FILES THAT WERE THE ASSET'S OWN go into the same bin item, so a restore puts
   // them back with it: frames Volt saved for it (picked or chosen, metadata.assetId), unless
   // something else still uses them, and its companion files (captions, sidecars). Uploaded

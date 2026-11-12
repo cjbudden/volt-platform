@@ -17,6 +17,14 @@
 //             variants), moved inside the bucket to trash/<item>/... (vodStore.ts movePrefix),
 //             so it is off the CDN's path at once and a restore moves it back.
 //
+//  WHERE THE BIN KEEPS FILES (build queue 2.1a-2c). On the Mac the files above wait
+//  on this disk under VOLT_TRASH_DIR. On AWS the control plane is several Fargate
+//  tasks and a task's disk goes with it, so with VOLT_TRASH_DRIVER=s3 (Terraform
+//  sets it) they are uploaded to the origin bucket under trash/<item>/<group>/...
+//  and removed from the disk: a restore on any task downloads them back to where
+//  they were, the purge deletes the prefix. An original held in the bucket
+//  (vod-src/, 2.1a-2b) moves to trash/<item>/vod-src/... key by key.
+//
 //  An item is purged after VOLT_TRASH_DAYS (7 by default): that is the real deletion.
 //  A Media Library delete (single or bulk) is held for VOLT_LIBRARY_TRASH_DAYS (2 by
 //  default, Christian 9 Nov): long enough to undo a mistake, short enough not to keep
@@ -35,14 +43,18 @@ export const TRASH_DAYS = Math.max(1, Number(process.env.VOLT_TRASH_DAYS ?? 7) |
 /** How long a Media Library delete stays restorable. */
 export const LIBRARY_TRASH_DAYS = Math.max(1, Number(process.env.VOLT_LIBRARY_TRASH_DAYS ?? 2) || 2);
 export function trashRoot(): string { return resolve(process.env.VOLT_TRASH_DIR ?? join(process.cwd(), 'trash')); }
+/** Where binned files wait: this disk (the Mac) or the origin bucket (AWS, VOLT_TRASH_DRIVER=s3). */
+export function trashDriver(): 'local' | 's3' { return process.env.VOLT_TRASH_DRIVER === 's3' ? 's3' : 'local'; }
 
-export interface TrashFile { from: string; to: string }
+/** store 's3': `to` is a key of the origin bucket (a file) or a key prefix (a tree, its files under `to`/). */
+export interface TrashFile { from: string; to: string; store?: 's3' }
 export interface TrashImage { from: string; to: string }
 export interface TrashRow { table: string; row: Record<string, any> }
 export interface TrashRelink { table: string; column: string; ids: string[]; value: string }
 /** A prefix of the S3 origin bucket moved into the bin. */
 /** inPlace: left at its own keys (Archive storage cannot be copied); to === from. */
-export interface TrashObjects { from: string; to: string; files: number; inPlace?: boolean }
+/** key: one exact key (an original or its sidecar), not a prefix. */
+export interface TrashObjects { from: string; to: string; files: number; inPlace?: boolean; key?: boolean }
 
 /** Move a file or directory, across volumes if it must. */
 function move(from: string, to: string): void {
@@ -54,6 +66,13 @@ function move(from: string, to: string): void {
     for (const n of readdirSync(from)) move(join(from, n), join(to, n));
     rmSync(from, { recursive: true, force: true });
   } else { copyFileSync(from, to); unlinkSync(from); }
+}
+
+/** Every file under a path (the path itself when it is a file). */
+function filesIn(p: string): string[] {
+  const st = statSync(p);
+  if (!st.isDirectory()) return [p];
+  return readdirSync(p).flatMap((n) => filesIn(join(p, n)));
 }
 
 function treeStats(p: string): { bytes: number; files: number } {
@@ -90,20 +109,40 @@ export class BinItem {
   get isEmpty(): boolean { return !this.files.length && !this.images.length && !this.rowsOut.length && !this.objectsOut.length; }
 
   /** Move a file or a whole directory into the bin. `group` names the subfolder it goes in. */
-  file(path: string, group = 'files'): void {
+  async file(path: string, group = 'files'): Promise<void> {
     if (!existsSync(path)) return;
     const s = treeStats(path);
-    const to = join(this.dir, group, String(this.files.length), path.split(/[\\/]/).pop() || 'x');
-    move(path, to);
-    this.files.push({ from: path, to });
+    const name = path.split(/[\\/]/).pop() || 'x';
+    if (trashDriver() === 's3') {
+      // Every file is uploaded before any is removed: if the bucket cannot be
+      // reached the removal fails here and nothing has left the disk.
+      const to = `trash/${this.id}/${group}/${this.files.length}/${name}`;
+      const { putFileAt } = await import('../fast/vodStore');
+      const dir = statSync(path).isDirectory();
+      for (const f of filesIn(path)) await putFileAt(dir ? `${to}/${relative(path, f).split(/[\\/]/).join('/')}` : to, f);
+      rmSync(path, { recursive: true, force: true });
+      this.files.push({ from: path, to, store: 's3' });
+    } else {
+      const to = join(this.dir, group, String(this.files.length), name);
+      move(path, to);
+      this.files.push({ from: path, to });
+    }
     this.bytes += s.bytes; this.count += s.files;
   }
   /** Move single files that share a root (some segments of a run) into one mirrored tree. */
-  filesUnder(root: string, paths: string[], group = 'files'): void {
+  async filesUnder(root: string, paths: string[], group = 'files'): Promise<void> {
     if (!paths.length) return;
+    const there = paths.filter((p) => existsSync(p));
+    if (trashDriver() === 's3') {
+      const to = `trash/${this.id}/${group}/${this.files.length}`;
+      const { putFileAt } = await import('../fast/vodStore');
+      for (const p of there) { this.bytes += await putFileAt(`${to}/${relative(root, p).split(/[\\/]/).join('/')}`, p); this.count++; }
+      for (const p of there) rmSync(p, { force: true });
+      this.files.push({ from: root, to, store: 's3' });
+      return;
+    }
     const to = join(this.dir, group, String(this.files.length));
-    for (const p of paths) {
-      if (!existsSync(p)) continue;
+    for (const p of there) {
       const sz = statSync(p).size;
       move(p, join(to, relative(root, p)));
       this.bytes += sz; this.count++;
@@ -133,6 +172,21 @@ export class BinItem {
     const m = await movePrefix(prefix, to);
     if (!m.files) return;
     this.objectsOut.push({ from: prefix, to, files: m.files }); this.bytes += m.bytes; this.count += m.files;
+  }
+  /**
+   * Move exact keys of the origin bucket into the bin (an original under vod-src/
+   * and its sidecar, 2.1a-2c). A key that is not there is skipped; one in Archive
+   * storage stays at its key, recorded in place, as objects() does.
+   */
+  async keys(keys: string[]): Promise<void> {
+    const { moveKey } = await import('../fast/vodStore');
+    for (const k of keys) {
+      const to = `trash/${this.id}/${k}`;
+      const m = await moveKey(k, to);
+      if (!m) continue;
+      this.objectsOut.push(m.inPlace ? { from: k, to: k, files: 1, inPlace: true, key: true } : { from: k, to, files: 1, key: true });
+      this.bytes += m.bytes; this.count++;
+    }
   }
   rows(table: string, rows: Record<string, any>[]): void { for (const row of rows) this.rowsOut.push({ table, row }); }
   relink(table: string, column: string, ids: string[], value: string): void { if (ids.length) this.relinks.push({ table, column, ids, value }); }
@@ -226,6 +280,24 @@ function putBack(from: string, to: string): { restored: number; kept: number } {
   return { restored, kept };
 }
 
+/**
+ * Put files the bin holds in the bucket back under `from` on this task (any task:
+ * that is the point). A file already there is left alone, as putBack does. The
+ * bin's copies are deleted once every file is down.
+ */
+async function putBackFromBucket(f: TrashFile): Promise<{ restored: number; kept: number }> {
+  const { listPrefix, getKeyTo, deleteKeys } = await import('../fast/vodStore');
+  let restored = 0, kept = 0;
+  const keys = (await listPrefix(f.to)).filter((k) => k.key === f.to || k.key.startsWith(f.to + '/'));
+  for (const k of keys) {
+    const dest = k.key === f.to ? f.from : join(f.from, ...k.key.slice(f.to.length + 1).split('/'));
+    if (existsSync(dest)) { kept++; continue; }
+    await getKeyTo(k.key, dest); restored++;
+  }
+  await deleteKeys(keys.map((k) => k.key));
+  return { restored, kept };
+}
+
 export interface RestoreResult { id: string; files: number; skipped: number; images: number; rows: number }
 
 export async function restoreItem(id: string, opts: { accountId?: string | null; by?: string | null } = {}): Promise<RestoreResult> {
@@ -234,6 +306,7 @@ export async function restoreItem(id: string, opts: { accountId?: string | null;
   if (it.state !== 'held') throw Object.assign(new Error(`That item was already ${it.state}`), { status: 409 });
   const res: RestoreResult = { id, files: 0, skipped: 0, images: 0, rows: 0 };
   for (const f of it.files as TrashFile[]) {
+    if (f.store === 's3') { const r = await putBackFromBucket(f); res.files += r.restored; res.skipped += r.kept; continue; }
     // A whole tree moved as one: put it back in one rename when the place is free.
     if (existsSync(f.to) && !existsSync(f.from) && !statSync(f.to).isDirectory()) { move(f.to, f.from); res.files++; continue; }
     if (existsSync(f.to) && !existsSync(f.from) && f.to.split(/[\\/]/).pop() === f.from.split(/[\\/]/).pop()) {
@@ -248,7 +321,11 @@ export async function restoreItem(id: string, opts: { accountId?: string | null;
     // Left in place (Archive storage): already where it belongs. Never move a
     // prefix onto itself: the copy is refused and the delete would then take it.
     if (ob.inPlace || ob.to === ob.from) { res.files += ob.files; continue; }
-    const { movePrefix } = await import('../fast/vodStore');
+    const { movePrefix, moveKey } = await import('../fast/vodStore');
+    if (ob.key) {
+      try { if (await moveKey(ob.to, ob.from)) res.files++; else res.skipped++; } catch (e) { console.error('[bin] origin key not restored', ob.from, e); res.skipped++; }
+      continue;
+    }
     try { res.files += (await movePrefix(ob.to, ob.from)).files; } catch (e) { console.error('[bin] origin objects not restored', ob.from, e); res.skipped += ob.files; }
   }
   await tx(async (c) => {
@@ -304,9 +381,16 @@ export async function purgeItem(id: string): Promise<void> {
   if (!it) return;
   try { rmSync(join(trashRoot(), id), { recursive: true, force: true }); } catch { /* */ }
   for (const im of it.images as TrashImage[]) await imageStore().delete(im.to).catch(() => {});
+  const store = await import('../fast/vodStore');
   for (const ob of (it.objects ?? []) as TrashObjects[]) {
     // Left in the bin (and the item held) if the bucket cannot be reached: the next sweep tries again.
-    await (await import('../fast/vodStore')).deletePrefix(ob.to);
+    // An exact key is deleted alone: as a prefix it would also take a neighbour named key + more.
+    if (ob.key) await store.deleteKeys([ob.to]); else await store.deletePrefix(ob.to);
+  }
+  for (const f of it.files as TrashFile[]) {
+    if (f.store !== 's3') continue;
+    const keys = (await store.listPrefix(f.to)).filter((k) => k.key === f.to || k.key.startsWith(f.to + '/')).map((k) => k.key);
+    await store.deleteKeys(keys);
   }
   // The rows were already deleted; once purged there is nothing to restore them to.
   await query(`UPDATE trash_items SET state = 'purged', purged_at = now(), rows = '[]'::jsonb, relinks = '[]'::jsonb WHERE id = $1`, [id]);

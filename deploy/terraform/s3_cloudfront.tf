@@ -354,7 +354,8 @@ data "aws_iam_policy_document" "origin_bucket" {
 }
 
 # ... except what viewers must never fetch: customers' original files (vod-src/,
-# build queue 2.1a-2b) and upload parts in flight (upload-staging/, 2.1a-2). The
+# build queue 2.1a-2b), upload parts in flight (upload-staging/, 2.1a-2) and
+# deleted media waiting in the restore bin (trash/, 2.1a-2c). The
 # distribution's default behaviour forwards any path to the bucket, and an
 # ingest rule can give an original a readable, guessable name.
 data "aws_iam_policy_document" "origin_bucket_private" {
@@ -366,6 +367,7 @@ data "aws_iam_policy_document" "origin_bucket_private" {
     resources = [
       "${aws_s3_bucket.origin.arn}/vod-src/*",
       "${aws_s3_bucket.origin.arn}/upload-staging/*",
+      "${aws_s3_bucket.origin.arn}/trash/*",
     ]
     principals {
       type        = "Service"

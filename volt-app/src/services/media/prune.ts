@@ -77,7 +77,7 @@ export async function pruneRun(o: {
         const p = join(runDir, r);
         if (statSync(p).isDirectory()) res.removedSegments += readdirSync(p).filter((f) => /^seg_\d+\.m4s$/.test(f)).length;
       }
-      bin.file(runDir, 'run');
+      await bin.file(runDir, 'run');
       res.whole = true;
     } else {
       const out: string[] = [];
@@ -92,7 +92,7 @@ export async function pruneRun(o: {
           else { out.push(join(dir, f)); res.removedSegments++; }
         }
       }
-      bin.filesUnder(runDir, out, 'run');
+      await bin.filesUnder(runDir, out, 'run');
     }
     invalidateRunScan(o.streamId, o.runId);
   }

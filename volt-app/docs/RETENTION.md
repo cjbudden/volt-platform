@@ -61,7 +61,16 @@ Nothing removed by retention, `scripts/prune-recordings.ts` or a Media Library d
 * Image Library objects move inside the image store to `trash/<item>/...`;
 * deleted database rows are kept on the item, parents before children, with the links the delete set to NULL;
 * a library asset's packaged media in the S3 origin bucket (`vod/<id>/`: HLS, DASH, FAST ladder variants) moves inside
-  the bucket to `trash/<item>/vod/<id>/` (`VOD_STORE=s3`), so the CDN stops serving it at once.
+  the bucket to `trash/<item>/vod/<id>/` (`VOD_STORE=s3`), so the CDN stops serving it at once;
+* an original Volt holds in the bucket (`vod-src/...`, `VOD_SOURCE_DRIVER=s3`) and its `.json` or `.xml` sidecar move,
+  key by key, to `trash/<item>/vod-src/...`; an original another asset still points at stays where it is. Before
+  build queue 2.1a-2c such an original stayed in the bucket for good after the asset was purged.
+
+**On AWS** (`VOLT_TRASH_DRIVER=s3`, set by Terraform) the files and directories above do not wait on the task's
+disk: they are uploaded to the origin bucket under `trash/<item>/<group>/<n>/...` and removed from the disk, every
+file uploaded before any is removed, so a bucket that cannot be reached fails the removal with nothing moved. A
+restore on any task downloads them back to where they were (a file already in its place is kept); the purge deletes
+them. The bucket policy keeps `trash/` away from the CDN. On the Mac (`local`, the default) nothing changes.
 
 **Storage > Recently removed** lists the items. **Restore** puts the files, images, rows and links back; a restored
 recording's media is readable again and put on hold so the next sweep does not take it straight back (set a date in

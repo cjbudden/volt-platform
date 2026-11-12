@@ -827,9 +827,8 @@
       "why": "How long deleted media can be restored; the product default."
     },
     "VOLT_TRASH_DIR": {
-      "class": "not-on-aws-yet",
-      "why": "Deleted media waits here to be restored, on the task's disk.",
-      "item": "2.1a-2c"
+      "class": "local",
+      "why": "Where deleted media waits to be restored on the Mac. On AWS the bin is in the origin bucket under trash/ (VOLT_TRASH_DRIVER=s3), so a restore works from any task and a replaced task loses nothing (build queue 2.1a-2c)."
     },
     "WATCH_S3_BACKSTOP_MIN": {
       "class": "default",

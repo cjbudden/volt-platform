@@ -152,6 +152,47 @@ export async function deletePrefix(prefix: string): Promise<number> {
   return keys.length;
 }
 
+/**
+ * Move one exact key (an original or its sidecar, build queue 2.1a-2c). Unlike
+ * movePrefix this never takes a neighbour whose name merely starts the same.
+ * Null when the key is not there. Archive storage cannot be copied, so a GLACIER
+ * or DEEP_ARCHIVE key is reported and left where it is.
+ */
+export async function moveKey(from: string, to: string): Promise<{ bytes: number; inPlace: boolean } | null> {
+  const hit = (await listPrefix(from)).find((k) => k.key === from);
+  if (!hit) return null;
+  if (hit.storageClass === 'GLACIER' || hit.storageClass === 'DEEP_ARCHIVE') return { bytes: hit.size, inPlace: true };
+  const { CopyObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+  const c = await client();
+  await c.send(new CopyObjectCommand({ Bucket: config.aws.s3Bucket, Key: to, CopySource: `${config.aws.s3Bucket}/${from.split('/').map(encodeURIComponent).join('/')}` }));
+  await c.send(new DeleteObjectCommand({ Bucket: config.aws.s3Bucket, Key: from }));
+  return { bytes: hit.size, inPlace: false };
+}
+
+/** Upload one local file to a key of the origin bucket (the restore bin's files, 2.1a-2c). */
+export async function putFileAt(key: string, path: string): Promise<number> {
+  const { PutObjectCommand } = await import('@aws-sdk/client-s3');
+  const { createReadStream } = await import('node:fs');
+  const size = (await stat(path)).size;
+  await (await client()).send(new PutObjectCommand({ Bucket: config.aws.s3Bucket, Key: key, Body: createReadStream(path), ContentLength: size }));
+  return size;
+}
+
+/** Download one key of the origin bucket to a local file (a restore from the bin, 2.1a-2c). */
+export async function getKeyTo(key: string, path: string): Promise<void> {
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const { createWriteStream } = await import('node:fs');
+  const { mkdir, rename } = await import('node:fs/promises');
+  const { dirname } = await import('node:path');
+  const { pipeline } = await import('node:stream/promises');
+  const r: any = await (await client()).send(new GetObjectCommand({ Bucket: config.aws.s3Bucket, Key: key }));
+  await mkdir(dirname(path), { recursive: true });
+  // Written beside the target and renamed in, so a reader never sees half a file.
+  const part = `${path}.restoring`;
+  await pipeline(r.Body, createWriteStream(part));
+  await rename(part, path);
+}
+
 /** Delete these keys (a repackage's old package, services/repackage.ts). */
 export async function deleteKeys(keys: string[]): Promise<number> {
   const { DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
