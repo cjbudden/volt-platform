@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.114.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- changed · Publishing Rules: A publishing rule's Sitemap and schema.org setting now applies: a title it turns off is left out of its schema.org data, so your portal, search engines and partners do not list it. A title whose MP4 download is off never has its MP4 file named in that data.
+
+### Internal
+
+- added · Tests: New publishing-sitemap check suite for the Sitemap and schema.org field and the MP4 in schema.org data.
+
 ## 0.113.0 (2026-11-12)
 
 ### Product (in customer release notes)
