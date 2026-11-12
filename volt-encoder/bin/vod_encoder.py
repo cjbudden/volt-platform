@@ -275,7 +275,27 @@ def build_encode_cmd(cfg, work_dir):
     return cmd, parts, audio_path
 
 
-def build_package_cmd(cfg, parts, audio_path, out_dir):
+def drm_keys(cfg):
+    """DRM for a file encode (build queue P4-2): the key from the account's
+    SPEKE key service, fetched exactly as the live encoder does it
+    (encoder.py fetch_drm_keys through speke_client.py, the credential in the
+    environment, never argv), so a title is protected the same way a live
+    channel is. None when the job asks for no DRM. A failed key request ends
+    the encode: packaging in the clear instead would give the title less
+    than its policy asks for."""
+    drm = cfg.get("drm")
+    if not drm or drm.get("mode", "none") == "none":
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "volt_live_encoder", os.path.join(os.path.dirname(os.path.abspath(__file__)), "encoder.py"))
+    enc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(enc)
+    keys = enc.fetch_drm_keys(drm)
+    return {"keys": keys, "flags": enc.shaka_drm_flags(keys)}
+
+
+def build_package_cmd(cfg, parts, audio_path, out_dir, drm_flags=None):
     """Shaka, in VOD mode.
 
     --hls_playlist_type VOD and no time-shift window: the asset is complete when
@@ -312,6 +332,9 @@ def build_package_cmd(cfg, parts, audio_path, out_dir):
     if packaging in ("hls", "both"):
         cmd += ["--hls_master_playlist_output", os.path.join(out_dir, "master.m3u8"),
                 "--hls_playlist_type", "VOD"]
+    # cbcs with the key service's key, PSSH and FairPlay key URI (encoder.py
+    # shaka_drm_flags, clear lead 0 so the first seconds are protected too).
+    cmd += list(drm_flags or [])
     return cmd
 
 
@@ -319,11 +342,13 @@ PROGRESS_KEYS = {"frame", "fps", "stream_0_0_q", "bitrate", "total_size", "out_t
                  "out_time", "dup_frames", "drop_frames", "speed", "progress"}
 
 
-def run(cmd, what, duration_sec=None):
+def run(cmd, what, duration_sec=None, quiet=False):
     """Run a step, streaming its stderr. ffmpeg's -progress lines become a log line
     about every five seconds ("progress encode 42.0% at 1.8x"), so a long encode
-    keeps talking; anything else is kept as the tail shown if the step fails."""
-    log(f"{what}: {' '.join(shlex.quote(c) for c in cmd)}")
+    keeps talking; anything else is kept as the tail shown if the step fails.
+    quiet: the caller logged the command itself (it carries a content key)."""
+    if not quiet:
+        log(f"{what}: {' '.join(shlex.quote(c) for c in cmd)}")
     t0 = time.time()
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
@@ -391,9 +416,18 @@ def main():
         print(json.dumps(probe(src)))
         return
 
+    # The key first: a key service that refuses should fail the job before
+    # minutes of encoding, not after.
+    drm = drm_keys(cfg)
     cmd, parts, audio_path = build_encode_cmd(cfg, work_dir)
     run(cmd, "encode", cfg.get("duration_sec"))
-    run(build_package_cmd(cfg, parts, audio_path, out_dir), "package")
+    pkg = build_package_cmd(cfg, parts, audio_path, out_dir, drm["flags"] if drm else None)
+    if drm:
+        # the command is logged; the content key is not
+        shown = [":".join(("key=<hidden>" if x.startswith("key=") else x) for x in a.split(":"))
+                 if a.startswith("label=") else a for a in pkg]
+        log("package (DRM): " + " ".join(shlex.quote(c) for c in shown))
+    run(pkg, "package", quiet=bool(drm))
 
     # THE INTERMEDIATES ARE NOT THE OUTPUT. Leaving them doubles the disk cost of
     # every asset, and they are worthless once the CMAF exists.
@@ -427,6 +461,13 @@ def main():
         "master": os.path.join(out_dir, "master.m3u8") if cfg.get("packaging", "both") in ("hls", "both") else None,
         "mpd": os.path.join(out_dir, "manifest.mpd") if cfg.get("packaging", "both") in ("dash", "both") else None,
     }
+    if drm:
+        # What protects the files, for the asset's record: never the key itself.
+        result["drm"] = {
+            "scheme": "cbcs",
+            "systems": [s.strip().lower() for s in (cfg["drm"].get("systems") or ["widevine", "playready", "fairplay"])],
+            "key_ids": [k["key_id"] for k in (drm["keys"] or {}).get("keys", [])],
+        }
     print(json.dumps(result))
 
 

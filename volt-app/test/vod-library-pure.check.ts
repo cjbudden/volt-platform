@@ -182,7 +182,12 @@ eq(enc14.source.subtitleTracks, [{ codec: 'SRT', language: 'eng' }], 'subtitle f
 ok(!pkg14.gaps.some((g) => /package-only|Video profile|Renditions/.test(g)), 'package-only: no gap left for codec, audio or profile', JSON.stringify(pkg14.gaps));
 ok(pkg.gaps.some((g) => /package-only source passes audio through/.test(g)), 'package-only not yet read: the gap is still stated');
 const old14 = encodeDetails({ source_kind: 'upload', encode_result: { kept: [{ height: 720, bitrate_kbps: 3000 }], probe: { hasAudio: true } } });
-ok(old14.gaps.some((g) => /DRM is not applied/.test(g)) && old14.gaps.some((g) => /Caption and subtitle tracks are not recorded/.test(g)) && old14.audio.source === 'derived', 'an encode from before 1.4 still says what was not recorded');
+ok(old14.gaps.some((g) => /DRM is not recorded/.test(g)) && old14.gaps.some((g) => /Caption and subtitle tracks are not recorded/.test(g)) && old14.audio.source === 'derived', 'an encode from before 1.4 still says what was not recorded');
+// DRM PACKAGING OF FILE ENCODES (P4-2): an encode packaged with DRM names its systems, with a note.
+const drm14 = encodeDetails({ source_kind: 'upload', encode_result: { kept: [{ height: 720, bitrate_kbps: 3000 }], probe: { hasAudio: true }, drm: 'cbcs', drmSystems: ['widevine', 'fairplay'] } });
+eq([drm14.drm.value, drm14.drm.source, drm14.notes?.some((n) => /Packaged with DRM \(cbcs\)/.test(n)), drm14.gaps.some((g) => /DRM/.test(g))], [['Widevine', 'FairPlay'], 'stored', true, false], 'a file encode packaged with DRM: its systems, stored, with a note and no DRM gap');
+const clr14 = encodeDetails({ source_kind: 'upload', encode_result: { kept: [{ height: 720, bitrate_kbps: 3000 }], probe: { hasAudio: true }, drm: 'clear' } });
+eq([clr14.drm.value, clr14.notes?.some((n) => /Packaged in the clear/.test(n))], [[], true], 'a clear file encode: none, said as such');
 const tr14 = encodeDetails({ source_kind: 'recording', channel_id: 'c', master_key: 'x', media_facts: { how: 'recording', video: [{ label: '720p', codec: 'h264', profile: 'High', level: '3.1', width: 1280, height: 720, fps: 25 }], audio: [{ label: 'audio', codec: 'aac', channels: 2, sampleRate: 48000, bitrateKbps: null, language: null }], subtitles: [] } },
   { outputProfile: { rungs: [{ height: 1080, bitrate_kbps: 5000 }, { height: 720, bitrate_kbps: 3000 }], workflow_type: 'transcode', codec_backend: 'x264', caption_source_lang: 'en', captions_enabled: false } });
 eq(tr14.renditions.value.map((r) => `${r.height}:${r.profile ?? '-'}`), ['1080:-', '720:High'], 'transcoded recording: the profile where the recording was read, nothing invented for the rung it lacks');

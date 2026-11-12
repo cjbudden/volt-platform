@@ -177,6 +177,10 @@ export function variantRel(groupId: string, segmentSeconds: number, loudnorm: bo
 export function mainMatches(r: { master_key?: string | null; encode_result?: any; ingest?: any }, ladder: ChannelLadder, need: { segmentSeconds: number; loudnorm: boolean }): boolean {
   const er = r.encode_result;
   if (!r.master_key || !er || er.zeroStart !== true) return false;
+  // AN ENCRYPTED ENCODE NEVER AIRS AS IT IS (build queue P4-2): FAST plays in
+  // the clear and the playout does not carry key tags yet (FAST_DRM.md, work
+  // item 2), so a DRM title gets its own clear packaging for the channel.
+  if (er.drm != null && er.drm !== 'clear') return false;
   if (need.loudnorm && er.loudnorm !== true) return false;
   if (Number(er.segmentSeconds) !== Number(need.segmentSeconds)) return false;
   if (er.fps != null && Math.abs(Number(er.fps) - ladder.fps) > 0.01) return false;

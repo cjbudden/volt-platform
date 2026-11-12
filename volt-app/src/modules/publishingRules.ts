@@ -247,7 +247,12 @@ publishingRulesRouter.get('/resolve', asyncHandler(async (req, res) => {
   const schemaId = typeof req.query.schemaId === 'string' ? req.query.schemaId : null;
   const channelId = typeof req.query.channelId === 'string' ? req.query.channelId : null;
   const eventId = typeof req.query.eventId === 'string' ? req.query.eventId : null;
-  res.json(await resolveForAsset(accountId(req), { schema_id: schemaId, channel_id: channelId, event_id: eventId }));
+  const r = await resolveForAsset(accountId(req), { schema_id: schemaId, channel_id: channelId, event_id: eventId });
+  // DRM IS APPLIED AT PACKAGING (build queue P4-2): whether the account has a
+  // key service decides if a file under this policy is packaged with DRM or
+  // refused, so the upload panel can say which before anything uploads.
+  const { accountDrmConfig } = await import('../services/encodePolicy');
+  res.json({ ...r, drmReady: !!(await accountDrmConfig(accountId(req))) });
 }));
 
 // ------------------------------------------------------------------ metadata rules (P3-3)

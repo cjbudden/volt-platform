@@ -61,7 +61,7 @@ In the grid, an asset with no image yet is shown in its kind's colour: the key b
 
    ![Publishing policy in the upload band for a content type: DRM, access and publishing, and the rules they come from](/img/screens/media-library-upload-policy.png)
 
-   DRM packaging of uploaded files is not available yet: a file whose policy asks for DRM is packaged in the clear and its **Encode** tab says **Repackage pending**.
+   A file whose policy asks for DRM is encrypted when it is packaged, with a key from your account's DRM key service, and gets no MP4 download. If the account has no DRM key service set up, the band says so and such a file does not encode: set DRM up for the account, or turn DRM off in the policy, then encode it again. A file encoded at one of your [sites](hybrid-sites.md) is still packaged in the clear, so its **Encode** tab says **Repackage pending**.
 6. With **Start as soon as added** on (the usual setting), uploading starts at once. With it off, choose **Ingest 1 file** (or the number of files) when you are ready. **Clear** empties the list without uploading.
 7. Progress shows under the band. A finished file appears in the library and starts encoding: its row shows **Queued to encode**, then **Encoding** with a percentage, then the renditions it made.
 
@@ -145,7 +145,7 @@ A description counts one of the month's **AI descriptions** ([Billing](billing.m
 
 The **Encode** tab shows the **Workflow** and **Ladder profile**, the **Source / mezzanine** it was made from, every rendition with its resolution, bitrate, codec, profile and frame rate, the audio tracks and the captions. For audio it shows the audio encode instead.
 
-**DRM** says what protects the files. **Policy asks** says what the title's publishing policy asks of them now, and which rule says so (or **its own setting**). When the two disagree it shows **Repackage pending** with why: a title whose policy asks for DRM but whose files are in the clear plays in the clear until it is packaged again; one whose policy no longer asks for DRM keeps its DRM until then, never a weaker protection. Below it, **At encode** says what the policy asked when the file was encoded, which a later rule change does not alter.
+**DRM** says what protects the files: **None (in the clear)**, or the DRM systems they were encrypted for (for example **Widevine, PlayReady, FairPlay**). **Policy asks** says what the title's publishing policy asks of them now, and which rule says so (or **its own setting**). When the two disagree it shows **Repackage pending** with why: a title whose policy asks for DRM but whose files are in the clear plays in the clear until it is packaged again (encode it again to package it with DRM); one whose policy no longer asks for DRM keeps its DRM until then, never a weaker protection. Below it, **At encode** says what the policy asked when the file was encoded, which a later rule change does not alter.
 
 An uploaded or dropped file with no picture, such as an MP3, WAV, M4A, AAC or FLAC file, becomes an **audio asset**: Volt encodes its sound alone to one AAC track (128 kb/s stereo, 48 kHz), packaged as HLS and DASH, and the asset plays with the audio player. Cover art inside an MP3 is not a picture, so it does not make the file a video. An audio asset has no stills, previews or social formats; give it a **Cover** image on its page. A file with neither picture nor sound is refused, with the reason on the asset.
 
@@ -299,6 +299,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Nothing here yet** | No clips have been cut and no files uploaded | Cut a clip in [Recordings](recordings.md) or upload a file |
 | **No assets match these filters** | The filters leave nothing | Choose **Clear filters** |
 | **Queued to encode** or **Encoding** with a percentage | An uploaded file is still being encoded | Wait; the row updates when you choose **Refresh** |
+| An encode fails with **its publishing policy asks for DRM ... but this account has no DRM key service set up** | The title's policy asks for DRM and there is no key to encrypt it with, so it is not packaged in the clear instead | Ask for DRM to be set up for your account, or turn DRM off in the rule named, then encode it again |
 | **Queued at site** or **Encoding at site**, with **At site** beside **Building** | The file came from an **Encode at site** watchfolder and a server at your site is encoding it; the original stays there | Wait. If it stays queued, check the site's servers in [Hybrid Sites](hybrid-sites.md); the item's page says which site |
 | **Sending to cloud** or **In the cloud** beside **Building** | The site did not take the encode within the watchfolder's fallback time, so the original is being sent to Volt and encoded in the cloud | Nothing to do; the item's page says why. See [Hybrid Sites](hybrid-sites.md#when-the-site-does-not-encode-it-fall-back-to-the-cloud) |
 | **Encode failed** | The file could not be encoded; hover over it for the reason | Check the file plays, then upload it again |

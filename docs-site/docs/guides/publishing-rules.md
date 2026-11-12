@@ -151,7 +151,9 @@ Turning DRM on or off changes the files, so published titles must be packaged ag
 
 Titles keep their current protection until they have been packaged again.
 
-Each title keeps what its policy asked for when it was encoded, and its **Encode** tab in the [Media Library](media-library.md) shows **Repackage pending** while its files and its policy disagree. Packaging uploaded files with DRM, and packaging them again after a change, are not available yet: until they are, such titles stay in the clear and show **Repackage pending**.
+DRM is applied when a file is packaged: a file encoded under a policy that asks for DRM is encrypted with a key from your account's DRM key service and gets no MP4 download. Without a key service set up for the account, such a file does not encode, and the upload band says so before you add it.
+
+Each title keeps what its policy asked for when it was encoded, and its **Encode** tab in the [Media Library](media-library.md) shows **Repackage pending** while its files and its policy disagree. Packaging titles again on their own after a change is not available yet: until it is, a title that should now have DRM stays in the clear until it is encoded again, and one that should no longer have DRM keeps it.
 
 ### Play without tokens (token-free playback)
 

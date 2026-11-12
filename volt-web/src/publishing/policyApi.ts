@@ -37,6 +37,8 @@ export interface ResolvedPolicy extends ResolvedRules {
   ignored?: { rung: Rung; field: string; lockedBy: Rung }[]
   rungs: (ResolvedRules['rungs'][number] & { lockedFields?: string[]; presetKey?: string | null })[]
   conflicts?: Conflict[]
+  /** Hypothetical resolves only (the upload panel): the account has a DRM key service, so DRM can be applied at packaging (P4-2). */
+  drmReady?: boolean
 }
 
 export interface PolicyBody { settings: PolicySettings; lockedFields: string[]; presetKey: PresetKey | null; confirm?: boolean }

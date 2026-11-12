@@ -255,6 +255,17 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
   }
   const plan = await planEncode(p, probe, log, ctx);
   const { ladder, fit, audioOnly, summary } = plan;
+
+  // DRM IS DECIDED HERE, AT PACKAGING (build queue P4-2, services/encodePolicy.ts):
+  // the title's publishing policy as it stands now. Asked for and the account
+  // has a key service: Shaka encrypts with a key from it. Asked for and none:
+  // refused, because packaging in the clear would give the title less than
+  // its policy promises, and a retry cannot set the key service up.
+  const { encodeDrmFor, encoderDrm, noDrmConfigMessage } = await import('../../encodePolicy');
+  const drm = await encodeDrmFor(p.vodAssetId);
+  if (drm?.wanted && !drm.config) throw new PermanentError(noDrmConfigMessage(drm.from), 'drm_not_configured');
+  const drmJob = drm?.wanted && drm.config ? encoderDrm(drm.config, p.vodAssetId) : null;
+  if (drmJob) log.step(`DRM: ${String(drmJob.mode)} for ${(drmJob.systems as string[]).join(', ')}, asked by ${drm!.from}; the key comes from the account's key service`);
   await ctx.progress(10, `encoding ${summary}`);
 
   const outDir = outDirFor(p.vodAssetId);
@@ -265,6 +276,7 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     out_dir: outDir,
     work_dir: join(outDir, '.enc'),
     ...encoderJobFor(plan, p, probe),
+    ...(drmJob ? { drm: drmJob } : {}),
   }, null, 1));
 
   // THE LEASE IS 120 s AND AN ENCODE IS NOT. Two things keep it: a timer that beats
@@ -295,6 +307,10 @@ async function encodeFrom(ctx: JobContext, log: JobLog, p: VodEncodePayload): Pr
     });
   } finally {
     clearInterval(timer);
+    // The job file sits in the folder that is served and uploaded to the
+    // origin. With DRM it names the key service and its credential's
+    // reference, which viewers have no business reading.
+    if (drmJob) await rm(jobPath, { force: true }).catch(() => null);
   }
 
   if (r.code !== 0) {
@@ -345,6 +361,10 @@ export interface EncodeOutcome {
 export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLog, o: EncodeOutcome): Promise<Record<string, unknown>> {
   const { p, probe, plan: { ladder, fit, audioOnly, summary }, master, mpd, outDir, srcBytes, result } = o;
   const sourcePath = o.sourcePath;
+  // WHAT PROTECTS THE FILES, from the encoder's own result (vod_encoder.py
+  // writes `drm` only when Shaka encrypted them). A site encode has no keys
+  // yet (build queue H5-4), so its result carries none and it reads clear.
+  const drmDone = result?.drm && typeof result.drm === 'object' ? result.drm as { scheme?: string; systems?: string[]; key_ids?: string[] } : null;
   // The stills and sprite sheets read the picture from the source; a site
   // encode's source is not here, so they read the packaged master instead
   // (ffmpeg takes the top rendition), which is the picture viewers get.
@@ -396,12 +416,14 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
     // WHAT THIS ENCODE DID with the sound, captions and protection, written
     // down so the Encode tab states it rather than infers it. ladder_args.py
     // audio_track_args(0): source audio track 0 only, AAC 128 kb/s stereo
-    // 48 kHz. The packager is run without encryption and without text streams,
-    // so a file encode is in the clear and carries no caption tracks; the
-    // source's own subtitle tracks are listed above, not carried.
+    // 48 kHz. The packager is run without text streams, so a file encode
+    // carries no caption tracks; the source's own subtitle tracks are listed
+    // above, not carried. Protection: 'clear', or the scheme Shaka encrypted
+    // with (P4-2) and the DRM systems the key service signalled.
     audio: probe.hasAudio === false ? [] : [{ sourceTrack: 0, codec: 'AAC', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: srcTracks[0]?.language ?? null }],
     captions: [],
-    drm: 'clear',
+    drm: drmDone ? String(drmDone.scheme || 'cbcs') : 'clear',
+    ...(drmDone ? { drmSystems: Array.isArray(drmDone.systems) ? drmDone.systems.map(String) : [] } : {}),
     // what the asset is: 'audio' when the file had no picture (H2b-4)
     kind: audioOnly ? 'audio' : 'video',
     summary: summary,
@@ -422,6 +444,10 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
     const okAudio = probe.hasAudio === false || !probe.audioTracks?.length || ac === 'aac' || ac === 'mp4a';
     if (audioOnly) {
       log.step('MP4: none for a sound-only asset; HLS and DASH');
+    } else if (drmDone) {
+      // An MP4 of the source would be the title in the clear beside its
+      // encrypted packages (PUBLISHING_POLICIES.md: MP4 export is off for DRM).
+      log.step('MP4: not made, the title is DRM protected; HLS and DASH only');
     } else if (!sourcePath) {
       // A SITE ENCODE (H4): the source stayed at the customer's site, so there is
       // nothing here to repackage. HLS and DASH only, as for a source browsers
@@ -488,11 +514,12 @@ export async function finishEncode(ctx: Pick<JobContext, 'progress'>, log: JobLo
 
   // THE ENCODE-TIME POLICY, KEPT WITH WHAT THE FILES CARRY (build queue P4).
   // DRM is decided at packaging, so the policy as it stands now is resolved
-  // and kept on the title beside what this encode did (in the clear today).
+  // and kept on the title beside what this encode did.
   // A failure here must not fail an encode whose files are written.
   try {
     const { snapshotEncodePolicy } = await import('../../encodePolicy');
     await snapshotEncodePolicy(p.vodAssetId, { drm: encodeResult.drm !== 'clear' });
+    if (drmDone) log.step(`DRM: packaged ${encodeResult.drm}${(drmDone.systems ?? []).length ? ` for ${(drmDone.systems ?? []).join(', ')}` : ''}`);
   } catch (e: any) {
     log.warn(`encode-time policy not recorded: ${e?.message ?? e}`);
   }

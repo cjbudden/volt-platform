@@ -52,7 +52,8 @@ export function UploadPolicy({ typeId, byRules }: { typeId: string | null; byRul
           DRM from the {from(r, 'protection.drm')}, access from the {from(r, 'access', 'access')}.
           {byRules ? ' The content type the ingest rules pick can change this.' : ''}
           {' '}A metadata rule may still apply once a title's details are saved.
-          {drm ? ' DRM packaging of uploaded files is not available yet: these files are packaged in the clear and marked Repackage pending.' : ''}
+          {drm && r.drmReady !== false ? ' These files are packaged with DRM, so they get no MP4 download.' : ''}
+          {drm && r.drmReady === false ? ' This account has no DRM key service set up, so these files will not encode until DRM is set up for the account or turned off in the policy.' : ''}
         </span>
       </div>
     </div>

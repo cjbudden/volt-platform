@@ -408,13 +408,18 @@ export function encodeDetails(a: Record<string, any>, ctx: EncodeContext = {}): 
   if (!fmts && a.progressive_key && !packaging.value.includes('MP4')) packaging.value.push('MP4');
   const seg = num(er?.segmentSeconds) ?? num(lg?.segment_dur) ?? num(prof?.segment_dur);
   const segmentSeconds: Fact<number> = seg != null ? { value: seg, source: 'stored' } : { value: null, source: 'unknown' };
-  const drm = er?.drm === 'clear'
+  // A file encode packaged with DRM (P4-2) names its systems; 'clear' is none.
+  const drmName = (x: string) => ({ widevine: 'Widevine', playready: 'PlayReady', fairplay: 'FairPlay' } as Record<string, string>)[String(x).toLowerCase()] ?? String(x);
+  const drm = typeof er?.drm === 'string' && er.drm !== 'clear'
+    ? { value: (Array.isArray(er.drmSystems) && er.drmSystems.length ? er.drmSystems : ['widevine', 'playready', 'fairplay']).map(drmName), source: 'stored' as Prov }
+    : er?.drm === 'clear'
     ? { value: [] as string[], source: 'stored' as Prov }
     : prof && prof.drm_enabled != null
     ? { value: prof.drm_enabled ? (prof.drm_systems?.length ? prof.drm_systems.map((s) => s[0].toUpperCase() + s.slice(1)) : ['Widevine', 'PlayReady', 'FairPlay']) : [], source: 'stored' as Prov }
     : fromFile ? { value: [] as string[], source: 'derived' as Prov } : { value: [] as string[], source: 'unknown' as Prov };
-  if (er?.drm === 'clear') notes.push('Packaged in the clear: file encodes are not DRM protected.');
-  else if (fromFile) gaps.push('DRM is not applied to file encodes today; they are packaged in the clear.');
+  if (er?.drm === 'clear') notes.push('Packaged in the clear: this encode is not DRM protected.');
+  else if (typeof er?.drm === 'string') notes.push(`Packaged with DRM (${er.drm}): it plays only in a player that gets a licence for it, and it has no MP4 download.`);
+  else if (fromFile) gaps.push('DRM is not recorded for this file encode: it was encoded before DRM was recorded, so it is taken to be in the clear.');
 
   // ---- what kind, and how it is delivered
   const audioKind = !!ctx.audioOnly || er?.probe?.hasVideo === false
