@@ -8362,6 +8362,15 @@
  },
  {
   "method": "POST",
+  "path": "/api/vod/bulk/availability",
+  "api": "admin",
+  "credential": "admin session (Bearer) or account secret key",
+  "access": "vod: manage",
+  "viewerTier": false,
+  "group": "/api/vod"
+ },
+ {
+  "method": "POST",
   "path": "/api/vod/bulk/remove",
   "api": "admin",
   "credential": "admin session (Bearer) or account secret key",

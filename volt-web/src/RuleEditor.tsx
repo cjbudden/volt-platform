@@ -370,7 +370,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
 }
 
 /** One conflict, with a block or warning icon and, for per-title ones, up to five titles. */
-function ConflictLine({ level, message, titles }: { level: 'block' | 'warn' | 'confirm'; message: string; titles?: { id: string; title: string }[] }) {
+export function ConflictLine({ level, message, titles }: { level: 'block' | 'warn' | 'confirm'; message: string; titles?: { id: string; title: string }[] }) {
   const P = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   return (
     <div className={`pol-msg ${level === 'block' ? 'block' : 'warn'}`} data-policy-conflict={level}>

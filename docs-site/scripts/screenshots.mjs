@@ -16,7 +16,9 @@
 //   (docs-site) node scripts/screenshots.mjs [name ...]
 // A shot may also press `keys` after its clicks and wait for `waitAfter`.
 // A `click` entry may be `{ "fill": <selector>, "value": <text> }` to type into a
-// field between clicks (a link pasted into Find details, build queue F2).
+// field between clicks (a link pasted into Find details, build queue F2), and
+// `{ "select": <selector>, "value": <option value> }` to choose from a list
+// (a preset in the Media Library's bulk Publishing policy, build queue P3-2c).
 // `fresh: true` visits / first, so a shot on the same path as the one before
 // starts from a newly drawn page rather than what that shot left open.
 // A shot may also `hide` elements (kept in place, left blank) or `remove` them
@@ -102,7 +104,8 @@ for (const s of shots) {
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(s.settleMs ?? 1200);
     for (const c of s.click || []) {
-      if (c && typeof c === 'object') await page.fill(c.fill, c.value);
+      if (c && typeof c === 'object' && c.select) await page.selectOption(c.select, c.value);
+      else if (c && typeof c === 'object') await page.fill(c.fill, c.value);
       else await page.click(c);
       await page.waitForTimeout(600);
     }

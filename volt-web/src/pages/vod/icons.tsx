@@ -24,6 +24,7 @@ export const LibIcon = {
   prev: <svg {...s}><path d="M15 6l-6 6 6 6" /></svg>,
   next: <svg {...s}><path d="M9 6l6 6-6 6" /></svg>,
   publish: <svg {...s}><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 14v5h14v-5" /></svg>,
+  policy: <svg {...s}><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></svg>,
   open: <svg {...s}><path d="M14 4h6v6M20 4l-8 8M18 14v5H5V6h5" /></svg>,
   /** Read from file name: a file with its name being read. */
   fileName: <svg {...s}><path d="M6 3h8l4 4v6" /><path d="M14 3v4h4" /><path d="M6 3v18h6" /><path d="M14 17h7M14 21h5" /></svg>,

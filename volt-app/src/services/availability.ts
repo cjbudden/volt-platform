@@ -436,11 +436,17 @@ export function restampPublished(was: any, plan: Resolved['settings'],
  * Mark the published titles a rung governs, for the sweep to stamp again.
  * One statement whatever the number of titles. Returns how many were marked.
  */
-export async function markPolicyStale(accountId: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata'; id: string | null }): Promise<number> {
+export async function markPolicyStale(accountId: string,
+  scope: { kind: 'account' | 'schema' | 'owner' | 'metadata'; id: string | null } | { kind: 'assets'; id: null; ids: string[] }): Promise<number> {
+  // 'assets' (build queue P3-2c): a bulk save of the titles' own overrides in
+  // the Media Library marks just those titles, and the sweep stamps them as it
+  // stamps a rule change (a single title's save re-applies at once instead).
+  if (scope.kind === 'assets' && !scope.ids.length) return 0;
   // A metadata rule can move any title of the account (its conditions or its
   // place in the order changed), so its change marks them all; the restamp
   // writes only the titles whose stamp really changes.
-  const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND x.schema_id = $2' : 'AND (x.channel_id = $2 OR x.event_id = $2)';
+  const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND x.schema_id = $2'
+    : scope.kind === 'assets' ? 'AND x.id = ANY($2::uuid[])' : 'AND (x.channel_id = $2 OR x.event_id = $2)';
   // A title recorded from a channel or event belongs to the account through
   // its group (as in assetAccount); an upload directly.
   const rows = await query<any>(
@@ -451,7 +457,7 @@ export async function markPolicyStale(accountId: string, scope: { kind: 'account
        LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
       WHERE x.id = v.id AND COALESCE(g.account_id, x.account_id) = $1
         AND x.availability_state IN ('scheduled', 'available') AND x.archived_at IS NULL ${where}
-      RETURNING v.id`, where ? [accountId, scope.id] : [accountId]);
+      RETURNING v.id`, where ? [accountId, scope.kind === 'assets' ? scope.ids : scope.id] : [accountId]);
   return rows.length;
 }
 

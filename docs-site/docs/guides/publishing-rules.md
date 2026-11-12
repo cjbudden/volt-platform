@@ -22,7 +22,7 @@ Publishing Rules decides what a publish does: where on-demand content goes, when
   | Content type | [Content Types](content-types.md), under **Publishing rule for this type**, or here under **By content type** |
   | Channel, event or station | The stream's settings, on the **Access** tab |
   | Metadata rule | Here, under **Metadata rules**: the first rule whose conditions the item meets |
-  | A single item | The asset in the [Media Library](media-library.md), under **What a publish does for this item** |
+  | A single item | The asset in the [Media Library](media-library.md), under **What a publish does for this item**; for many at once, tick them in the Media Library and choose **Publishing policy** |
 
   The higher rung wins: an item's own value beats the metadata rule it meets, which beats its channel's, which beats its content type's, which beats the account default.
 - **A gate before publishing.** Require an approved review, or block publishing while a quality check has failed.
@@ -292,6 +292,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `PUT /api/publishing-rules/{scopeKind}/{scopeId}` | Sets a rung (`{"settings": {...}}`, and optionally `lockedFields`, `name` and `presetKey`). Add `?dryRun=1` to see what the save would do without saving it |
 | `DELETE /api/publishing-rules/{scopeKind}/{scopeId}` | Removes a content type or stream rung; the account default cannot be removed |
 | `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | A single asset's own rung |
+| `POST /api/vod/bulk/availability` | Many assets' own rung at once: `{"ids": [...], "action": "apply", "presetKey": "members"}` (or `"override": {...}` instead of a preset), or `{"ids": [...], "action": "clear"}`. Each asset is checked as the single `PATCH` checks one; those refused are listed in `refused` with their conflicts and left as they are, the rest are saved (`ok`, `marked`). Add `?dryRun=1` to see it without saving |
 | `GET /api/publishing-rules/metadata-rules` | The metadata rules in order (`position` 0 is checked first), each with `titles`: how many items it governs now |
 | `GET /api/publishing-rules/metadata-rules/fields` | The fields and tests a rule's conditions can use, with the choices for lists, content types, channels, events and collections |
 | `POST /api/publishing-rules/metadata-rules` | Adds a rule at the end: `{"name": "...", "conditions": {"match": "all", "conditions": [{"field": "tags", "op": "has_any", "value": ["premier-league"]}]}}`, optionally with `settings`, `lockedFields`, `presetKey` and `enabled`. `?dryRun=1` answers what it would do |

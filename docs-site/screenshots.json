@@ -270,6 +270,28 @@
       "_comment": "Needs a page at http://films.example/films/nosferatu with schema.org Movie JSON-LD that the API can fetch (a hosts entry to a stand-in, with GRAPHICS_ALLOW_PRIVATE_FEEDS=1 on the API), and WIKIDATA_API_BASE as for media-library-find-details. Reset Nosferatu's metadata to its title and rating PG first."
     },
     {
+      "name": "media-library-bulk-policy",
+      "guide": "guides/media-library.md",
+      "path": "/vod",
+      "fresh": true,
+      "customerView": true,
+      "waitFor": "h1",
+      "settleMs": 1200,
+      "click": [
+        "input[aria-label=\"Select Harbour Lights\"]",
+        "input[aria-label=\"Select Station promo\"]",
+        "input[aria-label=\"Select Harbour Market\"]",
+        ".bulk-bar button:has-text(\"Publishing policy\")",
+        {
+          "select": "[data-bulk-policy-preset]",
+          "value": "geo_locked"
+        }
+      ],
+      "waitAfter": "[data-bulk-policy] [data-impact]",
+      "clip": "[data-bulk-policy]",
+      "alt": "Publishing policy for three selected titles: the Geo-locked preset chosen, and Before you save with how many can take it, how many are published, how many change, and the warning that no country is chosen yet"
+    },
+    {
       "name": "recordings",
       "guide": "guides/recordings.md",
       "path": "/recordings",

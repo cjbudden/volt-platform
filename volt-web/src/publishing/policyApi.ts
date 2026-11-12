@@ -59,6 +59,24 @@ export const policyApi = {
     req(`/vod/${assetId}/availability`, { method: 'PATCH', body: JSON.stringify({ override, ...(confirm ? { confirm: true } : {}) }) }),
 }
 
+/** The asset rung on many titles (build queue P3-2c): POST /api/vod/bulk/availability. */
+export interface BulkPolicyRefusal { id: string; title: string; conflicts: Conflict[] }
+export interface BulkPolicyAnswer {
+  dryRun?: true; saved?: boolean; canSave?: boolean
+  action: 'apply' | 'clear'; presetKey: PresetKey | null; override: PolicySettings
+  /** How many titles can take it (dry run) or took it (save). */
+  ok: number; refused: BulkPolicyRefusal[]; missing: string[]; warnings: Conflict[]; impact: Impact
+  /** Published titles marked to take the change up (save only). */
+  marked?: number
+}
+export type BulkPolicyBody = { ids: string[]; action: 'clear' } | { ids: string[]; action: 'apply'; presetKey?: PresetKey; override?: PolicySettings }
+export const bulkPolicyApi = {
+  dryRun: (b: BulkPolicyBody): Promise<BulkPolicyAnswer> =>
+    req('/vod/bulk/availability?dryRun=1', { method: 'POST', body: JSON.stringify(b) }),
+  save: (b: BulkPolicyBody, confirm = false): Promise<BulkPolicyAnswer> =>
+    req('/vod/bulk/availability', { method: 'POST', body: JSON.stringify({ ...b, ...(confirm ? { confirm: true } : {}) }) }),
+}
+
 /** A refusal the editor can act on: 422 policy_conflict or 409 confirm_repackage, with their details. */
 export function policyRefusal(e: unknown): { code: 'policy_conflict' | 'confirm_repackage'; message: string; conflicts: Conflict[]; impact: Impact | null } | null {
   if (!(e instanceof ApiError) || !e.body) return null

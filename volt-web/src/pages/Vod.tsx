@@ -26,6 +26,8 @@ import AssetRightsPanel from '../rights/AssetRightsPanel'
 import { useRoute } from '../router'
 import { BulkBar, SelectAllHead, SelectCell, bulkSummary, runBulk, useSelection } from '../listActions'
 import BulkRemoveDialog from '../BulkRemoveDialog'
+import BulkPolicyDialog from '../publishing/BulkPolicyDialog'
+import type { BulkPolicyAnswer } from '../publishing/policyApi'
 import { BulkRequests } from '../BulkRequests'
 import type { BulkRemoveResult } from '../api'
 import { NoMatches, usePref } from '../listFilters'
@@ -692,6 +694,8 @@ export default function VodPage() {
   }
   const [bulkBusy, setBulkBusy] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string[] | null>(null)
+  // PUBLISHING POLICY IN BULK (publishing/BulkPolicyDialog.tsx, build queue P3-2c).
+  const [policyFor, setPolicyFor] = useState<string[] | null>(null)
   const [tick, setTick] = useState(0)
   const notify = useNotify()
 
@@ -840,6 +844,14 @@ export default function VodPage() {
     })
   }
   const [reqTick, setReqTick] = useState(0)
+  function bulkPolicySaved(r: BulkPolicyAnswer) {
+    setPolicyFor(null)
+    const what = r.action === 'clear' ? 'back to the rules' : 'given the policy'
+    const left = r.refused.length + r.missing.length
+    notify({ kind: left ? 'warn' : 'ok', autoHideMs: left ? undefined : 15000,
+      message: `${r.ok} ${r.ok === 1 ? 'title' : 'titles'} ${what}.${r.marked ? ` ${r.marked} published ${r.marked === 1 ? 'takes' : 'take'} it up within a minute.` : ''}${left ? ` ${left} left as ${left === 1 ? 'it was' : 'they were'}: ${r.refused.slice(0, 3).map((x) => x.title).join(', ')}${r.refused.length > 3 ? ' and more' : ''}${r.missing.length ? `${r.refused.length ? ', ' : ''}${r.missing.length} not found` : ''}.` : ''}` })
+    sel.clear(); load()
+  }
   async function bulkPublish() {
     setBulkBusy(`Publishing ${unpublished.length}…`)
     const res = await runBulk(unpublished.map((r) => ({ id: r.id, name: r.title || 'Untitled' })), (r) => api.publishVod(r.id), (n) => setBulkBusy(`Publishing ${n} of ${unpublished.length}…`))
@@ -952,6 +964,8 @@ export default function VodPage() {
             hint: 'Type, title, season and episode, and the record a trailer promotes, from each file name. Only clear readings are applied; values people entered are kept.' },
           { key: 'publish', label: 'Publish', icon: LibIcon.publish, count: unpublished.length, onRun: bulkPublish,
             hint: unpublished.length < sel.sel.size ? 'Assets that are already available or scheduled are left out' : undefined },
+          { key: 'policy', label: 'Publishing policy', icon: LibIcon.policy, count: chosen.length, onRun: () => setPolicyFor(chosen.map((x) => x.id)),
+            hint: 'Apply a preset as the selected titles\' own policy, or clear their own settings. You see what changes, and which titles a locked rule keeps as they are, before saving.' },
           { key: 'collect', label: 'Add to collection', icon: ColIcon.addTo, count: chosen.length, onRun: () => setAdding(chosen.map((x) => x.id)),
             hint: 'Add the selected assets to a collection, or make a new one' },
           ...(filters.col ? [{ key: 'uncollect', label: 'Remove from collection', icon: ColIcon.out, count: chosen.length, onRun: bulkRemoveFromCollection,
@@ -960,6 +974,7 @@ export default function VodPage() {
             icon: <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>,
             hint: 'Remove the selected assets and their media. You confirm first, and they can be restored for a short time.' },
         ]} />
+      {policyFor && <BulkPolicyDialog ids={policyFor} onClose={() => setPolicyFor(null)} onDone={bulkPolicySaved} />}
       {removing && <BulkRemoveDialog ids={removing} onClose={() => setRemoving(null)} onDone={bulkRemoved} />}
 
       {!page ? <div className="loading">Loading the library…</div> : rows.length === 0 ? (

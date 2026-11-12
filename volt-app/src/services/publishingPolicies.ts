@@ -14,6 +14,9 @@
 //                       how many it governs, how many change, how many
 //                       published titles would need repackaging, and the
 //                       per-title blocks and warnings, before anything is saved
+//    assetBulkCheck()   the asset rung for many titles at once (build queue
+//                       P3-2c): which may take an override, which are refused
+//                       and why, and the summed impact on those that may
 //
 //  Conflicts are caught when a policy is saved, never discovered by a viewer.
 // ============================================================================
@@ -243,24 +246,31 @@ export function presetOf(r: Resolved): string | null {
  * governs once, then resolves in memory; titles that share a content type, an
  * owner and have no override of their own resolve once between them.
  */
-export async function policyImpact(accountId: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'; id: string | null },
+export async function policyImpact(accountId: string,
+  scope: { kind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'; id: string | null } | { kind: 'assets'; id: null; ids: string[] },
   next: { settings: RuleSettings; lockedFields: string[]; presetKey: string | null },
-  /** A metadata-rule change (P3-3): the account's enabled metadata rules, in order, as they would be after it. */
-  opts: { metaAfter?: MetaRow[] } = {}): Promise<Impact> {
+  /** A metadata-rule change (P3-3): the account's enabled metadata rules, in order, as they would be after it.
+   *  `blocked` (P3-2c): filled with every title a block is charged to and its blocks, not only the first five. */
+  opts: { metaAfter?: MetaRow[]; blocked?: Map<string, Conflict[]> } = {}): Promise<Impact> {
+  // 'assets' (build queue P3-2c) is the asset rung on many titles at once: each
+  // of them gets the same override, as a bulk save in the Media Library would.
+  const onAsset = scope.kind === 'asset' || scope.kind === 'assets';
   const rows = await query<RuleRow>(`SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
   const after = rows.filter((r) => !(r.scope_kind === scope.kind && (r.scope_id ?? null) === (scope.id ?? null)));
   // The asset rung (build queue P3-2b) is the title's own override, not a rule row: it is swapped on the title below.
-  if (scope.kind !== 'metadata' && scope.kind !== 'asset')
+  if (scope.kind !== 'metadata' && scope.kind !== 'asset' && scope.kind !== 'assets')
     after.push({ id: 'next', scope_kind: scope.kind, scope_id: scope.id, settings: next.settings, locked_fields: next.lockedFields, preset_key: next.presetKey });
   // Which metadata rule each title meets now and after the save: a change to
   // a rule's conditions or order moves titles between rules, so a metadata
   // change is measured over the whole library.
   const metaBefore: MetaRow[] = await loadRules(accountId, { enabledOnly: true });
   const metaAfter = scope.kind === 'metadata' ? (opts.metaAfter ?? metaBefore) : metaBefore;
-  const matchedBefore = await firstMatches(accountId, null, metaBefore);
-  const matchedAfter = metaAfter === metaBefore ? matchedBefore : await firstMatches(accountId, null, metaAfter);
+  // On the asset rung only the titles named are matched, not the whole library.
+  const only = scope.kind === 'assets' ? scope.ids : scope.kind === 'asset' && scope.id ? [scope.id] : null;
+  const matchedBefore = await firstMatches(accountId, only, metaBefore);
+  const matchedAfter = metaAfter === metaBefore ? matchedBefore : await firstMatches(accountId, only, metaAfter);
   const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND v.schema_id = $2'
-    : scope.kind === 'asset' ? 'AND v.id = $2' : 'AND (v.channel_id = $2 OR v.event_id = $2)';
+    : scope.kind === 'asset' ? 'AND v.id = $2' : scope.kind === 'assets' ? 'AND v.id = ANY($2::uuid[])' : 'AND (v.channel_id = $2 OR v.event_id = $2)';
   // A title recorded from a channel or event belongs to the account through
   // its group (as in services/availability.ts assetAccount); an upload directly.
   const titles = await query<any>(
@@ -271,7 +281,8 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
        LEFT JOIN channels c ON c.id = v.channel_id
        LEFT JOIN events   e ON e.id = v.event_id
        LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
-      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL ${where}`, where ? [accountId, scope.id] : [accountId]);
+      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL ${where}`,
+    where ? [accountId, scope.kind === 'assets' ? scope.ids : scope.id] : [accountId]);
   const memo = new Map<string, [Resolved, Resolved]>();
   const profiles = new Map<string, any>();
   const impact: Impact = { assets: titles.length, published: 0, changed: 0, repackage: 0, publishedChanged: 0, unavailableNow: 0, blocks: [], warnings: [] };
@@ -287,9 +298,9 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
     const mb = matchedBefore.get(t.id) ?? null, ma = matchedAfter.get(t.id) ?? null;
     // A metadata rule governs the titles that meet it, before or after the save.
     if (scope.kind === 'metadata' && scope.id && mb?.id !== scope.id && ma?.id !== scope.id) { impact.assets--; continue; }
-    const key = hasOverride || scope.kind === 'asset' ? `a:${t.id}` : `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}|${mb?.id ?? ''}|${ma === mb ? '=' : ma?.id ?? ''}`;
+    const key = hasOverride || onAsset ? `a:${t.id}` : `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}|${mb?.id ?? ''}|${ma === mb ? '=' : ma?.id ?? ''}`;
     let pair = memo.get(key);
-    if (!pair) { pair = [resolveWith(rows, t, mb), resolveWith(after, scope.kind === 'asset' ? { ...t, availability_override: next.settings } : t, ma)]; memo.set(key, pair); }
+    if (!pair) { pair = [resolveWith(rows, t, mb), resolveWith(after, onAsset ? { ...t, availability_override: next.settings } : t, ma)]; memo.set(key, pair); }
     const [was, now] = pair;
     const live = ['available', 'scheduled'].includes(t.availability_state);
     if (live) impact.published++;
@@ -319,7 +330,85 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
     for (const c of policyConflicts(now.settings, { presetKey: preset, title: { rights, availableFrom: t.available_from, availableUntil: t.available_until, createdAt: t.created_at, collectionAccess: t.collection_access } })) {
       if (before.has(c.code) || own.has(c.code)) continue;
       tally(c.level === 'block' ? impact.blocks : impact.warnings, c, t);
+      if (c.level === 'block' && opts.blocked) opts.blocked.set(t.id, [...(opts.blocked.get(t.id) ?? []), c]);
     }
   }
   return impact;
+}
+
+/** One title a bulk save on the asset rung leaves alone, and why. */
+export interface BulkRefusal { id: string; title: string; conflicts: Conflict[] }
+export interface BulkCheck {
+  /** The titles that may take the override (they belong to the account and nothing refuses them). */
+  ok: { id: string; title: string; published: boolean }[];
+  refused: BulkRefusal[];
+  /** Ids that are not titles of this account (or are in the restore bin). */
+  missing: string[];
+  /** The policy's own warnings, once for the batch (as a rung reports them once). */
+  warnings: Conflict[];
+  /** The summed impact on the titles in `ok`. */
+  impact: Impact;
+}
+
+/**
+ * THE ASSET RUNG ON MANY TITLES (build queue P3-2c, bulk in the Media Library).
+ * Each title is checked as PATCH /api/vod/:id/availability checks one: an
+ * override of a field a rung beneath it locked is refused, as is a problem
+ * the override brings that the title did not already have (DRM with MP4
+ * download), or one its own dates and rights bring (policyImpact's per-title
+ * blocks). A refused title is left as it is and named with its reasons; the
+ * rest may be saved. One read of the rules and one metadata match for the
+ * batch, the resolving in memory, so a few hundred titles answer at once.
+ */
+export async function assetBulkCheck(accountId: string, ids: string[], override: RuleSettings): Promise<BulkCheck> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const valid = ids.filter((x) => uuid.test(x));
+  const rows = await query<RuleRow>(`SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
+  const titles = valid.length ? await query<any>(
+    `SELECT v.id, v.title, v.schema_id, v.channel_id, v.event_id, v.availability_override, v.availability_state
+       FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id
+       LEFT JOIN events   e ON e.id = v.event_id
+       LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL AND v.id = ANY($2::uuid[])`, [accountId, valid]) : [];
+  const found = new Set(titles.map((t) => t.id));
+  const matched = await firstMatches(accountId, titles.map((t) => t.id), await loadRules(accountId, { enabledOnly: true }));
+  const name = (t: any) => (t.title as string | null)?.trim() || 'Untitled';
+  const refused = new Map<string, BulkRefusal>();
+  const okTitles: any[] = [];
+  const warnings = new Map<string, Conflict>();
+  for (const t of titles) {
+    const m = matched.get(t.id) ?? null;
+    const below = resolveWith(rows, { ...t, availability_override: {} }, m);
+    const was = resolveWith(rows, t, m);
+    const now = resolveWith(rows, { ...t, availability_override: override }, m);
+    const had = new Set(policyConflicts(was.settings, { presetKey: presetOf(was) }).map((c) => c.code));
+    const conflicts = [
+      ...lockConflicts(override, 'asset', below.locks),
+      ...policyConflicts(now.settings, { presetKey: presetOf(now) }).filter((c) => !had.has(c.code)),
+    ];
+    for (const c of conflicts) if (c.level !== 'block' && !warnings.has(c.code)) warnings.set(c.code, c);
+    const blocks = conflicts.filter((c) => c.level === 'block');
+    if (blocks.length) refused.set(t.id, { id: t.id, title: name(t), conflicts: blocks });
+    else okTitles.push(t);
+  }
+  // What the titles' own dates and rights add (a window outside the rights,
+  // say) is policyImpact's per-title check: those titles are refused too, and
+  // the impact is then measured again over the titles that remain.
+  const blocked = new Map<string, Conflict[]>();
+  const next = { settings: override, lockedFields: [], presetKey: null };
+  let ok = okTitles;
+  let impact = await policyImpact(accountId, { kind: 'assets', id: null, ids: ok.map((t) => t.id) }, next, { blocked });
+  if (blocked.size) {
+    for (const t of ok) if (blocked.has(t.id)) refused.set(t.id, { id: t.id, title: name(t), conflicts: blocked.get(t.id)! });
+    ok = ok.filter((t) => !blocked.has(t.id));
+    impact = await policyImpact(accountId, { kind: 'assets', id: null, ids: ok.map((t) => t.id) }, next);
+  }
+  return {
+    ok: ok.map((t) => ({ id: t.id, title: name(t), published: ['available', 'scheduled'].includes(t.availability_state) })),
+    refused: [...refused.values()],
+    missing: ids.filter((x) => !found.has(x)),
+    warnings: [...warnings.values()],
+    impact,
+  };
 }

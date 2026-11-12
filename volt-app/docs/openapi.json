@@ -41898,6 +41898,32 @@
     }
    }
   },
+  "/api/vod/bulk/availability": {
+   "post": {
+    "operationId": "postVODBulkAvailability",
+    "summary": "Set many assets' own publishing rule at once",
+    "tags": [
+     "VOD"
+    ],
+    "description": "The asset's own rung for many assets: `{ \"ids\": [...], \"action\": \"apply\", \"presetKey\": \"members\" }` applies a preset (or `\"override\": { ... }` with the fields to set, the same fields as a publishing rule) as each asset's own rung, replacing what it had; `{ \"ids\": [...], \"action\": \"clear\" }` puts them back on the rules. Each asset is checked as `PATCH /api/vod/{id}/availability` checks one: an asset whose override would set a field a rule beneath it locked, or bring a blocking conflict (DRM with MP4 download allowed, or a rights-managed policy on an asset with no rights window), is listed in `refused` with its `conflicts` and left as it is; the others are saved. The answer: `ok` (how many took it), `refused`, `missing` (ids that are not assets of this account), `warnings`, `impact` (summed over the assets that took it) and `marked` (published assets that take the change up within about a minute). `?dryRun=1` answers the same with `canSave` and saves nothing. When no asset can take it the answer is `422` `policy_conflict`; when it turns DRM on or off for published assets, `409` `confirm_repackage` until sent again with `\"confirm\": true`. At most 500 ids. Needs `vod: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "security": [
+     {
+      "adminBearer": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Success"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
   "/api/vod/bulk/remove": {
    "post": {
     "operationId": "postVODBulkRemove",

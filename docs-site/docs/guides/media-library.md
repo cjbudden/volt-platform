@@ -214,8 +214,20 @@ The asset and its media go to **Storage > Recently removed** for a number of day
 ### Work on several assets at once
 
 1. Tick the boxes on the rows (or **Select all shown**). A bar shows how many are selected.
-2. Choose **Fill from EPG** to fill the empty fields of every selected clip from its guide programme, **Read from file name** to apply what each file's name makes clear (nothing a person typed or chose is replaced; the message says how many need a look), or **Publish** to publish the ones not yet published. A number in brackets shows when an action applies to only some of the selection; hover over it to see why.
+2. Choose **Fill from EPG** to fill the empty fields of every selected clip from its guide programme, **Read from file name** to apply what each file's name makes clear (nothing a person typed or chose is replaced; the message says how many need a look), **Publish** to publish the ones not yet published, or **Publishing policy** to give them all the same publishing policy (below). A number in brackets shows when an action applies to only some of the selection; hover over it to see why.
 3. **Clear** deselects them.
+
+### Set the publishing policy of several assets
+
+Each asset can have a publishing policy of its own, on top of the rules ([Publishing Rules](publishing-rules.md)). To set it for many assets at once:
+
+1. Tick the assets and choose **Publishing policy** in the bar.
+2. Choose **Apply a preset as their own policy** and pick a preset (**Open**, **Members**, **Geo-locked**, **Premium** or **Rights-managed**; its summary shows under it), or **Clear their own settings, so the rules decide** to take away what each asset set for itself. Applying replaces any policy an asset had of its own.
+3. **Before you save** checks every asset as its own **Availability** tab would: how many **can take this**, how many are **published**, how many the save **changes**, and how many published assets would need their files **packaged again** or **become unavailable now**. Assets that cannot take it are listed with the reason, for example **Access is locked by the content type rule**: a field locked by the account, a content type, a channel, event or station, or a metadata rule cannot be changed on the asset, and a policy that would bring a problem (DRM with MP4 download allowed, say) is refused for that asset only. They are left as they are; the others are saved.
+4. If DRM changes on published assets, tick **Package again** to go ahead; they keep their current protection until their files are packaged again.
+5. Choose **Apply to** (or **Clear**) with the number of assets. A message says how many were changed and which were left. Published assets take the change up within about a minute, without posting to social accounts again, and each change is in the [audit log](audit-log.md) with your name.
+
+![Publishing policy for three selected titles: the Geo-locked preset chosen, and Before you save with how many can take it, how many are published, how many change, and the warning that no country is chosen yet](/img/screens/media-library-bulk-policy.png)
 
 ## How it connects
 
