@@ -3119,7 +3119,7 @@ What: detection fingerprinted each episode from a file on the task's disk (`medi
 - **Guides**: `volt-app/docs/DESIGN_vod_skip_markers.md` (How intros are found: where the audio comes from). The customer guide (Media Library, Skip markers) is unchanged: the tab works the same; the fix is that Volt finds markers by itself on a cloud deployment (change note, saas, fixed).
 - **Not done**: not run against moto or real S3. The whole file is fetched although only the opening 10 and closing 7 minutes are read; a range read from a presigned address would save scratch disk for long originals, not money (in-region). Detection still needs ffmpeg with Chromaprint in the task that runs it (2.1a-4 moves media jobs to their own ECS tasks).
 
-## 2026-11-12 - Media jobs in their own ECS tasks (build queue 2.1a-4, first part; vVERSION)
+## 2026-11-12 - Media jobs in their own ECS tasks (build queue 2.1a-4, first part; v0.135.0)
 
 What: on AWS the control plane's image carries no ffmpeg, packager or Python (2.1a's decision), so the jobs that run them (clip extract, VOD encode, loop preparation, intro detection and the rest) could not run there. Each now runs in its own task, like the thumbnailer.
 
