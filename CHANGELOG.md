@@ -2,6 +2,13 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.127.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Storage: A title kept for a number of days by its own setting or by a metadata rule is now deleted when its days are up; before, only titles governed by a publishing rule were.
+- added · Storage: Storage lists the titles their publishing policy deletes in the next 7, 30 or 90 days, says why a due title is kept, and is where a legal hold is placed with its reason and released.
+
 ## 0.126.0 (2026-11-12)
 
 ### Product (in customer release notes)
