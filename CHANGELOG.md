@@ -2,6 +2,17 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.121.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- added · Media Library: A title's Encode tab now shows what its publishing policy asks of its files and marks it Repackage pending when the files do not match, for example a policy that asks for DRM over files packaged in the clear. Each new encode keeps the policy it was made under.
+- added · Media Library: When you upload files, the upload band now shows the publishing policy they will get once you pick a content type: DRM on or off, access and whether they are published when ready, with the rule each comes from.
+
+### Internal
+
+- added · Tests: publishing-encode-policy check suite: the upload preview, the policy snapshot a real encode keeps, and Repackage pending on the Encode tab.
+
 ## 0.120.0 (2026-11-12)
 
 ### Product (in customer release notes)
