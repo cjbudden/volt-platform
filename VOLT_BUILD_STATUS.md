@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Publishing policies 4d: repackage on the bucket store (build queue P4-4, part (a); vX.Y.Z)
+## 2026-11-12 - Publishing policies 4d: repackage on the bucket store (build queue P4-4, part (a); v0.124.0)
 
 What: where titles are served from the origin bucket through the CDN (the AWS deployment), a repackage after a confirmed DRM change now works instead of holding the titles as waiting. The CDN keeps segments as immutable under their names for a year, so the new files go under a prefix of their own and the title's playlists move there; nothing old and new can mix in a player.
 
