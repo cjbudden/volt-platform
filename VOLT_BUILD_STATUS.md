@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Collection access 3: titles another collection locks, and the asset page (build queue C2-3, (a), (c) and (d); vVERSION)
+## 2026-11-12 - Collection access 3: titles another collection locks, and the asset page (build queue C2-3, (a), (c) and (d); v0.117.0)
 
 What: the strictest collection wins, so a title can sit in a free collection while another sells it as a package. Rule collections now leave such a title out where it is locked, hand-filled ones keep it marked with the package, and the asset page shows a title's collection access.
 
