@@ -33,11 +33,15 @@ make a live move unsafe today.
 
 **Blockers for moving a running stream**
 
-1. **Cloud output has no per-run namespace.** In local mode each run writes to
-   `runs/<runId>/` and a pointer selects the live one. In cloud mode the encoder
-   mirrors straight to `s3://bucket/<kind>/<id>/`. Two encoders for one channel, even
-   for a minute, would overwrite each other's `seg_N.m4s` on S3. Cloud has to adopt the
-   same `runs/<runId>/` layout before any handoff.
+1. **Cloud output has no per-run namespace.** *Fixed 12 Nov 2026 (build queue 2.2).*
+   In local mode each run writes to `runs/<runId>/` and a pointer selects the live
+   one. In cloud mode the encoder mirrored straight to `s3://bucket/<kind>/<id>/`, so
+   two encoders for one channel, even for a minute, would overwrite each other's
+   `seg_N.m4s` on S3. Now each run uploads under `<kind>/<id>/runs/<runId>/`, and the
+   uploader writes the stable playlists (their media pointed into the run) and
+   `current_run.txt` at `<kind>/<id>/` (`volt-encoder/bin/run_pointer.py`). The
+   pointer never goes back to an older run. For the handoff the shadow still needs a
+   standby mode that uploads its run but writes no stable playlists (step 1 below).
 2. **The delivered playlist is written inside the encoder container.**
    `_write_companion` / `playout.py` hold the media sequence, discontinuity sequence and
    PDT shift in process. A new container on another server starts that state from zero,

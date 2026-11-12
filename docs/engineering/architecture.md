@@ -22,7 +22,7 @@ AWS. The module-by-module design and the workflows through the modules are in
 | VOD encodes, clips, QC, filler builds | jobs in `volt-app/src/services/jobs` | inside the one process | one Fargate task per job of the `volt-media-jobs` image, started by the `worker` (`volt-app/src/services/jobs/mediaJobs.ts`); lighter jobs run in the `worker` service |
 | Database | Postgres 16. Migrations in `volt-app/migrations`, applied on boot by `volt-app/src/services/migrate.ts` | local Postgres, or Docker, on :5432 | RDS, optionally through RDS Proxy |
 | Cache | Valkey, optional (`REDIS_URL`) | none: caches are per process | ElastiCache |
-| Origin | segments under the control plane's origin folder (`volt-app/origin` by default, `ORIGIN_DIR`), served at `/origin` and `/live` | a folder | S3 behind CloudFront |
+| Origin | segments under the control plane's origin folder (`volt-app/origin` by default, `ORIGIN_DIR`), served at `/origin` and `/live`; every run in its own runs/&lt;runId&gt;/, the pointer file current_run.txt names the live one | a folder | S3 behind CloudFront: each run under `<kind>/<id>/runs/<runId>/`, the stable playlists and the pointer file current_run.txt at `<kind>/<id>/` (`volt-encoder/bin/run_pointer.py`) |
 | Edge rights | `deploy/edge/rights-viewer-request.js` picks a viewer's variant; `volt-app/src/services/variantManifest.ts` builds it | the API decides | CloudFront Function and KeyValueStore |
 | Customer docs | `docs-site` (Docusaurus) | :3000, started by `run-on-mac.sh` | S3 and CloudFront from `deploy/terraform-docs` |
 

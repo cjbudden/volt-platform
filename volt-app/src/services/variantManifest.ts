@@ -676,6 +676,43 @@ export function readDelivered(kind: 'channel' | 'event', id: string, file: strin
   return p;
 }
 
+/**
+ * The live run's folder in the bucket, `runs/<runId>/`, or '' (build queue 2.2).
+ *
+ * On AWS each encoder run now uploads under <kind>/<id>/runs/<runId>/ and
+ * writes the stable playlists, and current_run.txt naming the run, at the
+ * stream's root (volt-encoder/bin/run_pointer.py). The playlists at the root
+ * already point into the run, so readDelivered needs nothing more; the loop
+ * the encoder keeps beside its output (filler/) is not a playlist, so it is
+ * read from the run the pointer names. '' when there is no pointer: an
+ * encoder from before 2.2 still writes the flat layout. Same short cache as
+ * the delivered files, so a run boundary is seen within about a second.
+ */
+export function cloudRunDir(kind: 'channel' | 'event', id: string): Promise<string> {
+  if (!(config.env === 'production' && config.aws?.s3Bucket)) return Promise.resolve('');
+  const k = `${kind}/${id}/current_run.txt`;
+  const hit = sourceCache.get(k);
+  const ttl = SOURCE_CACHE_MS();
+  if (hit && Date.now() - hit.at < ttl) return hit.p.then((v) => v ?? '');
+  const p = s3Get(k).catch(() => null).then((t) => {
+    const run = (t ?? '').trim();
+    return /^[A-Za-z0-9._-]+$/.test(run) && !run.includes('..') ? `runs/${run}/` : null;
+  });
+  if (ttl > 0) sourceCache.set(k, { at: Date.now(), p });
+  return p.then((v) => v ?? '');
+}
+
+/** One text object of the bucket through the same short cache as the delivered files. */
+function cachedS3Text(key: string): Promise<string | null> {
+  const hit = sourceCache.get(key);
+  const ttl = SOURCE_CACHE_MS();
+  if (hit && Date.now() - hit.at < ttl) return hit.p;
+  variantSourceStats.reads++;
+  const p = s3Get(key).catch(() => null);
+  if (ttl > 0) sourceCache.set(key, { at: Date.now(), p });
+  return p;
+}
+
 /** Where the variant's playlists point for the stream's own files. */
 export function segmentBase(kind: 'channel' | 'event', id: string): string {
   // On the Mac the output is served at /origin/<id>/live/; behind the CDN the
@@ -695,12 +732,18 @@ export async function loadLoop(kind: 'channel' | 'event', id: string): Promise<L
     } catch { return null; }
   };
   const safe = (u: string) => !u.includes('..') && !u.startsWith('/') && !/^[a-z]+:/i.test(u);
-  const run = parse(await readDelivered(kind, id, 'filler/filler.json'), segmentBase(kind, id) + 'filler/');
+  // In the bucket the loop sits in the live run's own folder (2.2); on the Mac
+  // liveDirFor already is the run.
+  const runDir = localOutput(id) ? '' : await cloudRunDir(kind, id);
+  const loopJson = runDir
+    ? await cachedS3Text(`${kind}/${id}/${runDir}filler/filler.json`)
+    : await readDelivered(kind, id, 'filler/filler.json');
+  const run = parse(loopJson, segmentBase(kind, id) + runDir + 'filler/');
   if (run) {
     run.read = async (u) => {
       if (!safe(u)) return null;
       if (localOutput(id)) return readFile(join(liveDirFor(id), 'filler', u)).catch(() => null);
-      if (config.env === 'production' && config.aws?.s3Bucket) return s3GetBytes(`${kind}/${id}/filler/${u}`);
+      if (config.env === 'production' && config.aws?.s3Bucket) return s3GetBytes(`${kind}/${id}/${runDir}filler/${u}`);
       return null;
     };
     return run;

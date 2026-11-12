@@ -96,7 +96,7 @@ def health_snapshot(cfg):
         "metrics": _health["metrics"] or status.get("metrics"),
     }
 BASE_OUT_DIR = None   # local mode: the channel origin root (runs live in runs/<RUN_ID>)
-RUN_ID = None         # this run's unique, date-ordered id (local mode)
+RUN_ID = None         # this run's unique, date-ordered id (local mode, and the S3 run prefix in cloud mode)
 _selectors = []  # SourceSelector instances (own their own poller threads)
 _events = None   # EventLog (status snapshot + per-stream event log)
 
@@ -146,13 +146,16 @@ def resolve_out_dir(cfg):
     manage_runs(). The control plane serves the stable /origin/<id>/live/* URL by
     resolving the pointer, so player and share URLs survive restarts.
 
-    Cloud mode is unchanged (WORK_DIR/out, mirrored to S3 by the uploader)."""
+    Cloud mode writes WORK_DIR/out on the task disk, and the uploader mirrors it
+    to the run's OWN prefix, <kind>/<id>/runs/<runId>/, with the stable playlists
+    and current_run.txt at the stream's root (build queue 2.2, run_pointer.py).
+    Same run id format as the Mac, so both sort by time the same way."""
     global BASE_OUT_DIR, RUN_ID
     out = cfg.get("output") or {}
     d = out.get("dir") or os.environ.get("OUTPUT_DIR")
+    RUN_ID = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     if is_local(cfg) and d:
         BASE_OUT_DIR = os.path.abspath(d)
-        RUN_ID = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         return os.path.join(BASE_OUT_DIR, "runs", RUN_ID)
     return os.path.join(WORK_DIR, "out")
 
@@ -1272,11 +1275,26 @@ def spawn_supervised(name, cmd_or_builder, backoff=3.0):
     return state
 
 
-def start_uploader(cfg):
+def uploader_dests(cfg, run_id):
+    """(run prefix, stream root) on S3. PER-RUN PREFIXES (build queue 2.2): a
+    restart, or a second encoder on the same stream during a move between
+    servers, used to write seg_N.m4s over the run before it. Each run now has
+    its own prefix; the uploader writes the stable playlists and the pointer at
+    the root. `s3.per_run: false` keeps the old flat layout (one prefix, no
+    pointer) for anything that still needs it."""
     s3 = cfg["s3"]
-    dest = f"s3://{s3['bucket']}/{s3.get('prefix', cfg['channel_id']).rstrip('/')}/"
+    root = f"s3://{s3['bucket']}/{s3.get('prefix', cfg['channel_id']).strip('/')}/"
+    if s3.get("per_run") is False or not run_id:
+        return root, None
+    return f"{root}runs/{run_id}/", root
+
+
+def start_uploader(cfg):
+    dest, root = uploader_dests(cfg, RUN_ID)
     cmd = ["/app/bin/s3-uploader.sh", OUT_DIR, dest,
            str(cfg.get("upload_interval_seconds", 2))]
+    if root:
+        cmd += [RUN_ID, root]
     return spawn("s3-uploader", cmd)
 
 
@@ -2780,7 +2798,7 @@ def main():
         has_backup=bool(backup_inputs(cfg)),
         has_filler=redundancy_on(cfg) and red.get("input_loss_behavior", "slate") in ("slate", "vod_loop"),
     )
-    _events.channel_start(cfg["workflow"], nrend)
+    _events.channel_start(cfg["workflow"], nrend, run_id=RUN_ID)
     # NO SOURCE: one event if nothing has arrived after a grace period.
     _wait_s = int(cfg.get("source_wait_seconds") or 20)
     _wait_t = threading.Timer(_wait_s, lambda: _events.source_waiting("primary", _wait_s))

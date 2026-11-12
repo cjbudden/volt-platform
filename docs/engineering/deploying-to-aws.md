@@ -97,6 +97,12 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    disk once it is in S3 (`volt-encoder/bin/s3-uploader.sh`), and placement
    checks that disk (`FLEET_TASK_DISK_GIB`); see `PLACEMENT.md`, "Storage, and
    the task disk".
+   Each encoder run uploads under its own prefix, `<kind>/<id>/runs/<runId>/`,
+   and writes the stable playlists and the pointer file current_run.txt at `<kind>/<id>/`
+   (`volt-encoder/bin/run_pointer.py`), so the play URL behind CloudFront never
+   changes and a restart never writes over the run before it. Bucket
+   lifecycle rules and anything you list by hand should expect the runs
+   level; `s3.per_run: false` in a job config keeps the old flat layout.
    Radio needs no relay: stations deliver HLS and DASH (2.1c-2). MP3, where
    an account has it switched on, is made on demand by the control plane.
 4. **Migrations.** The deploy runs them once as a one-off task of the new

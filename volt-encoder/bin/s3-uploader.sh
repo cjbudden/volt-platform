@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Continuously mirror the local packager output dir to S3.
 #
-#   s3-uploader.sh <local_dir> <s3_dest> <interval_seconds>
+#   s3-uploader.sh <local_dir> <s3_dest> <interval_seconds> [<run_id> <stream_root>]
+#
+# PER-RUN PREFIXES (build queue 2.2). With a run id and the stream's root
+# (s3://bucket/<kind>/<id>/), <s3_dest> is the run's own prefix
+# (<stream_root>runs/<run_id>/) and every pass that uploaded the run's
+# playlists also writes the STABLE copies at the stream's root, their media
+# pointed into the run, then <stream_root>current_run.txt (run_pointer.py has
+# the layout and why). The play URL never changes; a new run moves the pointer
+# at its first pass; no run writes over another's segments. A run that finds a
+# NEWER run's pointer stops publishing for good: an older encoder still
+# shutting down never takes the stream back. Without the two extra arguments
+# the root is not written at all (the layout before 2.2).
 #
 # CloudFront serves viewers from S3, so viewer traffic never touches this
 # container — this sidecar is the only thing that egresses. The live segments
@@ -30,6 +41,12 @@ set -euo pipefail
 LOCAL_DIR="${1:?usage: s3-uploader.sh <local_dir> <s3_dest> <interval>}"
 S3_DEST="${2:?missing s3 destination}"
 INTERVAL="${3:-2}"
+RUN_ID="${4:-}"
+STREAM_ROOT="${5:-}"
+POINTER_PY="$(dirname "$0")/run_pointer.py"
+POINTER_STAGE="$(mktemp -d -t volt-pointer.XXXXXX)"
+POINTER_SEEN="$POINTER_STAGE.seen"
+POINTER_LOST=0
 
 # For local e2e against MinIO (or any S3-compatible endpoint), set
 # AWS_ENDPOINT_URL. In real AWS leave it unset and the CLI uses the region.
@@ -85,10 +102,13 @@ prune_local() {
 }
 
 sync_pass() {
-  local started ok=1
+  local started ok=1 mok=1
   started=$(date +%s)
   sync_segments || ok=0
-  sync_manifests
+  sync_manifests || mok=0
+  # The stable copies only after the run's own segments AND playlists are up,
+  # so the root never names a file the run has not uploaded yet.
+  [ "$ok" = 1 ] && [ "$mok" = 1 ] && publish_pointer
   [ "$ok" = 1 ] && prune_local "$started"
   return 0
 }
@@ -100,15 +120,52 @@ sync_manifests() {
     --no-progress \
     --exclude "*" --include "*.m3u8" --include "*.mpd" \
     --content-type "application/vnd.apple.mpegurl" \
-    --cache-control "$MANIFEST_CACHE" || true
+    --cache-control "$MANIFEST_CACHE"
+}
+
+publish_pointer() {
+  # Per-run prefixes (2.2): the stream's stable playlists, then the pointer.
+  [ -n "$RUN_ID" ] && [ -n "$STREAM_ROOT" ] || return 0
+  [ "$POINTER_LOST" = 1 ] && return 0
+  rm -f "$POINTER_SEEN"
+  aws s3 cp "${EP[@]}" "${STREAM_ROOT}current_run.txt" "$POINTER_SEEN" --only-show-errors >/dev/null 2>&1 || true
+  if ! python3 "$POINTER_PY" may-publish "$RUN_ID" "$POINTER_SEEN"; then
+    POINTER_LOST=1
+    echo "[s3-uploader] a newer run ($(cat "$POINTER_SEEN" 2>/dev/null)) holds the stream; run $RUN_ID stops writing its stable playlists"
+    return 0
+  fi
+  local n
+  n=$(python3 "$POINTER_PY" build "$LOCAL_DIR" "$RUN_ID" "$POINTER_STAGE" 2>/dev/null) || return 0
+  [ "${n:-0}" -gt 0 ] || return 0
+  aws s3 sync "${EP[@]}" "$POINTER_STAGE" "$STREAM_ROOT" \
+    --no-progress \
+    --exclude "*" --include "*.m3u8" \
+    --content-type "application/vnd.apple.mpegurl" \
+    --cache-control "$MANIFEST_CACHE" || return 0
+  aws s3 sync "${EP[@]}" "$POINTER_STAGE" "$STREAM_ROOT" \
+    --no-progress \
+    --exclude "*" --include "*.mpd" \
+    --content-type "application/dash+xml" \
+    --cache-control "$MANIFEST_CACHE" || return 0
+  # The pointer last: whoever reads it finds the run's playlists already there.
+  aws s3 cp "${EP[@]}" "$POINTER_STAGE/current_run.txt" "${STREAM_ROOT}current_run.txt" \
+    --only-show-errors --content-type "text/plain" \
+    --cache-control "$MANIFEST_CACHE" >/dev/null || return 0
+  [ "${POINTER_SAID:-}" = 1 ] || { echo "[s3-uploader] run $RUN_ID is live at ${STREAM_ROOT}"; POINTER_SAID=1; }
+  return 0
 }
 
 final_sync() {
   # No prune here: the task is ending and its disk goes with it.
   echo "[s3-uploader] final sync on shutdown"
-  sync_segments || true
-  sync_manifests
-  rm -f "$CUTOFF_MARK" 2>/dev/null || true
+  local ok=1
+  sync_segments || ok=0
+  sync_manifests || ok=0
+  # the closing playlists reach the stable copies too, unless a newer run has
+  # taken the stream meanwhile (publish_pointer checks)
+  [ "$ok" = 1 ] && publish_pointer
+  rm -f "$CUTOFF_MARK" "$POINTER_SEEN" 2>/dev/null || true
+  rm -rf "$POINTER_STAGE" 2>/dev/null || true
   exit 0
 }
 trap final_sync SIGTERM SIGINT

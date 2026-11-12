@@ -101,8 +101,13 @@ class EventLog:
         return ev
 
     # -- status transitions (each records an event + republishes) -----------
-    def channel_start(self, workflow, renditions):
-        self.event("channel.start", workflow=workflow, renditions=renditions)
+    def channel_start(self, workflow, renditions, run_id=None):
+        # run_id (build queue 2.2): where this run's output is, runs/<run_id>/
+        # under the stream, on the Mac and in S3 alike
+        if run_id:
+            self.event("channel.start", workflow=workflow, renditions=renditions, run_id=run_id)
+        else:
+            self.event("channel.start", workflow=workflow, renditions=renditions)
 
     def channel_stop(self, reason="server_window_closed"):
         # SYNCHRONOUS, AND THAT IS THE ENTIRE POINT.
