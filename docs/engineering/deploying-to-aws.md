@@ -82,7 +82,11 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    release/deployments.json (written by the first deploy, so not in a fresh checkout).
    `--rollback` goes back to the previous recorded state; `--dry-run` prints
    every change. Images, to the repositories the stack created: the
-   control plane (`volt-app`), the encoder (`volt-encoder`, also tagged as the
+   control plane (`volt-app`), the media jobs (`volt-app/Dockerfile.media-jobs`:
+   the same code with ffmpeg, the packager and Python; the worker starts one
+   Fargate task of it per clip, encode, loop preparation, marker detection and
+   other media job, `deploy/terraform/media_jobs.tf`, at most
+   `media_job_max_tasks` at once), the encoder (`volt-encoder`, also tagged as the
    thumbnailer), FAST playout (`volt-encoder/Dockerfile.fast`), radio
    (`volt-encoder/Dockerfile.radio`) and, if accounts use Whisper captions,
    the captions add-on (`volt-encoder/Dockerfile.captions`). Captions run on

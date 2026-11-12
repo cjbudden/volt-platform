@@ -4,13 +4,8 @@ import { pool } from './db';
 import { startScheduler } from './services/orchestrator';
 import { migrate } from './services/migrate';
 import { startWorker } from './services/jobs/worker';
-import { registerClipHandlers } from './services/jobs/handlers/clipExtract';
-import { registerQcHandlers } from './services/jobs/handlers/qcRun';
-import { registerVodEncodeHandlers } from './services/jobs/handlers/vodEncode';
-import { registerVodMarkerHandlers } from './services/jobs/handlers/vodMarkers';
-import { registerVodImageHandlers, startAssetImageSweep } from './services/jobs/handlers/vodImage';
-import { registerFillerHandlers } from './services/fillerPrep';
-import { registerRemoteIngestHandlers } from './services/jobs/handlers/remoteIngest';
+import { startAssetImageSweep } from './services/jobs/handlers/vodImage';
+import { registerAllJobHandlers } from './services/jobs/registerAll';
 import { backfillContainers } from './services/containers';
 import { reconcileAll } from './services/media/reconcile';
 import { reapAllEncoders } from './services/orchestrator/encoderCleanup';
@@ -127,23 +122,7 @@ boot().then(async () => {
   if (runsWorker()) {
     // Handlers are registered BEFORE the worker starts polling: the worker only
     // claims types it can handle, so an unregistered type would sit queued.
-    registerClipHandlers();
-    registerQcHandlers();
-    registerVodEncodeHandlers();
-    (await import('./services/jobs/handlers/adCondition')).registerAdConditionHandlers();
-    registerVodMarkerHandlers();
-    (await import('./services/jobs/handlers/reframe')).registerReframeHandlers();
-    registerVodImageHandlers();
-    (await import('./services/jobs/handlers/fillerThumbs')).registerFillerThumbsHandlers();
-    (await import('./services/jobs/handlers/songArtwork')).registerSongArtworkHandlers();
-    registerRemoteIngestHandlers();
-    (await import('./services/jobs/handlers/frameIndex')).registerFrameIndexHandlers();
-    (await import('./services/jobs/handlers/trickPlay')).registerTrickPlayHandlers();
-    (await import('./services/archive/recordings')).registerArchiveRecordingHandlers();
-    (await import('./services/workflows/runs')).registerAddonHandlers();
-    (await import('./services/media/postProcess')).registerPostProcessHandlers();
-    await registerFillerHandlers();
-    await (await import('./services/social')).registerSocialHandlers();
+    await registerAllJobHandlers();
     worker = startWorker({ concurrency: Number(process.env.WORKER_CONCURRENCY ?? 2) });
   }
 }).catch((e) => {

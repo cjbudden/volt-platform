@@ -92,7 +92,7 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   ok(cov.settings.SMTP_URL?.class === 'operator' && cov.settings.SMTP_URL?.how === 'app_secret_keys', 'SMTP_URL is the operator\'s, as a secret');
   // 2.1a: slates and loops live in the bucket on AWS; FILLER_DIR is only where one lands.
   ok(cov.settings.FILLER_DIR?.class === 'default' && real.wired.has('FILLER_STORE_DRIVER'), 'slates and loops are in the bucket on AWS, FILLER_DIR only scratch (2.1a)');
-  ok(Object.values(cov.settings as Record<string, any>).every((v) => v.item !== '2.1a'), 'nothing is left waiting on 2.1a itself (the rest is 2.1a-2 to 2.1a-4)');
+  ok(Object.values(cov.settings as Record<string, any>).every((v) => v.item !== '2.1a'), 'nothing is left waiting on 2.1a itself (the rest is 2.1a-2 to 2.1a-4b)');
   // 2.1a-2: upload chunks wait in the bucket, so an upload spread over tasks assembles.
   ok(real.wired.has('UPLOAD_STAGING_DRIVER') && cov.settings.UPLOAD_STAGING_DIR?.class === 'default', 'upload chunks wait in the bucket on AWS, UPLOAD_STAGING_DIR only scratch (2.1a-2)');
   ok(/resource "aws_s3_bucket_lifecycle_configuration" "origin"[\s\S]*?prefix = "upload-staging\/"/.test(readFileSync(join(ROOT, 'deploy/terraform/s3_cloudfront.tf'), 'utf8')), 'the origin bucket expires forgotten upload parts (2.1a-2)');
@@ -112,7 +112,8 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   ok(cov.settings.CLIPS_DIR?.class === 'default' && !cov.settings.CLIPS_DIR?.item, 'clips, encodes, ad creatives and FAST renders reach the bucket on AWS, CLIPS_DIR only scratch (2.1a-2b-3)');
   // 2.1a-3 and 2.1a-3b: pre-built loops and house previews are kept in the bucket, so ORIGIN_DIR is only scratch.
   ok(cov.settings.ORIGIN_DIR?.class === 'default' && !cov.settings.ORIGIN_DIR?.item, 'pre-built loops and house previews are kept in the bucket on AWS, ORIGIN_DIR only scratch (2.1a-3b)');
-  for (const [n, item] of [['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
+  // Media jobs run in their own task since 2.1a-4; the control plane's other uses of the tools are 2.1a-4b.
+  for (const [n, item] of [['FFMPEG_BIN', '2.1a-4b'], ['PACKAGER_BIN', '2.1a-4b'], ['PYTHON_BIN', '2.1a-4b']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
   // 2.1b wired radio, captions and the GPU pool. The Icecast relay is gone (2.1c-2).
   for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
   ok(!Object.keys(cov.settings).some((k) => k.startsWith('ICECAST_')), 'no Icecast relay settings are left (the relay is gone, 2.1c-2)');

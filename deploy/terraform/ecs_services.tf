@@ -391,6 +391,14 @@ locals {
     { name = "ENCODER_LOCAL_KEEP_SECONDS", value = tostring(var.encoder_local_keep_seconds) },
     { name = "ECS_SUBNETS", value = join(",", aws_subnet.private[*].id) },
     { name = "ECS_SECURITY_GROUPS", value = aws_security_group.encoder.id },
+    # Media jobs (ffmpeg, the packager, Python) run one task each, not in the
+    # control plane (media_jobs.tf, build queue 2.1a-4). They need the database,
+    # so they join the control plane's security group, not the encoders'.
+    { name = "MEDIA_JOBS_MODE", value = "ecs" },
+    { name = "MEDIA_JOB_TASK_DEF", value = "${local.name}-media-jobs" },
+    { name = "MEDIA_JOB_MAX_TASKS", value = tostring(var.media_job_max_tasks) },
+    { name = "MEDIA_JOB_SUBNETS", value = join(",", aws_subnet.private[*].id) },
+    { name = "MEDIA_JOB_SECURITY_GROUPS", value = aws_security_group.control_plane.id },
     # origin.<domain> over HTTPS with domain_name set: port 80 then only redirects.
     { name = "INTERNAL_API_BASE_URL", value = local.alb_base_url },
   ]

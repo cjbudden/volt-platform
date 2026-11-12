@@ -191,6 +191,12 @@ prewarm_origin_fraction = 0.1
 # worker_min = 1
 # worker_max = 10
 # worker_concurrency = 2
+
+# --- Media jobs, one Fargate task each (media_jobs.tf, build queue 2.1a-4) ---
+# media_job_cpu = 2048
+# media_job_memory = 4096
+# media_job_disk_gib = 100
+# media_job_max_tasks = 20
 #   Jobs per worker task at once.
 # worker_scale_out_queue = 10
 #   Ready jobs waiting (Volt/JobsQueued) above which a worker is added.

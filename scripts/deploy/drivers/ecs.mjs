@@ -14,10 +14,13 @@ const BUILDS = {
   thumbnailer: { repo: 'volt-thumbnailer', sameAs: 'encoder' },
   fast: { repo: 'volt-fast', dockerfile: 'volt-encoder/Dockerfile.fast', context: 'volt-encoder' },
   radio: { repo: 'volt-radio', dockerfile: 'volt-encoder/Dockerfile.radio', context: 'volt-encoder' },
+  // The control plane's code with ffmpeg, the packager and Python: one task per
+  // media job (deploy/terraform/media_jobs.tf, build queue 2.1a-4).
+  'media-jobs': { repo: 'volt-media-jobs', dockerfile: 'volt-app/Dockerfile.media-jobs', context: '.' },
   // Large (models and CUDA): only for environments that list it.
   captions: { repo: 'volt-captions', dockerfile: 'volt-encoder/Dockerfile.captions', context: 'volt-encoder' },
 };
-const DEFAULT_IMAGES = ['control-plane', 'encoder', 'thumbnailer', 'fast', 'radio'];
+const DEFAULT_IMAGES = ['control-plane', 'encoder', 'thumbnailer', 'fast', 'radio', 'media-jobs'];
 
 // Long-running services (one image, ROLE per service) and the task families
 // the orchestrator starts per stream with RunTask (by family, so the newest
@@ -25,7 +28,7 @@ const DEFAULT_IMAGES = ['control-plane', 'encoder', 'thumbnailer', 'fast', 'radi
 const SERVICES = ['control-plane', 'api-public', 'scheduler', 'worker'];
 const FAMILIES = {
   encoder: 'encoder', thumbnailer: 'thumbnailer', fast: 'fast', radio: 'radio',
-  captions: 'captions', 'captions-shared': 'captions',
+  captions: 'captions', 'captions-shared': 'captions', 'media-jobs': 'media-jobs',
 };
 
 export function ecsDriver(env, runner) {

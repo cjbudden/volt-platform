@@ -111,8 +111,11 @@ that is expected.
 
 ## 5. Build and push the images
 
-Six repositories: `volt-control-plane` (from `volt-app/Dockerfile`, built
-from the repository root), `volt-encoder` (also pushed as `volt-thumbnailer`),
+Seven repositories: `volt-control-plane` (from `volt-app/Dockerfile`, built
+from the repository root), `volt-media-jobs` (`volt-app/Dockerfile.media-jobs`,
+also from the repository root: the control plane's code with ffmpeg, the
+packager and Python, one Fargate task per media job, `media_jobs.tf`),
+`volt-encoder` (also pushed as `volt-thumbnailer`),
 `volt-fast` (`volt-encoder/Dockerfile.fast`), `volt-radio`
 (`volt-encoder/Dockerfile.radio`) and `volt-captions`
 (`volt-encoder/Dockerfile.captions`, several GB with its models; push it only

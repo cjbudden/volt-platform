@@ -1,0 +1,65 @@
+# Volt media jobs: one job per task (build queue 2.1a-4).
+# ============================================================================
+# The control plane's own code plus the tools its media jobs run: ffmpeg and
+# ffprobe, Shaka Packager, and Python with volt-encoder's scripts (loop
+# preparation, the VOD encoder, reframe analysis). On AWS the control plane's
+# worker hands each media job to a task of this image (services/jobs/
+# mediaJobs.ts), which runs that one job and exits, so the control-plane image
+# itself (volt-app/Dockerfile) carries none of these and stays small.
+#
+# THE BUILD CONTEXT IS THE REPOSITORY ROOT, like the control plane's:
+#
+#     docker build -f volt-app/Dockerfile.media-jobs -t volt-media-jobs .
+#
+# Same release tag as the control plane (variables.tf control_plane_image_tag):
+# the task runs the same handlers against the same database schema.
+
+# --- the control plane's code -----------------------------------------------
+FROM node:20-slim AS build
+WORKDIR /app
+COPY volt-app/package.json ./
+RUN npm install
+COPY volt-app/tsconfig.json ./
+COPY volt-app/src ./src
+RUN npm run build
+
+# --- runtime: Node 20 on Ubuntu 22.04 with the media tools --------------------
+FROM ubuntu:22.04
+ARG SHAKA_VERSION=v3.2.0
+ARG NODE_MAJOR=20
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    NODE_ENV=production \
+    ENCODER_BIN=/opt/volt-encoder/bin \
+    FFMPEG_BIN=ffmpeg FFPROBE_BIN=ffprobe PACKAGER_BIN=packager PYTHON_BIN=python3
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg python3 python3-pip curl ca-certificates gnupg tini \
+    && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /usr/local/bin/packager \
+      "https://github.com/shaka-project/shaka-packager/releases/download/${SHAKA_VERSION}/packager-linux-x64" \
+    && chmod +x /usr/local/bin/packager \
+    && /usr/local/bin/packager --version
+
+# Reframe analysis (bin/reframe_analyse.py) needs numpy and headless OpenCV,
+# the same pins as volt-encoder/Dockerfile.
+RUN pip3 install --no-cache-dir numpy==1.26.4 opencv-python-headless==4.10.0.84
+
+# volt-encoder's scripts and the face model, where config.testStream.encoderBin finds them.
+COPY volt-encoder/bin /opt/volt-encoder/bin
+COPY volt-encoder/models /opt/volt-encoder/models
+
+WORKDIR /app
+COPY volt-app/package.json ./
+RUN npm install --omit=dev
+COPY --from=build /app/dist ./dist
+COPY volt-app/assets ./assets
+
+# One job, then exit (MEDIA_JOB_ID and MEDIA_JOB_WORKER come from the RunTask
+# override). tini forwards SIGTERM so a Spot interruption ends ffmpeg cleanly;
+# the queue's lease then hands the job to the next attempt.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "dist/tools/run-media-job.js"]

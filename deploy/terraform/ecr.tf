@@ -1,9 +1,10 @@
 # Container registries for the images the platform ships. Radio and captions
 # are their own images (volt-encoder/Dockerfile.radio and Dockerfile.captions):
 # a station needs ffmpeg alone, and the captions models and CUDA stay out of the
-# encoder so every channel does not pay to pull them.
+# encoder so every channel does not pay to pull them. volt-media-jobs is the
+# control plane's code with ffmpeg, the packager and Python (media_jobs.tf).
 locals {
-  ecr_repos = ["volt-control-plane", "volt-encoder", "volt-thumbnailer", "volt-fast", "volt-radio", "volt-captions"]
+  ecr_repos = ["volt-control-plane", "volt-encoder", "volt-thumbnailer", "volt-fast", "volt-radio", "volt-captions", "volt-media-jobs"]
 }
 
 resource "aws_ecr_repository" "repo" {

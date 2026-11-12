@@ -239,18 +239,18 @@
     },
     "FFMPEG_BIN": {
       "class": "not-on-aws-yet",
-      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a-4"
+      "why": "Media jobs (clip extract, VOD encode, loop preparation, intro detection and the rest) run in their own volt-media-jobs task, which sets these (2.1a-4). The control plane still runs ffmpeg, ffprobe and Python itself outside the job queue (upload probes, the FAST render of a slate or loop, test streams, radio previews and others), which item 2.1a-4b moves out.",
+      "item": "2.1a-4b"
     },
     "FFMPEG_PATH": {
       "class": "not-on-aws-yet",
-      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a-4"
+      "why": "Media jobs (clip extract, VOD encode, loop preparation, intro detection and the rest) run in their own volt-media-jobs task, which sets these (2.1a-4). The control plane still runs ffmpeg, ffprobe and Python itself outside the job queue (upload probes, the FAST render of a slate or loop, test streams, radio previews and others), which item 2.1a-4b moves out.",
+      "item": "2.1a-4b"
     },
     "FFPROBE_BIN": {
       "class": "not-on-aws-yet",
-      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a-4"
+      "why": "Media jobs (clip extract, VOD encode, loop preparation, intro detection and the rest) run in their own volt-media-jobs task, which sets these (2.1a-4). The control plane still runs ffmpeg, ffprobe and Python itself outside the job queue (upload probes, the FAST render of a slate or loop, test streams, radio previews and others), which item 2.1a-4b moves out.",
+      "item": "2.1a-4b"
     },
     "FILLER_CACHE_DIR": {
       "class": "default",
@@ -462,6 +462,18 @@
       "class": "default",
       "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
     },
+    "MEDIA_JOB_SPOT": {
+      "class": "default",
+      "why": "Media-job tasks prefer Fargate Spot unless set to false."
+    },
+    "MEDIA_JOB_START_GRACE_S": {
+      "class": "default",
+      "why": "The lease a media job gets while its task starts (10 minutes by default)."
+    },
+    "MEDIA_JOB_TYPES": {
+      "class": "default",
+      "why": "The job types that run in their own task; the default list (services/jobs/mediaJobs.ts) covers every handler that runs ffmpeg, the packager or Python."
+    },
     "MEDIA_RESTORE_DAYS": {
       "class": "default",
       "why": "The storage ladder's tiers and restore terms; used once media_archive_enabled is on."
@@ -515,8 +527,8 @@
     },
     "PACKAGER_BIN": {
       "class": "not-on-aws-yet",
-      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a-4"
+      "why": "Media jobs (clip extract, VOD encode, loop preparation, intro detection and the rest) run in their own volt-media-jobs task, which sets these (2.1a-4). The control plane still runs ffmpeg, ffprobe and Python itself outside the job queue (upload probes, the FAST render of a slate or loop, test streams, radio previews and others), which item 2.1a-4b moves out.",
+      "item": "2.1a-4b"
     },
     "PLATFORM_REQUIRE_MFA": {
       "class": "default",
@@ -569,8 +581,8 @@
     },
     "PYTHON_BIN": {
       "class": "not-on-aws-yet",
-      "why": "In-process jobs (clip extract, VOD encode, loop preparation, intro detection) run these, and the control-plane image does not carry ffmpeg, the packager or Python.",
-      "item": "2.1a-4"
+      "why": "Media jobs (clip extract, VOD encode, loop preparation, intro detection and the rest) run in their own volt-media-jobs task, which sets these (2.1a-4). The control plane still runs ffmpeg, ffprobe and Python itself outside the job queue (upload probes, the FAST render of a slate or loop, test streams, radio previews and others), which item 2.1a-4b moves out.",
+      "item": "2.1a-4b"
     },
     "QOE_ANON_SALT": {
       "class": "default",

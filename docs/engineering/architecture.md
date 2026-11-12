@@ -19,7 +19,7 @@ AWS. The module-by-module design and the workflows through the modules are in
 | Thumbnailer | `volt-encoder/bin/thumbnailer.py` | child process beside the encoder | a task from the encoder image |
 | Captions | `volt-encoder/bin/captions.py` | beside the encoder | sidecar image (`volt-encoder/Dockerfile.captions`) |
 | Graphics burn-in | `volt-encoder/bin/gfx_burn.py` (Chromium renderer) | beside the encoder | same |
-| VOD encodes, clips, QC, filler builds | jobs in `volt-app/src/services/jobs` | inside the one process | the `worker` service |
+| VOD encodes, clips, QC, filler builds | jobs in `volt-app/src/services/jobs` | inside the one process | one Fargate task per job of the `volt-media-jobs` image, started by the `worker` (`volt-app/src/services/jobs/mediaJobs.ts`); lighter jobs run in the `worker` service |
 | Database | Postgres 16. Migrations in `volt-app/migrations`, applied on boot by `volt-app/src/services/migrate.ts` | local Postgres, or Docker, on :5432 | RDS, optionally through RDS Proxy |
 | Cache | Valkey, optional (`REDIS_URL`) | none: caches are per process | ElastiCache |
 | Origin | segments under the control plane's origin folder (`volt-app/origin` by default, `ORIGIN_DIR`), served at `/origin` and `/live` | a folder | S3 behind CloudFront |
@@ -42,7 +42,7 @@ the same image runs as:
 | control plane | `api-admin` | console and admin API; owns migrations |
 | public API | `api-public` | the viewer surface only (play gate, live, player); scales out |
 | scheduler | `scheduler` | one leader by advisory lock, with a standby; starts and stops encoders |
-| worker | `worker` | background jobs; scales on queue depth |
+| worker | `worker` | background jobs; scales on queue depth. Media jobs (ffmpeg, the packager, Python) are handed to a task of their own each |
 
 `deploy/staging/docker-compose.yml` runs the same split on one machine with an
 nginx edge, which is the cheapest way to see it before AWS. Why each setting

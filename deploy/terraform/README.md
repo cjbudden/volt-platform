@@ -72,7 +72,8 @@ It needs the AWS CLI v2 and Docker, with your own AWS credentials. In order it:
 
 1. runs the release checks and finds the release's git tag and commit;
 2. builds and pushes every image as `v<version>-<sha>` (and `v<version>`):
-   `volt-control-plane`, `volt-encoder` (also as `volt-thumbnailer`), `volt-fast`,
+   `volt-control-plane`, `volt-media-jobs` (one task per media job, `media_jobs.tf`),
+   `volt-encoder` (also as `volt-thumbnailer`), `volt-fast`,
    `volt-radio`, and `volt-captions` only if the environment lists `captions`.
    Never `latest`. Images already in ECR for that tag are not rebuilt;
 3. registers each service's new task definition revision from the newest one

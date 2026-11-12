@@ -170,6 +170,8 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
     aws_ecs_capacity_provider.spot_large.name,
     aws_ecs_capacity_provider.ondemand_large.name,
     "FARGATE",
+    # Media jobs prefer Fargate Spot (media_jobs.tf, build queue 2.1a-4).
+    "FARGATE_SPOT",
   ], aws_ecs_capacity_provider.gpu[*].name)
 
   # Default for the encoder: Spot weight 4 + on-demand base 1 (mirrors the

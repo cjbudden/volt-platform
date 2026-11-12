@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { claim, fail, heartbeat, reapExpiredLeases, succeed, type JobRow } from './queue';
 import { errorCodeOf } from './errorCode';
+import { claimableTypes, dispatchToTask, runsInOwnTask } from './mediaJobs';
 
 export interface JobContext {
   job: JobRow;
@@ -42,6 +43,11 @@ export function registerHandler(type: string, fn: JobHandler): void {
 
 export function registeredTypes(): string[] {
   return [...handlers.keys()];
+}
+
+/** The handler for a type, for the media-jobs task (mediaJobs.ts runClaimedJob). */
+export function handlerFor(type: string): JobHandler | undefined {
+  return handlers.get(type);
 }
 
 export interface WorkerHandle {
@@ -91,8 +97,14 @@ export function startWorker(opts: {
     if (stopping) return;
     try {
       while (active < concurrency && !stopping) {
-        const job = await claim(registeredTypes(), id);
+        const job = await claim(await claimableTypes(registeredTypes()), id);
         if (!job) break;
+        // On AWS a media job (ffmpeg, the packager, Python) runs in its own
+        // task, not here: hand it over and keep claiming (mediaJobs.ts).
+        if (runsInOwnTask(job.type)) {
+          await dispatchToTask(job, id).catch((e) => console.error('[jobs] hand-over to a task failed', e));
+          continue;
+        }
         active++;
         runOne(job).finally(() => { active--; });
       }

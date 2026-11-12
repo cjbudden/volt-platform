@@ -153,6 +153,15 @@ export class MockTaskLauncher implements TaskLauncher {
     this.issued.add(arn);
     return { taskArn: arn, lifecycle: 'on_demand' };
   }
+  /** A media job's own task (services/jobs/mediaJobs.ts, build queue 2.1a-4). */
+  public failMediaJobs = false;
+  async launchMediaJob(spec: { jobId: string; workerId: string; type: string }): Promise<LaunchResult> {
+    if (this.failMediaJobs) throw new Error('mock: the launcher refused the task');
+    this.launched.push({ kind: 'media-job', job: { ...spec } });
+    const arn = `mock:media-job:${spec.jobId}:${++this.n}`;
+    this.issued.add(arn);
+    return { taskArn: arn, lifecycle: 'spot' };
+  }
   async launchRadio(streamId: string, job: Record<string, any>, hints?: LaunchHints): Promise<LaunchResult> {
     this.launched.push({ kind: 'radio', streamId, job, hints });
     const arn = `mock:radio:${streamId}:${++this.n}`;
@@ -361,6 +370,51 @@ export class EcsTaskLauncher implements TaskLauncher {
    * it (local runs it as a child process). A playout writes text, so the
    * reservation is a sliver of a server: an eighth of a vCPU, 256 MiB.
    */
+  /**
+   * A media job's own task (services/jobs/mediaJobs.ts, build queue 2.1a-4):
+   * the volt-media-jobs image runs one job and exits. Fargate, not the encoder
+   * servers: the job needs a scratch disk sized for it (an encode holds its
+   * original and its renditions) and must never fill a live encoder's disk,
+   * and it needs the database, so it joins the control plane's network
+   * rather than the encoders'. Spot first, because an interrupted job is just
+   * retried by the queue; on-demand when Spot has no room.
+   */
+  async launchMediaJob(spec: { jobId: string; workerId: string; type: string }): Promise<LaunchResult> {
+    const { RunTaskCommand } = await import('@aws-sdk/client-ecs');
+    const ecs = await this.client();
+    const out = await ecs.send(new RunTaskCommand(this.mediaJobInput(spec) as any));
+    const task = out.tasks?.[0];
+    if (!task?.taskArn) throw new Error(`ECS RunTask returned no task: ${JSON.stringify(out.failures ?? [])}`);
+    return { taskArn: task.taskArn, lifecycle: (task.capacityProviderName ?? '').includes('SPOT') ? 'spot' : 'on_demand' };
+  }
+  /** The RunTask input for a media job (separate so it can be unit-tested). */
+  mediaJobInput(spec: { jobId: string; workerId: string; type: string }): Record<string, any> {
+    const { mediaJobsConfig } = require('../jobs/mediaJobs') as typeof import('../jobs/mediaJobs');
+    const m = mediaJobsConfig();
+    return {
+      cluster: config.orchestrator.ecsCluster,
+      taskDefinition: m.taskDef,
+      count: 1,
+      capacityProviderStrategy: m.spot
+        ? [{ capacityProvider: 'FARGATE_SPOT', weight: 3 }, { capacityProvider: 'FARGATE', weight: 1 }]
+        : [{ capacityProvider: 'FARGATE', weight: 1 }],
+      networkConfiguration: {
+        awsvpcConfiguration: { subnets: m.subnets, securityGroups: m.securityGroups, assignPublicIp: 'DISABLED' },
+      },
+      overrides: {
+        containerOverrides: [{
+          name: 'media-job',
+          environment: [
+            { name: 'MEDIA_JOB_ID', value: spec.jobId },
+            { name: 'MEDIA_JOB_WORKER', value: spec.workerId },
+          ],
+        }],
+      },
+      // Find a job's task in the console by its job id and type.
+      tags: [{ key: 'volt:job', value: spec.jobId }, { key: 'volt:job-type', value: spec.type }],
+      propagateTags: 'TASK_DEFINITION',
+    };
+  }
   launchFast(channelId: string, job: Record<string, any>, taskDef: string) {
     return this.run(taskDef, 'fast', { FAST_CONFIG_JSON: JSON.stringify(job) }, { cpuUnits: 128, memoryMib: 256 });
   }

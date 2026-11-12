@@ -52,13 +52,15 @@ data "aws_iam_policy_document" "control_plane" {
   }
   # The orchestrator launches encoder/thumbnailer tasks via RunTask.
   statement {
-    actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks", "ecs:ListTasks"]
+    # TagResource: a media-job task is tagged with its job at RunTask (media_jobs.tf).
+    actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks", "ecs:ListTasks", "ecs:TagResource"]
     resources = ["*"]
   }
   # PassRole so RunTask can attach the encoder task + execution roles.
   statement {
+    # The control plane's own role too: media-job tasks run with it (media_jobs.tf).
     actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.task_execution.arn, aws_iam_role.encoder_task.arn]
+    resources = [aws_iam_role.task_execution.arn, aws_iam_role.encoder_task.arn, aws_iam_role.control_plane.arn]
   }
 }
 
