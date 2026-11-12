@@ -2,6 +2,21 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.120.0 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Collections: A collection row in your app left out a title a collection package locks, instead of listing it as premium. Removing a collection's access could also leave a title locked until the next background pass; it now changes at once.
+- improved · Collections: A rule collection's row in your app leaves out a title another collection sells as a package in that app and country, as View as already showed; a title added by hand stays, listed as locked.
+- added · Collections: Each app chooses how its collection rows treat a title a package locks: show it locked, with the package that unlocks it and what viewers can buy, or leave it out. Set it as Titles a package locks on the app in API Keys & Apps; rows follow the change at once.
+- added · Loops & Fillers: Each QC finding on a slate or loop now shows stills from the preview at that moment (for a jump where a loop restarts, its last frame beside its first), plays that moment with one click, and can be accepted on its own, with a note. Accepted findings stay accepted when QC runs again, and once every error is accepted the item can be approved without a note.
+- changed · Loops & Fillers: The actions on each row of the list are now icons, named when you hover: details (or review, for one awaiting approval), archive or make available, and delete.
+- fixed · Loops & Fillers: Who approved, rejected or archived a slate or loop is shown by name or email, not as an id.
+
+### Internal
+
+- added · Tests: public-collections-locked suite: locked titles with their packages, upsell or hide per app, rule-collection exclusions and warm reads on the public collection answer.
+
 ## 0.119.0 (2026-11-12)
 
 ### Product (in customer release notes)
