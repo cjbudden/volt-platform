@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.133.0 (2026-11-12)
+
+### SaaS platform
+
+- fixed · Loops & Fillers: On AWS, an encoder now uses the fallback loop already built for its stream instead of building its own copy when it starts, so failover is ready sooner and costs the encoder no extra work. The preview of each stream's copy on a slate or loop's details also plays whichever server answers.
+
+### Internal
+
+- added · Tests: New filler-prebuilt-bucket check suite and test_filler_fetch.py: a stream's pre-built loop stored in the bucket, served by a second process and fetched by the encoder.
+
 ## 0.132.0 (2026-11-12)
 
 ### SaaS platform
