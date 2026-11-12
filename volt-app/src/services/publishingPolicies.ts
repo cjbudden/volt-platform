@@ -243,13 +243,14 @@ export function presetOf(r: Resolved): string | null {
  * governs once, then resolves in memory; titles that share a content type, an
  * owner and have no override of their own resolve once between them.
  */
-export async function policyImpact(accountId: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata'; id: string | null },
+export async function policyImpact(accountId: string, scope: { kind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'; id: string | null },
   next: { settings: RuleSettings; lockedFields: string[]; presetKey: string | null },
   /** A metadata-rule change (P3-3): the account's enabled metadata rules, in order, as they would be after it. */
   opts: { metaAfter?: MetaRow[] } = {}): Promise<Impact> {
   const rows = await query<RuleRow>(`SELECT id, scope_kind, scope_id, settings, locked_fields, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
   const after = rows.filter((r) => !(r.scope_kind === scope.kind && (r.scope_id ?? null) === (scope.id ?? null)));
-  if (scope.kind !== 'metadata')
+  // The asset rung (build queue P3-2b) is the title's own override, not a rule row: it is swapped on the title below.
+  if (scope.kind !== 'metadata' && scope.kind !== 'asset')
     after.push({ id: 'next', scope_kind: scope.kind, scope_id: scope.id, settings: next.settings, locked_fields: next.lockedFields, preset_key: next.presetKey });
   // Which metadata rule each title meets now and after the save: a change to
   // a rule's conditions or order moves titles between rules, so a metadata
@@ -258,7 +259,8 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
   const metaAfter = scope.kind === 'metadata' ? (opts.metaAfter ?? metaBefore) : metaBefore;
   const matchedBefore = await firstMatches(accountId, null, metaBefore);
   const matchedAfter = metaAfter === metaBefore ? matchedBefore : await firstMatches(accountId, null, metaAfter);
-  const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND v.schema_id = $2' : 'AND (v.channel_id = $2 OR v.event_id = $2)';
+  const where = scope.kind === 'account' || scope.kind === 'metadata' ? '' : scope.kind === 'schema' ? 'AND v.schema_id = $2'
+    : scope.kind === 'asset' ? 'AND v.id = $2' : 'AND (v.channel_id = $2 OR v.event_id = $2)';
   // A title recorded from a channel or event belongs to the account through
   // its group (as in services/availability.ts assetAccount); an upload directly.
   const titles = await query<any>(
@@ -285,9 +287,9 @@ export async function policyImpact(accountId: string, scope: { kind: 'account' |
     const mb = matchedBefore.get(t.id) ?? null, ma = matchedAfter.get(t.id) ?? null;
     // A metadata rule governs the titles that meet it, before or after the save.
     if (scope.kind === 'metadata' && scope.id && mb?.id !== scope.id && ma?.id !== scope.id) { impact.assets--; continue; }
-    const key = hasOverride ? `a:${t.id}` : `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}|${mb?.id ?? ''}|${ma === mb ? '=' : ma?.id ?? ''}`;
+    const key = hasOverride || scope.kind === 'asset' ? `a:${t.id}` : `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}|${mb?.id ?? ''}|${ma === mb ? '=' : ma?.id ?? ''}`;
     let pair = memo.get(key);
-    if (!pair) { pair = [resolveWith(rows, t, mb), resolveWith(after, t, ma)]; memo.set(key, pair); }
+    if (!pair) { pair = [resolveWith(rows, t, mb), resolveWith(after, scope.kind === 'asset' ? { ...t, availability_override: next.settings } : t, ma)]; memo.set(key, pair); }
     const [was, now] = pair;
     const live = ['available', 'scheduled'].includes(t.availability_state);
     if (live) impact.published++;

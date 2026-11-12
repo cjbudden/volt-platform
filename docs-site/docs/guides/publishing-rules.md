@@ -139,6 +139,7 @@ As you change a rung, **Before you save** checks it:
 - When the save changes published titles, a line says how many **take this up within a minute**, and in amber how many **become unavailable now** because their window would end before today or open later (see [What a change does to published titles](#what-a-change-does-to-published-titles)).
 - A red line is a **conflict that blocks the save**, for example DRM with MP4 download allowed. The rows it names are outlined, **Save publishing rule** is greyed out and **Fix the conflicts marked above to save.** appears beside it.
 - An amber line is a **warning**: the rule can be saved, and it is worth a look, for example a country restriction without a WAF profile.
+- On a single item in the Media Library the check is about that item: **This title** says whether it is published and whether the save changes anything. A field a rule beneath has locked cannot be set there, and a value the item was given before the lock blocks its save until it is cleared.
 - A line that starts with a number of titles is about those titles in particular, with up to five of them named, for example a rights-managed rule on a title that has no rights window.
 
 ### Turn DRM on or off for published titles

@@ -52,6 +52,11 @@ export const policyApi = {
     req(path(kind, id) + '?dryRun=1', { method: 'PUT', body: JSON.stringify(b) }),
   save: (kind: PolicyScope, id: string | null, b: PolicyBody): Promise<PolicyRule & { warnings: Conflict[]; impact: Impact }> =>
     req(path(kind, id), { method: 'PUT', body: JSON.stringify(b) }),
+  /** The asset rung (build queue P3-2b): the title's own override, checked like a rule. */
+  assetDryRun: (assetId: string, override: PolicySettings): Promise<DryRun> =>
+    req(`/vod/${assetId}/availability?dryRun=1`, { method: 'PATCH', body: JSON.stringify({ override }) }),
+  assetSave: (assetId: string, override: PolicySettings, confirm = false): Promise<{ override: PolicySettings; reapplied: boolean; state: string; warnings?: Conflict[] }> =>
+    req(`/vod/${assetId}/availability`, { method: 'PATCH', body: JSON.stringify({ override, ...(confirm ? { confirm: true } : {}) }) }),
 }
 
 /** A refusal the editor can act on: 422 policy_conflict or 409 confirm_repackage, with their details. */

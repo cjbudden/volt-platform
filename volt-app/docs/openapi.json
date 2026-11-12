@@ -39127,11 +39127,11 @@
    },
    "patch": {
     "operationId": "patchVODByIDAvailability",
-    "summary": "Update a VOD asset's availability",
+    "summary": "Set an asset's own publishing rule",
     "tags": [
      "VOD"
     ],
-    "description": "**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
+    "description": "The asset's own rung of the publishing rules: `{ \"override\": { ... } }` with the fields it sets for this asset only (the same fields as a publishing rule), replacing what it had; `{ \"override\": {} }` follows the rules again. Refused with `422` `policy_conflict` (with `details.conflicts` and `details.impact`) when it sets a field a rule beneath it has locked (the account, the content type, the channel, event or station, or a metadata rule), or brings a blocking conflict such as DRM with MP4 download allowed; a problem the rules beneath already had is not charged to it. When it turns DRM on or off for a published asset it answers `409` `confirm_repackage` until sent again with `\"confirm\": true`. `?dryRun=1` answers `{ dryRun, saved: false, canSave, conflicts, impact }` and saves nothing. A published asset takes a saved change up at once (`reapplied`); warnings come back in `warnings`. Needs `vod: manage`.\n\n**Credential:** admin session (Bearer) or account secret key\n\n**Access needed:** vod: manage",
     "security": [
      {
       "adminBearer": []

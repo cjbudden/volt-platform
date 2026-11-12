@@ -21,7 +21,8 @@ import { actorId, actorLabel } from '../util/actor';
 import { actor, writeAudit } from '../services/audit';
 import { publish, withdraw, republish, NotPublishable } from '../services/availability';
 import { resolveForAsset } from '../services/publishingRules';
-import { cleanSettings } from './publishingRules';
+import { cleanSettings, policyRefusal } from './publishingRules';
+import { lockConflicts, policyConflicts, policyImpact, presetOf } from '../services/publishingPolicies';
 import { defineList, parseList, whereSql, countWhereSql, countParams, pageSql, finishPage, onlyIdParam } from '../util/listQuery';
 import { ORIGIN_SQL, ORIGINS, SOURCE_SQL, SOURCES, MEDIA_TYPE_SQL, MEDIA_TYPES, completenessPctSql, missingRequiredCountSql, completeness as metadataCompleteness, targetFields, encodeDetails } from '../services/vodLibrary';
 import { previewFill, applyFill, pruneProvenance, typeOf } from '../services/epgFill';
@@ -1232,10 +1233,37 @@ vodRouter.post('/:id/evaluate', asyncHandler(async (req, res) => {
 }));
 
 vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {
-  const asset = await fetchOwned(req.params.id, accountId(req));
+  const acct = accountId(req);
+  const asset = await fetchOwned(req.params.id, acct);
   if (!asset) throw notFound('VOD asset not found');
   // The asset's rung: replace it wholesale (an empty object = back to the ladder).
-  const override = await cleanSettings(accountId(req), req.body?.override ?? req.body ?? {});
+  // `confirm` rides beside the override (or in a bare body), never in it.
+  const raw = req.body?.override !== undefined ? req.body.override : (({ confirm: _c, ...rest }) => rest)(req.body ?? {});
+  const confirm = req.body?.confirm === true || req.query.confirm === '1';
+  const override = await cleanSettings(acct, raw ?? {});
+  // THE ASSET RUNG'S CHECKS (build queue P3-2b), as the rule routes make them:
+  // an override of a field a rung beneath locked is refused (it would be saved
+  // and then ignored when resolved, which reads as a save that did nothing),
+  // the policy's own problems this override introduces, and what it does to
+  // the title. ?dryRun=1 answers the same without saving, for Before you save.
+  const below = await resolveForAsset(acct, { ...asset, availability_override: {} });
+  const was = await resolveForAsset(acct, asset);
+  const now = await resolveForAsset(acct, { ...asset, availability_override: override });
+  const had = new Set(policyConflicts(was.settings, { presetKey: presetOf(was) }).map((c) => c.code));
+  const conflicts = [
+    ...lockConflicts(override, 'asset', below.locks),
+    // Only what this override brings: a problem the title already had from the rungs beneath is theirs to fix.
+    ...policyConflicts(now.settings, { presetKey: presetOf(now) }).filter((c) => !had.has(c.code)),
+  ];
+  const impact = await policyImpact(acct, { kind: 'asset', id: asset.id }, { settings: override, lockedFields: [], presetKey: null });
+  const blocks = conflicts.filter((c) => c.level === 'block');
+  if (req.query.dryRun === '1' || req.query.dryRun === 'true') return res.json({ dryRun: true, saved: false, canSave: !blocks.length && !impact.blocks.length, conflicts, impact });
+  if (blocks.length || impact.blocks.length) {
+    const first = blocks[0]?.message ?? `${impact.blocks[0].message}`;
+    throw policyRefusal(422, 'policy_conflict', first, { conflicts, impact });
+  }
+  if (impact.repackage && !confirm)
+    throw policyRefusal(409, 'confirm_repackage', 'This changes DRM on a published title: its files must be packaged again. Send again with confirm to go ahead; it keeps its current protection until then.', { conflicts, impact });
   await query(`UPDATE vod_assets SET availability_override = $2::jsonb, updated_at = now() WHERE id = $1`, [asset.id, JSON.stringify(override)]);
   // A published asset re-applies its plan so the change takes effect now.
   let outcome: any = null;
@@ -1249,7 +1277,7 @@ vodRouter.patch('/:id/availability', asyncHandler(async (req, res) => {
   await writeAudit(null, { accountId: accountId(req), userId: who.userId, label: who.label,
     action: 'update', entityType: 'vod_asset', entityId: asset.id,
     changes: { availability_override: { from: asset.availability_override ?? {}, to: override } } }).catch(() => {});
-  res.json({ override, reapplied: !!outcome, state: outcome?.state ?? asset.availability_state });
+  res.json({ override, reapplied: !!outcome, state: outcome?.state ?? asset.availability_state, warnings: conflicts.filter((c) => c.level !== 'block') });
 }));
 
 vodRouter.post('/:id/publish', asyncHandler(async (req, res) => {

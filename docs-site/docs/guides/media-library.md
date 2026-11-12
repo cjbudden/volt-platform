@@ -184,7 +184,7 @@ The top of the **Availability** tab says what a viewer gets right now and why.
 
 1. Further down the **Availability** tab, **Publishing** shows the publishing state and, if published, from and until when.
 2. **What a publish does for this item** shows the publishing rule it follows: **Publish to**, **Auto-publish**, **Available from**, **Expires**, **Geo access**, **Access**, **Paywall**, **Publish gate** and **Access rules**. Grey values are inherited from the account, its content type and its channel, event or station ([Publishing Rules](publishing-rules.md)).
-3. To change a value for this asset only, tick the field, set it, and choose **Save publishing rule**.
+3. To change a value for this asset only, tick the field, set it, and choose **Save publishing rule**. **Before you save** checks it as on any rule: **This title** says whether it is published and whether the save changes anything, and a red line blocks the save. A field locked by the account, the content type, the channel, event or station, or a metadata rule cannot be set here; if the asset was given a value of its own before the lock, its row says **Save is refused until it is cleared**: choose **Clear it**. Turning **DRM** on or off for a published asset asks first, because its files must be packaged again; a saved change to a published asset applies at once.
 4. Choose **Publish**. Volt publishes it to every point the rule names and confirms **Published through its rules.** An asset that has expired or had its access removed offers **Publish again**.
 5. To take it off, choose **Remove access** and give a reason if you like. The asset is kept; nothing serves it until you publish it again.
 
@@ -302,7 +302,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | `GET /api/vod/{id}/links`, `PUT /api/vod/{id}/links/{field}`, `DELETE /api/vod/{id}/links/{field}` | Its links; link a record with `{"assetId"}`, keep a name with `{"name"}`, or remove it |
 | `GET /api/vod/link-candidates?q=` | Records a link field can point at, best match first |
 | `GET /api/vod/{id}/history`, `GET /api/vod/{id}/provenance` | Its history and where it came from |
-| `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | Its publishing rule for this item |
+| `GET /api/vod/{id}/availability`, `PATCH /api/vod/{id}/availability` | Its publishing rule for this item: `{"override": {...}}`, `{}` to follow the rules again. Refused with `422 policy_conflict` for a field locked beneath it or a conflict it brings; `409 confirm_repackage` until sent with `"confirm": true` when it changes DRM on a published item; `?dryRun=1` checks without saving |
 | `POST /api/vod/{id}/publish`, `POST /api/vod/{id}/withdraw` | Publish, and remove access |
 | `PUT /api/vod/{id}/availability` | **Listed from** and **Unlisted**: `{"listedFrom": "2026-12-01T09:00:00Z", "unlisted": false}` (`null` for the default) |
 | `POST /api/vod/{id}/archive`, `POST /api/vod/{id}/unarchive` | Archive (optional `reason`), and restore with `{"to": "draft"}` or `{"to": "published"}` |

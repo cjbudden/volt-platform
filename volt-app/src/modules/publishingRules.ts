@@ -458,8 +458,8 @@ const metaSchema = z.object({
   confirm: z.boolean().optional(),
 });
 
-/** A refusal that carries the conflicts and the impact, for the console to show. */
-function policyRefusal(status: number, code: string, message: string, details: object): ApiError {
+/** A refusal that carries the conflicts and the impact, for the console to show. Also the asset rung's (modules/vod.ts). */
+export function policyRefusal(status: number, code: string, message: string, details: object): ApiError {
   const e: any = new ApiError(status, message); e.code = code; e.details = details; return e;
 }
 

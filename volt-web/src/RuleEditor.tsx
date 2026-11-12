@@ -21,6 +21,9 @@
 //  the save (?dryRun=1): blocking conflicts stop Save, warnings are saved and
 //  shown, and the impact says how many titles the save changes. A save that
 //  changes DRM on published titles asks first (409 confirm_repackage).
+//  The asset rung (build queue P3-2b) is checked the same way through
+//  PATCH /vod/:id/availability: a field locked beneath it cannot be
+//  overridden, and Before you save shows what the override does to the title.
 // ============================================================================
 import { useEffect, useMemo, useState } from 'react'
 import { api, type RuleKey, type PublishingPoints, type PublishTarget, type Rung as ApiRung, type ArchiveTarget } from './api'
@@ -83,7 +86,7 @@ function describe(k: RuleKey, v: any, points: PublishingPoints | null, archiveTa
 
 export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, onSaved }: {
   scopeKind: 'account' | 'schema' | 'owner' | 'metadata' | 'asset'
-  /** For account: null. For asset: the asset id (saved through setVodAvailability). For metadata: the rule's id. */
+  /** For account: null. For asset: the asset id (saved through PATCH /vod/:id/availability). For metadata: the rule's id. */
   scopeId: string | null
   title?: string
   /** How to ask the server what this rung inherits (the rungs beneath it). */
@@ -139,12 +142,13 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
   // shown and saved, and the impact says what the save would do to titles.
   const body = JSON.stringify({ own, locks, presetKey })
   useEffect(() => {
-    if (asset || !loaded) return
+    if (!loaded) return
     let gone = false
     setChecking(true)
     const t = setTimeout(async () => {
       try {
-        const r = await policyApi.dryRun(scopeKind as PolicyScope, scopeId, { settings: own, lockedFields: locks, presetKey })
+        const r = asset ? await policyApi.assetDryRun(scopeId!, own)
+          : await policyApi.dryRun(scopeKind as PolicyScope, scopeId, { settings: own, lockedFields: locks, presetKey })
         if (!gone) { setCheck(r); setCheckErr('') }
       } catch (e: any) { if (!gone) { setCheck(null); setCheckErr(e.message) } }
       finally { if (!gone) setChecking(false) }
@@ -204,7 +208,11 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
   async function save(confirmed = false) {
     setBusy(true); setErr(''); setMsg('')
     try {
-      if (asset) { await api.setVodAvailability(scopeId!, own); setMsg('Saved.') }
+      if (asset) {
+        const r = await policyApi.assetSave(scopeId!, own, confirmed)
+        setConfirm(null)
+        setMsg(r.warnings?.length ? `Saved, with ${r.warnings.length} warning${r.warnings.length === 1 ? '' : 's'}.` : 'Saved.')
+      }
       else {
         const r = await policyApi.save(scopeKind as PolicyScope, scopeId, { settings: own, lockedFields: locks, presetKey, ...(confirmed ? { confirm: true } : {}) })
         setConfirm(null)
@@ -256,7 +264,7 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
             : <div>{isSectionField(id) ? describeSection(id, inh.value) : describe(id as RuleKey, inh.value, points, archiveTargets)}</div>}
           {lockBy && on && (
             <div className="pol-note">
-              This rung still sets a value of its own, which the lock overrides.{!asset && ' Save is refused until it is cleared.'}
+              This rung still sets a value of its own, which the lock overrides. Save is refused until it is cleared.
               <button type="button" className="btn ghost sm" onClick={() => setField(id, undefined)}>Clear it</button>
             </div>)}
         </div>
@@ -308,21 +316,23 @@ export function RuleEditor({ scopeKind, scopeId, title, resolveQuery, compact, o
             {ids.map(row)}
           </section>)
       })}
-      {!asset && (check || checkErr || checking) && (
+      {(check || checkErr || checking) && (
         <div className="pol-check" data-policy-check aria-live="polite">
           <div className="pol-check-h">Before you save{checking && <span style={{ color: 'var(--faint)', fontWeight: 400 }}> · checking…</span>}</div>
           {checkErr && <div className="pol-msg block">{checkErr}</div>}
           {check && <>
             <div className="pol-impact" data-impact>
-              <span>Governs <b>{check.impact.assets}</b> title{check.impact.assets === 1 ? '' : 's'}</span>
-              <span><b>{check.impact.published}</b> published</span>
-              <span>Saving changes <b>{check.impact.changed}</b></span>
+              {asset
+                ? <span>This title{check.impact.published ? ', published' : ''}{check.impact.changed ? '' : ': saving changes nothing'}</span>
+                : <><span>Governs <b>{check.impact.assets}</b> title{check.impact.assets === 1 ? '' : 's'}</span>
+                  <span><b>{check.impact.published}</b> published</span></>}
+              {!asset && <span>Saving changes <b>{check.impact.changed}</b></span>}
               {check.impact.repackage > 0 && <span style={{ color: 'var(--warn)' }}><b>{check.impact.repackage}</b> published title{check.impact.repackage === 1 ? '' : 's'} to be packaged again</span>}
               {(check.impact.unavailableNow ?? 0) > 0 && <span style={{ color: 'var(--warn)' }} data-impact-unavailable><b>{check.impact.unavailableNow}</b> become{check.impact.unavailableNow === 1 ? 's' : ''} unavailable now</span>}
             </div>
             {/* Published titles take up a save within about a minute (build queue P3-4). */}
             {(check.impact.publishedChanged ?? 0) > 0 && <div style={{ color: 'var(--muted)' }} data-impact-published>
-              <b>{check.impact.publishedChanged}</b> published title{check.impact.publishedChanged === 1 ? '' : 's'} take{check.impact.publishedChanged === 1 ? 's' : ''} this up within a minute, without posting to social accounts again.</div>}
+              {asset ? 'This published title takes the change up as soon as you save.' : <><b>{check.impact.publishedChanged}</b> published title{check.impact.publishedChanged === 1 ? '' : 's'} take{check.impact.publishedChanged === 1 ? 's' : ''} this up within a minute, without posting to social accounts again.</>}</div>}
             {check.conflicts.map((c, i) => <ConflictLine key={c.code + i} level={c.level} message={c.message} />)}
             {check.impact.blocks.map(b => <ConflictLine key={'ib' + b.code} level="block" message={`${b.count} title${b.count === 1 ? '' : 's'}: ${b.message}`} titles={b.titles} />)}
             {check.impact.warnings.map(w => <ConflictLine key={'iw' + w.code} level="warn" message={`${w.count} title${w.count === 1 ? '' : 's'}: ${w.message}`} titles={w.titles} />)}
