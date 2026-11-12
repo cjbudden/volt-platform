@@ -2295,7 +2295,7 @@ What: with the Mirror and Archive add-on, a copy rule can now archive the record
 - **Christian on the Mac**: a channel recording with the rule on, a folder as the NAS and a MinIO bucket; after a programme or hour ends (plus about 3 minutes) both files appear at the target and play in QuickTime or VLC.
 - **Not done**: on AWS the pass reads the task's disk (recordings move to the bucket with 2.2) and the file is served by the task that made it; clips, packaged outputs and asset sidecars as copy sources, copies on a schedule and mirror mode (H3-8). H3-5 still needs Christian's input.
 
-## 2026-11-12 - Collections as app rows: the public collection endpoint (build queue C3-2; vNEXT)
+## 2026-11-12 - Collections as app rows: the public collection endpoint (build queue C3-2; v0.119.0)
 
 What: viewer apps can now draw a row or rail from a collection with their publishable key. The answer lists the collection's titles in its order with what a viewer who is not signed in gets in that app and country, and countries with the same answer share one cached answer (the territory group).
 
