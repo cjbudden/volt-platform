@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.132.0 (2026-11-12)
+
+### SaaS platform
+
+- fixed · Storage: On AWS, a deleted title or recording can be restored from Recently removed whichever server answers, and nothing in the bin is lost when a server is replaced. Deleting a title now also takes its original file with it into the bin, so it is removed for good at the purge instead of being kept.
+
+### Internal
+
+- added · Tests: New trash-bucket check suite: the restore bin in the bucket (delete, restore from a second process, purge, exact keys for originals, a refusing bucket).
+
 ## 0.131.0 (2026-11-12)
 
 ### Product (in customer release notes)
