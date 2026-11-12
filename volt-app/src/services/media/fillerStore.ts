@@ -78,7 +78,8 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
   '.bmp': 'image/bmp', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
   '.mkv': 'video/x-matroska', '.ts': 'video/mp2t', '.mxf': 'application/mxf',
-  // a stream's pre-built loop (filler/prebuilt/..., build queue 2.1a-3)
+  // a stream's pre-built loop (filler/prebuilt/..., build queue 2.1a-3) and the
+  // house preview of a slate or loop with its QC stills (filler/preview/..., 2.1a-3b)
   '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mpd': 'application/dash+xml', '.json': 'application/json',
 };
 export function fillerContentType(key: string): string {
@@ -160,6 +161,61 @@ export async function deleteFillerPrefix(prefix: string): Promise<number> {
     const keys = (r.Contents ?? []).map((o: any) => ({ Key: o.Key }));
     if (keys.length) await cli.send(new DeleteObjectsCommand({ Bucket: bucket(), Delete: { Objects: keys, Quiet: true } }));
     n += keys.length;
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  return n;
+}
+
+/**
+ * Store a folder built on this disk under a prefix, file by file (S3 only; the
+ * house preview of a slate or loop, build queue 2.1a-3b). `rank` orders the
+ * upload: every file of a lower rank is in the bucket before any of the next
+ * goes up, so a player that finds the top playlist finds every file it names.
+ * `skip` leaves out working files that are not part of the build.
+ */
+export async function putFillerDir(dir: string, prefix: string, opts: { rank?: (rel: string) => number; skip?: (rel: string) => boolean } = {}): Promise<number> {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const { relative } = await import('node:path');
+  const walk = async (d: string): Promise<string[]> => (await Promise.all((await readdir(d, { withFileTypes: true }))
+    .map((e) => (e.isDirectory() ? walk(join(d, e.name)) : Promise.resolve([join(d, e.name)]))))).flat();
+  const files = (await walk(dir)).map((f) => relative(dir, f).split(/[\\/]/).join('/')).filter((f) => !opts.skip?.(f));
+  const rank = opts.rank ?? (() => 0);
+  const levels = [...new Set(files.map(rank))].sort((a, b) => a - b);
+  for (const level of levels) {
+    const these = files.filter((f) => rank(f) === level);
+    for (let i = 0; i < these.length; i += 8) {
+      await Promise.all(these.slice(i, i + 8).map(async (f) => putFiller(prefix + f, await readFile(join(dir, f)))));
+    }
+  }
+  return files.length;
+}
+
+/**
+ * Copy the objects under a prefix into a folder on this disk (S3 only), for a
+ * job that needs real files, such as QC of a house preview built on another
+ * task. `want` picks which files by their path under the prefix. Scratch: the
+ * caller removes the folder when done. Returns how many files were copied.
+ */
+export async function copyFillerPrefix(prefix: string, destDir: string, want: (rel: string) => boolean = () => true): Promise<number> {
+  const k = cleanKey(prefix.replace(/\/+$/, '') + '/x');
+  if (!k || fillerDriver() !== 's3') return 0;
+  const { ListObjectsV2Command, GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const cli = await s3();
+  const pre = objectKey(k.slice(0, -1));
+  const root = resolve(destDir);
+  let n = 0, token: string | undefined;
+  do {
+    const r: any = await cli.send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: pre, ContinuationToken: token }));
+    for (const o of r.Contents ?? []) {
+      const rel = String(o.Key).slice(pre.length);
+      if (!rel || rel.split('/').some((p) => !p || p === '.' || p === '..') || !want(rel)) continue;
+      const dest = resolve(root, rel);
+      if (!dest.startsWith(root + sep)) continue;
+      const g = await cli.send(new GetObjectCommand({ Bucket: bucket(), Key: String(o.Key) }));
+      await mkdir(dirname(dest), { recursive: true });
+      await pipeline(g.Body as Readable, createWriteStream(dest));
+      n++;
+    }
     token = r.IsTruncated ? r.NextContinuationToken : undefined;
   } while (token);
   return n;

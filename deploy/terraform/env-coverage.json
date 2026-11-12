@@ -510,9 +510,8 @@
       "why": "Loop timings; the same on the Mac and on AWS."
     },
     "ORIGIN_DIR": {
-      "class": "not-on-aws-yet",
-      "why": "The house preview of each slate and loop (ORIGIN_DIR/filler-preview, its QC and approval) is written here, on the task's disk. A stream's pre-built loop is built here but kept in the bucket under filler/prebuilt/ (FILLER_STORE_DRIVER=s3, build queue 2.1a-3), and the failover control file left the disk earlier.",
-      "item": "2.1a-3b"
+      "class": "default",
+      "why": "Working space only on AWS: a stream's pre-built loop and the house preview of each slate and loop are built here while the job runs, then kept in the origin bucket (filler/prebuilt/ and filler/preview/, FILLER_STORE_DRIVER=s3, build queue 2.1a-3 and 2.1a-3b) and served by any task; QC on another task copies the preview it measures into scratch. The failover control file left the disk earlier. The task's own folder is right; losing it loses no finished file."
     },
     "PACKAGER_BIN": {
       "class": "not-on-aws-yet",

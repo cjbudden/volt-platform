@@ -11,7 +11,8 @@
 //
 //  WHAT. When a slate or loop lands, it is built ONCE in the account's house
 //  format by the same filler_build.py the streams use, packaged as HLS, and
-//  kept under ORIGIN_DIR/filler-preview/<id>/. The console plays it three
+//  kept under ORIGIN_DIR/filler-preview/<id>/ (on AWS, in the bucket: see
+//  WHERE THE BUILD IS KEPT below). The console plays it three
 //  times back to back (preview.m3u8: the media playlists repeated with a
 //  discontinuity, the way playout.py splices a loop), so the join is watched,
 //  not imagined. QC then measures that build, not the upload: the same checks
@@ -32,7 +33,9 @@
 //  over a QC error, or with no preview at all, needs a note that says why.
 // ============================================================================
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { one, query } from '../../db';
@@ -48,6 +51,50 @@ export const LOOP_CAP_SECONDS = 60;
 export const previewDir = (id: string) => resolve(config.testStream.originDir, 'filler-preview', id);
 /** Served by the /origin static route like every stream's own filler copy. */
 export const previewUrl = (id: string) => `/origin/filler-preview/${id}/preview.m3u8`;
+
+// ---- where the build is kept -----------------------------------------------
+//  WHERE THE BUILD IS KEPT (build queue 2.1a-3b). On the Mac the build stays in
+//  ORIGIN_DIR/filler-preview/<id>/ and /origin serves it, as before. On AWS the
+//  control plane is several tasks that come and go, so a preview on one task's
+//  disk did not play from the others, its QC could not run there, and it was
+//  lost with the task. With FILLER_STORE_DRIVER=s3 the build is made on the
+//  task's disk as scratch, then stored in the bucket under
+//  filler/preview/<id>/<build>/ and served by any task at /filler/... (like a
+//  stream's pre-built loop, 2.1a-3). Each build gets its own folder, so its
+//  files never change once written (they are served as immutable) and a
+//  rebuild cannot be confused with the build before it. QC on another task
+//  copies just the two tracks it measures into scratch, and its stills are
+//  stored beside the build.
+
+/** The folder of one stored build. Pure. */
+export function previewPrefix(id: string, build: string): string {
+  const i = String(id).replace(/[^0-9a-zA-Z-]/g, '');
+  const b = String(build ?? '').replace(/[^0-9a-zA-Z]/g, '').slice(0, 32) || 'build';
+  return `filler/preview/${i}/${b}/`;
+}
+/** Every stored build of one slate or loop. Pure. */
+export const previewRoot = (id: string) => `filler/preview/${String(id).replace(/[^0-9a-zA-Z-]/g, '')}/`;
+
+/**
+ * Upload order of a build: segments and inits, then the media playlists, then
+ * the master, the repeats and preview.m3u8 last, so the console never finds a
+ * playlist naming a file that is not there yet. QC's working files stay out.
+ */
+export function previewRank(rel: string): number {
+  if (rel === 'preview.m3u8') return 3;
+  if (rel === 'master.m3u8' || rel.endsWith('.loop.m3u8')) return 2;
+  return /\.m3u8$/.test(rel) ? 1 : 0;
+}
+export const previewSkip = (rel: string) => rel.startsWith('.qc/') || rel.startsWith('qc-frames/');
+
+/** Store a finished build in the bucket (S3 only; null on the Mac). */
+async function storePreview(id: string, dir: string): Promise<string | null> {
+  const { fillerDriver, putFillerDir } = await import('./fillerStore');
+  if (fillerDriver() !== 's3') return null;
+  const prefix = previewPrefix(id, Date.now().toString(36) + randomBytes(3).toString('hex'));
+  await putFillerDir(dir, prefix, { rank: previewRank, skip: previewSkip });
+  return prefix;
+}
 
 // ---- the house format ------------------------------------------------------
 export interface HouseRung {
@@ -337,13 +384,33 @@ async function decodeMono(audio: string, sampleRate = 48000): Promise<Float32Arr
  * airs; reads the upload's own facts (probe, from fillerThumbs) only for what
  * the build hides (its real resolution, frame rate and scan).
  */
-export async function runFillerQc(id: string): Promise<FillerQc> {
+export async function runFillerQc(id: string, opts: { dir?: string } = {}): Promise<FillerQc> {
   const fa = await one<any>(`SELECT * FROM filler_assets WHERE id = $1`, [id]);
   if (!fa) throw new Error('That slate or loop no longer exists');
+  const { fillerDriver, copyFillerPrefix } = await import('./fillerStore');
+  // the build in the bucket (AWS), when it was stored there
+  const stored = fillerDriver() === 's3' && fa.preview?.key ? String(fa.preview.key) : null;
+  const top = fa.preview?.renditions?.[0]?.label;
+  if (!stored || opts.dir || fa.preview_status !== 'ready' || !top) return qcIn(fa, opts.dir ?? previewDir(id), stored, null);
+  // Built on another task (or this one, earlier): copy the top rendition and
+  // the sound into scratch, measure them there, and remove them afterwards.
+  const scratch = join(process.env.FILLER_CACHE_DIR || join(tmpdir(), 'volt-filler-cache'), 'preview-qc', `${id}-${process.pid}-${Date.now().toString(36)}`);
+  try {
+    let readError: string | null = null;
+    await copyFillerPrefix(stored, scratch, (rel) => rel === `${top}.m3u8` || rel.startsWith(`${top}/`) || rel === 'audio.m3u8' || rel.startsWith('audio/'))
+      .catch((e) => { readError = String(e?.message ?? e).slice(0, 200); });
+    return await qcIn(fa, scratch, stored, readError);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+/** QC of the build in `dir`; `stored` is its folder in the bucket, where its stills go too. */
+async function qcIn(fa: any, dir: string, stored: string | null, readError: string | null): Promise<FillerQc> {
+  const id: string = fa.id;
   const findings: FillerFinding[] = [];
   const skipped: { check: string; reason: string }[] = [];
   const pv = fa.preview ?? null;
-  const dir = previewDir(id);
   const kind: 'slate' | 'loop' = fa.kind === 'slate' ? 'slate' : 'loop';
   const top = pv?.renditions?.[0]?.label;
   const video = top ? join(dir, `${top}.m3u8`) : null;
@@ -352,6 +419,8 @@ export async function runFillerQc(id: string): Promise<FillerQc> {
   if (fa.preview_status !== 'ready' || !video || !existsSync(video)) {
     findings.push({ check: 'media', severity: 'error', message: fa.preview_error
       ? `The house preview could not be made: ${fa.preview_error}`
+      : readError ? `The house preview could not be read from storage: ${readError}`
+      : stored && fa.preview_status === 'ready' ? 'The house preview is missing from storage. Build it again.'
       : 'There is no house preview to check yet.' });
     return store(id, { state: 'failed', findings, skipped });
   }
@@ -423,18 +492,21 @@ export async function runFillerQc(id: string): Promise<FillerQc> {
     skipped.push({ check: 'loop_point', reason: 'a slate is a still: there is no join to see' });
   }
   findings.push(...sourceFindings(fa.probe, house, kind, { width: fa.width, height: fa.height }));
-  await addFrames(id, findings, video, loopMs, Number(pv.renditions?.[0]?.fps) || 25);
+  await addFrames(id, findings, video, loopMs, Number(pv.renditions?.[0]?.fps) || 25, dir, stored);
   return store(id, { state: qcState(findings), findings, skipped });
 }
 
 /**
  * Stills for each finding, from the top rendition of the preview, written
  * beside it (ORIGIN_DIR/filler-preview/<id>/qc-frames/) and served by
- * /origin like the preview. Remade on every QC run under a new name, so a
- * browser never shows an old still for a new finding.
+ * /origin like the preview; on AWS stored beside the build in the bucket
+ * (<build>/qc-frames/) and served by any task at /filler/... (2.1a-3b).
+ * Remade on every QC run under a new name, so a browser never shows an old
+ * still for a new finding.
  */
-async function addFrames(id: string, findings: FillerFinding[], video: string, loopMs: number, fps: number): Promise<void> {
-  const dir = join(previewDir(id), 'qc-frames');
+async function addFrames(id: string, findings: FillerFinding[], video: string, loopMs: number, fps: number,
+  buildDir: string = previewDir(id), stored: string | null = null): Promise<void> {
+  const dir = join(buildDir, 'qc-frames');
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   const run_ = Date.now().toString(36);
@@ -461,10 +533,25 @@ async function addFrames(id: string, findings: FillerFinding[], video: string, l
       '-fps_mode', 'passthrough', '-q:v', '3', '-update', '1', join(dir, f)], 120_000);
     if (r.code === 0 && existsSync(join(dir, f))) names.set(last, f);
   }
+  let base = `/origin/filler-preview/${id}/qc-frames/`;
+  if (stored) {
+    // The last run's stills are no longer named by any finding.
+    const { putFiller, deleteFillerPrefix } = await import('./fillerStore');
+    await deleteFillerPrefix(`${stored}qc-frames/`).catch(() => 0);
+    try {
+      for (const name of new Set(names.values())) await putFiller(`${stored}qc-frames/${name}`, await readFile(join(dir, name)));
+      base = `/${stored}qc-frames/`;
+    } catch (e: any) {
+      // Stills help a person judge a finding; without them the finding still stands.
+      console.warn(`[filler.preview] ${id}: QC stills not stored:`, e?.message ?? e);
+      names.clear();
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
   findings.forEach((f, k) => {
     const frames = wanted[k].flatMap((w) => {
       const name = names.get(nOf(w.atMs));
-      return name ? [{ label: w.label, atMs: w.atMs, url: `/origin/filler-preview/${id}/qc-frames/${name}` }] : [];
+      return name ? [{ label: w.label, atMs: w.atMs, url: `${base}${name}` }] : [];
     });
     if (frames.length) f.frames = frames;
   });
@@ -511,8 +598,13 @@ export async function buildFillerPreview(id: string): Promise<{ status: 'ready' 
   const meta = lastJson(res.out);
   if (res.code !== 0 || !meta || meta.error) return fail(String(meta?.error ?? (res.err || 'the build failed').trim().split('\n').pop()));
   await writePreviewPlaylists(dir, PREVIEW_REPEATS);
+  let key: string | null = null;
+  try { key = await storePreview(id, dir); } catch (e: any) {
+    return fail(`the preview was built but could not be stored: ${String(e?.message ?? e).slice(0, 200)}`);
+  }
   const preview = {
-    url: previewUrl(id), repeats: PREVIEW_REPEATS,
+    // key: where the build is kept in the bucket (AWS); the Mac serves it from /origin
+    url: key ? `/${key}preview.m3u8` : previewUrl(id), ...(key ? { key } : {}), repeats: PREVIEW_REPEATS,
     house: { profileId: house.profileId, profileName: house.profileName, usedBy: house.usedBy, standard: house.standard, format: house },
     segmentSeconds: house.segmentSeconds, loopSeconds: Number(meta.loop_seconds), sourceMs: still ? null : Number(fa.duration_ms) || null,
     renditions: house.video.map((v) => ({ label: v.label, width: v.width, height: v.height, fps: v.fps, bitrateKbps: v.bitrate_kbps })),
@@ -520,11 +612,27 @@ export async function buildFillerPreview(id: string): Promise<{ status: 'ready' 
   };
   await query(`UPDATE filler_assets SET preview_status = 'ready', preview = $2::jsonb, preview_error = NULL, preview_at = now() WHERE id = $1`,
     [id, JSON.stringify(preview)]);
-  return { status: 'ready', qc: await runFillerQc(id) };
+  // QC reads the build where it was just made, so nothing is fetched back.
+  const qc = await runFillerQc(id, { dir });
+  if (key) {
+    // Stored: the disk copy was only scratch. The previous build's folder is
+    // no longer named by anything (a player that had it open keeps the
+    // segments it already has; a new play asks for the new playlist).
+    await rm(dir, { recursive: true, force: true });
+    await rm(specPath, { force: true });
+    const prev = fa.preview?.key ? String(fa.preview.key) : null;
+    if (prev && prev !== key) {
+      const { deleteFillerPrefix } = await import('./fillerStore');
+      await deleteFillerPrefix(prev).catch((e) => console.warn(`[filler.preview] ${id}: old preview not removed:`, e?.message ?? e));
+    }
+  }
+  return { status: 'ready', qc };
 }
 
-/** Everything the preview left on disk (the slate or loop was deleted). */
+/** Everything the preview left on disk and in the bucket (the slate or loop was deleted). */
 export async function removeFillerPreview(id: string): Promise<void> {
+  const { deleteFillerPrefix } = await import('./fillerStore');
+  await deleteFillerPrefix(previewRoot(id));
   const dir = previewDir(id);
   await rm(dir, { recursive: true, force: true });
   await rm(`${dir}.spec.json`, { force: true });
