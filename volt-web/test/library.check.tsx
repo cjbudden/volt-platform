@@ -51,6 +51,11 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
   eq([parseFilters('?pub=hidden,available&exp=3').pub, parseFilters('?exp=3').exp], [['available'], false], 'unknown public statuses and other day counts are dropped')
   const papi = new URLSearchParams(filtersToApi(pf))
   eq([papi.get('public_status'), papi.get('expires_within_days')], ['restricted,expired', '7'], 'API: public_status (any of) and expires_within_days')
+  // REPACKAGE PENDING (build queue P4-5): a short URL flag, the server's own parameter.
+  const rf: LibraryFilters = { ...EMPTY_FILTERS, rp: true }
+  eq([filtersToSearch(rf), parseFilters(filtersToSearch(rf)).rp, parseFilters('?rp=yes').rp, isFiltered(rf)], ['?rp=1', true, false, true], 'URL: Repackage pending as rp=1, round trip, other values dropped, counts as filtered')
+  eq(new URLSearchParams(filtersToApi(rf)).get('repackage_pending'), 'true', 'API: repackage_pending=true')
+  eq(new URLSearchParams(filtersToApi(EMPTY_FILTERS)).has('repackage_pending'), false, 'API: no repackage_pending unless asked for')
   const fq = new URLSearchParams(filtersToApi(f, { facets: true }))
   ok(!fq.has('sort') && !fq.has('limit') && !fq.has('cursor') && fq.get('schema_id') === `${ID1},${ID2}`, 'facet query: the filters without paging')
   eq(parseColumns(null), DEFAULT_COLUMNS, 'default optional columns')
@@ -99,6 +104,8 @@ const ID1 = '11111111-1111-4111-8111-111111111111', ID2 = '22222222-2222-4222-82
   const pubPanel = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, pub: ['restricted'] }} onChange={() => {}} facets={pfx} />)
   ok(/Public status/.test(pubPanel) && /aria-pressed="true"[^>]*>Restricted<span class="ct">2/.test(pubPanel) && />Available<span class="ct">5/.test(pubPanel) && !/>Archived</.test(pubPanel) && /Expires in 7 days/.test(pubPanel),
     'public status chips: the statuses in use with counts, the chosen one pressed, and Expires in 7 days')
+  const rpPanel = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, rp: true }} onChange={() => {}} facets={pfx} />)
+  ok(/aria-pressed="true"[^>]*>Repackage pending/.test(rpPanel) && /aria-pressed="false"[^>]*>Repackage pending/.test(pubPanel), 'Repackage pending sits with the public status chips, pressed when on')
   const panel2 = renderToStaticMarkup(<LibraryFilterPanel filters={{ ...EMPTY_FILTERS, res: [1080] }} onChange={() => {}} facets={facets} />)
   ok(panel2.indexOf('1080p') < panel2.indexOf('720p') && panel2.includes('Top resolution') && panel2.includes('Clear filters'), 'a secondary filter in use opens the panel; resolutions highest first; Clear shown')
 

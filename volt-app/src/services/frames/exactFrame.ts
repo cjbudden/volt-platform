@@ -64,6 +64,34 @@ export async function extractFrame(init: Buffer | null, segment: Buffer, k: numb
   }
 }
 
+/**
+ * The picture at `seconds` into a whole file, as a JPEG: for a title whose
+ * packaged segments are encrypted (build queue P4-5), read from its original.
+ * Accurate seek (`-ss` after `-i` would decode from the start; before it,
+ * ffmpeg seeks to the keyframe and decodes forward to the time), so the
+ * picture is the one on screen at that time.
+ */
+export async function extractFrameAt(path: string, seconds: number, opts: { ffmpeg?: string; timeoutMs?: number } = {}): Promise<Buffer> {
+  if (!Number.isFinite(seconds) || seconds < 0) throw new FrameError(400, 'the time must be zero or more seconds');
+  const dir = await mkdtemp(join(tmpdir(), 'volt-frame-'));
+  try {
+    const out = join(dir, 'frame.jpg');
+    await run(opts.ffmpeg ?? 'ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
+      '-ss', seconds.toFixed(6), '-i', path, '-an', '-sn', '-frames:v', '1', '-q:v', '2', out,
+    ], { timeout: opts.timeoutMs ?? 30_000 });
+    const { readFile } = await import('node:fs/promises');
+    const jpg = await readFile(out).catch(() => null);
+    if (!jpg?.length) throw new FrameError(404, `no picture at ${seconds.toFixed(3)} s in the original`);
+    return jpg;
+  } catch (e: any) {
+    if (e instanceof FrameError) throw e;
+    throw new FrameError(500, `the frame could not be decoded: ${String(e?.stderr || e?.message || e).trim().slice(0, 300)}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /** Frame count and first presentation time of an MPEG-TS segment (one ffprobe packet scan). */
 export async function probeTsSegment(path: string, ffprobe = 'ffprobe'): Promise<{ frames: number; firstPts: number; timescale: number; rate: string | null }> {
   const { stdout } = await run(ffprobe, [

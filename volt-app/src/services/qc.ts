@@ -259,9 +259,27 @@ export function parseLoudnessPlaces(log: string): { loudest: { atMs: number; luf
  * used, then measures the file itself. All three have to agree, and where they
  * do not, the disagreement is the finding.
  */
-export async function runQc(vodAssetId: string, opts: { path?: string } = {}): Promise<QcResult> {
+export async function runQc(vodAssetId: string, opts: { path?: string; encrypted?: 'original' | 'none' } = {}): Promise<QcResult> {
   const asset = await one<any>(`SELECT * FROM vod_assets WHERE id = $1`, [vodAssetId]);
   if (!asset) throw new Error(`vod asset ${vodAssetId} not found`);
+
+  // AN ENCRYPTED TITLE'S FILES CANNOT BE DECODED HERE (build queue P4-5): Volt
+  // never holds the content key after packaging, so ffmpeg reading the master
+  // would decode noise and report a working title as unplayable. Its sound
+  // and picture are measured on the original instead (the same pictures the
+  // packaging was made from), fetched from the bucket when it is there. With
+  // no original on hand (kept at a site, in the archive, not kept) the decode
+  // checks are skipped with the reason, never failed.
+  if (!opts.path && !opts.encrypted) {
+    const { packagedOf } = await import('./encodePolicy');
+    if (asset.master_key && packagedOf(asset).drm) {
+      const { fetchVodSource } = await import('./media/vodSource');
+      const src = await fetchVodSource(asset.source_key).catch(() => null);
+      if (!src) return runQc(vodAssetId, { encrypted: 'none' });
+      try { return await runQc(vodAssetId, { path: src.path, encrypted: 'original' }); }
+      finally { await src.release(); }
+    }
+  }
 
   const findings: QcFinding[] = [];
   const skipped: { check: string; reason: string }[] = [];
@@ -292,6 +310,11 @@ export async function runQc(vodAssetId: string, opts: { path?: string } = {}): P
   // ---- is there media at all ----------------------------------------------
   // NO MEDIA IS A FAILURE, NOT A SKIP. This branch used to record four skips
   // and return 'pass'.
+  if (opts.encrypted === 'none') {
+    for (const c of ['playback', 'duration', 'silence', 'black', 'loudness']) skipped.push({ check: c, reason: 'its files are encrypted (DRM) and its original is not on this server, so there is nothing Volt can decode' });
+    return finish(vodAssetId, findings, skipped, null);
+  }
+  if (opts.encrypted === 'original') skipped.push({ check: 'package', reason: 'its files are encrypted (DRM), so the original was measured; a player with a licence reads the packaged files' });
   const path = opts.path ?? mediaInputFor(asset);
   if (!path || (!/^https?:/.test(path) && !existsSync(path))) {
     findings.push({

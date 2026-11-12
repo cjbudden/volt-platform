@@ -129,6 +129,13 @@ export function mediaPathFor(a: any): string | null {
     const f = existsSync(src) ? readdirSync(src).find((n) => n.startsWith(String(a.id))) : undefined;
     if (f) return join(src, f);
   } catch { /* no originals kept */ }
+  // An encrypted title's packaged files decode to noise without the content
+  // key (build queue P4-5): its own original, when it is a file here, else
+  // nothing rather than a wrong answer.
+  if (a.encode_result?.drm && a.encode_result.drm !== 'clear') {
+    const s = typeof a.source_key === 'string' && a.source_key.startsWith('/') && existsSync(a.source_key) ? a.source_key : null;
+    return s;
+  }
   return local(a.master_key);
 }
 

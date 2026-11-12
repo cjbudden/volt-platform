@@ -177,7 +177,7 @@ const VOD_LIST = defineList({
   // any of them; collection_deep=true includes their sub-collections;
   // not_in_collection=<id> leaves out what is already in one (the picker's
   // "not yet added" view). Applied by collectionWhere below.
-  extraParams: ['collection', 'collection_deep', 'not_in_collection', 'expires_within_days'],
+  extraParams: ['collection', 'collection_deep', 'not_in_collection', 'expires_within_days', 'repackage_pending'],
 });
 
 /**
@@ -191,6 +191,21 @@ function expiresWhere(q: Record<string, any>, params: unknown[]): string {
   if (!Number.isInteger(n) || n < 1 || n > 366) throw badRequest('expires_within_days must be a whole number of days from 1 to 366');
   params.push(n);
   return ` AND v.public_status = 'available' AND v.status_until > now() AND v.status_until <= now() + make_interval(days => $${params.length}::int)`;
+}
+
+/**
+ * REPACKAGE PENDING (the library's filter, build queue P4-5): titles whose
+ * files do not carry what their publishing policy asks for now. The policy is
+ * resolved in code (services/repackage.ts repackagePendingIds), so the ids
+ * are worked out first and the list keeps those.
+ */
+async function repackageWhere(q: Record<string, any>, params: unknown[], account: string): Promise<string> {
+  const v = q.repackage_pending;
+  if (v == null || v === '' || v === 'false') return '';
+  if (v !== 'true') throw badRequest('repackage_pending must be true or false');
+  const { repackagePendingIds } = await import('../services/repackage');
+  params.push(await repackagePendingIds(account));
+  return ` AND v.id = ANY($${params.length}::uuid[])`;
 }
 
 /**
@@ -225,7 +240,7 @@ vodRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const params: unknown[] = [accountId(req)];
-    const inCollection = await collectionWhere(req.query as any, params, accountId(req)) + expiresWhere(req.query as any, params);
+    const inCollection = await collectionWhere(req.query as any, params, accountId(req)) + expiresWhere(req.query as any, params) + await repackageWhere(req.query as any, params, accountId(req));
     const pl = parseList(VOD_LIST, req.query, params);
     const from = `${OWNED}${LIBRARY_JOINS}
        LEFT JOIN jobs j ON j.id = v.encode_job_id
@@ -322,7 +337,7 @@ vodRouter.get(
     const out: Record<string, any[]> = {};
     for (const [name, keys] of Object.entries(FACET_PARAMS)) {
       const params: unknown[] = [accountId(req)];
-      const inCollection = await collectionWhere(req.query as any, params, accountId(req)) + expiresWhere(req.query as any, params);
+      const inCollection = await collectionWhere(req.query as any, params, accountId(req)) + expiresWhere(req.query as any, params) + await repackageWhere(req.query as any, params, accountId(req));
       const pl = parseList(VOD_LIST, strip(keys) as any, params);
       const f = FACET_SQL[name];
       const groupBy = f.group === '1' ? '1' : f.group;
@@ -337,7 +352,7 @@ vodRouter.get(
           GROUP BY ${groupBy} ORDER BY n DESC`, countParams(pl, params));
     }
     const allParams: unknown[] = [accountId(req)];
-    const allIn = await collectionWhere(req.query as any, allParams, accountId(req)) + expiresWhere(req.query as any, allParams);
+    const allIn = await collectionWhere(req.query as any, allParams, accountId(req)) + expiresWhere(req.query as any, allParams) + await repackageWhere(req.query as any, allParams, accountId(req));
     const all = parseList(VOD_LIST, strip([]) as any, allParams);
     const total = await one<{ n: number }>(
       `SELECT count(*)::int AS n ${OWNED}${LIBRARY_JOINS} LEFT JOIN jobs j ON j.id = v.encode_job_id

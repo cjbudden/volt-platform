@@ -266,3 +266,60 @@ export async function removeOldPackage(assetId: string, oldBase: string): Promis
   await deleteKeys(gone);
   return { removed: gone.length };
 }
+
+// ---------------------------------------------------------------------------
+//  REPACKAGE PENDING, for the Media Library filter (build queue P4-5,
+//  PUBLISHING_POLICIES.md "User workflow and screens" 3). The same test as the
+//  Encode tab (encodePolicy.ts pendingFields): the title's files do not carry
+//  what its publishing policy asks for now, whether or not a repackage is on
+//  the way. The policy is resolved in code, not in SQL, so this is one pass
+//  over the account's packaged titles: the rules and the metadata-rule
+//  matches loaded once, and titles that share a type, an owner, a matched
+//  rule and an own setting resolved once.
+// ---------------------------------------------------------------------------
+// The library page asks for the list and its facets together, and the facets
+// route filters once per facet: one pass serves them all for two seconds.
+const pendingMemo = new Map<string, { at: number; ids: Promise<string[]> }>();
+export function repackagePendingIds(accountId: string): Promise<string[]> {
+  const hit = pendingMemo.get(accountId);
+  if (hit && Date.now() - hit.at < 2000) return hit.ids;
+  const ids = pendingPass(accountId);
+  pendingMemo.set(accountId, { at: Date.now(), ids });
+  ids.catch(() => pendingMemo.delete(accountId));
+  if (pendingMemo.size > 500) for (const [k, v] of pendingMemo) if (Date.now() - v.at >= 2000) pendingMemo.delete(k);
+  return ids;
+}
+
+/** Forget the remembered pass (tests, and anything that must read its own change at once). */
+export function forgetRepackagePending(accountId?: string): void {
+  if (accountId) pendingMemo.delete(accountId); else pendingMemo.clear();
+}
+
+async function pendingPass(accountId: string): Promise<string[]> {
+  const titles = await query<any>(
+    `SELECT v.id, v.schema_id, v.channel_id, v.event_id, v.availability_override, v.policy_snapshot, v.encode_result
+       FROM vod_assets v
+       LEFT JOIN channels c ON c.id = v.channel_id
+       LEFT JOIN events   e ON e.id = v.event_id
+       LEFT JOIN groups   g ON g.id = COALESCE(c.group_id, e.group_id)
+      WHERE COALESCE(g.account_id, v.account_id) = $1 AND v.archived_at IS NULL AND v.master_key IS NOT NULL`, [accountId]);
+  if (!titles.length) return [];
+  const rows = await query<any>(`SELECT id, scope_kind, scope_id, settings, locked_fields, name, preset_key FROM publishing_rules WHERE account_id = $1`, [accountId]);
+  const { loadRules, firstMatches, rungOf } = await import('./publishingMetadataRules');
+  const { resolveFromRows } = await import('./publishingRules');
+  const metaRules = await loadRules(accountId, { enabledOnly: true });
+  const matched = await firstMatches(accountId, null, metaRules);
+  const memo = new Map<string, boolean>();
+  const out: string[] = [];
+  for (const t of titles) {
+    const m = matched.get(String(t.id)) ?? null;
+    const key = `${t.schema_id ?? ''}|${t.channel_id ?? t.event_id ?? ''}|${m?.id ?? ''}|${JSON.stringify(t.availability_override ?? {})}`;
+    let drm = memo.get(key);
+    if (drm === undefined) {
+      drm = !!resolveFromRows(rows, t, m, rungOf as any).settings.protection?.drm;
+      memo.set(key, drm);
+    }
+    if (pendingFields({ drm }, { drm: packagedOf(t).drm }).length) out.push(String(t.id));
+  }
+  return out;
+}

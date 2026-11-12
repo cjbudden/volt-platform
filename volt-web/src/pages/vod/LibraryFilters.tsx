@@ -165,6 +165,8 @@ export function LibraryFilterPanel({ filters, onChange, facets, mediaOnly }: {
             <Toggle key={k} on={filters.pub.includes(k)} label={PUBLIC_STATUS_UI[k]?.label ?? k} n={n(fx?.public_status, k)} title={PUBLIC_STATUS_UI[k]?.tip} onClick={() => set({ pub: flip(filters.pub, k) })} />
           ))}
           <Toggle on={filters.exp} label="Expires in 7 days" title="Available now, and stops being available within 7 days" onClick={() => set({ exp: !filters.exp })} />
+          {/* P4-5: the files and the publishing policy disagree on DRM; the Encode tab says whether a repackage is on the way. */}
+          <Toggle on={filters.rp} label="Repackage pending" title="Its files do not carry what its publishing policy asks for now (DRM on or off). It keeps its current protection until it is packaged again" onClick={() => set({ rp: !filters.rp })} />
         </Group>
         <Group label="Availability">
           {Object.keys(AVAIL_LABEL).filter((k) => n(fx?.availability, k) > 0 || filters.avail.includes(k)).map((k) => (
@@ -184,7 +186,7 @@ export function LibraryFilterPanel({ filters, onChange, facets, mediaOnly }: {
           {LibIcon.filter}{open ? 'Fewer filters' : 'More filters'}
         </button>
         {isFiltered(filters) && (
-          <button type="button" className="btn ghost sm" onClick={() => onChange({ ...filters, types: [], avail: [], pub: [], exp: false, origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [], from: '', to: '', durMin: null, durMax: null, q: '' })}>
+          <button type="button" className="btn ghost sm" onClick={() => onChange({ ...filters, types: [], avail: [], pub: [], exp: false, rp: false, origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [], from: '', to: '', durMin: null, durMax: null, q: '' })}>
             Clear filters
           </button>
         )}

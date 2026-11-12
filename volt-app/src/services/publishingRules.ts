@@ -257,6 +257,29 @@ export async function resolveForAsset(accountId: string, asset: {
 }
 
 /**
+ * PURE. Resolve a title from rule rows already loaded (the account's
+ * publishing_rules) and the metadata rule it meets: the batch form of
+ * resolveForAsset, for a pass over a whole library (repackage.ts
+ * repackagePendingIds) that must not run three queries per title.
+ */
+export function resolveFromRows(rows: any[], asset: {
+  id?: string; schema_id?: string | null; channel_id?: string | null; event_id?: string | null;
+  availability_override?: RuleSettings | null;
+}, matched: any, rungOf: (r: any) => LadderInput): Resolved {
+  const ownerId = asset.channel_id ?? asset.event_id ?? null;
+  const pick = (kind: string, id: string | null) => rows.find((r) => r.scope_kind === kind && (kind === 'account' || (id && String(r.scope_id) === String(id))));
+  const acc = pick('account', null), sch = pick('schema', asset.schema_id ?? null), own = pick('owner', ownerId);
+  const meta = (r: any) => r ? { lockedFields: r.locked_fields ?? [], name: r.name ?? null, presetKey: r.preset_key ?? null } : {};
+  return resolveLadder([
+    { rung: 'account', id: acc?.id, scopeId: null, settings: acc?.settings, ...meta(acc) },
+    { rung: 'schema', id: sch?.id, scopeId: asset.schema_id ?? null, settings: sch?.settings, ...meta(sch) },
+    { rung: 'owner', id: own?.id, scopeId: ownerId, settings: own?.settings, ...meta(own) },
+    rungOf(matched),
+    { rung: 'asset', id: asset.id ?? null, scopeId: asset.id ?? null, settings: asset.availability_override ?? {} },
+  ]);
+}
+
+/**
  * Every target in a rule must be one of the client's own publishing points.
  * Returns the cleaned list, or throws with the first offender.
  */

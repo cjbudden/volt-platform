@@ -21,6 +21,8 @@ export interface LibraryFilters {
   pub: string[]
   /** Available now and stops being available within 7 days */
   exp: boolean
+  /** its files do not carry what its publishing policy asks for (DRM on or off): P4-5 */
+  rp: boolean
   /** how it was made: recording | clip | upload | watchfolder, any of */
   origin: string[]
   /** what it belongs to: channel | event | radio | upload | none, any of */
@@ -54,7 +56,7 @@ export interface LibraryFilters {
 }
 
 export const EMPTY_FILTERS: LibraryFilters = {
-  types: [], avail: [], pub: [], exp: false, origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [],
+  types: [], avail: [], pub: [], exp: false, rp: false, origin: [], source: [], media: [], status: [], review: '', stale: false, missing: false, res: [], codec: [],
   from: '', to: '', durMin: null, durMax: null, q: '', sort: 'newest', col: '', colDeep: true,
 }
 
@@ -91,6 +93,7 @@ export function parseFilters(search: string | URLSearchParams): LibraryFilters {
     avail: list(p.get('avail')).filter((x) => AVAIL.includes(x)),
     pub: list(p.get('pub')).filter((x) => PUBLIC_VALUES.includes(x)),
     exp: p.get('exp') === String(EXPIRES_DAYS),
+    rp: p.get('rp') === '1',
     origin: list(p.get('origin')).filter((x) => ORIGIN.includes(x)),
     source: list(p.get('src')).filter((x) => SOURCE_VALUES.includes(x)),
     media: list(p.get('media')).filter((x) => MEDIA_VALUES.includes(x)),
@@ -119,6 +122,7 @@ export function filtersToSearch(f: LibraryFilters): string {
   if (f.avail.length) p.set('avail', f.avail.join(','))
   if (f.pub.length) p.set('pub', f.pub.join(','))
   if (f.exp) p.set('exp', String(EXPIRES_DAYS))
+  if (f.rp) p.set('rp', '1')
   if (f.origin.length) p.set('origin', f.origin.join(','))
   if (f.source.length) p.set('src', f.source.join(','))
   if (f.media.length) p.set('media', f.media.join(','))
@@ -148,6 +152,7 @@ export function filtersToApi(f: LibraryFilters, opts: { limit?: number; cursor?:
   if (f.avail.length) p.set('availability_state', f.avail.join(','))
   if (f.pub.length) p.set('public_status', f.pub.join(','))
   if (f.exp) p.set('expires_within_days', String(EXPIRES_DAYS))
+  if (f.rp) p.set('repackage_pending', 'true')
   if (f.origin.length) p.set('origin', f.origin.join(','))
   if (f.source.length) p.set('source', f.source.join(','))
   if (f.media.length) p.set('media_type', f.media.join(','))

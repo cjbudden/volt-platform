@@ -35,10 +35,10 @@ import { listRuns, pickRenditions, scanRun, type LocalSegment } from '../localRe
 import { originBaseFor } from '../liveOrigin';
 import { readFragments, readInit } from './fmp4';
 import {
-  buildIndex, locateFrame, parseMediaPlaylist, parseRate, pickVideoVariant, rateFromDurations,
+  buildIndex, locateFrame, msOfFrame, parseMediaPlaylist, parseRate, pickVideoVariant, rateFromDurations,
   type FrameIndex, type Located, type Rate, type SegmentFrames,
 } from './frameIndex';
-import { extractFrame, FrameError, probeTsSegment } from './exactFrame';
+import { extractFrame, extractFrameAt, FrameError, probeTsSegment } from './exactFrame';
 import { frameFolderObject, refreshFolderBytes, retireFrameFolders, type FrameFolder } from './folders';
 
 // ------------------------------------------------------------- asset index
@@ -188,8 +188,14 @@ export async function assetFrameStill(accountId: string, assetId: string, stored
   if (!index) throw new FrameError(409, stored.error ?? 'this asset has no frame index');
   const located = locateFrame(index, n);
   if (!located) throw new FrameError(404, `frame ${n} is outside the asset (0 to ${index.totalFrames - 1})`);
-  const a = await one<any>(`SELECT master_key FROM vod_assets WHERE id = $1`, [assetId]);
+  const a = await one<any>(`SELECT master_key, source_key, policy_snapshot, encode_result FROM vod_assets WHERE id = $1`, [assetId]);
   const masterRel = clipsPathOfMaster(a?.master_key);
+  // AN ENCRYPTED TITLE (build queue P4-5): its segments decode to noise
+  // without the content key, which Volt does not keep. The frame index
+  // itself is fine (it reads box headers, which cbcs leaves in the clear);
+  // the picture is read from the original at that frame's time.
+  const { packagedOf } = await import('../encodePolicy');
+  const encrypted = !!a && packagedOf(a).drm;
   // Owned by the asset alone (no channel), so deleting the asset leaves the
   // folder ownerless and the retention sweep reclaims it.
   const folder: FrameFolder = {
@@ -197,6 +203,13 @@ export async function assetFrameStill(accountId: string, assetId: string, stored
     logicalKey: assetFolderKey(assetId, stored.version), vodAssetId: assetId,
   };
   const { key, cache } = await ensureStill(accountId, folder, `${n}.jpg`, async () => {
+    if (encrypted) {
+      const { fetchVodSource } = await import('../media/vodSource');
+      const src = await fetchVodSource(a.source_key).catch(() => null);
+      if (!src) throw new FrameError(409, 'its files are encrypted (DRM) and its original is not on this server, so no frame can be drawn');
+      try { return await extractFrameAt(src.path, msOfFrame(index.rate, n) / 1000); }
+      finally { await src.release(); }
+    }
     if (!masterRel) throw new FrameError(409, 'the asset has no packaged media any more');
     const dir = posix.dirname(posix.join(posix.dirname(masterRel), index.playlist));
     const seg = await readClipsFile(posix.join(dir, located.segment.uri));
