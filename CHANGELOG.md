@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.137.1 (2026-11-12)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On the cloud service, a finished recording now gets its poster, storyboard and scrub-bar previews. They were missing because the thumbnails were looked for where recordings used to be kept, not in the runs the recording is made of.
+
+### Internal
+
+- added · Tests: New check s3-recording-source: the recording's source playlist over its bucket runs and the thumbnailer job on ECS (29 assertions); thumbnailer signing tests in volt-encoder/dev/test_thumbnailer.py.
+
 ## 0.137.0 (2026-11-12)
 
 ### Product (in customer release notes)
