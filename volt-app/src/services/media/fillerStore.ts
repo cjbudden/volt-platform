@@ -78,6 +78,8 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
   '.bmp': 'image/bmp', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
   '.mkv': 'video/x-matroska', '.ts': 'video/mp2t', '.mxf': 'application/mxf',
+  // a stream's pre-built loop (filler/prebuilt/..., build queue 2.1a-3)
+  '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mpd': 'application/dash+xml', '.json': 'application/json',
 };
 export function fillerContentType(key: string): string {
   return TYPES[extname(key).toLowerCase()] ?? 'application/octet-stream';
@@ -132,6 +134,35 @@ export async function statFiller(key: string): Promise<{ size: number } | null> 
     const r = await (await s3()).send(new HeadObjectCommand({ Bucket: bucket(), Key: objectKey(k) }));
     return { size: Number(r.ContentLength ?? 0) };
   } catch { return null; }
+}
+
+/**
+ * Where a stream's pre-built loop is kept on S3 (build queue 2.1a-3): one folder
+ * per build, named by the build's hash, so its files never change once written
+ * (they are served as immutable) and a rebuild is a new folder.
+ */
+export function prebuiltPrefix(streamId: string, hash: string): string {
+  const s = String(streamId).replace(/[^0-9a-zA-Z-]/g, '');
+  const h = String(hash ?? '').replace(/[^0-9a-zA-Z]/g, '').slice(0, 64) || 'build';
+  return `filler/prebuilt/${s}/${h}/`;
+}
+
+/** Remove every object under a prefix of the store (S3 only: an old pre-built loop). */
+export async function deleteFillerPrefix(prefix: string): Promise<number> {
+  const k = cleanKey(prefix.replace(/\/+$/, '') + '/x');
+  if (!k || fillerDriver() !== 's3') return 0;
+  const { ListObjectsV2Command, DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
+  const cli = await s3();
+  const pre = objectKey(k.slice(0, -1));
+  let n = 0, token: string | undefined;
+  do {
+    const r: any = await cli.send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: pre, ContinuationToken: token }));
+    const keys = (r.Contents ?? []).map((o: any) => ({ Key: o.Key }));
+    if (keys.length) await cli.send(new DeleteObjectsCommand({ Bucket: bucket(), Delete: { Objects: keys, Quiet: true } }));
+    n += keys.length;
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+  return n;
 }
 
 /** Remove the file behind a key (a missing one is not an error). */

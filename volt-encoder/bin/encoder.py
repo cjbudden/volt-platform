@@ -2349,6 +2349,17 @@ def start_playout(cfg):
         pre = ((cfg.get("redundancy") or {}).get("filler") or {}).get("prebuilt") or {}
         meta, built_dir = None, None
         cand = [pre.get("dir")] if pre.get("dir") else []
+        if pre.get("url"):
+            # On AWS the control plane keeps the build in the bucket, not on a disk
+            # this encoder can see (build queue 2.1a-3): fetch it from any control-plane
+            # task. A failed fetch only means building the loop here, as before.
+            got = os.path.join(BASE_OUT_DIR or WORK_DIR, "filler-pre",
+                               re.sub(r"[^0-9A-Za-z]", "", str(pre.get("hash") or "build"))[:64] or "build")
+            try:
+                filler_build.fetch_prebuilt(pre["url"], got)
+                cand.insert(0, got)
+            except Exception as e:  # noqa: BLE001
+                log(f"playout: could not fetch the pre-built loop ({e}); building it here if needed")
         h = filler_build.spec_hash(spec)
         cache = os.path.join(BASE_OUT_DIR or WORK_DIR, "filler", h)
         cand.append(cache)

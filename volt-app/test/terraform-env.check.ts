@@ -110,7 +110,7 @@ function fakeRepo(o: { code?: string; env?: string[]; values?: Record<string, st
   // 2.1a-2b-3: ad creatives and FAST renders of slates and loops land in the bucket like
   // originals, and caption clocks read through the bucket, so CLIPS_DIR is only scratch.
   ok(cov.settings.CLIPS_DIR?.class === 'default' && !cov.settings.CLIPS_DIR?.item, 'clips, encodes, ad creatives and FAST renders reach the bucket on AWS, CLIPS_DIR only scratch (2.1a-2b-3)');
-  for (const [n, item] of [['ORIGIN_DIR', '2.1a-3'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
+  for (const [n, item] of [['ORIGIN_DIR', '2.1a-3b'], ['FFMPEG_BIN', '2.1a-4']]) ok(cov.settings[n]?.class === 'not-on-aws-yet' && cov.settings[n]?.item === item, `${n} is named as not on AWS yet (${item})`);
   // 2.1b wired radio, captions and the GPU pool. The Icecast relay is gone (2.1c-2).
   for (const n of ['RADIO_TASK_DEF', 'CAPTIONS_TASK_DEF', 'ECS_GPU_PROVIDER', 'FLEET_GPU_TYPES']) ok(real.wired.has(n) && !cov.settings[n], `${n} is set by Terraform (2.1b)`);
   ok(!Object.keys(cov.settings).some((k) => k.startsWith('ICECAST_')), 'no Icecast relay settings are left (the relay is gone, 2.1c-2)');

@@ -395,11 +395,14 @@ async function streamUse(acc: string, assetId: string, sourceKey: string | null)
     const b = r.build ?? null;
     const dir = resolve(config.testStream.originDir, r.id, 'filler', 'prebuilt');
     // What the copy on disk was made FROM: the spec beside it names the source.
-    let builtFrom: string | null = null;
-    try { builtFrom = JSON.parse(await readFile(`${dir}.spec.json`, 'utf8'))?.source?.path ?? null; } catch { /* never built */ }
+    // Recorded on the build since 2.1a-3; older builds only have it on the building task's disk.
+    let builtFrom: string | null = b?.built_from ?? null;
+    if (!builtFrom) try { builtFrom = JSON.parse(await readFile(`${dir}.spec.json`, 'utf8'))?.source?.path ?? null; } catch { /* never built */ }
     const fromThis = builtFrom && sourceKey ? builtFrom.split('?')[0].endsWith(sourceKey.replace(/^\//, '')) : null;
-    let playable = false;
-    try { playable = (await stat(resolve(dir, 'master.m3u8'))).isFile(); } catch { /* not built */ }
+    // A build kept in the bucket (AWS, 2.1a-3) is served at /filler/... by any task.
+    const stored = b?.status === 'ready' && typeof b.key === 'string' && b.key.startsWith('filler/prebuilt/') ? b.key : null;
+    let playable = !!stored;
+    if (!stored) try { playable = (await stat(resolve(dir, 'master.m3u8'))).isFile(); } catch { /* not built */ }
     // Why a stream that points at this asset might never play it.
     const active = !!r.failover && (r.loss === 'slate' || r.loss === 'vod_loop');
     out.push({
@@ -413,7 +416,7 @@ async function streamUse(acc: string, assetId: string, sourceKey: string | null)
         loopSeconds: b.loop_seconds ?? null, buildSeconds: b.build_seconds ?? null, watermark: !!b.watermark,
         renditions: b.renditions ?? [], audio: b.audio ?? null, sourceKind: b.source_kind ?? null,
         fromThisAsset: fromThis,
-        preview: playable ? `/origin/${r.id}/filler/prebuilt/master.m3u8` : null,
+        preview: playable ? (stored ? `/${stored}master.m3u8` : `/origin/${r.id}/filler/prebuilt/master.m3u8`) : null,
       } : null,
     });
   }

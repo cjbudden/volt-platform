@@ -511,8 +511,8 @@
     },
     "ORIGIN_DIR": {
       "class": "not-on-aws-yet",
-      "why": "Prebuilt loop segments and the failover control file are written here, on the task's disk.",
-      "item": "2.1a-3"
+      "why": "The house preview of each slate and loop (ORIGIN_DIR/filler-preview, its QC and approval) is written here, on the task's disk. A stream's pre-built loop is built here but kept in the bucket under filler/prebuilt/ (FILLER_STORE_DRIVER=s3, build queue 2.1a-3), and the failover control file left the disk earlier.",
+      "item": "2.1a-3b"
     },
     "PACKAGER_BIN": {
       "class": "not-on-aws-yet",

@@ -19,10 +19,18 @@
 //  encoder re-checks the build against its live output at start and rebuilds
 //  from that output when it does not match, so a push source (SRT/RTMP), which
 //  cannot be probed until it is received, still ends up with an exact loop.
+//
+//  WHERE THE BUILD LIVES (build queue 2.1a-3). On the Mac it stays under
+//  ORIGIN_DIR/<stream>/filler/prebuilt and the encoder reads it there. On AWS
+//  the control plane is several Fargate tasks and the encoder runs elsewhere, so
+//  with FILLER_STORE_DRIVER=s3 the build is also stored in the bucket under
+//  filler/prebuilt/<stream>/<hash>/ (publishPrebuilt), any task serves it at
+//  /filler/..., and the encoder is given that URL to fetch it from. The folder
+//  on the task's disk is then only where the build was made.
 // ============================================================================
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
 import { one, query } from '../db';
 import { config } from '../config';
 import { buildEncoderJobConfig } from './jobConfig';
@@ -129,6 +137,30 @@ async function setBuild(kind: Kind, id: string, v: any) {
   await query(`UPDATE ${kind === 'channel' ? 'channels' : 'events'} SET filler_build = $2::jsonb WHERE id = $1`, [id, JSON.stringify(v)]);
 }
 
+/**
+ * Store a finished build in the bucket so every task and the encoder reach it
+ * (S3 only; null on the Mac). Inits and segments first, playlists next and
+ * filler.json last, so a reader that finds filler.json finds every file it names.
+ */
+export async function publishPrebuilt(id: string, dir: string, hash: string): Promise<string | null> {
+  const { fillerDriver, putFiller, prebuiltPrefix } = await import('./media/fillerStore');
+  if (fillerDriver() !== 's3') return null;
+  const prefix = prebuiltPrefix(id, hash);
+  const walk = async (d: string): Promise<string[]> => (await Promise.all((await readdir(d, { withFileTypes: true }))
+    .map((e) => (e.isDirectory() ? walk(join(d, e.name)) : Promise.resolve([join(d, e.name)]))))).flat();
+  const files = (await walk(dir)).map((f) => relative(dir, f).split(/[\\/]/).join('/'));
+  const rank = (f: string) => (f === 'filler.json' ? 2 : /\.(m3u8|mpd)$/.test(f) ? 1 : 0);
+  files.sort((a, b) => rank(a) - rank(b));
+  for (let i = 0; i < files.length; i += 8) {
+    const batch = files.slice(i, i + 8);
+    // never let filler.json go up beside files still uploading
+    if (batch.some((f) => rank(f) === 2) && batch.length > 1) {
+      for (const f of batch) await putFiller(prefix + f, await readFile(join(dir, f)));
+    } else await Promise.all(batch.map(async (f) => putFiller(prefix + f, await readFile(join(dir, f)))));
+  }
+  return prefix;
+}
+
 /** The job: probe, decide, build. Safe to run any number of times. */
 export async function runFillerPrep(kind: Kind, id: string): Promise<any> {
   const { orchestrator } = await import('./orchestrator');
@@ -142,6 +174,7 @@ export async function runFillerPrep(kind: Kind, id: string): Promise<any> {
     await setBuild(kind, id, v);
     return v;
   }
+  const prev = await fillerStatus(kind, id).catch(() => null);
   await setBuild(kind, id, { status: 'building', at: new Date().toISOString() });
   const dir = resolve(config.testStream.originDir, id, 'filler', 'prebuilt');
   await mkdir(resolve(config.testStream.originDir, id, 'filler'), { recursive: true });
@@ -154,12 +187,27 @@ export async function runFillerPrep(kind: Kind, id: string): Promise<any> {
     await setBuild(kind, id, v);
     return v;
   }
+  let key: string | null = null;
+  try { key = await publishPrebuilt(id, dir, meta.hash); } catch (e: any) {
+    const v = { status: 'failed', error: `the loop was built but could not be stored: ${String(e?.message ?? e).slice(0, 200)}`, at: new Date().toISOString() };
+    await setBuild(kind, id, v);
+    return v;
+  }
   const v = {
     status: 'ready', dir, hash: meta.hash, loop_seconds: meta.loop_seconds, source_kind: spec.source.kind,
+    // key: where the build is kept in the bucket (AWS); built_from: what it was made from,
+    // since the spec file beside dir is only on the disk of the task that built it.
+    ...(key ? { key } : {}), built_from: spec.source?.path ?? null,
     renditions: spec.video.map((x: any) => ({ label: x.label, width: x.width, height: x.height, fps: x.fps, bitrate_kbps: x.bitrate_kbps, profile: x.x264_profile })),
     audio: spec.audio, watermark: !!spec.watermark, build_seconds: meta.build_seconds, at: new Date().toISOString(),
   };
   await setBuild(kind, id, v);
+  // The previous build's folder in the bucket is no longer named by anything. An
+  // encoder that started on it has its own copy already (it fetches at start).
+  if (prev?.key && prev.key !== key) {
+    const { deleteFillerPrefix } = await import('./media/fillerStore');
+    await deleteFillerPrefix(prev.key).catch((e) => console.warn(`[filler] old loop not removed for ${kind} ${id}:`, e?.message ?? e));
+  }
   return v;
 }
 

@@ -257,6 +257,62 @@ def load(out_dir):
         return None
 
 
+def _plain_rel(rel):
+    """A file name from filler.json that stays inside the loop's folder."""
+    r = str(rel or "")
+    return (bool(r) and not r.startswith("/") and "\\" not in r and "://" not in r
+            and all(p not in ("", ".", "..") for p in r.split("/")))
+
+
+def fetch_prebuilt(url, dest, timeout=30, opener=None):
+    """Download a pre-built loop the control plane keeps in the bucket (build queue
+    2.1a-3). On AWS the control plane runs on Fargate tasks whose disks come and go,
+    so the build is stored under filler/prebuilt/<stream>/<hash>/ and served by any
+    task at /filler/...; the encoder fetches filler.json there and every init and
+    segment it names into `dest`, then loads it like a local build.
+
+    filler.json is written last and the folder swapped in whole, so a fetch that
+    fails part-way never leaves a loop that looks complete. A `dest` already holding
+    the same build (same hash) is reused without fetching the files again. Names
+    that would leave the folder are refused. Returns the build's metadata."""
+    import urllib.parse
+    import urllib.request
+    get = opener or (lambda u: urllib.request.urlopen(u, timeout=timeout).read())
+    base = url if url.endswith("/") else url + "/"
+    raw = get(base + "filler.json")
+    meta = json.loads(raw)
+    have = load(dest)
+    if have and have.get("hash") and have.get("hash") == meta.get("hash"):
+        return have
+    files = []
+    for t in (meta.get("tracks") or {}).values():
+        files.append(t.get("init"))
+        files.extend(x.get("uri") for x in t.get("segments") or [])
+    if not files:
+        raise ValueError("the pre-built loop lists no files")
+    bad = [f for f in files if not _plain_rel(f)]
+    if bad:
+        raise ValueError(f"the pre-built loop names a file outside its folder: {bad[0]!r}")
+    tmp = dest.rstrip("/") + ".part"
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    try:
+        for rel in dict.fromkeys(files):
+            path = os.path.join(tmp, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(get(base + urllib.parse.quote(rel)))
+        with open(os.path.join(tmp, "filler.json"), "wb") as fh:
+            fh.write(raw)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    shutil.rmtree(dest, ignore_errors=True)
+    os.replace(tmp, dest)
+    log(f"fetched the pre-built loop {meta.get('hash')} ({len(set(files))} file(s)) -> {dest}")
+    return meta
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print(__doc__)

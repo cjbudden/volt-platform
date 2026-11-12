@@ -273,7 +273,7 @@ has.
 These are queued, not forgotten (`BUILD_QUEUE.md`, and class
 `not-on-aws-yet` in `env-coverage.json`):
 
-- **2.1a-3, 2.1a-4.** Uploaded slates and loops now live
+- **2.1a-3b, 2.1a-4.** Uploaded slates and loops now live
   in the origin bucket under `filler/` (2.1a, `FILLER_STORE_DRIVER=s3`), so
   every control-plane task serves them and none is lost with its task. A
   resumable upload's chunks and tus parts wait in the bucket under
@@ -293,8 +293,10 @@ These are queued, not forgotten (`BUILD_QUEUE.md`, and class
   does not yet count a bucket original as on the server (2.1a-2b-4, since
   built). The restore bin keeps deleted files in the bucket under `trash/`
   (2.1a-2c, `VOLT_TRASH_DRIVER=s3`), so a restore works from any task; the
-  bucket policy keeps `trash/` from the CDN. Still on a task's own disk: the
-  prebuilt loop segments (2.1a-3). The control-plane image has no
+  bucket policy keeps `trash/` from the CDN. A stream's pre-built failover
+  loop is stored under `filler/prebuilt/<stream>/<hash>/` (2.1a-3) and the
+  encoder fetches it from any task at `/filler/...`. Still on a task's own
+  disk: the house preview of each slate and loop (`filler-preview/`, 2.1a-3b). The control-plane image has no
   ffmpeg, packager or Python for the jobs that run in it (clip extract, VOD
   encode, loop preparation, intro detection, the FAST render of a slate or
   loop), so on AWS those jobs fail until they run as their own tasks (2.1a-4).

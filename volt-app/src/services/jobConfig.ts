@@ -78,7 +78,7 @@ export interface OwnerRow {
   watermark_opacity?: number;
   watermark_scale?: number;
   /** pre-built, ladder-matched fallback loop (services/fillerPrep.ts) */
-  filler_build?: { status?: string; dir?: string; hash?: string } | null;
+  filler_build?: { status?: string; dir?: string; hash?: string; key?: string } | null;
 }
 
 export interface AccountRow {
@@ -274,7 +274,10 @@ export function buildEncoderJobConfig(ctx: JobConfigCtx): Record<string, any> {
         // the loop already rendered to this channel's ladder and packaged; the
         // encoder checks it against its live output and uses it when it matches
         ...(owner.filler_build?.status === 'ready' && owner.filler_build.dir
-          ? { prebuilt: { dir: owner.filler_build.dir, hash: owner.filler_build.hash ?? null } } : {}),
+          ? { prebuilt: { dir: owner.filler_build.dir, hash: owner.filler_build.hash ?? null,
+              // On AWS the build is in the bucket (build queue 2.1a-3): the encoder
+              // fetches it from any control-plane task at this URL.
+              ...(owner.filler_build.key ? { url: absRef(`/${owner.filler_build.key}`) } : {}) } } : {}),
       },
     };
   }
