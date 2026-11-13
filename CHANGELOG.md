@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.4 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service, a recording's timeline now marks where viewers were shown the channel's loop or slate during an outage, and names the missing stretch it covered, as it already did on a single server.
+
+### Internal
+
+- added · Recordings: New check suite recording-fallbacks-bucket: loop markers on a recording's timeline read from each run's playout.jsonl in the bucket.
+
 ## 0.140.3 (2026-11-13)
 
 ### Product (in customer release notes)
