@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.1 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · VOD: On a cloud service, clips of a radio station or of an event that carried only sound open with the audio player and an audio-only Encode tab, as on a single server.
+
+### Internal
+
+- added · VOD: New check suite vod-audio-only-bucket (10 assertions): the asset detail's and encode tab's audio-only answer from the bucket.
+
 ## 0.140.0 (2026-11-13)
 
 ### Product (in customer release notes)
