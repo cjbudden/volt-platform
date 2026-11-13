@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.2 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service the schedule now shows which aired programmes can still be converted to VOD, with how much of each was recorded, and the recordings timeline and Timeline view draw the recorded media and its gaps. Before, they read as if nothing had been recorded.
+
+### Internal
+
+- added · Recordings: Coverage from the bucket listing alone (services/clips/coverageBucket.ts) for the EPG VOD states, the coverage and timeline routes and the Timeline grid on AWS; new check suite coverage-bucket.
+
 ## 0.140.1 (2026-11-13)
 
 ### Product (in customer release notes)
