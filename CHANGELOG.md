@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.139.0 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service, a radio station's clips are MP3 and M4A downloads, as on a single server, instead of promising an MP4.
+
+### Internal
+
+- added: clips-bucket-radio suite: sound-only streams judged from the bucket on AWS, radio clip formats and build jobs.
+
 ## 0.138.0 (2026-11-13)
 
 ### Product (in customer release notes)
