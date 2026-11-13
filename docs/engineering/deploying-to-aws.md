@@ -136,6 +136,9 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    `recordingTimelineBucket`, 2.3c-7; its loop markers, 2.3c-8,
    `recordingFallbacksBucket`, from each run's `playout.jsonl`, which the
    uploader's segment sync takes up with the run, one GetObject a run;
+   the orchestrator's orphan sweep, `reconcileOrphanRecordings`, closes a
+   recording whose owner is no longer live at its last segment in the
+   bucket, 2.3c-9, rather than at now;
    `volt-app/src/services/clips/coverageBucket.ts`) comes from the bucket
    listing alone: segment numbers for holes, LastModified less half an
    uploader pass for placement, the run's upload cadence for each segment's

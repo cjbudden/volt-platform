@@ -1225,8 +1225,10 @@ export class Orchestrator {
   }
 
   /** Close recording rows whose owner is not live any more. End time comes from
-   *  the newest recorded segment on disk inside the recording window (falls back
-   *  to now if nothing is on disk). Runs every tick; matches nothing normally. */
+   *  the newest recorded segment inside the recording window: on the disk where
+   *  this machine holds the stream's runs (the Mac), else from the bucket
+   *  listing (AWS, build queue 2.3c-9); now only when neither has any.
+   *  Runs every tick; matches nothing normally. */
   async reconcileOrphanRecordings(): Promise<number> {
     const orphans = await query<any>(
       `SELECT r.* FROM recordings r
@@ -1243,11 +1245,22 @@ export class Orchestrator {
         const streamId = rec.channel_id ?? rec.event_id;
         let endMs = Date.now();
         try {
-          const { recordingSpans } = await import('../localRecordingIndex');
-          const spans = recordingSpans(streamId)
-            .filter((s) => s.endMs > Number(rec.start_epoch_ms));
+          // ON AWS the task's disk holds no run, so this closed every orphan
+          // at now: a recording whose encoder died hours ago got hours of
+          // "recording" with nothing in them, counted in its length and its
+          // retention, and a hole that long on its timeline. The bucket
+          // listing says where the media really stopped (recordingTimelineBucket
+          // ends a still-open recording at its last segment).
+          const { coverageFromBucket, recordingTimelineBucket } = await import('../clips/coverageBucket');
+          let spans: { endMs: number }[];
+          if (coverageFromBucket(streamId)) {
+            spans = (await recordingTimelineBucket(streamId, Number(rec.start_epoch_ms), null)).spans;
+          } else {
+            const { recordingSpans } = await import('../localRecordingIndex');
+            spans = recordingSpans(streamId).filter((s) => s.endMs > Number(rec.start_epoch_ms));
+          }
           if (spans.length) endMs = Math.min(endMs, spans[spans.length - 1].endMs);
-        } catch { /* no local index (S3 deploy) — close at now */ }
+        } catch { /* no index and no bucket answer: close at now */ }
         endMs = Math.max(endMs, Number(rec.start_epoch_ms) + 1000);
         const closed = await one<any>(
           `UPDATE recordings SET
