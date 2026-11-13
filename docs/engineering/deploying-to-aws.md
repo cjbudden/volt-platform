@@ -139,6 +139,15 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    the orchestrator's orphan sweep, `reconcileOrphanRecordings`, closes a
    recording whose owner is no longer live at its last segment in the
    bucket, 2.3c-9, rather than at now;
+   the waveform behind a recording and the channel timeline,
+   `volt-app/src/services/waveform.ts`, 2.3c-10, reads its audio segments
+   from the bucket too: a window under 15 minutes placed exactly
+   (`resolveRangeBucket`) and a wider one from the listing, the bytes by
+   GetObject (each run's init.mp4 once), under the Mac's own decode budget,
+   sample cap and concurrency. Its peak cache stays in the task's memory
+   (`WAVEFORM_BUCKET_CACHE_RUNS`, 256 runs), never in a `.peaks.json`,
+   because a run folder on the task's disk would make the stream read from
+   the disk; a segment in archive storage is drawn as a gap;
    `volt-app/src/services/clips/coverageBucket.ts`) comes from the bucket
    listing alone: segment numbers for holes, LastModified less half an
    uploader pass for placement, the run's upload cadence for each segment's

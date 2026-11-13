@@ -849,6 +849,10 @@
       "class": "local",
       "why": "Point the drop queue client at a local SQS stand-in (ElasticMQ, LocalStack) for tests; unset on AWS so the regional endpoint is used."
     },
+    "WAVEFORM_BUCKET_CACHE_RUNS": {
+      "class": "default",
+      "why": "How many recording runs' waveform peaks a control-plane task keeps in memory when the runs are in the bucket (build queue 2.3c-10); 256 runs is a few megabytes."
+    },
     "WEB_DIST_DIR": {
       "class": "default",
       "why": "The image puts the console in /app/web and the player in /app/player, which is where the code looks first."

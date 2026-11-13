@@ -25,12 +25,38 @@
 //  longer than its budget: whatever is still missing comes back as `pending`
 //  and the client asks again, so the picture fills in progressively instead of
 //  hanging.
+//
+//  ON AWS (build queue 2.3c-10) the control plane's disk holds no runs: the
+//  encoder uploads them to s3://<bucket>/<kind>/<id>/runs/<runId>/, so the
+//  disk index found no audio and every recording drew a flat, empty waveform.
+//  Where the bucket answers for a stream (coverageFromBucket, the same rule as
+//  the timeline and the clip resolver), the segments come from the bucket:
+//
+//   EXACT   placed exactly (resolveRangeBucket: each segment's decode time
+//           read from its head), because this is the zoom where in and out
+//           points are picked and a segment drawn a second early is a clip
+//           cut a second early.
+//   SAMPLED placed from the listing alone (coverageRangeBucket), as the
+//           timeline lane is: at minutes per bucket a second does not show.
+//
+//  Their bytes are fetched with GetObject (init.mp4 once per run, kept in
+//  memory) and fed to the same single ffmpeg pass, under the same wall-clock
+//  budget, sample cap and concurrency as on the Mac. The peak cache is kept
+//  in memory only there: writing <run>/.peaks.json would create a run folder
+//  on the task's disk, and a stream with a run folder is answered from the
+//  disk (listRuns), which would hide its recordings in the bucket. A segment
+//  that cannot be read (archive storage, deleted, too large) is remembered
+//  for a few minutes and drawn as a gap rather than left pending, so the
+//  client does not ask again forever.
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { originBaseFor } from './liveOrigin';
 import { audioSegmentsInRange, type LocalSegment } from './localRecordingIndex';
+import { coverageFromBucket, coverageRangeBucket } from './clips/coverageBucket';
+import { resolveRangeBucket, type AnyResolution } from './clips/resolveBucket';
+import { runsApi } from './media/s3Runs';
 
 export interface WaveBucket {
   t: number;            // bucket start (epoch ms)
@@ -106,6 +132,10 @@ function decodeFine(s: string): [number, number][] {
   return out;
 }
 const memCache = new Map<string, RunCache>();       // key: streamId/runId
+/** Runs of bucket streams held in memory, oldest first: their cache has no
+ *  file behind it, so it is capped (a task serves many streams for days). */
+const bucketRuns = new Set<string>();
+const bucketCacheRuns = () => Number(process.env.WAVEFORM_BUCKET_CACHE_RUNS ?? 256);
 
 function cachePath(streamId: string, runId: string) {
   return join(originBaseFor(streamId), 'runs', runId, '.peaks.json');
@@ -115,6 +145,15 @@ function loadCache(streamId: string, runId: string): RunCache {
   const hit = memCache.get(key);
   if (hit) return hit;
   let c: RunCache = {};
+  if (coverageFromBucket(streamId)) {
+    bucketRuns.add(key);
+    for (const old of bucketRuns) {
+      if (bucketRuns.size <= bucketCacheRuns()) break;
+      bucketRuns.delete(old); memCache.delete(old);
+    }
+    memCache.set(key, c);
+    return c;
+  }
   try {
     const p = cachePath(streamId, runId);
     if (existsSync(p)) c = JSON.parse(readFileSync(p, 'utf8')) as RunCache;
@@ -126,6 +165,9 @@ function saveCache(streamId: string, runId: string) {
   const key = `${streamId}/${runId}`;
   const c = memCache.get(key);
   if (!c) return;
+  // A bucket stream's cache stays in memory: a .peaks.json would create the
+  // run's folder on this disk, and then the stream would be read from the disk.
+  if (bucketRuns.has(key)) return;
   try {
     const p = cachePath(streamId, runId);
     mkdirSync(dirname(p), { recursive: true });
@@ -139,7 +181,7 @@ function saveCache(streamId: string, runId: string) {
 const PCM_RATE = 4000;       // enough for an envelope, 60x cheaper than 48k
 
 /** Decode init + segments (in order) to mono PCM at PCM_RATE. */
-function decodePcm(initPath: string, segPaths: string[], timeoutMs: number): Promise<Int16Array> {
+function decodePcm(init: Buffer, segBytes: Buffer[], timeoutMs: number): Promise<Int16Array> {
   return new Promise((resolve) => {
     const ff = spawn('ffmpeg', [
       '-hide_banner', '-loglevel', 'error', '-i', 'pipe:0',
@@ -159,8 +201,8 @@ function decodePcm(initPath: string, segPaths: string[], timeoutMs: number): Pro
     ff.on('close', () => { clearTimeout(timer); finish(); });
     ff.on('error', () => { clearTimeout(timer); finish(); });
     try {
-      ff.stdin.write(readFileSync(initPath));
-      for (const p of segPaths) ff.stdin.write(readFileSync(p));
+      ff.stdin.write(init);
+      for (const b of segBytes) ff.stdin.write(b);
       ff.stdin.end();
     } catch { clearTimeout(timer); finish(); }
     ff.stdin.on('error', () => { /* closed early: the timeout/close path resolves */ });
@@ -184,20 +226,113 @@ function runDirOf(streamId: string, runId: string) {
   return join(originBaseFor(streamId), 'runs', runId, 'audio');
 }
 
+// ---- where the audio is: the disk, or the bucket on AWS ---------------------
+/** A segment to measure. From the bucket it carries its s3:// keys, and
+ *  `listed` when it was placed from the listing (its length is then the run's
+ *  cadence, not measured, so the decode's own length is used instead). */
+type WSeg = LocalSegment & { src?: string; initSrc?: string; listed?: boolean };
+
+/** Objects bigger than this are not audio segments: never fetched whole. */
+const MAX_OBJECT_BYTES = 16 * 1024 * 1024;
+/** A key that could not be read is not asked for again for this long. */
+const UNREADABLE_RETRY_MS = 5 * 60_000;
+const unreadable = new Map<string, number>();
+const initBytes = new Map<string, Buffer>();
+
+function srcOf(streamId: string, s: WSeg): { init: string; seg: string } {
+  if (s.src && s.initSrc) return { init: s.initSrc, seg: s.src };
+  const dir = runDirOf(streamId, s.runId);
+  return { init: join(dir, 'init.mp4'), seg: join(dir, s.file) };
+}
+
+function isUnreadable(s: WSeg): boolean {
+  if (!s.src) return false;
+  const at = unreadable.get(s.src);
+  return at != null && Date.now() - at < UNREADABLE_RETRY_MS;
+}
+
+/** A run whose init.mp4 cannot be read cannot be decoded: its bucket
+ *  segments count as gaps too (on the disk nothing changes). */
+function markGone(list: WSeg[]): void {
+  for (const s of list) if (s.src) unreadable.set(s.src, Date.now());
+}
+
+/** A file's bytes: a path on disk, or a whole object under an s3:// key. */
+async function readSrc(src: string): Promise<Buffer | null> {
+  if (!src.startsWith('s3://')) {
+    try { return existsSync(src) ? readFileSync(src) : null; } catch { return null; }
+  }
+  const at = unreadable.get(src);
+  if (at != null && Date.now() - at < UNREADABLE_RETRY_MS) return null;
+  const m = /^s3:\/\/([^/]+)\/(.+)$/.exec(src);
+  if (!m) return null;
+  try {
+    const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const api = await runsApi();
+    const r = await api.send(new GetObjectCommand({ Bucket: m[1], Key: m[2] }));
+    if (Number(r.ContentLength ?? 0) > MAX_OBJECT_BYTES) { unreadable.set(src, Date.now()); return null; }
+    const body: any = r.Body;
+    let buf: Buffer;
+    if (body?.transformToByteArray) buf = Buffer.from(await body.transformToByteArray());
+    else {
+      const chunks: Buffer[] = [];
+      for await (const c of body) chunks.push(Buffer.from(c));
+      buf = Buffer.concat(chunks);
+    }
+    if (buf.length > MAX_OBJECT_BYTES) { unreadable.set(src, Date.now()); return null; }
+    return buf;
+  } catch {
+    // Archive storage (InvalidObjectState), deleted by retention, or no
+    // access: drawn as a gap, tried again after a while.
+    unreadable.set(src, Date.now());
+    return null;
+  }
+}
+
+/** A run's init.mp4: read once per run from the bucket (it never changes). */
+async function readInit(src: string): Promise<Buffer | null> {
+  if (!src.startsWith('s3://')) return readSrc(src);
+  const hit = initBytes.get(src);
+  if (hit) return hit;
+  const b = await readSrc(src);
+  if (b) {
+    initBytes.set(src, b);
+    for (const k of initBytes.keys()) { if (initBytes.size <= 256) break; initBytes.delete(k); }
+  }
+  return b;
+}
+
+/** Segments of `kind` audio in a window, from the disk or, on AWS, the bucket. */
+async function audioSegments(streamId: string, from: number, to: number, exact: boolean): Promise<WSeg[]> {
+  if (!coverageFromBucket(streamId)) return audioSegmentsInRange(streamId, from, to);
+  const r: AnyResolution = exact
+    ? await resolveRangeBucket(streamId, from, to, 'audio')
+    : await coverageRangeBucket(streamId, from, to, 'audio');
+  const out: WSeg[] = [];
+  for (const b of r.blocks) {
+    for (const s of b.segments) {
+      out.push({ runId: s.runId, rendition: s.rendition, file: s.file, seq: s.seq, startMs: s.startMs,
+        durMs: s.endMs - s.startMs, uri: s.path, src: s.path, initSrc: b.initPath, listed: !exact });
+    }
+  }
+  return out.sort((a, b) => a.startMs - b.startMs);
+}
+
 /** Decode ONE segment and cache its peak/RMS. */
-async function segmentPeak(streamId: string, s: LocalSegment, timeoutMs: number): Promise<CacheVal | null> {
+async function segmentPeak(streamId: string, s: WSeg, timeoutMs: number): Promise<CacheVal | null> {
   const cache = loadCache(streamId, s.runId);
   const hit = cache[String(s.seq)];
   // A pre-fine-envelope entry (two values) is a hit for the sampled path but
   // not here: this is the function that upgrades it.
   if (hit && hit.length === 3) return hit;
-  const dir = runDirOf(streamId, s.runId);
-  const init = join(dir, 'init.mp4');
-  const seg = join(dir, s.file);
-  if (!existsSync(init) || !existsSync(seg)) return null;
+  const src = srcOf(streamId, s);
+  const [init, seg] = await Promise.all([readInit(src.init), readSrc(src.seg)]);
+  if (!init || !seg) { if (!init) markGone([s]); return null; }
   const pcm = await decodePcm(init, [seg], timeoutMs);
   if (!pcm.length) return null;
-  const val = measureSegmentPcm(pcm, 0, s.durMs);
+  // Placed from the listing, its length is the run's cadence; one segment
+  // decoded alone is exactly its own length, so that is what is measured.
+  const val = measureSegmentPcm(pcm, 0, s.listed ? (pcm.length / PCM_RATE) * 1000 : s.durMs);
   cache[String(s.seq)] = val;
   return val;
 }
@@ -239,10 +374,10 @@ async function pool<T>(jobs: (() => Promise<T>)[], limit: number): Promise<T[]> 
  * happily draw across a gap the extractor refuses to cut across.
  */
 const CONTIGUITY_TOLERANCE_MS = 50;
-function contiguousBlocks(list: LocalSegment[]): LocalSegment[][] {
+function contiguousBlocks<T extends LocalSegment>(list: T[]): T[][] {
   const sorted = [...list].sort((a, b) => a.startMs - b.startMs);
-  const blocks: LocalSegment[][] = [];
-  let cur: LocalSegment[] = [];
+  const blocks: T[][] = [];
+  let cur: T[] = [];
   for (const s of sorted) {
     if (!cur.length) { cur = [s]; continue; }
     const prev = cur[cur.length - 1];
@@ -285,7 +420,11 @@ export function primeWaveformCache(streamId: string, fromMs: number, toMs: numbe
   priming.add(streamId);
   void (async () => {
     try {
-      const segs = audioSegmentsInRange(streamId, fromMs, toMs).reverse();  // newest first
+      // The disk is read synchronously (so progress is known the moment this
+      // starts); the bucket is listed. Newest first either way.
+      const segs = (coverageFromBucket(streamId)
+        ? await audioSegments(streamId, fromMs, toMs, false)
+        : audioSegmentsInRange(streamId, fromMs, toMs)).reverse();
       // Entries from before the fine envelope existed count as unmeasured:
       // they still serve a wide window, but a clip-zoom window needs frames.
       const todo = segs.filter((s) => (loadCache(streamId, s.runId)[String(s.seq)]?.length ?? 0) < 3);
@@ -317,7 +456,7 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
   const n = Math.max(16, Math.min(1200, Math.round(buckets)));
   const bucketMs = (to - from) / n;
   const out: (WaveBucket | null)[] = new Array(n).fill(null);
-  const segs = audioSegmentsInRange(streamId, from, to);
+  const segs = await audioSegments(streamId, from, to, to - from <= EXACT_MAX_MS);
   const base: WaveformResult = {
     streamId, from, to, bucketMs, mode: 'exact', complete: true, pending: 0, buckets: out,
   };
@@ -329,7 +468,7 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
     // at a tight zoom, and several frames fall into one bucket at a loose one)
     const accPeak = new Float64Array(n).fill(-Infinity);
     const accRms = new Float64Array(n).fill(-Infinity);
-    const paintFrames = (seg: LocalSegment, frames: [number, number][]) => {
+    const paintFrames = (seg: WSeg, frames: [number, number][]) => {
       for (let k = 0; k < frames.length; k++) {
         const t0 = seg.startMs + k * FINE_MS, t1 = t0 + FINE_MS;
         const b0 = Math.floor((t0 - from) / bucketMs), b1 = Math.floor((t1 - 1 - from) / bucketMs);
@@ -342,7 +481,7 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
     };
 
     let measured = 0;
-    const missing: LocalSegment[] = [];
+    const missing: WSeg[] = [];
     for (const s of segs) {
       const hit = loadCache(streamId, s.runId)[String(s.seq)];
       if (hit && hit.length === 3) { paintFrames(s, decodeFine(hit[2])); measured++; }
@@ -355,36 +494,50 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
     const started = Date.now();
     const touched = new Set<string>();
     if (missing.length) {
-      const byRun = new Map<string, LocalSegment[]>();
+      const byRun = new Map<string, WSeg[]>();
       for (const s of missing) {
+        if (isUnreadable(s)) continue;
         if (!byRun.has(s.runId)) byRun.set(s.runId, []);
         byRun.get(s.runId)!.push(s);
       }
       outer: for (const [runId, list] of byRun) {
-        const dir = runDirOf(streamId, runId);
-        const init = join(dir, 'init.mp4');
-        if (!existsSync(init)) continue;
+        const init = await readInit(srcOf(streamId, list[0]).init);
+        if (!init) { markGone(list); continue; }
         // SPLIT ON HOLES BEFORE DECODING. Concatenated segments give PCM that
         // is contiguous in SAMPLES whether or not the media is contiguous in
         // TIME; anchoring across a hole places everything after it early by
         // the hole's length. resolve.ts refuses to join across a hole for the
         // same reason, with the same tolerance.
-        for (const block of contiguousBlocks(list)) {
+        for (const whole of contiguousBlocks(list)) {
           if (Date.now() - started > BUDGET_MS) { base.complete = false; break outer; }
-          const pcm = await decodePcm(init, block.map((s) => join(dir, s.file)),
-            Math.max(1000, BUDGET_MS - (Date.now() - started)));
-          if (!pcm.length) continue;
-          const cache = loadCache(streamId, runId);
-          const blockStart = block[0].startMs;
-          for (const s of block) {
-            const s0 = Math.floor(((s.startMs - blockStart) / 1000) * PCM_RATE);
-            if (s0 >= pcm.length) break;
-            const val = measureSegmentPcm(pcm, s0, s.durMs);
-            cache[String(s.seq)] = val;
-            paintFrames(s, decodeFine(val[2]));
-            measured++;
+          // Read the block's bytes (8 at a time from the bucket). A segment
+          // that cannot be read is a hole too: decode the readable stretches
+          // either side of it separately, never across it.
+          const bytes = await pool(whole.map((s) => () => readSrc(srcOf(streamId, s).seg)), 8);
+          const parts: { segs: WSeg[]; bufs: Buffer[] }[] = [];
+          let cur: { segs: WSeg[]; bufs: Buffer[] } | null = null;
+          whole.forEach((s, i) => {
+            const b = bytes[i];
+            if (!b) { cur = null; return; }
+            if (!cur) { cur = { segs: [], bufs: [] }; parts.push(cur); }
+            cur.segs.push(s); cur.bufs.push(b);
+          });
+          for (const { segs: block, bufs } of parts) {
+            if (Date.now() - started > BUDGET_MS) { base.complete = false; break outer; }
+            const pcm = await decodePcm(init, bufs, Math.max(1000, BUDGET_MS - (Date.now() - started)));
+            if (!pcm.length) continue;
+            const cache = loadCache(streamId, runId);
+            const blockStart = block[0].startMs;
+            for (const s of block) {
+              const s0 = Math.floor(((s.startMs - blockStart) / 1000) * PCM_RATE);
+              if (s0 >= pcm.length) break;
+              const val = measureSegmentPcm(pcm, s0, s.durMs);
+              cache[String(s.seq)] = val;
+              paintFrames(s, decodeFine(val[2]));
+              measured++;
+            }
+            touched.add(runId);
           }
-          touched.add(runId);
         }
       }
       for (const runId of touched) saveCache(streamId, runId);
@@ -396,12 +549,14 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
     }
     // An empty bucket where a segment exists but was not measured (budget cut)
     // is work still to do; an empty bucket with no segment is a real GAP.
-    const unmeasured = segs.length - measured;
+    // A segment that cannot be read (archive, deleted) is a gap, not work to do.
+    const gone = missing.filter(isUnreadable).length;
+    const unmeasured = segs.length - measured - gone;
     base.pending = unmeasured > 0
       ? Math.max(1, Math.round(n * (unmeasured / Math.max(1, segs.length))))
       : 0;
-    base.complete = unmeasured === 0;
-    base.coverage = { measured, total: segs.length };
+    base.complete = unmeasured <= 0;
+    base.coverage = { measured, total: segs.length - gone };
     base.priming = isPriming(streamId);
     base.progress = primingProgress(streamId);
     return base;
@@ -417,7 +572,7 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
   //  picket fence rather than an envelope, which is worse than useless when the
   //  job is to find the quiet moment to cut on.
   base.mode = 'sampled';
-  const segForBucket: (LocalSegment | null)[] = new Array(n).fill(null);
+  const segForBucket: (WSeg | null)[] = new Array(n).fill(null);
   for (const s of segs) {
     const b0 = Math.floor((s.startMs - from) / bucketMs);
     const b1 = Math.floor((s.startMs + Math.max(1, s.durMs) - 1 - from) / bucketMs);
@@ -427,7 +582,7 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
     }
   }
 
-  interface Paint { seg: LocalSegment; buckets: number[] }
+  interface Paint { seg: WSeg; buckets: number[] }
   const paint = new Map<string, Paint>();
   for (let i = 0; i < n; i++) {
     const s = segForBucket[i];
@@ -459,7 +614,7 @@ export async function waveform(streamId: string, fromMs: number, toMs: number, b
   results.forEach((r, k) => { if (r) apply(take[k], r[0], r[1]) });
   for (const runId of new Set(take.map((e) => e.seg.runId))) saveCache(streamId, runId);
 
-  base.pending = out.reduce<number>((acc, b, i) => acc + (b === null && segForBucket[i] ? 1 : 0), 0);
+  base.pending = out.reduce<number>((acc, b, i) => acc + (b === null && segForBucket[i] && !isUnreadable(segForBucket[i]!) ? 1 : 0), 0);
   base.complete = base.pending === 0;
   base.priming = isPriming(streamId);
   base.progress = primingProgress(streamId);
