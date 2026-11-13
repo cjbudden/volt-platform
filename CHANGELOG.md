@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.0 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: A full VOD asset made from a recording (Publish full VOD, or an event's automatic replay) now plays: it is pointed at the recording's own media, on a single server and on a cloud service, without storing a second copy.
+
+### Internal
+
+- added · Recordings: New check suite full-recording-vod (32 assertions): the full-recording title's playlists on the disk and in the bucket, the publish route and the automatic replay.
+
 ## 0.139.0 (2026-11-13)
 
 ### Product (in customer release notes)
