@@ -79,6 +79,21 @@ export async function frameFolderObject(f: FrameFolder): Promise<{ id: string; a
   const address = folderAddress(f.key);
   const hit = registered.get(address.uri);
   if (hit) return { id: hit, address };
+  // The first stills of a folder are often made together (the timeline
+  // filmstrip makes four at once, 2.3c-13): they share one registration, or
+  // the second insert of the same folder fails on the unique key and its
+  // still is lost.
+  let p = registering.get(address.uri);
+  if (!p) {
+    p = registerFolder(f, address).finally(() => registering.delete(address.uri));
+    registering.set(address.uri, p);
+  }
+  return { id: await p, address };
+}
+
+const registering = new Map<string, Promise<string>>();
+
+async function registerFolder(f: FrameFolder, address: FolderAddress): Promise<string> {
   const obj = await registerObject({
     vodAssetId: f.vodAssetId ?? null, channelId: f.channelId ?? null, eventId: f.eventId ?? null,
     logicalKey: f.logicalKey, kind: FRAME_STILLS_KIND, rendition: null,
@@ -92,7 +107,7 @@ export async function frameFolderObject(f: FrameFolder): Promise<{ id: string; a
     throw new FrameError(410, 'the stills of this media were removed under its retention rule');
   }
   registered.set(address.uri, obj.id);
-  return { id: obj.id, address };
+  return obj.id;
 }
 
 /** Keep the folder object's size current after a still is added or removed. */

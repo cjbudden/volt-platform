@@ -100,7 +100,10 @@ export function cadenceMs(segs: { seq: number; lastModified: number }[]): number
  * Same shape as resolveRange (blocks, gaps, coverage); segment paths are
  * s3:// keys and segment times are placed from the listing, not measured.
  */
-export async function coverageRangeBucket(streamId: string, fromMs: number, toMs: number, kind: MediaKind = 'video'): Promise<AnyResolution & { measured: 'listing' }> {
+export async function coverageRangeBucket(streamId: string, fromMs: number, toMs: number, kind: MediaKind = 'video',
+  /** minHeight: the lightest picture at least that tall (pickBucketRendition). skipArchived: leave
+   *  segments in archive storage out of the blocks (still counted), for a reader that must open them. */
+  opts: { minHeight?: number; skipArchived?: boolean } = {}): Promise<AnyResolution & { measured: 'listing' }> {
   const from = Math.min(fromMs, toMs);
   const to = Math.max(fromMs, toMs);
   const bucket = config.aws.s3Bucket;
@@ -110,7 +113,7 @@ export async function coverageRangeBucket(streamId: string, fromMs: number, toMs
   let archived = 0;
   for (const runId of root ? runsForRange(root.runs, from, to) : []) {
     const runKey = `${root!.rootKey}runs/${runId}/`;
-    const rendition = await pickBucketRendition(api, bucket, runKey, kind);
+    const rendition = await pickBucketRendition(api, bucket, runKey, kind, opts.minHeight);
     if (!rendition) continue;
     const prefix = `${runKey}${rendition}/`;
     const listed = await listCached(api, bucket, prefix);
@@ -132,7 +135,7 @@ export async function coverageRangeBucket(streamId: string, fromMs: number, toMs
       if (!(p.startMs + p.durMs > from && p.startMs < to)) return;
       // Cold media is still recorded media: counted, and reported, so the
       // caller can say it needs a restore before a clip.
-      if (UNREADABLE.has(o.storageClass)) archived++;
+      if (UNREADABLE.has(o.storageClass)) { archived++; if (opts.skipArchived) return; }
       inRange.push({ runId, rendition, file: o.file, seq: o.seq, startMs: p.startMs, durMs: p.durMs, uri: `s3://${bucket}/${o.key}` });
     });
     if (inRange.length) picks.push({ runId, rendition, dir: `s3://${bucket}/${prefix}`, segs: inRange });

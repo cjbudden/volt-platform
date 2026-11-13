@@ -291,16 +291,40 @@ export async function streamFrameAt(streamId: string, ms: number): Promise<Strea
   return { runId: s.runId, rendition: s.rendition, seq: s.seq, localFrame: k, wallMs: at(k), rate: f.rate, timescale: f.timescale };
 }
 
-/** The still of the stream frame `fr` (from streamFrameAt), made if needed. */
-export async function streamFrameStill(accountId: string, streamId: string, fr: StreamFrame): Promise<{ key: string; cache: 'cached' | 'made' }> {
+/** The folder a stream's stills of one run and rendition go in. */
+async function streamFolder(accountId: string, streamId: string, runId: string, rendition: string): Promise<FrameFolder> {
   // Owned by the stream, like the run it was taken from, so it follows the
   // stream's recording rule and goes with the run (services/media/prune.ts).
   const isChannel = !!(await one(`SELECT 1 FROM channels WHERE id = $1`, [streamId]));
-  const folder: FrameFolder = {
-    key: `derived/${accountId}/frames/streams/${streamId}/${fr.runId}/${fr.rendition}`,
-    logicalKey: runFolderKey(fr.runId, fr.rendition),
+  return {
+    key: `derived/${accountId}/frames/streams/${streamId}/${runId}/${rendition}`,
+    logicalKey: runFolderKey(runId, rendition),
     channelId: isChannel ? streamId : null, eventId: isChannel ? null : streamId,
   };
+}
+
+/**
+ * Where a still of a stream's segment is, or would be, kept: the image store
+ * key. The timeline filmstrip on AWS (services/thumbs.ts, 2.3c-13) keeps its
+ * pictures here rather than in the run folder on the task's disk (a run
+ * folder there would make the stream read from the disk).
+ */
+export const streamStillKey = (accountId: string, streamId: string, runId: string, rendition: string, name: string) =>
+  `derived/${accountId}/frames/streams/${streamId}/${runId}/${rendition}/${name}`;
+
+/**
+ * A picture of a stream's segment, kept as a frame still: same folder, record,
+ * TTL and removal with the run as the exact frames (folders.ts). `make` is
+ * called once however many requests ask together.
+ */
+export async function streamSegmentStill(accountId: string, streamId: string, runId: string, rendition: string, name: string,
+  make: () => Promise<Buffer>): Promise<{ key: string; cache: 'cached' | 'made' }> {
+  return ensureStill(accountId, await streamFolder(accountId, streamId, runId, rendition), name, make);
+}
+
+/** The still of the stream frame `fr` (from streamFrameAt), made if needed. */
+export async function streamFrameStill(accountId: string, streamId: string, fr: StreamFrame): Promise<{ key: string; cache: 'cached' | 'made' }> {
+  const folder = await streamFolder(accountId, streamId, fr.runId, fr.rendition);
   return ensureStill(accountId, folder, `${fr.seq}-${fr.localFrame}.jpg`, async () => {
     let s: LocalSegment | BucketSegment | null | undefined;
     if (resolvesFromBucket(streamId)) {
