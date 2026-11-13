@@ -2,6 +2,12 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.7 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud deployment, Exact frame and frame stepping on a recording now show the picture at that moment, instead of saying there is a gap in the capture. A moment that has moved to archive storage says to restore the recording first.
+
 ## 0.140.6 (2026-11-13)
 
 ### Product (in customer release notes)
