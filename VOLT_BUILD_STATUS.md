@@ -3169,7 +3169,7 @@ What: on AWS the encoder mirrored its output straight to `<kind>/<id>/` in the b
 - **Guides**: `docs-site/docs/guides/storage.md` (cloud paragraph), `docs/engineering/deploying-to-aws.md`.
 - **Not done** (2.3c-4): the recordings page on AWS, the asset detail's `audioOnly` for clips of non-radio streams, EPG auto-VOD, `master_key` and Publish full VOD, frame stills, encoder stills, storyboards, removal, exact placement. Not run on moto or real S3.
 
-## 2026-11-13 - The full-recording title plays (build queue 2.3c-4; vVERSION)
+## 2026-11-13 - The full-recording title plays (build queue 2.3c-4; v0.140.0)
 
 - **What**: Publish full VOD and an event's automatic replay made a title whose `master_key` was the recording's old-layout key (`channel/<id>/<day>`, `event/<id>`), which nothing writes on the Mac or on AWS, so it played nothing. The title now gets its own playlists over the recording's segments, with no media copied.
 - **Where**: `volt-app/src/services/media/fullRecordingVod.ts` (`buildFullRecordingPackage`, `writeFullRecordingPackage`, `attachFullRecordingPackage`): master, video and audio playlists at `CLIPS_DIR/<asset>/` and, when clips go to the bucket, `clips/<asset>/`; `master_key` = `/clips/<asset>/master.m3u8`. The disk first (`localRecordingIndex.ts` range playlists, `/origin/` addresses), else the bucket (`s3RecordingSource.ts` `buildRecordingSource`, now taking a rendition and a segment address; CDN addresses). Called from `modules/recordings.ts` (publish, which now reads the row back) and `services/clips.ts` `deriveEventVod`. No media found: the title is kept as it was.
