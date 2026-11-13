@@ -123,14 +123,24 @@ export function runsForRange(runs: string[], fromMs: number, toMs: number): stri
   return [...(before ? [before] : []), ...inside].map((r) => r.id);
 }
 
-/** The rendition a clip of `kind` is cut from in one run, the Mac's rule (pickRenditions). */
-export async function pickBucketRendition(api: S3Api, bucket: string, runKey: string, kind: MediaKind): Promise<string | null> {
+/**
+ * The rendition a clip of `kind` is cut from in one run, the Mac's rule (pickRenditions).
+ * With `minHeight` (the storyboard builder, 2.3c-12) the lightest picture at
+ * least that tall instead, else the tallest: a 160 px tile needs no 1080p
+ * segment, and the smaller one is a fraction of the bytes read and decoded.
+ */
+export async function pickBucketRendition(api: S3Api, bucket: string, runKey: string, kind: MediaKind, minHeight?: number): Promise<string | null> {
   const level = await listLevel(api, bucket, runKey);
   const names = level.folders.map((p) => p.slice(runKey.length).replace(/\/$/, ''));
   const audio = names.includes('audio');
   const videos = names.filter((n) => !NOT_RENDITIONS.has(n) && RUN_ID.test(n))
     .map((r) => ({ r, h: parseInt(r, 10) || 0 })).sort((a, b) => b.h - a.h);
   if (kind === 'audio') return audio ? 'audio' : null;
+  if (minHeight != null) {
+    const sized = videos.filter((v) => v.h > 0);
+    const light = [...sized].reverse().find((v) => v.h >= minHeight) ?? sized[0];
+    if (light) return light.r;
+  }
   return videos[0]?.r ?? (audio ? 'audio' : null);
 }
 
@@ -138,7 +148,8 @@ export async function pickBucketRendition(api: S3Api, bucket: string, runKey: st
  * Resolve [fromMs..toMs] on a stream from its runs in the bucket. Same blocks,
  * gaps and coverage as the disk; segment and init paths are s3:// keys.
  */
-export async function resolveRangeBucket(streamId: string, fromMs: number, toMs: number, kind: MediaKind = 'video'): Promise<AnyResolution> {
+export async function resolveRangeBucket(streamId: string, fromMs: number, toMs: number, kind: MediaKind = 'video',
+  opts: { minHeight?: number } = {}): Promise<AnyResolution> {
   const from = Math.min(fromMs, toMs);
   const to = Math.max(fromMs, toMs);
   const bucket = config.aws.s3Bucket;
@@ -148,7 +159,7 @@ export async function resolveRangeBucket(streamId: string, fromMs: number, toMs:
   let archived = 0;
   for (const runId of root ? runsForRange(root.runs, from, to) : []) {
     const runKey = `${root!.rootKey}runs/${runId}/`;
-    const rendition = await pickBucketRendition(api, bucket, runKey, kind);
+    const rendition = await pickBucketRendition(api, bucket, runKey, kind, opts.minHeight);
     if (!rendition) continue;
     const prefix = `${runKey}${rendition}/`;
     const listed = await listAll(api, bucket, prefix);

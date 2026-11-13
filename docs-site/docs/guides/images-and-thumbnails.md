@@ -110,6 +110,10 @@ Every TV channel and event with video gets pictures of itself while it runs:
 
 Previews trail live by a couple of minutes. Older hours are built when someone asks for them.
 
+When retention removes a recording's media, its stills and preview sheets go too, so the library never shows pictures of something that is no longer there. Two kinds stay: those around a part a clip was cut from, and any still used as an image on a title. The ones removed wait in **Storage > Recently removed** for a few days, where you can restore them.
+
+On a cloud service a stretch of recording that has moved to archive storage gets no previews; those moments show as empty in the preview strip.
+
 ## How it connects
 
 | Section | How it relates |

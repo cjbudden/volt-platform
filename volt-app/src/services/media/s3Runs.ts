@@ -333,7 +333,7 @@ export async function pruneS3Run(o: { uri: string; streamId: string; recordingId
   const pointer = await pointerRun(api, run.bucket, run.rootKey);
 
   const blocks = await query<any>(
-    `SELECT DISTINCT cs.vod_asset_id, cs.first_seq, cs.last_seq FROM clip_segments cs
+    `SELECT DISTINCT cs.vod_asset_id, cs.first_seq, cs.last_seq, cs.source_from_ms, cs.source_to_ms FROM clip_segments cs
        JOIN vod_assets v ON v.id = cs.vod_asset_id
       WHERE cs.run_id = $1 AND (v.channel_id = $2 OR v.event_id = $2 OR cs.recording_id = $3)`,
     [run.runId, o.streamId, o.recordingId ?? null]).catch(() => [] as any[]);
@@ -384,7 +384,56 @@ export async function pruneS3Run(o: { uri: string; streamId: string; recordingId
     await retireFrameFolders({ streamId: o.streamId, logicalLike: `frames/run/${run.runId}/%`, reason: `${o.reason}; the run was removed`, actor: o.actor })
       .catch((e) => console.warn('[prune] frame stills of the run not removed', e));
   }
+
+  // The library stills and storyboard sheets of the run's time (2.3c-12), as
+  // on the Mac (prune.ts removeDerivedImages): they are in the image store, not
+  // the media bucket, so they go to the restore bin there, except what clips
+  // were cut from. The run's time is from its id (the encoder's clock at
+  // start) to its last segment's upload; the segment length from the
+  // rendition with the most segments.
+  await removeRunImages(o, run, all, blocks, res).catch((e) => console.warn('[prune] stills and sheets of the bucket run not removed', e));
   return res;
+}
+
+async function removeRunImages(o: { streamId: string; recordingId?: string | null; reason: string; actor: string },
+  run: { runId: string; runKey: string }, all: Listed[], blocks: any[], res: PruneResult): Promise<void> {
+  const perRendition = new Map<string, { n: number; last: number; first: number }>();
+  for (const k of all) {
+    const rest = k.key.slice(run.runKey.length);
+    if (!SEGMENT.test('/' + rest) || !rest.includes('/')) continue;
+    const r = rest.slice(0, rest.indexOf('/'));
+    const x = perRendition.get(r) ?? { n: 0, last: 0, first: Infinity };
+    x.n++; x.last = Math.max(x.last, k.lastModified); x.first = Math.min(x.first, k.lastModified);
+    perRendition.set(r, x);
+  }
+  const most = [...perRendition.values()].sort((a, b) => b.n - a.n)[0];
+  if (!most) return;
+  const start = runStartMs(run.runId) ?? most.first;
+  const end = Math.max(...[...perRendition.values()].map((x) => x.last));
+  if (!(end > start)) return;
+  const segMs = Math.max(1000, Math.round((end - start) / most.n));
+  const keepTime: [number, number][] = blocks
+    .filter((b: any) => b.source_from_ms != null && b.source_to_ms != null)
+    .map((b: any) => [Number(b.source_from_ms) - CLIP_MARGIN_SEGMENTS * segMs, Number(b.source_to_ms) + CLIP_MARGIN_SEGMENTS * segMs]);
+  const owner = await one<any>(`SELECT COALESCE(c.name, e.name) AS name, COALESCE(gc.account_id, ge.account_id) AS account_id
+      FROM (SELECT $1::uuid AS id) x LEFT JOIN channels c ON c.id = x.id LEFT JOIN groups gc ON gc.id = c.group_id
+      LEFT JOIN events e ON e.id = x.id LEFT JOIN groups ge ON ge.id = e.group_id`, [o.streamId]);
+  const { BinItem } = await import('./trash');
+  const { removeDerivedImages } = await import('./prune');
+  const when = new Date(start).toISOString().slice(0, 16).replace('T', ' ');
+  const bin = await BinItem.open({ accountId: owner?.account_id ?? null, kind: 'recording_media', subjectId: o.recordingId ?? null,
+    label: `${owner?.name ?? 'Recording'} · ${when} UTC: stills and storyboard sheets (the media was removed from the bucket)`,
+    reason: o.reason, createdBy: o.actor });
+  const d = await removeDerivedImages({ streamId: o.streamId, span: [start, end], keepTime, bin });
+  res.stills = d.stills; res.sheets = d.sheets;
+  if (!bin.isEmpty) {
+    res.binId = await bin.save({ streamId: o.streamId, runId: run.runId, recordingId: o.recordingId ?? null, objects: [], storyboards: d.sheetRows });
+  }
+  if (d.emptied.length) {
+    const { pruneEmptyFolders } = await import('./libraryMoves');
+    for (const acc of [...new Set(d.emptied.map((e) => e.account_id))])
+      await pruneEmptyFolders(acc, d.emptied.filter((e) => e.account_id === acc).map((e) => e.folder)).catch((e) => console.warn('[prune] empty folders not removed', e));
+  }
 }
 
 /** Every stream's runs in the bucket, throttled per stream (the tick). */

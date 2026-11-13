@@ -115,62 +115,10 @@ export async function pruneRun(o: {
   }
 
   // Stills and sprite sheets of the removed time.
-  const sheetRows: { id: string; sheets: any }[] = [];
-  // Folders images left this pass: emptied ones are removed after (libraryMoves.ts pruneEmptyFolders).
-  const emptied: { account_id: string; folder: string }[] = [];
-  if (span) {
-    const removed = (w: Win) => inside(w, span) && !keepTime.some((k) => overlaps(w, k));
-    const stills = await query<any>(
-      `SELECT * FROM media_files WHERE source = 'encoder' AND channel_id = $1 AND kind = 'keyframe'
-          AND captured_at >= $2 AND captured_at < $3`, [o.streamId, new Date(span[0]), new Date(span[1])]);
-    // A still an asset uses as an image (its main image, or one of its typed images) stays.
-    const posters = await query<any>(`SELECT poster_key AS k FROM vod_assets WHERE poster_key IS NOT NULL
-                                        UNION SELECT poster_key FROM recordings WHERE poster_key IS NOT NULL
-                                        UNION SELECT image_key FROM vod_asset_images`).catch(() => query<any>(`SELECT poster_key AS k FROM vod_assets WHERE poster_key IS NOT NULL
-                                        UNION SELECT poster_key FROM recordings WHERE poster_key IS NOT NULL`));
-    const used = (key: string) => posters.some((p: any) => String(p.k).endsWith(key));
-    const go = stills.filter((s: any) => { const t = new Date(s.captured_at).getTime(); return removed([t, t + 1]) && !used(s.store_key); });
-    if (go.length) {
-      for (const s of go) await bin.image(s.store_key, Number(s.size_bytes ?? 0));
-      await snapshotDelete(bin, 'media_files', go.map((s: any) => s.id));
-      await query(`DELETE FROM media_files WHERE id = ANY($1::uuid[])`, [go.map((s: any) => s.id)]);
-      emptied.push(...go.map((s: any) => ({ account_id: s.account_id, folder: s.folder })));
-      res.stills = go.length;
-    }
-    const boards = await query<any>(`SELECT * FROM storyboards WHERE stream_id = $1 AND unit_end > $2 AND unit_start < $3`,
-      [o.streamId, new Date(span[0]), new Date(span[1])]);
-    for (const sb of boards) {
-      const keep: any[] = [], drop: any[] = [];
-      for (const sh of sb.sheets ?? []) {
-        const w: Win = [Number(sh.start_ms), Number(sh.start_ms) + Number(sh.slots ?? 60) * Number(sb.interval_ms)];
-        (removed(w) ? drop : keep).push(sh);
-      }
-      if (!drop.length) continue;
-      for (const sh of drop) await bin.image(sh.key);
-      // Their rows in the sprite inventory (thumbnails/spriteStore.ts) go into the bin with them;
-      // sheets from before the sprite store may still have an Image Library row.
-      const sprites = await query<any>(`SELECT id FROM sprite_sheets WHERE store_key = ANY($1::text[])`, [drop.map((d) => d.key)]);
-      if (sprites.length) {
-        await snapshotDelete(bin, 'sprite_sheets', sprites.map((f: any) => f.id));
-        await query(`DELETE FROM sprite_sheets WHERE id = ANY($1::uuid[])`, [sprites.map((f: any) => f.id)]);
-      }
-      const sheetFiles = await query<any>(`SELECT id, account_id, folder FROM media_files WHERE account_id = $1 AND store_key = ANY($2::text[])`, [sb.account_id, drop.map((d) => d.key)]);
-      emptied.push(...sheetFiles.map((f: any) => ({ account_id: f.account_id, folder: f.folder })));
-      if (sheetFiles.length) {
-        await snapshotDelete(bin, 'media_files', sheetFiles.map((f: any) => f.id));
-        await query(`DELETE FROM media_files WHERE id = ANY($1::uuid[])`, [sheetFiles.map((f: any) => f.id)]);
-      }
-      if (!keep.length) {
-        if (sb.vtt_key) await bin.image(sb.vtt_key);
-        await snapshotDelete(bin, 'storyboards', [sb.id]);
-        await query(`DELETE FROM storyboards WHERE id = $1`, [sb.id]);
-      } else {
-        sheetRows.push({ id: sb.id, sheets: sb.sheets });
-        await query(`UPDATE storyboards SET sheets = $2::jsonb, updated_at = now() WHERE id = $1`, [sb.id, JSON.stringify(keep)]);
-      }
-      res.sheets += drop.length;
-    }
-  }
+  const derived = span ? await removeDerivedImages({ streamId: o.streamId, span, keepTime, bin }) : { stills: 0, sheets: 0, sheetRows: [], emptied: [] };
+  res.stills = derived.stills; res.sheets = derived.sheets;
+  const sheetRows = derived.sheetRows;
+  const emptied = derived.emptied;
 
   // Exact-frame stills taken from this run (services/frames/folders.ts). They
   // are derived and made again in a moment, so they go now rather than to the
@@ -191,6 +139,76 @@ export async function pruneRun(o: {
       await pruneEmptyFolders(acc, emptied.filter((e) => e.account_id === acc).map((e) => e.folder)).catch((e) => console.warn('[prune] empty folders not removed', e));
   }
   return res;
+}
+
+/**
+ * The derived images of a removed time: the Image Library's encoder stills of
+ * the stream and its storyboard sheets (with their sprite_sheets rows; an hour
+ * left with no sheets goes with its VTT), into `bin`, except what clips were
+ * cut from (`keepTime`) and stills an asset uses as an image. Shared by the
+ * Mac's run removal and the bucket's (s3Runs.ts pruneS3Run, 2.3c-12): the
+ * images live in the image store either way, whatever held the segments.
+ */
+export async function removeDerivedImages(o: { streamId: string; span: Win; keepTime: Win[]; bin: BinItem }): Promise<{
+  stills: number; sheets: number; sheetRows: { id: string; sheets: any }[]; emptied: { account_id: string; folder: string }[];
+}> {
+  const { span, keepTime, bin } = o;
+  const out = { stills: 0, sheets: 0, sheetRows: [] as { id: string; sheets: any }[], emptied: [] as { account_id: string; folder: string }[] };
+  const sheetRows = out.sheetRows;
+  // Folders images left this pass: emptied ones are removed after (libraryMoves.ts pruneEmptyFolders).
+  const emptied = out.emptied;
+  const removed = (w: Win) => inside(w, span) && !keepTime.some((k) => overlaps(w, k));
+  const stills = await query<any>(
+    `SELECT * FROM media_files WHERE source = 'encoder' AND channel_id = $1 AND kind = 'keyframe'
+        AND captured_at >= $2 AND captured_at < $3`, [o.streamId, new Date(span[0]), new Date(span[1])]);
+  // A still an asset uses as an image (its main image, or one of its typed images) stays.
+  const posters = await query<any>(`SELECT poster_key AS k FROM vod_assets WHERE poster_key IS NOT NULL
+                                      UNION SELECT poster_key FROM recordings WHERE poster_key IS NOT NULL
+                                      UNION SELECT image_key FROM vod_asset_images`).catch(() => query<any>(`SELECT poster_key AS k FROM vod_assets WHERE poster_key IS NOT NULL
+                                      UNION SELECT poster_key FROM recordings WHERE poster_key IS NOT NULL`));
+  const used = (key: string) => posters.some((p: any) => String(p.k).endsWith(key));
+  const go = stills.filter((s: any) => { const t = new Date(s.captured_at).getTime(); return removed([t, t + 1]) && !used(s.store_key); });
+  if (go.length) {
+    for (const s of go) await bin.image(s.store_key, Number(s.size_bytes ?? 0));
+    await snapshotDelete(bin, 'media_files', go.map((s: any) => s.id));
+    await query(`DELETE FROM media_files WHERE id = ANY($1::uuid[])`, [go.map((s: any) => s.id)]);
+    emptied.push(...go.map((s: any) => ({ account_id: s.account_id, folder: s.folder })));
+    out.stills = go.length;
+  }
+  const boards = await query<any>(`SELECT * FROM storyboards WHERE stream_id = $1 AND unit_end > $2 AND unit_start < $3`,
+    [o.streamId, new Date(span[0]), new Date(span[1])]);
+  for (const sb of boards) {
+    const keep: any[] = [], drop: any[] = [];
+    for (const sh of sb.sheets ?? []) {
+      const w: Win = [Number(sh.start_ms), Number(sh.start_ms) + Number(sh.slots ?? 60) * Number(sb.interval_ms)];
+      (removed(w) ? drop : keep).push(sh);
+    }
+    if (!drop.length) continue;
+    for (const sh of drop) await bin.image(sh.key);
+    // Their rows in the sprite inventory (thumbnails/spriteStore.ts) go into the bin with them;
+    // sheets from before the sprite store may still have an Image Library row.
+    const sprites = await query<any>(`SELECT id FROM sprite_sheets WHERE store_key = ANY($1::text[])`, [drop.map((d) => d.key)]);
+    if (sprites.length) {
+      await snapshotDelete(bin, 'sprite_sheets', sprites.map((f: any) => f.id));
+      await query(`DELETE FROM sprite_sheets WHERE id = ANY($1::uuid[])`, [sprites.map((f: any) => f.id)]);
+    }
+    const sheetFiles = await query<any>(`SELECT id, account_id, folder FROM media_files WHERE account_id = $1 AND store_key = ANY($2::text[])`, [sb.account_id, drop.map((d) => d.key)]);
+    emptied.push(...sheetFiles.map((f: any) => ({ account_id: f.account_id, folder: f.folder })));
+    if (sheetFiles.length) {
+      await snapshotDelete(bin, 'media_files', sheetFiles.map((f: any) => f.id));
+      await query(`DELETE FROM media_files WHERE id = ANY($1::uuid[])`, [sheetFiles.map((f: any) => f.id)]);
+    }
+    if (!keep.length) {
+      if (sb.vtt_key) await bin.image(sb.vtt_key);
+      await snapshotDelete(bin, 'storyboards', [sb.id]);
+      await query(`DELETE FROM storyboards WHERE id = $1`, [sb.id]);
+    } else {
+      sheetRows.push({ id: sb.id, sheets: sb.sheets });
+      await query(`UPDATE storyboards SET sheets = $2::jsonb, updated_at = now() WHERE id = $1`, [sb.id, JSON.stringify(keep)]);
+    }
+    out.sheets += drop.length;
+  }
+  return out;
 }
 
 /** Remove every run of a recording (the cleanup script, a manual expiry that has passed). */

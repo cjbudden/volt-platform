@@ -18,6 +18,7 @@ import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, badRequest, notFound } from '../util/http';
 import { config } from '../config';
 import { buildRangeInBackground, layoutOf, sheetUrl, streamInfo, unitsFor } from '../services/thumbnails/builder';
+import { resolvesFromBucket } from '../services/clips/resolveBucket';
 import { clipPieces, recordingPieces, vttForRange } from '../services/thumbnails/clips';
 import { fileVttFor } from '../services/thumbnails/fileSprites';
 import { spriteUsage } from '../services/thumbnails/spriteStore';
@@ -67,7 +68,8 @@ thumbnailsRouter.get('/storyboard', asyncHandler(async (req, res) => {
   if (q.prime === '1' && config.thumbnails.enabled) {
     const built = new Set(units.filter((u) => u.status === 'complete').map((u) => u.unitStart));
     const missing = units.length === 0 || units.some((u) => !built.has(u.unitStart));
-    if (missing && listRuns(s.id).length) priming = buildRangeInBackground(s.id, from, to);
+    // On AWS the runs are in the bucket, not on this disk (2.3c-12): the builder reads them there.
+    if (missing && (listRuns(s.id).length || resolvesFromBucket(s.id))) priming = buildRangeInBackground(s.id, from, to);
   }
   res.setHeader('Cache-Control', 'private, max-age=15');
   res.json({

@@ -47,6 +47,7 @@ const KEEP_STREAMS = 64;
 const windows = new Map<string, Window[]>();
 const segBytes = new Map<string, Buffer>();
 const initBytes = new Map<string, Buffer>();
+const initReading = new Map<string, Promise<Buffer | null>>();
 
 /** Forget everything kept (tests, and a stream's run removed). */
 export function clearFrameBucketCache(): void { windows.clear(); segBytes.clear(); initBytes.clear(); }
@@ -130,12 +131,26 @@ function keep(map: Map<string, Buffer>, key: string, b: Buffer, max: number): vo
   for (const k of map.keys()) { if (map.size <= max) break; map.delete(k); }
 }
 
-/** A bucket segment's init and media bytes (kept for the next ask). */
-export async function readBucketSegment(s: BucketSegment): Promise<{ init: Buffer | null; seg: Buffer | null }> {
+/**
+ * A bucket segment's init and media bytes (kept for the next ask). The
+ * storyboard builder passes `keepSegment: false`: it reads each segment once,
+ * and keeping them would push out the few an operator stepping through a
+ * scene is using. The init is kept either way (one per run).
+ */
+export async function readBucketSegment(s: BucketSegment, opts: { keepSegment?: boolean } = {}): Promise<{ init: Buffer | null; seg: Buffer | null }> {
   let init = initBytes.get(s.initSrc) ?? null;
-  if (!init) { init = await getObject(s.initSrc); if (init) keep(initBytes, s.initSrc, init, KEEP_INITS); }
+  if (!init) {
+    // Several tiles decode at once (THUMBS_CONCURRENCY): they share one read of the init.
+    let p = initReading.get(s.initSrc);
+    if (!p) {
+      p = getObject(s.initSrc).finally(() => initReading.delete(s.initSrc));
+      initReading.set(s.initSrc, p);
+    }
+    init = await p;
+    if (init) keep(initBytes, s.initSrc, init, KEEP_INITS);
+  }
   let seg = segBytes.get(s.src) ?? null;
   if (seg) keep(segBytes, s.src, seg, KEEP_SEGMENTS);
-  else { seg = await getObject(s.src); if (seg) keep(segBytes, s.src, seg, KEEP_SEGMENTS); }
+  else { seg = await getObject(s.src); if (seg && opts.keepSegment !== false) keep(segBytes, s.src, seg, KEEP_SEGMENTS); }
   return { init, seg };
 }

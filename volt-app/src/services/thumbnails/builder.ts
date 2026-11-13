@@ -21,6 +21,17 @@
 //  Sheets are re-composited onto their previous image as tiles arrive, and
 //  their image URLs carry the tile count as a version, so a CDN can cache
 //  every version forever and a hover never shows a stale sheet.
+//
+//  ON AWS (build queue 2.3c-12) the encoder is a task of its own and uploads
+//  its runs to s3://<bucket>/<kind>/<id>/runs/<runId>/ (2.2); this disk holds
+//  none, so no stream had "material" and no hover preview, sheet or library
+//  still was ever made there. The segments are then placed from the bucket,
+//  on the same placement as clips and exact frames (clips/resolveBucket.ts),
+//  so a tile, a frame and a clip at the same moment agree. Cost: only the
+//  time still to fill is resolved (in a running hour, the last pass's worth,
+//  not the whole hour again), from the lightest rendition tall enough, and
+//  each segment is read once. A stream with runs on this disk (the Mac) is
+//  read from the disk as before.
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -31,6 +42,9 @@ import { one, query } from '../../db';
 import { imageStore } from '../imageStore';
 import { originBaseFor } from '../liveOrigin';
 import { listRuns, scanRun, type LocalSegment } from '../localRecordingIndex';
+import { resolveRangeBucket, resolvesFromBucket, runsForRange, streamRoot } from '../clips/resolveBucket';
+import { bucketRecordings, runsApi } from '../media/s3Runs';
+import { readBucketSegment } from '../frames/bucket';
 import { upsertMediaRow } from '../mediaLibrary';
 import { signedImageUrl } from '../../modules/images';
 import { isSpriteKey, recordSprite, streamSpriteKey, legacySpritesRemain, relocateLegacySprites } from './spriteStore';
@@ -82,12 +96,41 @@ export async function streamInfo(id: string): Promise<StreamInfo | null> {
   return { kind: r.kind, id: r.id, accountId: r.account_id, name: r.name, tz, slug: await slugFor(r.account_id, r.id, r.name) };
 }
 
-/** Video streams (TV channels and events) with recorded runs on this origin. */
-async function streamsWithMaterial(): Promise<string[]> {
+// A stream with no run in the bucket is asked again after this long, not every
+// pass: ended events stay on the list for ever, and each ask is a listing.
+const NO_BUCKET_RUN_RECHECK_MS = 30 * 60_000;
+const bucketRunSeen = new Map<string, { at: number; has: boolean }>();
+/** Tests: forget what the bucket said. */
+export function clearBuilderBucketCache(): void { bucketRunSeen.clear(); }
+
+/** Has the stream a run in the bucket that can reach [from, to)? One short listing. */
+async function bucketHasMaterial(id: string, from: number, to: number, now: number): Promise<boolean> {
+  const seen = bucketRunSeen.get(id);
+  if (seen && !seen.has && now - seen.at < NO_BUCKET_RUN_RECHECK_MS) return false;
+  let has = false;
+  try {
+    const root = await streamRoot(await runsApi(), config.aws.s3Bucket, id);
+    has = !!root && runsForRange(root.runs, from, to).length > 0;
+  } catch (e) {
+    console.warn('[thumbnails] bucket runs not listed for', id, e);
+  }
+  bucketRunSeen.set(id, { at: now, has });
+  return has;
+}
+
+/** Video streams (TV channels and events) with recorded runs on this origin, or in the bucket on AWS. */
+async function streamsWithMaterial(from: number, to: number, now = Date.now()): Promise<string[]> {
   const rows = await query<{ id: string }>(
     `SELECT c.id FROM channels c WHERE c.kind = 'tv'
      UNION ALL SELECT e.id FROM events e WHERE e.status IN ('live','ended','provisioning','scheduled')`);
-  return rows.map((r) => r.id).filter((id) => { try { return listRuns(id).length > 0; } catch { return false; } });
+  const out: string[] = [];
+  for (const { id } of rows) {
+    let local = false;
+    try { local = listRuns(id).length > 0; } catch { /* unreadable folder: not here */ }
+    if (local) out.push(id);
+    else if (bucketRecordings() && await bucketHasMaterial(id, from, to, now)) out.push(id);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- frames
@@ -105,7 +148,8 @@ export function pickThumbRendition(rends: string[], minH: number): string | null
   return (v.find((x) => x.h >= minH) ?? v[v.length - 1]).r;
 }
 
-interface PlacedSegment extends LocalSegment { dir: string }
+/** A segment to take a tile from: on this disk (`dir`), or in the bucket (`src`, `initSrc`). */
+interface PlacedSegment extends LocalSegment { dir: string; src?: string; initSrc?: string }
 
 /** Video segments overlapping [from, to), every run, in time order. */
 export function videoSegments(streamId: string, from: number, to: number, minH: number): PlacedSegment[] {
@@ -121,6 +165,25 @@ export function videoSegments(streamId: string, from: number, to: number, minH: 
   return out.sort((a, b) => a.startMs - b.startMs);
 }
 
+/** The same from the runs in the bucket (AWS): placed as clips and frames are, archived segments left out. */
+export async function videoSegmentsBucket(streamId: string, from: number, to: number, minH: number): Promise<PlacedSegment[]> {
+  const r = await resolveRangeBucket(streamId, from, to, 'video', { minHeight: minH });
+  const out: PlacedSegment[] = [];
+  for (const b of r.blocks) {
+    if (b.rendition === 'audio') continue;   // a run with no picture has no tile to give
+    for (const x of b.segments) {
+      out.push({ runId: x.runId, rendition: x.rendition, file: x.file, seq: x.seq, startMs: x.startMs, durMs: x.endMs - x.startMs,
+        uri: x.path, dir: b.initPath.slice(0, b.initPath.lastIndexOf('/')), src: x.path, initSrc: b.initPath });
+    }
+  }
+  return out.sort((a, b) => a.startMs - b.startMs);
+}
+
+/** The disk when it holds the stream's runs (the Mac), else the bucket (AWS). */
+export async function videoSegmentsAny(streamId: string, from: number, to: number, minH: number): Promise<PlacedSegment[]> {
+  return resolvesFromBucket(streamId) ? videoSegmentsBucket(streamId, from, to, minH) : videoSegments(streamId, from, to, minH);
+}
+
 /** The segment showing instant `t` (binary search over a sorted list). */
 export function segmentAt(segs: PlacedSegment[], t: number): PlacedSegment | null {
   let lo = 0, hi = segs.length - 1, best: PlacedSegment | null = null;
@@ -132,9 +195,20 @@ export function segmentAt(segs: PlacedSegment[], t: number): PlacedSegment | nul
 }
 
 /** Decode the opening keyframe of one segment to a JPEG, `height` tall. */
-export function extractJpeg(seg: PlacedSegment, height: number, quality: number, timeoutMs = 8000): Promise<Buffer | null> {
-  const init = join(seg.dir, 'init.mp4'), file = join(seg.dir, seg.file);
-  if (!existsSync(init) || !existsSync(file)) return Promise.resolve(null);
+export async function extractJpeg(seg: PlacedSegment, height: number, quality: number, timeoutMs = 8000): Promise<Buffer | null> {
+  let initBytes: Buffer, fileBytes: Buffer;
+  if (seg.src && seg.initSrc) {
+    // From the bucket: the init is kept per run, the segment read once and not kept.
+    try {
+      const b = await readBucketSegment({ ...seg, src: seg.src, initSrc: seg.initSrc }, { keepSegment: false });
+      if (!b.init || !b.seg) return null;
+      initBytes = b.init; fileBytes = b.seg;
+    } catch { return null; }   // in archive storage since it was placed: no tile
+  } else {
+    const init = join(seg.dir, 'init.mp4'), file = join(seg.dir, seg.file);
+    if (!existsSync(init) || !existsSync(file)) return null;
+    try { initBytes = readFileSync(init); fileBytes = readFileSync(file); } catch { return null; }
+  }
   return new Promise((resolve) => {
     const q = Math.max(2, Math.min(31, Math.round(31 - (quality / 100) * 29)));
     const ff = spawn(config.clips.ffmpegBin ?? 'ffmpeg', [
@@ -155,7 +229,7 @@ export function extractJpeg(seg: PlacedSegment, height: number, quality: number,
     ff.on('close', (code) => finish(code === 0 ? Buffer.concat(chunks) : null));
     ff.on('error', () => finish(null));
     ff.stdin.on('error', () => { /* close resolves */ });
-    try { ff.stdin.write(readFileSync(init)); ff.stdin.write(readFileSync(file)); ff.stdin.end(); } catch { finish(null); }
+    try { ff.stdin.write(initBytes); ff.stdin.write(fileBytes); ff.stdin.end(); } catch { finish(null); }
   });
 }
 
@@ -173,6 +247,19 @@ async function programmesBetween(s: StreamInfo, from: number, to: number): Promi
 const programmeAt = (ps: Prog[], t: number) => ps.find((p) => p.start <= t && t < p.end) ?? null;
 
 // ---------------------------------------------------------------- one hour
+/** The earliest slot time in [start, until) neither filled nor known to be a gap, or null when all are settled. */
+export function firstOpenSlot(sheets: SheetRecord[], start: number, until: number, l: Layout): number | null {
+  const per = slotsPerSheet(l);
+  for (let t = start; t < until; t += l.intervalMs) {
+    const k = Math.round((t - start) / l.intervalMs);
+    const sheetStart = start + Math.floor(k / per) * per * l.intervalMs;
+    const rec = sheets.find((x) => x.start_ms === sheetStart);
+    const i = k % per;
+    if (!rec || !(rec.filled.includes(i) || (rec.skipped ?? []).includes(i))) return t;
+  }
+  return null;
+}
+
 export interface UnitResult { tilesAdded: number; framesAdded: number; status: string; reachedDeadline: boolean }
 
 const libraryKey = (s: StreamInfo, rel: string) => `library/${s.accountId}/${rel}`;
@@ -203,7 +290,10 @@ export async function buildUnit(s: StreamInfo, u: HourUnit, upTo: number, deadli
   const row = await one<any>(`SELECT * FROM storyboards WHERE stream_id = $1 AND unit_start = $2`, [s.id, new Date(u.start)]);
   if (row?.status === 'complete') return { ...res, status: 'complete' };
   const until = Math.min(upTo, u.end);
-  const segs = videoSegments(s.id, u.start, until, c.frameHeight);
+  // Only the time still to fill is resolved: in a running hour that is the
+  // last pass's worth, which on the bucket is a few object heads, not the hour.
+  const open = firstOpenSlot(row?.sheets ?? [], u.start, until, l);
+  const segs = open == null ? [] : await videoSegmentsAny(s.id, open, until, c.frameHeight);
   if (!segs.length && !row) return { ...res, status: 'empty' };
 
   const folder: string = row?.folder ?? unitFolder(s.slug, u);
@@ -402,7 +492,7 @@ export async function thumbnailPass(now = Date.now()): Promise<PassReport | null
   const r: PassReport = { streams: 0, units: 0, tiles: 0, frames: 0, deadline: false, ms: 0 };
   try {
     await relocateWhilePending();
-    for (const id of await streamsWithMaterial()) {
+    for (const id of await streamsWithMaterial(now - c.lookbackMinutes * 60_000, now, now)) {
       if (building.has(id)) continue;
       const x = await buildRange(id, now - c.lookbackMinutes * 60_000, now, deadline);
       r.streams++; r.units += x.units; r.tiles += x.tiles; r.frames += x.frames;
