@@ -3177,7 +3177,7 @@ What: on AWS the encoder mirrored its output straight to `<kind>/<id>/` in the b
 - **Guides**: `docs-site/docs/guides/recordings.md` (Publish full VOD, a troubleshooting row), `docs-site/docs/guides/storage.md` (cloud paragraph), `docs/engineering/deploying-to-aws.md`.
 - **Not done** (2.3c-5): the recordings page on AWS, the asset detail's `audioOnly`, EPG auto-VOD, frame stills, encoder stills, storyboards, removal, exact placement; whether retention keeps the media a full-recording title points at; on AWS an automatic replay misses segments the uploader had not sent when the recording closed. Not run on moto or real S3.
 
-## 2026-11-13 - Recorded assets judged sound only from the bucket (build queue 2.3c-5; vVERSION2)
+## 2026-11-13 - Recorded assets judged sound only from the bucket (build queue 2.3c-5; v0.140.1)
 
 - **What**: the asset detail's `audioOnly` (which picks the console's audio or video player) and the encode tab read the stream's run folders on the task's disk, so on AWS station and sound-only event clips showed as video. Now judged from the bucket too.
 - **Where**: `volt-app/src/modules/vod.ts` `GET /api/vod/:id` and `GET /api/vod/:id/encode` call `isAudioOnlyAny` (`services/clips/resolveBucket.ts`).
