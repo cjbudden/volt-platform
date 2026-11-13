@@ -659,11 +659,17 @@ recordingsRouter.post(
         rec.thumb_status,
       ]
     );
+    // ITS OWN PLAYLISTS (build queue 2.3c-4): the recording's master_key is
+    // the old layout nothing writes, so the title is pointed at playlists over
+    // the recording's segments, on the disk or in the bucket.
+    const { attachFullRecordingPackage } = await import('../services/media/fullRecordingVod');
+    await attachFullRecordingPackage((row as any).id, rec);
     // Made from the finished recording, so ready now: its publishing rules
     // decide whether it goes out by itself (build queue 1.14-G5a).
     const { autoPublishWhenReady } = await import('../services/availability');
     const autoPublish = await autoPublishWhenReady((row as any).id, 'full_event');
-    const out = autoPublish === 'skipped' ? row : await one(`SELECT * FROM vod_assets WHERE id = $1`, [(row as any).id]);
+    // Read back: the playlists and the publishing rules may both have changed the row.
+    const out = (await one(`SELECT * FROM vod_assets WHERE id = $1`, [(row as any).id])) ?? row;
     res.status(201).json({ ...(out as any), autoPublish });
   })
 );

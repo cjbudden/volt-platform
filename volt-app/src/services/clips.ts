@@ -42,6 +42,9 @@ export async function deriveEventVod(rec: any) {
     [rec.event_id, rec.id, ev.name ?? 'Event recording', `${rec.master_key}/master.m3u8`, dur,
      JSON.stringify(formatsFor('manifest')), ev.schema_id ?? null, JSON.stringify(ev.metadata ?? {})]
   );
+  // Its own playlists over the recording's segments (build queue 2.3c-4):
+  // `${rec.master_key}/master.m3u8` is the old layout, which nothing writes.
+  if (row) await (await import('./media/fullRecordingVod')).attachFullRecordingPackage(row.id, rec);
   // The replay is the finished recording itself: there is no build to wait
   // for, so the publishing rules are asked now (build queue 1.14-G5a).
   if (row) await (await import('./assetReadiness')).setMediaState(row.id, 'ready');

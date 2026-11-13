@@ -123,6 +123,12 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    Whether a stream is sound only (a clip's MP3 and M4A rather than an MP4)
    is read the same way (`isAudioOnlyAny`): a channel whose kind is radio,
    else the newest run in the bucket with the sound and no picture.
+   A full-recording title (Publish full VOD, an event's automatic replay)
+   gets its own playlists at `clips/<asset>/` (master, video, audio; 2.3c-4,
+   `volt-app/src/services/media/fullRecordingVod.ts`) over the runs that started inside
+   the recording, with segment addresses through the CDN
+   (`<cdn>/<kind>/<id>/runs/<runId>/<rendition>/seg_N.m4s`), so the CDN must
+   keep serving the run folders. No media is copied.
    Radio needs no relay: stations deliver HLS and DASH (2.1c-2). MP3, where
    an account has it switched on, is made on demand by the control plane.
 4. **Migrations.** The deploy runs them once as a one-off task of the new

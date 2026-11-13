@@ -78,7 +78,7 @@ When your marks cross a gap, **Missing media inside the marks.** explains how lo
 ### Publish the whole recording or download it
 
 1. Open the recording.
-2. Choose **Publish full VOD** to make the whole recording one VOD asset. It is available once the recording has closed. **Recording published as a full VOD asset.** confirms it.
+2. Choose **Publish full VOD** to make the whole recording one VOD asset. It is available once the recording has closed. **Recording published as a full VOD asset.** confirms it. The asset plays the recording's own media, so no second copy is stored: keep the recording for as long as the asset should play. The same goes for the replay an event makes by itself with **Automatic VOD on end**.
 3. Choose **Download MP4** (**Download MP3** for radio) to export the whole recording as a file. The button is there for roles with Downloads: Operate. The first time, **MP4 export is being prepared. Check back shortly.** appears: choose the button again later and the file opens. A radio export also offers **AAC (.m4a)** beside it. Where on-demand addresses carry play tokens, the download link works for four hours; choose the button again for a fresh one.
 
 ### Check what a clip was made from
@@ -134,6 +134,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | A message that gaps **fall inside this range**, with **Accept the gap and create the clip** | The range crosses missing media | Choose the button to cut it without the missing time, or **Cancel** and move the marks |
 | **Part of this range is in archive storage** | On a cloud service, part of the recording has moved to archive storage under its retention rule, and archived media cannot be read until it is restored | Restore the recording, then cut the clip again, or move the marks to a part that is not archived |
 | **Publish full VOD** is greyed out | The recording is still in progress (**Available when the recording closes**) | Wait until it closes, or cut a clip instead |
+| A full VOD asset does not play | No recorded media was found when it was made (recording was off for that time, or the media had already been removed), or the recording has since been removed | Check the recording still shows its coverage; publish it again while it does, or cut a clip of the part that is left |
 | **MP4 export is being prepared. Check back shortly.** | The file is being made | Choose **Download MP4** again in a minute |
 | **Some parts did not load** above the player | Part of the page (coverage, waveform, metadata lane or transcript) failed; hover over it for the reason | Choose **Refresh** |
 | **Playback failed:** under the player | The player could not load the range | Choose **Refresh**, or load a smaller range with **Load marks** |

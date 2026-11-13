@@ -53,9 +53,15 @@ export interface RecordingSource {
  * The VOD playlist over the recording's runs in the bucket, or null when no run
  * in its window has any segment of its rendition.
  */
-export async function buildRecordingSource(rec: RecordingLike, opts: { segmentSeconds?: number; now?: number } = {}): Promise<RecordingSource | null> {
+export async function buildRecordingSource(rec: RecordingLike, opts: {
+  segmentSeconds?: number; now?: number;
+  /** Another rendition than the recording's top one (the full-recording title takes `audio` too, 2.3c-4). */
+  rendition?: string;
+  /** How a segment is addressed; s3:// by default (the thumbnailer signs them itself). */
+  segmentUri?: (bucket: string, key: string) => string;
+} = {}): Promise<RecordingSource | null> {
   const streamId = rec.channel_id ?? rec.event_id;
-  const rendition = rec.hi_res_rendition;
+  const rendition = opts.rendition ?? rec.hi_res_rendition;
   if (!streamId || !rendition || !RUN_ID.test(rendition)) return null;
   const kind: 'channel' | 'event' = rec.channel_id ? 'channel' : 'event';
   const root = parseS3Uri(streamRootUri(kind, streamId))!;
@@ -84,8 +90,9 @@ export async function buildRecordingSource(rec: RecordingLike, opts: { segmentSe
     if (!segs.length) continue;
     if (used.length) body.push('#EXT-X-DISCONTINUITY');
     // Each run has its own init segment: a restart may change the encode.
-    if (keys.includes('init.mp4')) body.push(`#EXT-X-MAP:URI="s3://${root.bucket}/${prefix}init.mp4"`);
-    for (const s of segs) body.push(`#EXTINF:${seg.toFixed(3)},`, `s3://${root.bucket}/${prefix}${s}`);
+    const uri = opts.segmentUri ?? ((b: string, k: string) => `s3://${b}/${k}`);
+    if (keys.includes('init.mp4')) body.push(`#EXT-X-MAP:URI="${uri(root.bucket, `${prefix}init.mp4`)}"`);
+    for (const s of segs) body.push(`#EXTINF:${seg.toFixed(3)},`, uri(root.bucket, `${prefix}${s}`));
     used.push(run.id);
     segments += segs.length;
   }
