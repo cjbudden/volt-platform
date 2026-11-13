@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.5 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service, a recording left open when its stream stopped unexpectedly now ends at its last recorded segment rather than when Volt noticed, so its length and retention count only the media it holds.
+
+### Internal
+
+- added · Recordings: New check suite orphan-close-bucket: the orphan recording sweep ends a recording at its last segment in the bucket on AWS.
+
 ## 0.140.4 (2026-11-13)
 
 ### Product (in customer release notes)
