@@ -28,7 +28,8 @@ export interface ResolvedSegment {
   /** Wall-clock start and end of this segment's content. */
   startMs: number;
   endMs: number;
-  /** Absolute path on disk, for the extractor. */
+  /** Absolute path on disk, for the extractor (an s3:// key for a bucket run
+   *  until clips/resolveBucket.ts stageResolution copies it into scratch). */
   path: string;
   /** How much of this segment the request actually wants, as an offset into it.
    *  0 / durMs for a fully-included segment; non-zero on the two ends. */
@@ -111,21 +112,48 @@ export function resolveRange(
 ): Resolution {
   const from = Math.min(fromMs, toMs);
   const to = Math.max(fromMs, toMs);
-  const blocks: ResolvedBlock[] = [];
-  const runIds = new Set<string>();
-
+  const picks: RunPick[] = [];
   for (const runId of listRuns(streamId)) {
     const pick = pickRenditions(streamId, runId);
     const rendition = kind === 'audio'
       ? (pick.audio ? 'audio' : null)
       : (pick.video ?? (pick.audio ? 'audio' : null));
     if (!rendition) continue;
-
     const segs = segmentsIn(streamId, runId, rendition, from, to);
     if (!segs.length) continue;
-    runIds.add(runId);
+    picks.push({ runId, rendition, dir: join(originBaseFor(streamId), 'runs', runId, rendition), segs });
+  }
+  return assembleResolution(streamId, from, to, kind, picks);
+}
 
-    const dir = join(originBaseFor(streamId), 'runs', runId, rendition);
+/**
+ * One run's contribution to a range: the rendition chosen, where its files are
+ * (a folder on disk, or an s3:// prefix ending in '/' for a run in the bucket,
+ * build queue 2.3c-2) and its segments that overlap the range, placed.
+ */
+export interface RunPick { runId: string; rendition: string; dir: string; segs: LocalSegment[] }
+
+/** A file inside a pick's folder: a path on disk, or a key under an s3:// prefix. */
+function inDir(dir: string, file: string): string {
+  return dir.startsWith('s3://') ? `${dir.endsWith('/') ? dir : `${dir}/`}${file}` : join(dir, file);
+}
+
+/**
+ * Blocks, gaps and coverage from the runs' placed segments. Shared by the
+ * disk (resolveRange) and the bucket (clips/resolveBucket.ts), so a clip on
+ * AWS is refused, accepted and cut by exactly the Mac's rules.
+ */
+export function assembleResolution(
+  streamId: string, fromMs: number, toMs: number, kind: MediaKind, picks: RunPick[]
+): Resolution {
+  const from = Math.min(fromMs, toMs);
+  const to = Math.max(fromMs, toMs);
+  const blocks: ResolvedBlock[] = [];
+  const runIds = new Set<string>();
+
+  for (const { runId, rendition, dir, segs } of picks) {
+    if (!segs.length) continue;
+    runIds.add(runId);
     const resolved: ResolvedSegment[] = segs.map((s) => {
       const segStart = s.startMs;
       const segEnd = s.startMs + s.durMs;
@@ -136,7 +164,7 @@ export function resolveRange(
       return {
         runId, rendition, file: s.file, seq: s.seq,
         startMs: segStart, endMs: segEnd,
-        path: join(dir, s.file),
+        path: inDir(dir, s.file),
         takeFromMs: wantFrom - segStart,
         takeToMs: wantTo - segStart,
         partial: wantFrom > segStart || wantTo < segEnd,
@@ -151,7 +179,7 @@ export function resolveRange(
         runId,
         blockIndex: blocks.filter((b) => b.runId === runId).length,
         rendition,
-        initPath: join(dir, 'init.mp4'),
+        initPath: inDir(dir, 'init.mp4'),
         segments: part,
         startMs: part[0].startMs,
         endMs: part[part.length - 1].endMs,

@@ -106,10 +106,20 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    When a recording closes, the control plane writes a VOD playlist over the
    runs it covers to `thumbs/<recording id>/source.m3u8` (s3:// addresses,
    `volt-app/src/services/media/s3RecordingSource.ts`) and the thumbnailer
-   signs them with its own credentials when it starts (`thumbnailer.py`
+   signs them with its own credentials when it starts (`volt-encoder/bin/thumbnailer.py`
    `resolve_source`). That needs botocore in the volt-encoder image (Ubuntu's
    awscli package brings python3-botocore): check once with
    `docker run --rm --entrypoint python3 volt-encoder -c 'import botocore'`.
+   Clips are resolved and cut from the runs in the bucket
+   (`volt-app/src/services/clips/resolveBucket.ts`): the clip, re-trim,
+   rebuild and export routes place each segment from the decode time at the
+   head of the object (a ranged read) and the object's LastModified less half
+   an uploader pass (`CLIP_BUCKET_UPLOAD_LAG_MS`, 1 s), reading only segments
+   written between the range's start and its end plus
+   `CLIP_BUCKET_WRITE_LAG_MS` (2 min); the clip.extract job copies exactly
+   those segments into scratch and removes them after the cut. A machine with
+   the stream's runs on its own disk (the Mac, MinIO included) still uses the
+   disk. Segments in GLACIER or DEEP_ARCHIVE are refused (`media_archived`).
    Radio needs no relay: stations deliver HLS and DASH (2.1c-2). MP3, where
    an account has it switched on, is made on demand by the control plane.
 4. **Migrations.** The deploy runs them once as a one-off task of the new
@@ -138,7 +148,7 @@ What makes Volt cheap to run is mostly in phase 2 of the queue:
 | Control-plane work off the task's own disk, and the tools its jobs need | `volt-app/src/services/media/fillerStore.ts` for slates and loops; `volt-app/src/services/uploadStaging.ts` for resumable upload chunks and tus parts (`UPLOAD_STAGING_DRIVER=s3`, under the upload-staging prefix of the origin bucket, expired by its lifecycle rule); `volt-app/src/services/media/vodSource.ts` for the originals of uploads and watch folder drops (`VOD_SOURCE_DRIVER=s3`, under vod-src/, a scratch copy per job, kept from the CDN by the bucket policy); `volt-app/src/services/media/clipsStore.ts` for clip and encode files and downloads served from any task (a file the task does not hold is read from the bucket copy under clips/ or vod/, byte ranges passed through); ad creatives (`volt-app/src/services/jobs/handlers/adCondition.ts`) and FAST renders of slates and loops (`volt-app/src/services/fast/fillerBridge.ts`) landed under vod-src/ like originals, and caption clocks read through the bucket (`volt-app/src/services/companions/serve.ts` `readClipsFile`); a stream's pre-built failover loop in the bucket (`volt-app/src/services/fillerPrep.ts` `publishPrebuilt`, under filler/prebuilt/<stream>/<hash>/, fetched by the encoder from `/filler/...` with `volt-encoder/bin/filler_build.py` `fetch_prebuilt`); the house preview of each slate and loop and its QC stills in the bucket (`volt-app/src/services/media/fillerPreview.ts`, under filler/preview/<id>/<build>/, QC on another task copies the two tracks it measures into scratch); the restore bin in the bucket (`volt-app/src/services/media/trash.ts`, `VOLT_TRASH_DRIVER=s3`, under trash/, kept from the CDN by the bucket policy; a deleted asset's bucket original goes with it); the rest in `deploy/terraform/env-coverage.json` (not-on-aws-yet) | slates and loops built (2.1a); uploads spread over tasks built (2.1a-2); originals in the bucket built (2.1a-2b); clip, encode and download files served from any task built (2.1a-2b-2); ad conditioning, FAST renders and caption clocks built (2.1a-2b-3); caption tracks on CDN-served encodes and FAST counting bucket originals 2.1a-2b-4; the trash built (2.1a-2c); prebuilt loop segments built (2.1a-3); the house preview of slates and loops built (2.1a-3b); jobs as their own tasks 2.1a-4 |
 | Encoders on Spot with an on-demand base, launched per channel by RunTask | `volt-app/src/services/orchestrator/launcher.ts`, `deploy/terraform/ecs_cluster.tf` | built |
 | Per-run S3 prefixes, so a recording is a time range over segments that move as a unit | encoder and origin pointer | 2.2 |
-| Retention, cooling and archive of recordings on S3 | `volt-app/src/services/media/s3Runs.ts` registers each rendition of each run in the bucket and prunes a recorded run there (clips and extracts: `volt-app/src/services/clips`); bucket listing at most every `MEDIA_S3_RECONCILE_MS` per stream | built (2.3); the recording thumbnailer reads the runs (2.3c); recordings `master_key`, clips, frame stills, encoder stills and storyboards reading the run prefix are 2.3c-2 |
+| Retention, cooling and archive of recordings on S3 | `volt-app/src/services/media/s3Runs.ts` registers each rendition of each run in the bucket and prunes a recorded run there (clips and extracts: `volt-app/src/services/clips`); bucket listing at most every `MEDIA_S3_RECONCILE_MS` per stream | built (2.3); the recording thumbnailer reads the runs (2.3c); clips are cut from the runs (2.3c-2); the recordings timeline, `master_key`, frame stills, encoder stills and storyboards reading the run prefix are 2.3c-3 |
 | Consolidation: move encoders off part-empty nodes, make before break | `CONSOLIDATION.md` | 2.4 |
 | Sizing that learns from every run, storage projected, placement that checks the task disk | `volt-app/src/services/fleet/loadFit.ts`, `volt-app/src/services/fleet/storageProjection.ts`, `PLACEMENT.md` | built (2.4a); disk check waits on 2.4c |
 | Watch folders picked up from S3 by event, not by a walk | `volt-app/src/services/watchfolder/s3events.ts`, `deploy/terraform/watchfolders.tf` | built (2.6) |

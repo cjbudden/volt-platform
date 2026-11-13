@@ -49,7 +49,12 @@ function readHead(path: string, n = 65536): Buffer | null {
 
 function mdhdTimescale(initPath: string): number | null {
   const b = readHead(initPath);
-  if (!b) return null;
+  return b ? mdhdTimescaleOf(b) : null;
+}
+
+/** The media timescale from the head of an init segment (the bucket reader
+ *  hands in a ranged read, clips/resolveBucket.ts). */
+export function mdhdTimescaleOf(b: Buffer): number | null {
   const i = b.indexOf('mdhd');
   if (i < 0) return null;
   const ver = b[i + 4];
@@ -60,7 +65,11 @@ function mdhdTimescale(initPath: string): number | null {
 
 function tfdtBase(segPath: string): bigint | null {
   const b = readHead(segPath);
-  if (!b) return null;
+  return b ? tfdtOf(b) : null;
+}
+
+/** The decode time from the head of a media segment. */
+export function tfdtOf(b: Buffer): bigint | null {
   const i = b.indexOf('tfdt');
   if (i < 0) return null;
   const ver = b[i + 4];

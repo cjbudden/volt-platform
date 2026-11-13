@@ -132,6 +132,7 @@ Roles and levels are explained in [Roles and access](../getting-started/roles-an
 | **Give the clip a title** | **Clip title** is empty | Enter a title |
 | **Clip range is outside the recording** | A mark is outside the recording's window | Move the marks inside it, or open the recording that holds that time |
 | A message that gaps **fall inside this range**, with **Accept the gap and create the clip** | The range crosses missing media | Choose the button to cut it without the missing time, or **Cancel** and move the marks |
+| **Part of this range is in archive storage** | On a cloud service, part of the recording has moved to archive storage under its retention rule, and archived media cannot be read until it is restored | Restore the recording, then cut the clip again, or move the marks to a part that is not archived |
 | **Publish full VOD** is greyed out | The recording is still in progress (**Available when the recording closes**) | Wait until it closes, or cut a clip instead |
 | **MP4 export is being prepared. Check back shortly.** | The file is being made | Choose **Download MP4** again in a minute |
 | **Some parts did not load** above the player | Part of the page (coverage, waveform, metadata lane or transcript) failed; hover over it for the reason | Choose **Refresh** |

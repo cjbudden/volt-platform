@@ -8,7 +8,9 @@ import { asyncHandler, notFound, badRequest } from '../util/http';
 import { createClipVod, formatsFor, enqueueClipBuild } from '../services/clips';
 import { inheritedMetadata } from '../services/contentTypes';
 import { previewFill } from '../services/epgFill';
-import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
+import { segmentCount } from '../services/clips/resolve';
+// The disk on the Mac, the bucket's runs on AWS (build queue 2.3c-2).
+import { resolveRangeAny, assessRangeAny } from '../services/clips/resolveBucket';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
 import { tokenisedUrls } from '../services/edgeTokens';
@@ -753,8 +755,8 @@ recordingsRouter.post(
     // discovered the problem when the player failed. Now the range is checked
     // against the media on disk first and a bad one is refused here.
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
-    const resolution = resolveRange(streamId, body.startMs, body.endMs, kind);
-    const verdict = assessRange(resolution, { maxGapMs: body.acceptGapsMs });
+    const resolution = await resolveRangeAny(streamId, body.startMs, body.endMs, kind);
+    const verdict = assessRangeAny(resolution, { maxGapMs: body.acceptGapsMs });
     // A refusal the console can ACT on: the gaps themselves, so the operator
     // can see where they are and accept exactly that much, rather than a
     // sentence that recommends an option they have no button for.
@@ -915,8 +917,8 @@ recordingsRouter.get(
     if (kind === 'video' && existing?.export_mp4_key) {
       return res.json({ status: 'ready', kind, format: 'mp4', assetId: existing.id, ...exportLinks(existing.id, existing.export_mp4_key, []) });
     }
-    const resolution = resolveRange(streamId, fromMs, toMs, kind);
-    const verdict = assessRange(resolution, { maxGapMs: acceptGapsMs });
+    const resolution = await resolveRangeAny(streamId, fromMs, toMs, kind);
+    const verdict = assessRangeAny(resolution, { maxGapMs: acceptGapsMs });
     if (!verdict.ok) {
       return res.status(409).json({
         status: 'unavailable', code: verdict.code, message: verdict.message,

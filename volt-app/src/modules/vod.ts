@@ -12,7 +12,9 @@ import { decide, historyOf as reviewHistory, publishGate, queue as reviewQueue, 
 import { qcFindings, reviewQcFinding, QcReviewError } from '../services/qc';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
-import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
+import { segmentCount } from '../services/clips/resolve';
+// The disk on the Mac, the bucket's runs on AWS (build queue 2.3c-2).
+import { resolveRangeAny, assessRangeAny } from '../services/clips/resolveBucket';
 import { isAudioOnly } from '../services/localRecordingIndex';
 import type { OutputFormat } from '../services/clips/extract';
 import { QC_RUN } from '../services/jobs/handlers/qcRun';
@@ -851,8 +853,8 @@ vodRouter.post(
     const streamId = asset.channel_id ?? asset.event_id;
     const fromMs = Number(asset.start_epoch_ms), toMs = Number(asset.end_epoch_ms);
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
-    const resolution = resolveRange(streamId, fromMs, toMs, kind);
-    const verdict = assessRange(resolution, { maxGapMs: b.acceptGapsMs });
+    const resolution = await resolveRangeAny(streamId, fromMs, toMs, kind);
+    const verdict = assessRangeAny(resolution, { maxGapMs: b.acceptGapsMs });
     if (!verdict.ok) {
       res.status(409).json({
         error: verdict.message, code: verdict.code,
@@ -1080,8 +1082,8 @@ vodRouter.patch(
     // an operator finds out at playback time instead of now.
     const streamId = asset.channel_id ?? asset.event_id;
     const kind = isAudioOnly(streamId) ? 'audio' : 'video';
-    const resolution = resolveRange(streamId, b.startMs, b.endMs, kind);
-    const verdict = assessRange(resolution, { maxGapMs: b.acceptGapsMs });
+    const resolution = await resolveRangeAny(streamId, b.startMs, b.endMs, kind);
+    const verdict = assessRangeAny(resolution, { maxGapMs: b.acceptGapsMs });
     if (!verdict.ok) throw badRequest(verdict.message);
 
     // THE KEY IS REWRITTEN, NOT PATCHED. The old regexp_replace only matched a

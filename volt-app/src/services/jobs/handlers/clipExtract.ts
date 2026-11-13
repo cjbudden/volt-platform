@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { one, query } from '../../../db';
 import { config } from '../../../config';
-import { resolveRange, assessRange, segmentCount } from '../../clips/resolve';
+import { segmentCount } from '../../clips/resolve';
+import { resolveRangeAny, assessRangeAny, stageResolution } from '../../clips/resolveBucket';
 import { extract, plan, type OutputFormat } from '../../clips/extract';
 import { recordProvenance } from '../../clips/provenance';
 import { enqueue } from '../queue';
@@ -94,12 +95,14 @@ async function buildClip(ctx: JobContext): Promise<Record<string, unknown>> {
 
   await ctx.progress(1, 'resolving range');
   const kind = p.kind ?? 'video';
-  const resolution = resolveRange(p.streamId, p.fromMs, p.toMs, kind);
+  // From the disk when this machine holds the stream's runs (the Mac), else
+  // from the runs in the bucket (AWS, build queue 2.3c-2).
+  const resolution = await resolveRangeAny(p.streamId, p.fromMs, p.toMs, kind);
 
   // Refuse before doing work, with the reason the operator needs. These are
   // PERMANENT: a missing hour of recording will still be missing on a retry, and
   // three attempts with backoff only delays telling the operator.
-  const verdict = assessRange(resolution, { maxGapMs: p.acceptGapsMs ?? 0 });
+  const verdict = assessRangeAny(resolution, { maxGapMs: p.acceptGapsMs ?? 0 });
   if (!verdict.ok) {
     throw new PermanentError(verdict.message, verdict.code);
   }
@@ -112,10 +115,21 @@ async function buildClip(ctx: JobContext): Promise<Record<string, unknown>> {
     `${((resolution.requestedMs) / 1000).toFixed(1)}s requested`
   );
 
+  // A bucket resolution is cut from a scratch copy of exactly the segments it
+  // names, removed when the cut ends, whatever happens.
+  const staged = resolution.fromBucket
+    ? await (async () => {
+        await ctx.progress(2, `fetching ${segmentCount(resolution)} segment(s) from the bucket`);
+        const { tmpdir } = await import('node:os');
+        const root = process.env.VOD_SOURCE_CACHE_DIR || join(tmpdir(), 'volt-vod-src');
+        return stageResolution(resolution, join(root, `clip-${p.vodAssetId}-${Date.now()}`));
+      })()
+    : null;
+
   let result;
   try {
     result = await extract({
-      resolution,
+      resolution: staged?.resolution ?? resolution,
       outDir,
       formats: p.formats?.length ? p.formats : ['mp4', 'hls'],
       ffmpegBin: config.clips.ffmpegBin,
@@ -127,6 +141,8 @@ async function buildClip(ctx: JobContext): Promise<Record<string, unknown>> {
     // playable asset to anything that only checks for existence.
     try { rmSync(outDir, { recursive: true, force: true }); } catch { /* ignore */ }
     throw e;
+  } finally {
+    await staged?.release();
   }
 
   // WHOLE MILLISECONDS. A range that skips a gap measures a fractional length
