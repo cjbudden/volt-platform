@@ -17,6 +17,9 @@
 //  boxes, read when asked. A 24x7 channel writes 21,600 segments a day, so a
 //  second, stored index of them would cost a database write per segment and
 //  buy nothing the scan does not already give (the cost rule, 27 Oct).
+//  On AWS the runs are in the bucket, not on this disk: bucket.ts finds the
+//  segment there on the clips' placement (build queue 2.3c-11), and from the
+//  segment on everything is the same.
 //
 //  STILLS are JPEGs in the image store under derived/<account>/frames/, one
 //  per frame asked for. Each is recorded in frame_stills with the bucket and
@@ -40,6 +43,8 @@ import {
 } from './frameIndex';
 import { extractFrame, extractFrameAt, FrameError, probeTsSegment } from './exactFrame';
 import { frameFolderObject, refreshFolderBytes, retireFrameFolders, type FrameFolder } from './folders';
+import { resolvesFromBucket } from '../clips/resolveBucket';
+import { bucketSegmentAt, readBucketSegment, type BucketSegment } from './bucket';
 
 // ------------------------------------------------------------- asset index
 
@@ -236,10 +241,14 @@ export interface StreamFrame {
 
 interface SegFrames { init: Buffer; seg: Buffer; pts: number[]; rate: Rate; timescale: number }
 
-async function segmentFrames(streamId: string, s: LocalSegment): Promise<SegFrames> {
-  const dir = join(originBaseFor(streamId), 'runs', s.runId, s.rendition);
-  const init = await readFile(join(dir, 'init.mp4')).catch(() => null);
-  const seg = await readFile(join(dir, s.file)).catch(() => null);
+async function segmentFrames(streamId: string, s: LocalSegment | BucketSegment): Promise<SegFrames> {
+  let init: Buffer | null, seg: Buffer | null;
+  if ('src' in s && s.src) ({ init, seg } = await readBucketSegment(s));
+  else {
+    const dir = join(originBaseFor(streamId), 'runs', s.runId, s.rendition);
+    init = await readFile(join(dir, 'init.mp4')).catch(() => null);
+    seg = await readFile(join(dir, s.file)).catch(() => null);
+  }
   if (!init || !seg) throw new FrameError(410, 'the segment holding that moment is no longer stored');
   const facts = readInit(init);
   const frag = facts ? readFragments(seg, facts) : null;
@@ -269,7 +278,8 @@ export function streamSegmentAt(streamId: string, ms: number): LocalSegment | nu
 
 /** The frame of a stream's capture on screen at wall time `ms` (null in a hole). */
 export async function streamFrameAt(streamId: string, ms: number): Promise<StreamFrame | null> {
-  const s = streamSegmentAt(streamId, ms);
+  // The disk when it holds the stream's runs (the Mac), else the bucket (AWS).
+  const s = resolvesFromBucket(streamId) ? await bucketSegmentAt(streamId, ms) : streamSegmentAt(streamId, ms);
   if (!s) return null;
   const f = await segmentFrames(streamId, s);
   // The segment's wall-clock start is its first frame; the rest follow by
@@ -292,8 +302,12 @@ export async function streamFrameStill(accountId: string, streamId: string, fr: 
     channelId: isChannel ? streamId : null, eventId: isChannel ? null : streamId,
   };
   return ensureStill(accountId, folder, `${fr.seq}-${fr.localFrame}.jpg`, async () => {
-    const segs = scanRun(streamId, fr.runId, fr.rendition);
-    const s = segs.find((x) => x.seq === fr.seq);
+    let s: LocalSegment | BucketSegment | null | undefined;
+    if (resolvesFromBucket(streamId)) {
+      // The lookup that made `fr` kept this segment's window and bytes.
+      const b = await bucketSegmentAt(streamId, fr.wallMs);
+      s = b && b.runId === fr.runId && b.seq === fr.seq ? b : null;
+    } else s = scanRun(streamId, fr.runId, fr.rendition).find((x) => x.seq === fr.seq);
     if (!s) throw new FrameError(410, 'the segment holding that moment is no longer stored');
     const f = await segmentFrames(streamId, s);
     return extractFrame(f.init, f.seg, fr.localFrame);
