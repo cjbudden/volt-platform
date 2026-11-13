@@ -34,7 +34,8 @@
 //  ------------------------------------------------------------------------
 //  COVERAGE IS MEASURED ONCE FOR THE WHOLE WINDOW, NOT ONCE PER PROGRAMME.
 //
-//  resolveRange() scans the run directories on disk. Calling it for each of a
+//  resolveRange() scans the run directories on disk (on AWS the bucket
+//  listing does the same job, clips/coverageBucket.ts). Calling it for each of a
 //  day's thirty slots would scan the same runs thirty times. It is called once
 //  for the day and each programme's span is intersected against the resolved
 //  blocks in memory, which is the same arithmetic resolveRange does internally
@@ -46,8 +47,9 @@
 //  that is not there. Coverage here always comes from the blocks.
 // ============================================================================
 import { query, one } from '../db';
-import { resolveRange, type Resolution } from './clips/resolve';
-import { isAudioOnly } from './localRecordingIndex';
+import type { Resolution } from './clips/resolve';
+import { coverageRangeAny } from './clips/coverageBucket';
+import { isAudioOnlyAny } from './clips/resolveBucket';
 import { createClipVod, enqueueClipBuild, AUTO_BUILD_ACCEPT_GAPS_MS } from './clips';
 import { programmeMedia, flagFor, type ProgrammeMedia, type ProgrammeFlag } from './programmeMedia';
 
@@ -139,8 +141,10 @@ export async function programmeVodStates(
   let resolution: Resolution | null = null;
   if (needsMedia) {
     try {
-      const mediaKind = isAudioOnly(ownerId) ? 'audio' : 'video';
-      resolution = resolveRange(ownerId, Date.parse(fromIso), Date.parse(toIso), mediaKind);
+      // The disk on the Mac; on AWS the bucket listing (build queue 2.3c-6),
+      // without which every aired slot read Unavailable there.
+      const mediaKind = (await isAudioOnlyAny(ownerId)) ? 'audio' : 'video';
+      resolution = await coverageRangeAny(ownerId, Date.parse(fromIso), Date.parse(toIso), mediaKind);
     } catch (e) {
       // A failure to read the archive is NOT "there is no media". Left null,
       // which makes coverage unknown, and an unknown-coverage aired slot is

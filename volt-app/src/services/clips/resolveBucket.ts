@@ -99,7 +99,7 @@ async function head(api: S3Api, bucket: string, key: string, bytes: number): Pro
 }
 
 /** The stream's root key in the bucket: `channel/<id>/` or `event/<id>/`, whichever has runs. */
-async function streamRoot(api: S3Api, bucket: string, streamId: string): Promise<{ rootKey: string; runs: string[] } | null> {
+export async function streamRoot(api: S3Api, bucket: string, streamId: string): Promise<{ rootKey: string; runs: string[] } | null> {
   for (const kind of ['channel', 'event']) {
     const rootKey = `${kind}/${streamId}/`;
     const level = await listLevel(api, bucket, `${rootKey}runs/`);
@@ -124,7 +124,7 @@ export function runsForRange(runs: string[], fromMs: number, toMs: number): stri
 }
 
 /** The rendition a clip of `kind` is cut from in one run, the Mac's rule (pickRenditions). */
-async function pickBucketRendition(api: S3Api, bucket: string, runKey: string, kind: MediaKind): Promise<string | null> {
+export async function pickBucketRendition(api: S3Api, bucket: string, runKey: string, kind: MediaKind): Promise<string | null> {
   const level = await listLevel(api, bucket, runKey);
   const names = level.folders.map((p) => p.slice(runKey.length).replace(/\/$/, ''));
   const audio = names.includes('audio');

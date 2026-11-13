@@ -16,9 +16,11 @@ import { z } from 'zod';
 import { query, one } from '../db';
 import { requireAuth, accountId } from '../auth/middleware';
 import { asyncHandler, notFound, badRequest } from '../util/http';
-import { resolveRange, assessRange, segmentCount } from '../services/clips/resolve';
+import { assessRange, segmentCount } from '../services/clips/resolve';
+import { coverageRangeAny } from '../services/clips/coverageBucket';
+import { isAudioOnlyAny } from '../services/clips/resolveBucket';
 import { plan } from '../services/clips/extract';
-import { isAudioOnly, recordingSpans } from '../services/localRecordingIndex';
+import { recordingSpans } from '../services/localRecordingIndex';
 import { containersInRange, daysForChannel } from '../services/containers';
 import { waveform, primeWaveformCache, isPriming } from '../services/waveform';
 import { thumbStrip, primeThumbs, isThumbPriming } from '../services/thumbs';
@@ -70,8 +72,9 @@ timelineRouter.get('/:id/coverage', asyncHandler(async (req, res) => {
   const q = windowQuery.parse(req.query);
   checkWindow(q.from, q.to);
 
-  const kind = isAudioOnly(ch.id) ? 'audio' : 'video';
-  const resolution = resolveRange(ch.id, q.from, q.to, kind);
+  // The disk on the Mac, the bucket listing on AWS (build queue 2.3c-6).
+  const kind = (await isAudioOnlyAny(ch.id)) ? 'audio' : 'video';
+  const resolution = await coverageRangeAny(ch.id, q.from, q.to, kind);
   const verdict = assessRange(resolution);
 
   res.json({
@@ -107,10 +110,10 @@ timelineRouter.get('/:id/timeline', asyncHandler(async (req, res) => {
   checkWindow(q.from, q.to);
 
   const cfg = await channelDayConfig(ch.id);
-  const kind = isAudioOnly(ch.id) ? 'audio' : 'video';
+  const kind = (await isAudioOnlyAny(ch.id)) ? 'audio' : 'video';
 
   // ---- lane 1: media ------------------------------------------------------
-  const resolution = resolveRange(ch.id, q.from, q.to, kind);
+  const resolution = await coverageRangeAny(ch.id, q.from, q.to, kind);
 
   // ---- lane 2: days and strips -------------------------------------------
   const days = await daysForChannel(ch.id, q.from, q.to);

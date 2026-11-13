@@ -35,8 +35,9 @@ import { can } from '../auth/roles';
 import { asyncHandler, badRequest } from '../util/http';
 import { defineList, parseList, whereSql, pageSql, finishPage } from '../util/listQuery';
 import { loadChannelHealthLite } from '../services/channelDetail';
-import { resolveRange, assessRange, type Resolution } from '../services/clips/resolve';
-import { isAudioOnly } from '../services/localRecordingIndex';
+import { assessRange, type Resolution } from '../services/clips/resolve';
+import { coverageRangeAny } from '../services/clips/coverageBucket';
+import { isAudioOnlyAny } from '../services/clips/resolveBucket';
 import { programmeVodShape, withFlag } from '../services/epgVod';
 import { programmeMedia } from '../services/programmeMedia';
 
@@ -422,8 +423,9 @@ timelineGridRouter.get('/grid', asyncHandler(async (req: Request, res) => {
     let resolution: Resolution | null = null;
     if (hasPast) {
       try {
-        const mediaKind = o.kind === 'radio' || isAudioOnly(o.id) ? 'audio' : 'video';
-        resolution = resolveRange(o.id, from, pastTo, mediaKind);
+        // The disk on the Mac, the bucket listing on AWS (build queue 2.3c-6).
+        const mediaKind = o.kind === 'radio' || (await isAudioOnlyAny(o.id)) ? 'audio' : 'video';
+        resolution = await coverageRangeAny(o.id, from, pastTo, mediaKind);
       } catch (e) {
         // Unknown is not "nothing recorded": left null, the row draws no lane.
         console.warn('[timeline-grid] coverage failed for', o.id, e);
@@ -510,8 +512,8 @@ timelineGridRouter.get('/selection', asyncHandler(async (req: Request, res) => {
     [id, accountId(req)]))[0];
   if (!owner) return res.status(404).json({ error: 'Not found' });
 
-  const mediaKind = kind === 'radio' || isAudioOnly(id) ? 'audio' : 'video';
-  const resolution = resolveRange(id, from, to, mediaKind);
+  const mediaKind = kind === 'radio' || (await isAudioOnlyAny(id)) ? 'audio' : 'video';
+  const resolution = await coverageRangeAny(id, from, to, mediaKind);
   const verdict = assessRange(resolution);
   const col = kind === 'event' ? 'event_id' : 'channel_id';
   const recs = await query<any>(
