@@ -37,6 +37,8 @@ const fake = {
     const op = cmd.constructor.name.replace(/Command$/, ''); const i = cmd.input ?? {};
     calls.push({ op, prefix: i.Prefix });
     if (i.Bucket !== BUCKET) throw new Error(`wrong bucket ${i.Bucket}`);
+    // The loop markers (2.3c-8) read each run's playout.jsonl; these runs have none.
+    if (op === 'GetObject' && String(i.Key).endsWith('/playout.jsonl')) { const e: any = new Error('NoSuchKey'); e.name = 'NoSuchKey'; throw e; }
     if (op !== 'ListObjectsV2') throw new Error(`coverage must not ${op}`);
     const keys = [...bucket.keys()].filter((k) => k.startsWith(i.Prefix ?? '')).sort();
     const contents: string[] = []; const prefixes = new Set<string>();

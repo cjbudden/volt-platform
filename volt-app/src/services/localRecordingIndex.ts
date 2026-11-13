@@ -435,25 +435,49 @@ export interface FallbackSpan {
   open: boolean;            // still on the loop (live run, or the run ended on it)
 }
 
+/**
+ * One run's playout.jsonl, read into the spans it spent on the loop. A span the
+ * run never came back from is returned as `open` (its end is the caller's to
+ * fill: the run's last segment). Shared by the disk (below) and the bucket
+ * (clips/coverageBucket.ts recordingFallbacksBucket), so both read the log by
+ * the same rules.
+ */
+export function parsePlayoutLog(txt: string): { closed: FallbackSpan[]; open: FallbackSpan | null } {
+  const closed: FallbackSpan[] = [];
+  let cur: FallbackSpan | null = null;
+  for (const line of txt.split('\n')) {
+    let e: any;
+    try { e = JSON.parse(line); } catch { continue; }
+    if (e?.type !== 'splice' || !Number.isFinite(Number(e.at_ms))) continue;
+    const at = Number(e.at_ms);
+    if (e.to === 'loop' && !cur) {
+      cur = { fromMs: at, toMs: at, ms: 0, filler: e.filler === 'loop' ? 'loop' : 'slate',
+              reason: e.reason === 'forced' ? 'forced' : 'source-lost', open: true };
+    } else if (e.to === 'live' && cur) {
+      cur.toMs = at; cur.open = false; closed.push(cur); cur = null;
+    }
+  }
+  return { closed, open: cur };
+}
+
+/** Fallback spans clipped to [fromMs..toMs], with their lengths. */
+export function clipFallbacks(spans: FallbackSpan[], fromMs: number, toMs: number): FallbackSpan[] {
+  return spans
+    .filter((f) => f.toMs > fromMs && f.fromMs < toMs)
+    .map((f) => {
+      const a = Math.max(f.fromMs, fromMs), b = Math.min(f.toMs, toMs);
+      return { ...f, fromMs: a, toMs: b, ms: b - a };
+    });
+}
+
 export function recordingFallbacks(streamId: string, fromMs: number, toMs: number): FallbackSpan[] {
   const out: FallbackSpan[] = [];
   for (const runId of listRuns(streamId)) {
     let txt: string;
     try { txt = readFileSync(join(originBaseFor(streamId), 'runs', runId, 'playout.jsonl'), 'utf8'); }
     catch { continue; }
-    let cur: FallbackSpan | null = null;
-    for (const line of txt.split('\n')) {
-      let e: any;
-      try { e = JSON.parse(line); } catch { continue; }
-      if (e?.type !== 'splice' || !Number.isFinite(Number(e.at_ms))) continue;
-      const at = Number(e.at_ms);
-      if (e.to === 'loop' && !cur) {
-        cur = { fromMs: at, toMs: at, ms: 0, filler: e.filler === 'loop' ? 'loop' : 'slate',
-                reason: e.reason === 'forced' ? 'forced' : 'source-lost', open: true };
-      } else if (e.to === 'live' && cur) {
-        cur.toMs = at; cur.open = false; out.push(cur); cur = null;
-      }
-    }
+    const { closed, open: cur } = parsePlayoutLog(txt);
+    out.push(...closed);
     if (cur) {
       // the run ended (or is still) on the loop: it lasts to the run's last segment
       const spans = recordingSpans(streamId).filter((s) => s.runId === runId);
@@ -461,10 +485,5 @@ export function recordingFallbacks(streamId: string, fromMs: number, toMs: numbe
       out.push(cur);
     }
   }
-  return out
-    .filter((f) => f.toMs > fromMs && f.fromMs < toMs)
-    .map((f) => {
-      const a = Math.max(f.fromMs, fromMs), b = Math.min(f.toMs, toMs);
-      return { ...f, fromMs: a, toMs: b, ms: b - a };
-    });
+  return clipFallbacks(out, fromMs, toMs);
 }

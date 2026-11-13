@@ -133,12 +133,13 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    status, `GET /api/channels/:id/coverage` and the timeline's media lane,
    the Timeline grid and its selection check; 2.3c-6; a recording's
    `GET /api/recordings/:id/timeline` spans, gaps and sound or picture,
-   `recordingTimelineBucket`, 2.3c-7, without the loop markers of
-   `playout.jsonl`, which stay on the encoder's disk;
+   `recordingTimelineBucket`, 2.3c-7; its loop markers, 2.3c-8,
+   `recordingFallbacksBucket`, from each run's `playout.jsonl`, which the
+   uploader's segment sync takes up with the run, one GetObject a run;
    `volt-app/src/services/clips/coverageBucket.ts`) comes from the bucket
    listing alone: segment numbers for holes, LastModified less half an
    uploader pass for placement, the run's upload cadence for each segment's
-   length. No object is read (about 22 list calls a rendition a day), and
+   length. No segment is read (about 22 list calls a rendition a day), and
    listings are kept for `COVERAGE_BUCKET_CACHE_MS` (30 s). Edges are within
    a few seconds; clips still resolve exactly (`resolveRangeAny`).
    Radio needs no relay: stations deliver HLS and DASH (2.1c-2). MP3, where

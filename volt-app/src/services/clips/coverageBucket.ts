@@ -41,7 +41,7 @@
 //  (resolveRangeAny), and the clip flow refuses or accepts by that.
 // ============================================================================
 import { config } from '../../config';
-import { listRuns, placeSegments, type LocalSegment } from '../localRecordingIndex';
+import { clipFallbacks, listRuns, parsePlayoutLog, placeSegments, type FallbackSpan, type LocalSegment } from '../localRecordingIndex';
 import { bucketRecordings, listAll, runsApi } from '../media/s3Runs';
 import type { S3Api } from '../media/s3Driver';
 import { assembleResolution, resolveRange, type MediaKind, type RunPick } from './resolve';
@@ -202,4 +202,40 @@ export async function recordingTimelineBucket(streamId: string, startMs: number,
     if (hasAudio && hasVideo) break;
   }
   return { spans, gaps, hasAudio, hasVideo, winEndMs };
+}
+
+/**
+ * WHERE VIEWERS SAW THE LOOP, FROM THE BUCKET (build queue 2.3c-8). The
+ * encoder writes every playout splice to playout.jsonl in its run folder, and
+ * the uploader's segment sync (s3-uploader.sh, everything but playlists) takes
+ * that file up with the run, so on AWS it is at runs/<runId>/playout.jsonl.
+ * Read the same way as the disk (parsePlayoutLog): one GetObject per run in
+ * the window, a run without the file (no splice yet, or an encoder from before
+ * splices were logged) simply has none. A run that ended on the loop, or is
+ * still on it, lasts to that run's last segment, from `spans` (the timeline's
+ * own, so no second listing).
+ */
+export async function recordingFallbacksBucket(streamId: string, fromMs: number, toMs: number,
+  spans: { runId: string; endMs: number }[], nowMs = Date.now()): Promise<FallbackSpan[]> {
+  const bucket = config.aws.s3Bucket;
+  const api = await runsApi();
+  const root = await streamRoot(api, bucket, streamId);
+  if (!root) return [];
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const out: FallbackSpan[] = [];
+  for (const runId of runsForRange(root.runs, fromMs, toMs)) {
+    let txt: string;
+    try {
+      const o = await api.send(new GetObjectCommand({ Bucket: bucket, Key: `${root.rootKey}runs/${runId}/playout.jsonl` }));
+      txt = String(await o.Body?.transformToString?.() ?? '');
+    } catch { continue; }
+    const { closed, open } = parsePlayoutLog(txt);
+    out.push(...closed);
+    if (open) {
+      const last = spans.filter((s) => s.runId === runId).pop();
+      open.toMs = Math.max(open.fromMs, last ? last.endMs : nowMs);
+      out.push(open);
+    }
+  }
+  return clipFallbacks(out, fromMs, toMs);
 }

@@ -11,7 +11,7 @@ import { previewFill } from '../services/epgFill';
 import { segmentCount } from '../services/clips/resolve';
 // The disk on the Mac, the bucket's runs on AWS (build queue 2.3c-2).
 import { resolveRangeAny, assessRangeAny, isAudioOnlyAny } from '../services/clips/resolveBucket';
-import { coverageFromBucket, recordingTimelineBucket } from '../services/clips/coverageBucket';
+import { coverageFromBucket, recordingFallbacksBucket, recordingTimelineBucket } from '../services/clips/coverageBucket';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
 import { tokenisedUrls } from '../services/edgeTokens';
@@ -66,11 +66,17 @@ recordingsRouter.get(
     const r = await ownedRecording(req);
     const streamId = r.channel_id ?? r.event_id;
     // ON AWS the runs are in the bucket, not on this task's disk (build queue
-    // 2.3c-7): the same answer from the bucket listing. No loop markers there
-    // yet (they are in each run's playout.jsonl on the encoder's disk).
+    // 2.3c-7): the same answer from the bucket listing. The loop markers come
+    // from each run's playout.jsonl, which the uploader takes up with the run
+    // (2.3c-8), and name the holes they cover as on the Mac.
     if (coverageFromBucket(streamId)) {
       const b = await recordingTimelineBucket(streamId, Number(r.start_epoch_ms),
         r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null);
+      const fallbacks = await recordingFallbacksBucket(streamId, Number(r.start_epoch_ms), b.winEndMs, b.spans);
+      const gaps = b.gaps.map((g) => {
+        const f = fallbacks.find((x) => x.toMs > g.fromMs && x.fromMs < g.toMs);
+        return f ? { ...g, onAir: f.filler, onAirReason: f.reason } : g;
+      });
       return res.json({
         recordingId: r.id,
         streamId,
@@ -82,10 +88,10 @@ recordingsRouter.get(
         hasAudio: b.hasAudio,
         audioOnly: b.hasAudio && !b.hasVideo,
         spans: b.spans,
-        gaps: b.gaps,
-        missingMs: b.gaps.reduce((n, g) => n + g.ms, 0),
-        fallbacks: [],
-        fallbackMs: 0,
+        gaps,
+        missingMs: gaps.reduce((n, g) => n + g.ms, 0),
+        fallbacks,
+        fallbackMs: fallbacks.reduce((n, f) => n + f.ms, 0),
       });
     }
     const spans = recordingSpans(streamId)
