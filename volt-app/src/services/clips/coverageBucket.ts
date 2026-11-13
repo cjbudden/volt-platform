@@ -152,3 +152,54 @@ export async function coverageRangeAny(streamId: string, fromMs: number, toMs: n
   if (bucketRecordings() && listRuns(streamId).length === 0) return coverageRangeBucket(streamId, fromMs, toMs, kind);
   return resolveRange(streamId, fromMs, toMs, kind);
 }
+
+/** Under this a hole is segment jitter, not missing media (localRecordingIndex's GAP_MIN_MS). */
+const GAP_MIN_MS = 1500;
+
+/** Does this machine answer the stream's recordings from the bucket? Only when its disk has no run of it. */
+export function coverageFromBucket(streamId: string): boolean {
+  return bucketRecordings() && listRuns(streamId).length === 0;
+}
+
+/**
+ * A RECORDING'S TIMELINE FROM THE BUCKET (build queue 2.3c-7): what
+ * GET /api/recordings/:id/timeline draws, on AWS. The same answers the disk
+ * gives (localRecordingIndex recordingSpans and recordingGaps): per-run spans
+ * inside the recording's window, the holes with their reasons (jitter under
+ * 1.5 s is not a hole), whether it has sound and a picture. A recording still
+ * being made ends at its last segment, so its trailing edge is not a hole.
+ * Placed from the listing, as coverageRangeBucket is.
+ */
+export async function recordingTimelineBucket(streamId: string, startMs: number, endMs: number | null, nowMs = Date.now()): Promise<{
+  spans: { runId: string; startMs: number; endMs: number; segments: number }[];
+  gaps: { fromMs: number; toMs: number; ms: number; reason: 'between-runs' | 'missing-media' | 'no-recording' }[];
+  hasAudio: boolean; hasVideo: boolean; winEndMs: number;
+}> {
+  const to = endMs ?? nowMs;
+  const r = await coverageRangeBucket(streamId, startMs, to, 'video');
+  const byRun = new Map<string, { runId: string; startMs: number; endMs: number; segments: number }>();
+  for (const b of r.blocks) {
+    const s = byRun.get(b.runId);
+    if (!s) byRun.set(b.runId, { runId: b.runId, startMs: b.startMs, endMs: b.endMs, segments: b.segments.length });
+    else { s.startMs = Math.min(s.startMs, b.startMs); s.endMs = Math.max(s.endMs, b.endMs); s.segments += b.segments.length; }
+  }
+  const spans = [...byRun.values()].sort((a, b) => a.startMs - b.startMs);
+  const winEndMs = endMs ?? (spans.length ? spans[spans.length - 1].endMs : startMs);
+  const gaps = r.gaps
+    .map((g) => ({ ...g, toMs: Math.min(g.toMs, winEndMs) }))
+    .map((g) => ({ ...g, ms: g.toMs - g.fromMs }))
+    .filter((g) => g.ms > GAP_MIN_MS)
+    .map(({ fromMs, toMs, ms, reason }) => ({ fromMs, toMs, ms, reason }));
+  // Sound and picture: from the renditions of the runs in the window.
+  let hasAudio = false, hasVideo = false;
+  const bucket = config.aws.s3Bucket;
+  const api = await runsApi();
+  const root = await streamRoot(api, bucket, streamId);
+  for (const runId of root ? runsForRange(root.runs, startMs, to) : []) {
+    const runKey = `${root!.rootKey}runs/${runId}/`;
+    if (!hasAudio && (await pickBucketRendition(api, bucket, runKey, 'audio'))) hasAudio = true;
+    if (!hasVideo) { const v = await pickBucketRendition(api, bucket, runKey, 'video'); if (v && v !== 'audio') hasVideo = true; }
+    if (hasAudio && hasVideo) break;
+  }
+  return { spans, gaps, hasAudio, hasVideo, winEndMs };
+}

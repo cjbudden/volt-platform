@@ -11,6 +11,7 @@ import { previewFill } from '../services/epgFill';
 import { segmentCount } from '../services/clips/resolve';
 // The disk on the Mac, the bucket's runs on AWS (build queue 2.3c-2).
 import { resolveRangeAny, assessRangeAny, isAudioOnlyAny } from '../services/clips/resolveBucket';
+import { coverageFromBucket, recordingTimelineBucket } from '../services/clips/coverageBucket';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
 import { tokenisedUrls } from '../services/edgeTokens';
@@ -64,6 +65,29 @@ recordingsRouter.get(
   asyncHandler(async (req, res) => {
     const r = await ownedRecording(req);
     const streamId = r.channel_id ?? r.event_id;
+    // ON AWS the runs are in the bucket, not on this task's disk (build queue
+    // 2.3c-7): the same answer from the bucket listing. No loop markers there
+    // yet (they are in each run's playout.jsonl on the encoder's disk).
+    if (coverageFromBucket(streamId)) {
+      const b = await recordingTimelineBucket(streamId, Number(r.start_epoch_ms),
+        r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null);
+      return res.json({
+        recordingId: r.id,
+        streamId,
+        kind: r.kind,
+        sourceName: r.source_name,
+        startMs: Number(r.start_epoch_ms),
+        endMs: r.end_epoch_ms != null ? Number(r.end_epoch_ms) : null,
+        live: r.status === 'recording',
+        hasAudio: b.hasAudio,
+        audioOnly: b.hasAudio && !b.hasVideo,
+        spans: b.spans,
+        gaps: b.gaps,
+        missingMs: b.gaps.reduce((n, g) => n + g.ms, 0),
+        fallbacks: [],
+        fallbackMs: 0,
+      });
+    }
     const spans = recordingSpans(streamId)
       .filter((s) => s.endMs > Number(r.start_epoch_ms)
         && (r.end_epoch_ms == null || s.startMs < Number(r.end_epoch_ms)));
