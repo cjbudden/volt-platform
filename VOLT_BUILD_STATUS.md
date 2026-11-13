@@ -3217,7 +3217,7 @@ What: on AWS the encoder mirrored its output straight to `<kind>/<id>/` in the b
 - **Guides**: `docs-site/docs/guides/storage.md` (cloud paragraph), `docs/engineering/deploying-to-aws.md`.
 - **Not done** (2.3c-10): the waveform, frame stills, encoder stills, storyboards, removal, exact placement, retention and the full-recording title, the automatic replay's last segments on AWS. Not run on moto or real S3.
 
-## 2026-11-13 - The waveform reads the bucket on AWS (build queue 2.3c-10; vVERSION)
+## 2026-11-13 - The waveform reads the bucket on AWS (build queue 2.3c-10; v0.140.6)
 
 - **What**: the waveform behind a recording and the channel timeline found its audio only on the task's disk, so on AWS every recording drew an empty waveform and the clipping workbench had nothing to trim against. Where the bucket answers for a stream, the audio segments now come from the bucket.
 - **Where**: `volt-app/src/services/waveform.ts`: `audioSegments` (the disk's `audioSegmentsInRange` on the Mac, unchanged; on AWS `resolveRangeBucket` for a window under 15 minutes, placed exactly from object heads, and `coverageRangeBucket` for a wider one, placed from the listing), `readSrc` and `readInit` (GetObject, init.mp4 once a run in memory, objects over 16 MB refused, an unreadable key remembered for 5 minutes and drawn as a gap), `decodePcm` now takes bytes, the exact path never decodes across an unreadable segment, the peak cache is memory only for bucket streams (`WAVEFORM_BUCKET_CACHE_RUNS`, 256 runs) because a `.peaks.json` would create a run folder and flip the stream to the disk, the primer lists the bucket. `deploy/terraform/env-coverage.json` entry for the new setting.
