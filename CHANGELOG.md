@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.3 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service a recording's page now shows its recorded stretches, the missing ones and whether it has sound and picture. Before, it showed nothing recorded.
+
+### Internal
+
+- added · Recordings: GET /api/recordings/:id/timeline on AWS answers from the bucket listing (recordingTimelineBucket in services/clips/coverageBucket.ts); new check suite recording-timeline-bucket.
+
 ## 0.140.2 (2026-11-13)
 
 ### Product (in customer release notes)
