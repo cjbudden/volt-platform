@@ -45,7 +45,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { config } from '../../config';
-import { listRuns, placeSegments, mdhdTimescaleOf, tfdtOf, type LocalSegment } from '../localRecordingIndex';
+import { isAudioOnly, listRuns, placeSegments, mdhdTimescaleOf, tfdtOf, type LocalSegment } from '../localRecordingIndex';
 import { bucketRecordings, listAll, listLevel, runStartMs, runsApi } from '../media/s3Runs';
 import type { S3Api } from '../media/s3Driver';
 import { assembleResolution, assessRange, resolveRange, type MediaKind, type Resolution, type RunPick } from './resolve';
@@ -192,6 +192,33 @@ export function resolvesFromBucket(streamId: string): boolean {
 /** The disk when it holds the stream's runs, else the bucket (AWS). */
 export async function resolveRangeAny(streamId: string, fromMs: number, toMs: number, kind: MediaKind = 'video'): Promise<AnyResolution> {
   return resolvesFromBucket(streamId) ? resolveRangeBucket(streamId, fromMs, toMs, kind) : resolveRange(streamId, fromMs, toMs, kind);
+}
+
+/**
+ * IS THIS STREAM SOUND ONLY? (build queue 2.3c-3). A radio station's clip is
+ * cut from its audio and delivered as MP3 and M4A, never an MP4. On the Mac
+ * that is read from the run folders on disk (isAudioOnly); on AWS there are
+ * none, so every station read as video and its clips were promised an MP4
+ * that the audio rendition cannot make. From the bucket: a channel whose kind
+ * is radio, or a stream whose newest run in the bucket has the sound and no
+ * picture (one short listing). The disk is still asked first.
+ */
+export async function isAudioOnlyAny(streamId: string): Promise<boolean> {
+  if (!resolvesFromBucket(streamId)) return isAudioOnly(streamId);
+  try {
+    const { one } = await import('../../db');
+    const ch = await one<{ kind: string | null }>(`SELECT kind FROM channels WHERE id = $1`, [streamId]);
+    if (ch?.kind === 'radio') return true;
+  } catch { /* not a channel id (an event), or no database: ask the bucket */ }
+  const api = await runsApi();
+  const bucket = config.aws.s3Bucket;
+  const root = await streamRoot(api, bucket, streamId);
+  const newest = root?.runs.map((id) => ({ id, at: runStartMs(id) }))
+    .filter((r): r is { id: string; at: number } => r.at != null)
+    .sort((a, b) => b.at - a.at)[0];
+  if (!root || !newest) return false;
+  const runKey = `${root.rootKey}runs/${newest.id}/`;
+  return (await pickBucketRendition(api, bucket, runKey, 'video')) === 'audio';
 }
 
 /** assessRange, plus the refusal for media that has to be restored first. */

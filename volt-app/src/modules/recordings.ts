@@ -10,13 +10,13 @@ import { inheritedMetadata } from '../services/contentTypes';
 import { previewFill } from '../services/epgFill';
 import { segmentCount } from '../services/clips/resolve';
 // The disk on the Mac, the bucket's runs on AWS (build queue 2.3c-2).
-import { resolveRangeAny, assessRangeAny } from '../services/clips/resolveBucket';
+import { resolveRangeAny, assessRangeAny, isAudioOnlyAny } from '../services/clips/resolveBucket';
 import { plan, type OutputFormat } from '../services/clips/extract';
 import { clipsFromRecording } from '../services/clips/provenance';
 import { tokenisedUrls } from '../services/edgeTokens';
 import { enqueue } from '../services/jobs/queue';
 import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
-import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, isAudioOnly, recordingGaps, recordingFallbacks } from '../services/localRecordingIndex';
+import { recordingSpans, rangeMediaPlaylist, rangeMasterPlaylist, listRuns, pickRenditions, recordingGaps, recordingFallbacks } from '../services/localRecordingIndex';
 import { transcriptForStream, searchTranscript, transcriptMatches } from '../services/recordingSearch';
 import { waveform, primeWaveformCache } from '../services/waveform';
 import { defineList, parseList, whereSql, countWhereSql, countParams, finishPage } from '../util/listQuery';
@@ -754,7 +754,7 @@ recordingsRouter.post(
     // would write, so an impossible range still returned 201 and the operator
     // discovered the problem when the player failed. Now the range is checked
     // against the media on disk first and a bad one is refused here.
-    const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    const kind = (await isAudioOnlyAny(streamId)) ? 'audio' : 'video';
     const resolution = await resolveRangeAny(streamId, body.startMs, body.endMs, kind);
     const verdict = assessRangeAny(resolution, { maxGapMs: body.acceptGapsMs });
     // A refusal the console can ACT on: the gaps themselves, so the operator
@@ -896,7 +896,7 @@ recordingsRouter.get(
     );
     const fromMs = Number(rec.start_epoch_ms);
     const toMs = rec.end_epoch_ms != null ? Number(rec.end_epoch_ms) : Date.now();
-    const kind = isAudioOnly(streamId) ? 'audio' : 'video';
+    const kind = (await isAudioOnlyAny(streamId)) ? 'audio' : 'video';
     // How much missing media the operator accepts, in total ms. 30s by default
     // (a normal encoder restart); ?acceptGaps=<ms> to take more, which the
     // console offers once it has been told the gaps.

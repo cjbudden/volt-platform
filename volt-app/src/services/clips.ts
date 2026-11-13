@@ -63,8 +63,9 @@ export async function createClipVod(opts: {
   const base = `${masterKeyBase}/clip-${startMs}-${endMs}`;
   // A radio station (or any audio-only stream) gets an MP3 download, which the
   // extractor writes to export_mp3_key; there is no progressive MP4 to promise.
-  const { isAudioOnly } = await import('./localRecordingIndex');
-  const audio = isAudioOnly(ownerId);
+  // The disk on the Mac, the bucket on AWS (build queue 2.3c-3).
+  const { isAudioOnlyAny } = await import('./clips/resolveBucket');
+  const audio = await isAudioOnlyAny(ownerId);
   const progressiveKey = outputKind !== 'manifest' && !audio ? `${base}/progressive.mp4` : null;
   // THE CLIP CARRIES ITS OWNER'S TYPE. A cut from a sports match is sports
   // metadata; a cut from a station carries the station's identity. Copied at
@@ -143,9 +144,9 @@ export async function enqueueClipBuild(opts: {
 }): Promise<{ id: string; state: string }> {
   const { enqueue } = await import('./jobs/queue');
   const { CLIP_EXTRACT } = await import('./jobs/handlers/clipExtract');
-  const { isAudioOnly } = await import('./localRecordingIndex');
+  const { isAudioOnlyAny } = await import('./clips/resolveBucket');
 
-  const audio = isAudioOnly(opts.streamId);
+  const audio = await isAudioOnlyAny(opts.streamId);
   const formats: string[] = [];
   if (opts.outputKind !== 'progressive') formats.push('hls');
   // An audio clip's download is the two AUDIO files: MP3 for anywhere, M4A as

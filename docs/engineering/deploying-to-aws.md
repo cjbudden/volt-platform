@@ -120,6 +120,9 @@ The full runbook is `deploy/terraform/APPLY.md`; in outline:
    those segments into scratch and removes them after the cut. A machine with
    the stream's runs on its own disk (the Mac, MinIO included) still uses the
    disk. Segments in GLACIER or DEEP_ARCHIVE are refused (`media_archived`).
+   Whether a stream is sound only (a clip's MP3 and M4A rather than an MP4)
+   is read the same way (`isAudioOnlyAny`): a channel whose kind is radio,
+   else the newest run in the bucket with the sound and no picture.
    Radio needs no relay: stations deliver HLS and DASH (2.1c-2). MP3, where
    an account has it switched on, is made on demand by the control plane.
 4. **Migrations.** The deploy runs them once as a one-off task of the new
