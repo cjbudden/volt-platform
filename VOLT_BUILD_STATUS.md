@@ -3225,7 +3225,7 @@ What: on AWS the encoder mirrored its output straight to `<kind>/<id>/` in the b
 - **Guides**: `docs-site/docs/guides/recordings.md` (troubleshooting row: a flat waveform over archived media), `docs/engineering/deploying-to-aws.md`.
 - **Not done** (2.3c-11): frame stills, encoder stills, storyboards, removal, exact placement (`x-amz-meta-written`), retention and the full-recording title, the automatic replay's last segments on AWS. Not run on moto or real S3.
 
-## 2026-11-13 - A recording's exact frames read the bucket on AWS (build queue 2.3c-11; vNEXT)
+## 2026-11-13 - A recording's exact frames read the bucket on AWS (build queue 2.3c-11; v0.140.7)
 
 - **What**: `GET /api/recordings/:id/frame` (the frame stepper and the Exact frame still) found a recording's segment only in the run folders on the task's disk, so on AWS every moment of every recording answered "a gap in the capture". Where the bucket answers for a stream, the segment now comes from the bucket, on the same placement the clips use, so a frame and a clip cut at the same moment agree.
 - **Where**: new `volt-app/src/services/frames/bucket.ts` (`bucketSegmentAt`: `resolveRangeBucket` over a window of `FRAME_BUCKET_WINDOW_MS`, 60 s, either side, kept `FRAME_BUCKET_CACHE_MS`, 30 s, so stepping lists nothing; `readBucketSegment`: GetObject with the last 8 segments and each run's init.mp4 kept in memory; 409 for a moment in Glacier or Deep Archive, found by resolving that moment alone); `volt-app/src/services/frames/store.ts` `streamFrameAt`, `segmentFrames` and `streamFrameStill` use it when `resolvesFromBucket` (the disk path on the Mac unchanged). Stills are kept and recorded as on the Mac, so `pruneS3Run` (which already retires `frames/run/<run>/%`) and retention take them.
