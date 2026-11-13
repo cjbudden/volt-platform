@@ -15,7 +15,6 @@ import { CLIP_EXTRACT } from '../services/jobs/handlers/clipExtract';
 import { segmentCount } from '../services/clips/resolve';
 // The disk on the Mac, the bucket's runs on AWS (build queue 2.3c-2).
 import { resolveRangeAny, assessRangeAny, isAudioOnlyAny } from '../services/clips/resolveBucket';
-import { isAudioOnly } from '../services/localRecordingIndex';
 import type { OutputFormat } from '../services/clips/extract';
 import { QC_RUN } from '../services/jobs/handlers/qcRun';
 import { originBaseFor } from '../services/liveOrigin';
@@ -471,7 +470,8 @@ vodRouter.get(
       }
     }
     res.json({ ...encodeDetails(a, { ladderGroup, outputProfile, radioConfig: ch?.radio_config ?? null,
-      audioOnly: ch?.kind === 'radio' || (streamId ? await Promise.resolve(isAudioOnly(streamId)).catch(() => false) : false),
+      // The disk on the Mac, the bucket on AWS (build queue 2.3c-5).
+      audioOnly: ch?.kind === 'radio' || (streamId ? await isAudioOnlyAny(streamId).catch(() => false) : false),
       extract: job ? { formats: Array.isArray(job.formats) ? job.formats : [], state: String(job.state) } : null }), policy });
   })
 );
@@ -574,8 +574,10 @@ vodRouter.get(
     const streamId = row.channel_id ?? row.event_id;
     // A file with no picture (H2b-4) says so in its probe, from the ingest or
     // the encode, whichever has read it.
+    // On AWS the stream's runs are in the bucket, not on this disk, so the disk
+    // alone called every event and station clip there video (build queue 2.3c-5).
     const audioOnly = streamId
-      ? isAudioOnly(streamId)
+      ? await isAudioOnlyAny(streamId).catch(() => false)
       : (!!(row.export_mp3_key || row.export_m4a_key) && !row.progressive_key)
         || row.ingest?.probe?.hasVideo === false || row.encode_result?.probe?.hasVideo === false;
     // ?include=linkedContent: the records this one links to and the ones linking
