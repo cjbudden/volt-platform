@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.9 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud deployment, the recordings timeline now shows pictures along a video recording's media lane, as it does on a single server.
+
+### Internal
+
+- fixed · Recordings: Frame stills: the first stills of a folder made at the same time share one registration of the folder, so none is lost to a duplicate key. New thumbs-bucket check suite for the timeline filmstrip on a stand-in S3 bucket.
+
 ## 0.140.8 (2026-11-13)
 
 ### Product (in customer release notes)
