@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.138.0 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service, clips, re-trims and downloads can now be cut from recordings: they are made from the recording in cloud storage, frame-accurate at both ends. A range that reaches into a part already moved to archive storage says so and asks you to restore the recording first.
+
+### Internal
+
+- added: clips-bucket suite: bucket resolution against the disk's, ranged reads only, gaps, archive refusal, staging and the clip.extract job on AWS.
+
 ## 0.137.1 (2026-11-12)
 
 ### Product (in customer release notes)
