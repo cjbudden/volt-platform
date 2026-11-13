@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.8 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud deployment, recordings now get hover previews, scrub-bar preview sheets and stills in the Image Library, as they do on a single server. When retention removes a recording's media, its stills and preview sheets go with it to Recently removed, except those around a clip.
+
+### Internal
+
+- added · Recordings: storyboards-bucket check suite: the storyboard builder and run removal on a stand-in S3 bucket.
+
 ## 0.140.7 (2026-11-13)
 
 ### Product (in customer release notes)
