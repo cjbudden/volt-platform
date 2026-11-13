@@ -2,6 +2,16 @@
 
 Every release, every change: product, SaaS platform and internal. The customer-facing subset is published as the release notes in the docs.
 
+## 0.140.6 (2026-11-13)
+
+### Product (in customer release notes)
+
+- fixed · Recordings: On a cloud service, the waveform behind a recording and the channel timeline now draws the recorded sound, so you can find the quiet moment to cut on. Parts in archive storage show as a gap until the recording is restored.
+
+### Internal
+
+- added · Tests: New check suite waveform-bucket: the waveform measured from a stand-in S3 bucket holding a real audio run.
+
 ## 0.140.5 (2026-11-13)
 
 ### Product (in customer release notes)
